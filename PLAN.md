@@ -1,0 +1,211 @@
+Khan is an AI orchestration system with a Go server. The user controls the system through the web interface. Use Go to get the performance benefits of the language.
+
+## Deployment and storage
+- Run as a single-user local service. Bind the control API to loopback; the web interface calls its HTTP API through a same-origin proxy.
+- Use SQLite as the durable store. Enable WAL and foreign keys, use versioned migrations, one database writer connection, short transactions, and bounded busy retries.
+- Store tasks, plans, implementation units, dependencies, leases, sessions, checkpoints, findings, checks, notifications, repository indexes, webhook deliveries, idempotency receipts, events, and outcome metrics durably.
+- Commit resource changes and corresponding ordered events atomically. Enforce unique repository/issue identity so webhooks and reconciliation cannot create duplicate tasks.
+- Keep agent work outside database transactions. Use renewable, fenced leases and terminate or reconcile registered child processes before resuming after server restart.
+- Expose GitHub webhook ingress on a separate listener. Only that listener may be exposed through user-managed HTTPS ingress; never expose the loopback control API.
+- Fresh SQLite database only; no migration from the removed Python implementation.
+
+# Onboarding Projects
+- The Go server must let the user add projects.
+- Each project must meet these conditions:
+    - The project must have a repository on GitHub.
+    - The GitHub CLI (`gh`) must be installed.
+
+# Onboarding AIs
+- The Go server must support agents that comply with the Agent Client Protocol (ACP).
+- The user must be able to add any agent that complies with ACP.
+- These agents need a special setup procedure:
+    - Cursor
+    - Claude
+    - Codex
+    - Antigravity
+- Use Codex app-server, Cursor ACP, and the official Claude Agent SDK through a pinned Node.js bridge.
+- Antigravity remains unavailable until a supported third-party integration is established; consumer-plan headless wrapping is unsupported.
+- Generic ACP agents use configurable executable and argument arrays.
+- Use one Go adapter interface for all providers.
+- Add adapters for Codex, Claude, and Cursor through supported interfaces. Show Antigravity as unavailable until a supported third-party integration exists.
+- Keep support for other agents that comply with ACP.
+- Record the capabilities and quota status of each provider.
+- Do not select a provider that cannot do the task.
+
+# System Overview
+## Ideation Loop
+- Agents: Ideation Agent and Planner Agent.
+- Start the loop each day at 10AM.
+- Before each daily run, the Go server checks each repository for changes.
+- If the repository has changed, update the affected entries in the repository index. Keep a version for each index.
+- The Ideation Agent generates four new directions for each project.
+    - Use AI innovation skills and new ideas.
+    - Use the repository index, GitHub issues, GitHub discussions, TODO markers, and previous suggestions.
+    - The Go server collects and caches the data. It also removes duplicate suggestions.
+    - The Ideation Agent uses the index without examining the full repository again.
+    - Start with Git, text search, and symbol search.
+    - Add embeddings only if tests show that they improve retrieval.
+    - Show the four directions in the web interface. Let the user select one direction.
+- When the user selects a direction:
+    - The Planner Agent prepares a master plan.
+    - If necessary, the Planner Agent asks the user questions to improve the plan.
+    - Show the questions in the web interface. Give the user space to answer each question.
+    - The Planner Agent specifies acceptance criteria.
+    - Divide a large plan into smaller implementation units only if this improves reliability or recovery.
+    - Specify the dependencies between the implementation units.
+    - Store the implementation units and their dependency graph in SQLite.
+    - Keep a small plan as one task.
+    - Example: A plan to add GitHub OAuth has four dependent implementation units.
+        - First, implement authentication storage.
+        - Then, implement the OAuth service.
+        - Then, add API endpoints.
+        - Finally, add integration tests.
+    - When the plan is ready, create a GitHub issue. Add the "khan:plan" label to the issue.
+    - Move the plan to the Worker Loop.
+
+## Worker Loop
+- Agents: Coding Agent and Reviewer Agent.
+- The Worker Loop monitors issues in the project repositories.
+- Use GitHub issue webhooks to start work when an issue is created or receives the "khan:plan" label.
+- The Go server must validate each webhook signature.
+- The Go server must check that the issue has the "khan:plan" label.
+- Store one task for each eligible issue in SQLite.
+- Duplicate webhook deliveries must not create duplicate tasks.
+- Use periodic reconciliation to find eligible issues that the webhooks missed.
+- Reconciliation must not create duplicate tasks. This replaces continuous polling at 30-second intervals.
+- For each eligible issue:
+    - Use the issue description as the Coding Agent's plan.
+    - The Coding Agent implements the plan in a new Git worktree and branch.
+    - The Coding Agent tests the implementation.
+    - The Go server uses task leases to prevent two agents from changing the same worktree.
+    - Start an implementation unit only when its dependencies are complete.
+    - Combine the implementation units. Verify the full implementation before the final review.
+    - The Go Verification Engine runs deterministic checks before the Reviewer Agent starts [P0].
+        - Run the project's formatting checks.
+        - Compile the project.
+        - Run the required tests.
+        - Run static analysis.
+        - Run basic diff checks.
+        - If a check fails, send the related diagnostic to the Coding Agent.
+        - Do not start an AI review until the required checks pass.
+    - The Go Verification Engine selects additional checks for the change's risk level [P1].
+        - Use file paths, affected modules, changed APIs, and code type to select the risk level.
+        - Keep all required baseline checks at every risk level.
+        - Low risk: For documentation changes, check formatting and scope.
+        - Medium risk: For a new REST endpoint, run unit tests, integration tests, and a review.
+        - High risk: For authentication or concurrency changes, run broader tests, a security review, and an architecture review.
+        - Critical risk: For sensitive payment or permission logic, do the high-risk checks and get human approval.
+    - Transfer the task to the Reviewer Agent when the full plan is implemented and all required checks pass.
+    - Send the user a notification in the Inbox when this transfer is complete.
+    - Give the Reviewer Agent the worktree and branch information.
+    - The Reviewer Agent examines the full implementation diff against the plan.
+    - The Reviewer Agent checks for inaccessible code and code outside the plan's scope.
+    - The Reviewer Agent returns a score out of 10 and structured findings [P0].
+    - The Go server stores each finding with a stable ID.
+    - The Coding Agent corrects unresolved findings and runs the required checks again.
+    - The Reviewer Agent examines the corrections and any affected code.
+    - Do not cap productive repair/review passes. Continue until acceptance or user cancellation.
+    - After five repeated failures without relevant changes, recover with fresh context or another provider.
+    - After three unsuccessful stall recoveries, pause and send an Inbox decision.
+    - Accept the implementation only when all these conditions are true:
+        - The review score is at least 9/10.
+        - All mandatory checks pass.
+        - No blocking findings remain.
+    - If repeated stalls exhaust recovery, send the task to the user's Inbox for a decision.
+    - Create a pull request (PR) only after acceptance and any required human approval.
+    - The Coding Agent creates the PR from the worktree's branch in the project repository.
+    - The PR description explains the plan and implementation to a human reader.
+    - Add the "khan:work" label to the PR.
+- After PR creation, send the user an Inbox notification with the PR link.
+- The user reviews the PR and merges it if the implementation is satisfactory.
+
+## Project execution policy
+- Require a trusted local GitHub repository, authenticated `gh`, and committed `.khan.yaml` before enabling execution.
+- Project policy defines baseline checks, risk rules, allowed paths, allowed commands, and provider preferences. Policy changes require explicit confirmation in the web interface.
+- The `khan:plan` label authorizes eligible issue execution. Issue edits cancel active work and trigger replanning; closure or label removal pauses the task and preserves artifacts.
+- Run up to four agent processes globally and two per project by default. Parallel units use separate worktrees and integrate serially in dependency order; Coding Agent resolves conflicts before full verification.
+- Route only to available providers with required capabilities. Unknown quota remains unknown; exclude providers after confirmed exhaustion until reset or recovery. Coding and review may use the same provider in separate sessions.
+- Use machine timezone for daily 10AM ideation. On startup, catch up only the latest missed day.
+- Require review score of at least 9/10, passing mandatory checks, and no unresolved blocking findings before acceptance. Do not cap productive review cycles. Five repeated unchanged failures trigger recovery; after three failed recoveries, pause for an Inbox decision.
+- Permit critical-risk PR publication only after explicit user approval. Never merge automatically.
+
+# Under The Hood
+- Khan has four agent roles: Ideation Agent, Planner Agent, Coding Agent, and Reviewer Agent.
+- The shared features operate in the Go server. They support both loops.
+- Workflow Engine:
+    - Durable Task State [P0]:
+        - Create SQLite tables for tasks, checkpoints, and agent sessions.
+        - Save Git commit references and completed acceptance criteria.
+        - Keep the task state when an agent stops or changes.
+    - Structured Handoffs [P0]:
+        - Define one JSON handoff contract for all agents.
+        - Include the current worktree, branch, checkpoint references, and Git commit references.
+        - Include completed work, completed acceptance criteria, failing tests, and the next action.
+        - Let another provider continue from the last valid checkpoint under a task lease.
+    - Example: Codex reaches its quota.
+        - Khan gives Claude the current worktree, completed work, failing tests, and next action.
+        - Claude continues the task without starting again.
+    - Progress / Stall Detection [P1]:
+        - Record commits, changed files, test results, and tool errors.
+        - Measure progress against the acceptance criteria.
+        - Detect repeated failures without related changes.
+        - Stop an attempt when it exceeds its configured progress or budget limit.
+        - Continue with new context, a smaller task, or another provider.
+    - Example: The Coding Agent runs the same failing test five times without a related code change.
+        - Khan stops the attempt and starts recovery.
+    - GitHub Webhooks [P0]:
+        - Register GitHub issue webhooks.
+        - Validate webhook signatures.
+        - Create one task for each eligible issue.
+        - Use periodic reconciliation to find missed issues.
+- Context Engine:
+    - Context Selection [P0]:
+        - Prepare a context package for each agent role.
+        - Include the related code, interfaces, dependencies, and tests.
+        - Let agents request more files when necessary.
+    - Repository Intelligence [P1]:
+        - Use Go to examine files, package structures, dependencies, and tests.
+        - Store a repository index with a version.
+        - Use Git changes to update only the affected entries.
+        - Use the index in both loops.
+    - Example: An authentication task receives the authentication code, related interfaces, and tests.
+        - Do not automatically supply the full repository.
+- Decision Engine:
+    - Capability-Based Routing [P1]:
+        - Use the shared Go adapter interface.
+        - Use the recorded capabilities and quota status to identify providers that can do the task.
+        - Select an available provider through cost and previous results.
+    - Example: Use a provider with a lower cost for a small change.
+        - Use a provider with stronger reasoning capabilities for a complex task.
+    - Outcome Optimization [P2]:
+        - Record the provider for each task.
+        - Record tokens, cost estimates, execution time, and review attempts.
+        - Record test results and human PR decisions.
+        - Compare providers on similar task types.
+        - Use measured success rates to update provider selection preferences.
+    - Example: Claude completes similar Go refactoring tasks with fewer repair attempts than Codex.
+        - Khan can prefer Claude for these tasks.
+- Place the components in the Go server as follows:
+    - The Workflow Engine, Context Engine, and Decision Engine support both loops.
+    - In the Ideation Loop, the Ideation Agent uses Repository Intelligence.
+    - In the Ideation Loop, the Planner Agent divides plans into implementation units [P1].
+    - The Worker Loop contains the Coding Agent, Go Verification Engine, and Reviewer Agent.
+    - The Go Verification Engine supplies Deterministic Checks [P0] and Risk-Adaptive Checks [P1].
+    - The Reviewer Agent supplies Bounded Feedback [P0] with the Workflow Engine.
+- Agents must communicate with each other and the user through the web interface.
+- The web interface must let the user:
+    - Add projects.
+    - View and select a direction from the Ideation Agent.
+    - Answer the Planner Agent's questions.
+    - Receive information about implementation and review.
+    - View task status and the current task stage.
+    - View the Reviewer Agent's score.
+    - Open the PR link after PR creation.
+    - Review and answer planner questions, resolve permission requests, approve critical-risk publication, and pause or resume tasks.
+
+## Go and web interfaces
+- Implement the backend in Go with `net/http` and `database/sql` using `modernc.org/sqlite`.
+- Publish a versioned `/api/v1` HTTP contract and OpenAPI document. The Next.js server route proxies to loopback and enforces same-origin, host, request-size, idempotency, and version-precondition checks.
+- Stream ordered, resumable task events using Server-Sent Events.
+- Use Codex app-server, Cursor ACP, and the official Claude Agent SDK through a pinned Node.js bridge behind one Go provider interface. Support generic ACP executable/argument configuration. Keep Antigravity visibly unavailable while consumer-plan wrapping remains unsupported.
+- Build Git, text, and symbol repository retrieval first. Add configured embeddings only when comparative evaluation demonstrates improved retrieval without reduced acceptance-criteria coverage.

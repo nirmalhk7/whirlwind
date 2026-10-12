@@ -1,3 +1,11 @@
+# Go backend implementation
+
+Khan now has local Go/SQLite server and HTTP-backed web controls. See [Go backend setup and policy](docs/go-backend.md) and [HTTP API](API.md). Start server with `go run ./cmd/khan`; start `web/` with `KHAN_BACKEND_URL=http://127.0.0.1:8090 npm run dev -- --hostname 127.0.0.1`.
+
+The previous README below describes the removed Python implementation and is retained as historical context.
+
+---
+
 # Khan
 
 Khan is a local multi-agent decision system for software engineering work.
@@ -8,6 +16,10 @@ worktrees, completed candidates are cross-reviewed, and Khan produces a decision
 card with evidence and explicit adopt/reject commands. Khan never auto-adopts
 changes into your checkout.
 
+An optional local browser control center is available after installing the
+pinned dependencies in `web/`; see [docs/web.md](docs/web.md). The Python CLI
+and workers do not require Node.js.
+
 ## Why Khan Exists
 
 AI coding work becomes hard to trust when it lives only in terminal scrollback.
@@ -17,6 +29,8 @@ Khan gives that work durable structure:
   artifacts, and adoption decisions.
 - Pipeline-first `khan ask` flow for planning, parallel implementation,
   cross-review, and human approval.
+- Shadow-mode `khan assess` for comparing no-change with one or more local
+  candidate diffs before a human chooses whether anything should land.
 - Provider-neutral sessions for Codex, Cursor Agent, and custom adapters.
 - Manual adoption and rejection so generated changes enter your working tree
   only when you choose.
@@ -99,6 +113,30 @@ Run the default multi-agent pipeline against the current repository:
 khan ask . "Implement the feature and run the inferred checks."
 ```
 
+Assess a local transition without generating code or changing the checkout:
+
+```bash
+khan assess . "Add feature." --verify "make test"
+khan assess . "Add feature." --contract .khan/evidence.yaml --max-actions 20 --max-seconds 600
+khan diff <assessment-id> --candidate working-tree
+khan adopt <assessment-id> --candidate working-tree
+khan outcome record <assessment-id> --candidate working-tree --status healthy
+```
+
+`assess` snapshots the no-change baseline and each named local candidate into
+isolated worktrees. A deterministic planner reads `.khan/evidence.yaml`, rejects
+out-of-scope paths before spending command budget, ranks relevant checks by
+criticality and evidence-per-second, then records why and where it stopped.
+Exact base+patch+command receipts are reused when safe. One explicitly requested
+verifier may advise on unresolved evidence. It never writes to the source
+checkout or auto-adopts.
+
+When configured, Khan can run bounded repository-owned counterexample
+generators after ordinary evidence remains incomplete. Delayed healthy/regressed
+outcomes calibrate later check ordering, and similar past transitions are
+retrieved by changed files, source symbols, and behavior obligations. Provider
+models remain optional; these moat layers are local and deterministic.
+
 Inspect actionable records:
 
 ```bash
@@ -132,6 +170,7 @@ khan ask . "Make the small targeted change." --mode single
 khan inbox                         # actionable decision cards
 khan show <id>                     # human-readable evidence view
 khan get pipelines                 # pipeline records
+khan get assessments               # shadow assessment records
 khan get runs                      # task-loop runs
 khan get sessions                  # provider sessions
 khan diff <id>                     # recorded workspace diff when available

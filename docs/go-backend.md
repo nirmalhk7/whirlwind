@@ -1,0 +1,120 @@
+# Go backend
+
+Khan runs locally on macOS or Linux. Go owns scheduling, worktrees, verification, provider routing, and GitHub writes. SQLite stores versioned JSON aggregates and immutable commit-keyed context index snapshots plus indexed issue identities, fenced leases, webhook receipts, mutation receipts, and ordered events. Existing Python files remain deleted; this is a fresh database without legacy migration.
+
+## Run
+
+Requirements: Go 1.25+, Git, authenticated GitHub CLI, Node.js for web UI and optional Claude SDK bridge. Install an agent separately and authenticate using its own documented setup.
+
+```sh
+go mod download
+go run ./cmd/khan --data /absolute/path/to/khan-state
+```
+
+Control server binds `127.0.0.1:8090`. From repository root, run backend and web UI in separate terminals:
+
+```sh
+make run
+```
+
+```sh
+make web
+```
+
+Open `http://127.0.0.1:3000`. The browser uses same-origin `/api/v1` requests; Next.js forwards requests and live events to the Go server. `make web` defaults to `http://127.0.0.1:8090`; override with `make web KHAN_BACKEND_URL=http://127.0.0.1:PORT` when running Go on another loopback port.
+
+Install web dependencies before first launch, or run web directly:
+
+```sh
+cd web
+npm ci
+KHAN_BACKEND_URL=http://127.0.0.1:8090 npm run dev -- --hostname 127.0.0.1
+```
+
+For direct `npm run dev` or `npm start`, optional `web/.env.local` can supply `KHAN_BACKEND_URL`; copy `web/.env.example` to start. Next.js keeps this setting on the server. Restart Next.js after changing it.
+
+For Claude, install the pinned bridge dependency first:
+
+```sh
+cd bridges/claude
+npm ci
+```
+
+Start Khan from repository root or pass absolute `--claude-bridge` path. Default providers are Codex (`codex app-server`), Cursor (`agent acp`), Claude SDK, and an unavailable Antigravity entry. Register other ACP agents through Providers. Use existing provider login; Khan does not install agents, copy credentials, or rotate accounts. Availability means executable/dependency exists, not successful login. Quota stays unknown unless provider reports it or rejects a run for quota exhaustion.
+
+## Project policy
+
+Register a trusted existing local repository with GitHub `origin`. Commit `.khan.yaml` before registration; uncommitted policy is rejected. The web registration and “Confirm committed policy” actions authorize policy changes. Worker pauses if committed policy differs from approved hash.
+
+Example for a Go project:
+
+```yaml
+checks:
+  - name: formatting
+    command: [sh, -c, 'test -z "$(gofmt -l cmd internal)"']
+  - name: build
+    command: [go, build, ./...]
+  - name: tests
+    command: [go, test, ./...]
+  - name: static-analysis
+    command: [go, vet, ./...]
+allowed_paths: ['cmd/**', 'internal/**', 'go.mod', 'go.sum', 'docs/**']
+commands:
+  - [go, test]
+  - [go, build]
+  - [go, vet]
+risk_rules:
+  - level: high
+    paths: ['internal/auth/**', 'internal/store/**']
+    checks:
+      - name: race
+        command: [go, test, -race, ./...]
+  - level: critical
+    paths: ['internal/payments/**', 'internal/permissions/**']
+providers: [codex, claude, cursor]
+project_slots: 2
+```
+
+Commands are argument arrays, not implicit shell snippets. A shell check must explicitly invoke its interpreter. Checks default to ten-minute timeout; override `timeout_seconds`. Optional project `run_timeout_seconds` limits each agent attempt; zero (default) leaves productive runs uncapped. Timeout pauses task for operator decision. Required baseline commands are defined by project policy, remain enabled at all risk levels, and run before AI review. Diff/scope checks are added by server. Risk rules can match module/file `paths`, extension `code_types` (such as `.sql`), or changed exported `api_symbols` (such as `Authorize*`). Selectors within one rule are alternatives; highest matching risk wins. Baseline checks remain required. High/critical changes receive dedicated security and architecture reviews; critical changes require user approval before PR publication.
+
+Allowed paths use glob patterns and directory suffix `/**`; `**` allows repository-wide changes except `.git` and `.khan.yaml`. Agent commands use configured exact argument prefixes when protocol exposes a safely parseable command. Complex shell requests and incomplete permission metadata require Inbox decision. Local agents may implement their own approval behavior; this is trusted local execution, not container isolation. Worktree scope is checked before acceptance.
+
+## Lifecycle
+
+At 10AM machine time, Khan updates Git-based index and caches GitHub sources, then requests exactly four distinct directions. After downtime, only latest due day catches up. Selecting direction starts planner; unanswered questions pause planning. Ready plan becomes `khan:plan` issue before coding begins. Codex native user-input requests and Claude `AskUserQuestion` use Inbox question forms; replies return to suspended provider session. Cursor vendor-specific ask/create-plan extensions return explicit unsupported-method errors; portable structured planner questions are supported.
+
+Eligible issue label authorizes execution. Webhooks and five-minute reconciliation share repository/issue identity. Issue edits cancel current run and invalidate plan/worktree/approval evidence; old artifacts remain retained. Closure or label removal pauses work. Resume preserves paused stage, including pending planner questions. Explicit Resume authorizes continuing withdrawn issue snapshot; later content changes invalidate that authorization. Issue changes after PR publication pause for review in GitHub; published tasks cannot restart coding.
+
+Units run in independent worktrees; dependencies complete before dependents start. Integration runs serially. Required checks must pass before review. Review accepts score ≥9 with zero unresolved blockers; omitted previous blocking findings remain unresolved. Productive review has no pass cap. Five identical failed attempts trigger new provider/context; three unsuccessful recoveries pause for user decision.
+
+PRs receive `khan:work`. Server pushes branch and creates PR only after acceptance/approval. User merges. State tracks PR closure/merge; worktrees remain retained for inspection and manual cleanup.
+
+Default capacity is four agent processes globally, two per project, configurable in Settings and project policy. Leases renew every 15 seconds for a 60-second term. Single-server lock plus child process registry prevents restarted server reusing worktrees with stale registered processes. Database and process registry belong in private local filesystem, never network-mounted storage.
+
+## Webhook ingress
+
+Expose only webhook listener through user-managed HTTPS ingress:
+
+```sh
+KHAN_WEBHOOK_SECRET=your-secret go run ./cmd/khan \
+  --data /absolute/path/to/khan-state \
+  --webhook-listen 127.0.0.1:8091
+```
+
+Ingress forwards only `/webhooks/github` to port 8091. Never expose control listener. Supply public HTTPS URL during registration; `gh` needs repository webhook administration access. HMAC signature validation is mandatory. Without ingress, reconciliation still discovers eligible issues.
+
+## Optional embeddings
+
+Policy supports `embeddings: {endpoint, model, key_env, enabled}`. Endpoint uses an embeddings-compatible JSON request `{model,input}` and returns `{data:[{index,embedding}]}`. Credential is read from named environment variable, never stored in database. Submit fixture queries, relevant file paths, and acceptance-criterion text to project embedding-evaluation API. Vectors activate only when retrieval recall improves and criterion coverage does not decline. Changed repository index invalidates prior evaluation; rerun fixtures before activation.
+
+## Verification
+
+```sh
+go test -race ./...
+go vet ./...
+cd web
+npm run build
+npm run test:e2e
+```
+
+Go tests use real SQLite and Git worktrees, fake provider processes, and fake external GitHub boundary. Browser suite starts real Go and Next servers. Full onboarding-to-PR scenario uses real storage, ACP client tools, worktrees, verification, and review routing, with local fake external CLIs. Planner/approval interaction also has focused HTTP fixtures. Historical Python-era browser specs remain on disk but are excluded by new test configuration.

@@ -1,5 +1,0 @@
-pydantic
-PyYAML
-rich
-textual
-typer

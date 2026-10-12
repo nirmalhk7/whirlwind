@@ -1,0 +1,29 @@
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+export type Fixture = { root: string; repo: string; bin: string; agent: string };
+export function workspace(): Fixture {
+  if (process.env.KHAN_E2E_FIXTURE) return JSON.parse(process.env.KHAN_E2E_FIXTURE);
+  const root = mkdtempSync(join(tmpdir(), "khan-workflow-fixture-"));
+  const repo = join(root, "repo"), bin = join(root, "bin"); mkdirSync(repo); mkdirSync(bin);
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  const git = (...args: string[]) => execFileSync(realGit, ["-C", repo, ...args]);
+  git("init", "-b", "main"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.test");
+  writeFileSync(join(repo, ".khan.yaml"), `checks:\n  - name: tests\n    command: [node, -e, 'if (!require("fs").existsSync("result.txt")) process.exit(1)']\nallowed_paths: ['result.txt']\ncommands: []\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\nproviders: [fixture]\n`);
+  git("add", "."); git("commit", "-m", "Fixture policy"); git("remote", "add", "origin", "https://github.com/khan-fixture/demo.git"); git("update-ref", "refs/remotes/origin/main", "HEAD"); git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+  const script = (name: string, content: string) => { const path = join(bin, name); writeFileSync(path, `#!${process.execPath}\n${content}`, { mode: 0o700 }); return path; };
+  script("git", `const {spawnSync}=require('node:child_process'); const args=process.argv.slice(2); if(args.includes('fetch')||args.includes('push'))process.exit(0);const result=spawnSync(${JSON.stringify(realGit)},args,{stdio:'inherit'});process.exit(result.status??1);`);
+  script("gh", `const fs=require('node:fs');const args=process.argv.slice(2),root=${JSON.stringify(root)};const issuePath=root+'/issue.json',prPath=root+'/pr.json';const get=(name)=>args[args.indexOf(name)+1];const say=(v)=>process.stdout.write(typeof v==='string'?v:JSON.stringify(v));
+if(args[0]==='auth'||args[0]==='label'){process.exit(0)}
+if(args[0]==='repo'){say(args.includes('--jq')?'main':{nameWithOwner:'khan-fixture/demo',defaultBranchRef:{name:'main'}});process.exit(0)}
+if(args[0]==='api'){say({data:{repository:{discussions:{nodes:[]}}}});process.exit(0)}
+if(args[0]==='issue'&&args[1]==='list'){say(fs.existsSync(issuePath)?[JSON.parse(fs.readFileSync(issuePath,'utf8'))]:[]);process.exit(0)}
+if(args[0]==='issue'&&args[1]==='view'){say(JSON.parse(fs.readFileSync(issuePath,'utf8')));process.exit(0)}
+if(args[0]==='issue'&&args[1]==='create'){const issue={number:1,title:get('--title'),body:fs.readFileSync(get('--body-file'),'utf8'),state:'OPEN',updatedAt:new Date().toISOString(),labels:[{name:'khan:plan'}],url:'https://github.com/khan-fixture/demo/issues/1'};fs.writeFileSync(issuePath,JSON.stringify(issue));say(issue.url);process.exit(0)}
+if(args[0]==='pr'&&args[1]==='list'){say(fs.existsSync(prPath)?[{url:fs.readFileSync(prPath,'utf8')}]:[]);process.exit(0)}
+if(args[0]==='pr'&&args[1]==='create'){const url='https://github.com/khan-fixture/demo/pull/1';fs.writeFileSync(prPath,url);say(url);process.exit(0)}
+if(args[0]==='pr'&&args[1]==='view'){say({state:'OPEN'});process.exit(0)}process.stderr.write('Unsupported fixture gh command');process.exit(2);`);
+  const agent = script("fixture-agent", `const readline=require('node:readline'),path=require('node:path');let cwd='',pending=null;const send=(v)=>process.stdout.write(JSON.stringify(v)+'\\n');const finish=(id,text)=>{send({method:'session/update',params:{update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text}}}});send({id,result:{stopReason:'end_turn'}})};readline.createInterface({input:process.stdin}).on('line',(line)=>{const m=JSON.parse(line);if(!m.method){if(pending){if(m.error){send({id:pending,error:m.error})}else finish(pending,'Implemented and tested result.txt');pending=null}return};let result={};if(m.method==='initialize')result={agentCapabilities:{loadSession:true}};if(m.method==='session/new'||m.method==='session/load'){cwd=m.params.cwd;result={sessionId:'fixture-session',modes:{availableModes:[{id:'ask'}]}}};if(m.method==='session/prompt'){const prompt=m.params.prompt.map(p=>p.text).join('');if(prompt.includes('Generate exactly four')){finish(m.id,JSON.stringify(['Add verified result','Improve context retrieval','Improve task recovery','Improve review evidence'].map(title=>({title,description:'Add result.txt with deterministic verification.'}))));return}if(prompt.includes('Return only JSON matching')){finish(m.id,JSON.stringify({objective:'Add verified result',acceptance_criteria:['result.txt exists'],questions:[],units:[{id:'main',objective:'Create result.txt',dependencies:[],allowed_paths:['result.txt']}]}));return}if(prompt.includes('Read-only review')){finish(m.id,JSON.stringify({score:9,findings:[],summary:'Acceptance criteria satisfied; checks pass.'}));return}pending=m.id;send({id:'write-result',method:'fs/write_text_file',params:{sessionId:'fixture-session',path:path.join(cwd,'result.txt'),content:'Verified implementation\\n'}});return}send({id:m.id,result})});`);
+  const fixture = { root, repo, bin, agent }; process.env.KHAN_E2E_FIXTURE = JSON.stringify(fixture); return fixture;
+}
