@@ -44,7 +44,7 @@ test("planner answers and critical approval use current versions", async ({ page
 
 test("trusted repository runs direction through verified PR with real backend", async ({ page, request }) => {
   test.setTimeout(60_000);
-  const fixture: Fixture = JSON.parse(process.env.KHAN_E2E_FIXTURE!);
+  const fixture: Fixture = JSON.parse(process.env.WHIRLWIND_E2E_FIXTURE!);
   await page.goto("/providers");
   await page.getByLabel("Provider ID").fill("fixture");
   await page.getByLabel("Display name").fill("Fixture agent");
@@ -58,7 +58,7 @@ test("trusted repository runs direction through verified PR with real backend", 
   await expect(page.getByRole("heading", { name: "Fixture project", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Select direction" }).first()).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: "Select direction" }).first().click();
-  await expect(page.getByRole("link", { name: "Open pull request" })).toHaveAttribute("href", "https://github.com/khan-fixture/demo/pull/1", { timeout: 40_000 });
+  await expect(page.getByRole("link", { name: "Open pull request" })).toHaveAttribute("href", "https://github.com/whirlwind-fixture/demo/pull/1", { timeout: 40_000 });
   const response = await request.get("/api/v1/tasks");
   const tasks = await response.json();
   expect(tasks).toHaveLength(1);

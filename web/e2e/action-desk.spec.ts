@@ -425,7 +425,7 @@ test("GitHub sync and local follow-up stay on the Action Desk", async ({ page })
   });
 
   await page.goto("/");
-  const capability = page.getByRole("checkbox", { name: /Allow Khan to read open issues/ });
+  const capability = page.getByRole("checkbox", { name: /Allow Whirlwind to read open issues/ });
   await expect(capability).not.toBeChecked();
   await expect(page.getByRole("button", { name: "Sync GitHub now" })).toBeDisabled();
   await capability.check();
@@ -1018,7 +1018,7 @@ test("SSE refresh updates drawer evidence without erasing an unsent plan edit", 
       emit(type: string) { for (const listener of listeners.get(type) ?? []) listener(); },
     };
     Object.defineProperty(window, "EventSource", { configurable: true, value: class { close() {} addEventListener = source.addEventListener; } });
-    (window as any).__khanEventSource = source;
+    (window as any).__whirlwindEventSource = source;
   });
   await page.goto("/");
   await page.getByRole("button", { name: /Review evidence and act/ }).click();
@@ -1032,7 +1032,7 @@ test("SSE refresh updates drawer evidence without erasing an unsent plan edit", 
   fixture.plan.record.version = 2;
   fixture.plan.record.content.objective = "Current objective from another reviewer";
   fixture.plan.evidence = { plan: { version: 2, content: fixture.plan.record.content } };
-  await page.evaluate(() => (window as any).__khanEventSource.emit("update"));
+  await page.evaluate(() => (window as any).__whirlwindEventSource.emit("update"));
 
   await expect(dialog.locator("pre").first()).toContainText("Current objective from another reviewer");
   await expect(objective).toHaveValue("My unsent local edit");
@@ -1063,7 +1063,7 @@ test("SSE refresh preserves an unsent run reply and reports the latest revision 
       emit(type: string) { for (const listener of listeners.get(type) ?? []) listener(); },
     };
     Object.defineProperty(window, "EventSource", { configurable: true, value: class { close() {} addEventListener = source.addEventListener; } });
-    (window as any).__khanEventSource = source;
+    (window as any).__whirlwindEventSource = source;
   });
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
@@ -1107,7 +1107,7 @@ test("SSE refresh preserves an unsent run reply and reports the latest revision 
   run.updated_at = "rev-2";
   run.summary = "Run changed while the reply was open";
   run.evidence = { question: "Updated question" };
-  await page.evaluate(() => (window as any).__khanEventSource.emit("update"));
+  await page.evaluate(() => (window as any).__whirlwindEventSource.emit("update"));
 
   await expect(dialog.locator("pre").first()).toContainText("Updated question");
   await expect(reply).toHaveValue("My reply based on the original question");
@@ -1131,7 +1131,7 @@ test("run checkpoint history is reviewable inside the Action Desk drawer", async
       id: "checkpoint-1", run_id: "checkpoint-run", sequence: 1,
       approved_plan_version: 3, policy_digest: "policy-v3", created_at: "2026-10-11T00:00:00Z",
       content: {
-        phase: "verification_passed", workspace: "/tmp/khan-worktree", workspace_head: "base-commit",
+        phase: "verification_passed", workspace: "/tmp/whirlwind-worktree", workspace_head: "base-commit",
         candidate_digest: "candidate-digest", workspace_dirty: true,
         verified_steps: ["make test passed for candidate-digest"],
         provider_lineage: [{ provider: "codex", role: "worker", status: "succeeded", session_id: "codex-session" }],
@@ -1142,7 +1142,7 @@ test("run checkpoint history is reviewable inside the Action Desk drawer", async
       id: "checkpoint-2", run_id: "checkpoint-run", sequence: 2,
       approved_plan_version: 3, policy_digest: "policy-v3", created_at: "2026-10-11T00:01:00Z",
       content: {
-        phase: "interrupted", workspace: "/tmp/khan-worktree", workspace_head: "new-head",
+        phase: "interrupted", workspace: "/tmp/whirlwind-worktree", workspace_head: "new-head",
         candidate_digest: null, workspace_dirty: null,
         verified_steps: ["make test passed for candidate-digest"],
         provider_lineage: [{ provider: "codex", role: "worker", status: "failed", session_id: "codex-session" }],
@@ -1192,7 +1192,7 @@ test("repeated validation and Reviewer FIX failures are reviewable on the Action
     {
       run: {
         id: "validation-stop", type: "run", project: "smoke-project", status: "needs_human",
-        summary: "Repeated validation failure; Khan stopped for your direction.", updated_at: "validation-rev-1",
+        summary: "Repeated validation failure; Whirlwind stopped for your direction.", updated_at: "validation-rev-1",
         record: { failure_fingerprint: "validation-abc123", repeated_failures: 2 },
         evidence: {
           run: { status: "needs_human", failure_fingerprint: "validation-abc123", repeated_failures: 2 },

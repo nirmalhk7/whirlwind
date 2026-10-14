@@ -11,7 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"khan/internal/process"
+	"whirlwind/internal/process"
 )
 
 type Message struct {

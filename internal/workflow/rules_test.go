@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 // TestAcceptanceRequiresChecksAndNoBlockers verifies a high review score cannot bypass failed checks or unresolved blocking findings.

@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"khan/internal/github"
-	"khan/internal/model"
-	"khan/internal/policy"
-	"khan/internal/provider"
-	"khan/internal/store"
+	"whirlwind/internal/github"
+	"whirlwind/internal/model"
+	"whirlwind/internal/policy"
+	"whirlwind/internal/provider"
+	"whirlwind/internal/store"
 )
 
 type fakeGitHub struct{}
@@ -32,7 +32,7 @@ func (fakeGitHub) Sources(context.Context, string) (any, error) { return map[str
 
 // CreateIssue returns a fixed open, labeled issue to simulate plan publication.
 func (fakeGitHub) CreateIssue(context.Context, string, string, string, string) (model.Issue, error) {
-	return model.Issue{Number: 1, State: "OPEN", Labels: []string{"khan:plan"}, UpdatedAt: "1"}, nil
+	return model.Issue{Number: 1, State: "OPEN", Labels: []string{"whirlwind:plan"}, UpdatedAt: "1"}, nil
 }
 
 // CreatePR returns a fixed PR URL without pushing or publishing remotely.
@@ -93,7 +93,7 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	run("init", "-b", "main")
 	run("config", "user.name", "Test")
 	run("config", "user.email", "test@example.com")
-	os.WriteFile(filepath.Join(repo, ".khan.yaml"), []byte("checks:\n  - name: test\n    command: [sh, -c, 'test -f result.txt']\nallowed_paths: ['**']\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\ncommands: []\n"), 0600)
+	os.WriteFile(filepath.Join(repo, ".whirlwind.yaml"), []byte("checks:\n  - name: test\n    command: [sh, -c, 'test -f result.txt']\nallowed_paths: ['**']\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\ncommands: []\n"), 0600)
 	run("add", ".")
 	run("commit", "-m", "initial")
 	p, hash, e := policy.Load(repo)
@@ -108,7 +108,7 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	project := model.Project{ID: "p", Repo: "o/r", Path: repo, Policy: p, PolicyHash: hash}
 	s.Put(ctx, "projects", "p", project, 0)
 	s.Put(ctx, "providers", "fake", model.Provider{ID: "fake", Kind: "acp", Available: true, Quota: "unknown", Capabilities: []string{"plan", "code", "review"}}, 0)
-	task, e := s.IngestIssue(ctx, project, model.Issue{Number: 1, Title: "file", Body: "add file", State: "OPEN", Labels: []string{"khan:plan"}})
+	task, e := s.IngestIssue(ctx, project, model.Issue{Number: 1, Title: "file", Body: "add file", State: "OPEN", Labels: []string{"whirlwind:plan"}})
 	if e != nil {
 		t.Fatal(e)
 	}

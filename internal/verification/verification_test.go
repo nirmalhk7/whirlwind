@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 // TestChecksExecuteAndFailureBlocksAcceptance verifies project check commands execute and any failed check makes the report fail.

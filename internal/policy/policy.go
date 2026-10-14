@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 // Validate rejects missing baseline checks, malformed risk rules, negative run budgets, and allowed paths outside the repository.
@@ -52,17 +52,17 @@ func Validate(p model.Policy) error {
 	return nil
 }
 
-// Load reads committed .khan.yaml, requires the local file to match it, validates known fields, and returns its content hash.
+// Load reads committed .whirlwind.yaml, requires the local file to match it, validates known fields, and returns its content hash.
 func Load(path string) (model.Policy, string, error) {
 	var p model.Policy
-	cmd := exec.Command("git", "-C", path, "show", "HEAD:.khan.yaml")
+	cmd := exec.Command("git", "-C", path, "show", "HEAD:.whirlwind.yaml")
 	b, e := cmd.Output()
 	if e != nil {
-		return p, "", errors.New("committed .khan.yaml required")
+		return p, "", errors.New("committed .whirlwind.yaml required")
 	}
-	local, e := os.ReadFile(filepath.Join(path, ".khan.yaml"))
+	local, e := os.ReadFile(filepath.Join(path, ".whirlwind.yaml"))
 	if e != nil || string(local) != string(b) {
-		return p, "", errors.New(".khan.yaml must match committed policy")
+		return p, "", errors.New(".whirlwind.yaml must match committed policy")
 	}
 	decoder := yaml.NewDecoder(strings.NewReader(string(b)))
 	decoder.KnownFields(true)
@@ -107,7 +107,7 @@ func Match(pattern, path string) bool {
 // AllowedPath checks configured path patterns while always denying Git metadata, policy edits, and paths outside the repository.
 func AllowedPath(p model.Policy, path string) bool {
 	path = filepath.ToSlash(filepath.Clean(path))
-	if path == ".khan.yaml" || strings.HasPrefix(path, ".git/") || path == ".git" || filepath.IsAbs(path) || path == ".." || strings.HasPrefix(path, "../") {
+	if path == ".whirlwind.yaml" || strings.HasPrefix(path, ".git/") || path == ".git" || filepath.IsAbs(path) || path == ".." || strings.HasPrefix(path, "../") {
 		return false
 	}
 	for _, a := range p.AllowedPaths {

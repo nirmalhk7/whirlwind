@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 type Input struct {
@@ -160,7 +160,7 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 			mu.Unlock()
 		case "account/rateLimits/updated":
 			if h.Event != nil {
-				h.Event("khan/quota", json.RawMessage(m.Params))
+				h.Event("whirlwind/quota", json.RawMessage(m.Params))
 			}
 		case "thread/tokenUsage/updated":
 			if usage, ok := p["tokenUsage"].(map[string]any); ok {
@@ -262,7 +262,7 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 				Load bool `json:"loadSession"`
 			} `json:"agentCapabilities"`
 		}
-		e = rpc.Call(ctx, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"fs": map[string]bool{"readTextFile": true, "writeTextFile": !in.ReadOnly}, "terminal": !in.ReadOnly}, "clientInfo": map[string]any{"name": "khan", "version": "0.1.0"}}, &init)
+		e = rpc.Call(ctx, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"fs": map[string]bool{"readTextFile": true, "writeTextFile": !in.ReadOnly}, "terminal": !in.ReadOnly}, "clientInfo": map[string]any{"name": "whirlwind", "version": "0.1.0"}}, &init)
 		if e != nil {
 			return out, e
 		}
@@ -285,7 +285,7 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 		}
 		out.SessionID = session.ID
 		if h.Event != nil {
-			h.Event("khan/session", map[string]string{"session_id": session.ID})
+			h.Event("whirlwind/session", map[string]string{"session_id": session.ID})
 		}
 		if in.ReadOnly {
 			for _, mode := range session.Modes.Available {
@@ -304,7 +304,7 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 			e = fmt.Errorf("ACP stopped: %s", result.Stop)
 		}
 	case "codex":
-		e = rpc.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "khan", "version": "0.1.0"}}, nil)
+		e = rpc.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "whirlwind", "version": "0.1.0"}}, nil)
 		if e != nil {
 			return out, e
 		}
@@ -312,7 +312,7 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 		quotaCtx, quotaCancel := context.WithTimeout(ctx, 5*time.Second)
 		var quota json.RawMessage
 		if rpc.Call(quotaCtx, "account/rateLimits/read", map[string]any{}, &quota) == nil && h.Event != nil {
-			h.Event("khan/quota", quota)
+			h.Event("whirlwind/quota", quota)
 		}
 		quotaCancel()
 		params := map[string]any{"cwd": in.CWD, "approvalPolicy": "untrusted", "approvalsReviewer": "user", "sandbox": "workspace-write"}
@@ -335,7 +335,7 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 		}
 		out.SessionID = thread.Thread.ID
 		if h.Event != nil {
-			h.Event("khan/session", map[string]string{"session_id": out.SessionID})
+			h.Event("whirlwind/session", map[string]string{"session_id": out.SessionID})
 		}
 		e = rpc.Call(ctx, "turn/start", map[string]any{"threadId": out.SessionID, "input": []any{map[string]any{"type": "text", "text": in.Prompt}}}, nil)
 		if e == nil {

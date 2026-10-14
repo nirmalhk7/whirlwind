@@ -12,10 +12,10 @@ import (
 	"strings"
 	"testing"
 
-	"khan/internal/github"
-	"khan/internal/model"
-	"khan/internal/store"
-	"khan/internal/workflow"
+	"whirlwind/internal/github"
+	"whirlwind/internal/model"
+	"whirlwind/internal/store"
+	"whirlwind/internal/workflow"
 )
 
 // setup constructs a temporary real store, workflow engine, and HTTP server for request tests.
@@ -77,7 +77,7 @@ func TestProviderMutationIdempotencyAndVersionConflict(t *testing.T) {
 func TestSignedWebhookDeduplicatesEligibleIssue(t *testing.T) {
 	s := setup(t)
 	s.Store.Put(context.Background(), "projects", "p", model.Project{ID: "p", Repo: "o/r"}, 0)
-	payload := map[string]any{"action": "labeled", "repository": map[string]any{"full_name": "o/r"}, "issue": map[string]any{"number": 4, "title": "work", "body": "do it", "state": "open", "updated_at": "now", "labels": []any{map[string]any{"name": "khan:plan"}}}}
+	payload := map[string]any{"action": "labeled", "repository": map[string]any{"full_name": "o/r"}, "issue": map[string]any{"number": 4, "title": "work", "body": "do it", "state": "open", "updated_at": "now", "labels": []any{map[string]any{"name": "whirlwind:plan"}}}}
 	b, _ := json.Marshal(payload)
 	mac := hmac.New(sha256.New, []byte("secret"))
 	mac.Write(b)
@@ -87,7 +87,7 @@ func TestSignedWebhookDeduplicatesEligibleIssue(t *testing.T) {
 		r.Header.Set("X-GitHub-Delivery", "delivery")
 		r.Header.Set("X-GitHub-Event", "issues")
 		w := httptest.NewRecorder()
-		s.WebhookHandler().ServeHTTP(w, r)
+		s.Webhoowhirlwinddler().ServeHTTP(w, r)
 		if w.Code != 202 {
 			t.Fatalf("%d %s", w.Code, w.Body)
 		}
@@ -98,7 +98,7 @@ func TestSignedWebhookDeduplicatesEligibleIssue(t *testing.T) {
 	}
 	r := httptest.NewRequest("GET", "http://public/api/v1/tasks", nil)
 	w := httptest.NewRecorder()
-	s.WebhookHandler().ServeHTTP(w, r)
+	s.Webhoowhirlwinddler().ServeHTTP(w, r)
 	if w.Code != 404 {
 		t.Fatal("control API publicly exposed")
 	}

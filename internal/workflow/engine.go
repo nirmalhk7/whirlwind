@@ -14,13 +14,13 @@ import (
 	"sync"
 	"time"
 
-	ctxengine "khan/internal/context"
-	"khan/internal/github"
-	"khan/internal/model"
-	"khan/internal/policy"
-	"khan/internal/provider"
-	"khan/internal/store"
-	"khan/internal/verification"
+	ctxengine "whirlwind/internal/context"
+	"whirlwind/internal/github"
+	"whirlwind/internal/model"
+	"whirlwind/internal/policy"
+	"whirlwind/internal/provider"
+	"whirlwind/internal/store"
+	"whirlwind/internal/verification"
 )
 
 type Engine struct {
@@ -224,7 +224,7 @@ func (e *Engine) Step(ctx context.Context, id string) error {
 		if x != nil {
 			return x
 		}
-		if x = e.worktree(ctx, p.Path, planningPath, fmt.Sprintf("codex/khan-plan-%s-v%d", t.ID, t.PlanVersion), base); x != nil {
+		if x = e.worktree(ctx, p.Path, planningPath, fmt.Sprintf("codex/whirlwind-plan-%s-v%d", t.ID, t.PlanVersion), base); x != nil {
 			return x
 		}
 		out, err := e.agent(ctx, p, t, "plan", planningPath, prompt, true, "")
@@ -267,7 +267,7 @@ func (e *Engine) Step(ctx context.Context, id string) error {
 			return errors.New("ready plan missing")
 		}
 		body := t.Plan.Objective + "\n\nAcceptance criteria:\n" + jsonText(t.Plan.AcceptanceCriteria) + "\n\nImplementation units:\n" + jsonText(t.Plan.Units)
-		i, x := e.GitHub.CreateIssue(ctx, p.Repo, t.Issue.Title, body, "<!-- khan-plan:"+t.ID+" -->")
+		i, x := e.GitHub.CreateIssue(ctx, p.Repo, t.Issue.Title, body, "<!-- whirlwind-plan:"+t.ID+" -->")
 		if x != nil {
 			return x
 		}
@@ -495,7 +495,7 @@ func (e *Engine) Step(ctx context.Context, id string) error {
 		}
 		var review model.Review
 		_ = json.Unmarshal([]byte(e.latestReview(ctx, fmt.Sprintf("%s:%d", t.ID, t.PlanVersion))), &review)
-		fmt.Fprintf(&description, "\nReview score: %.1f/10; no unresolved blocking findings.\n\n%s\n\n<!-- khan-task:%s -->", t.Score, review.Summary, t.ID)
+		fmt.Fprintf(&description, "\nReview score: %.1f/10; no unresolved blocking findings.\n\n%s\n\n<!-- whirlwind-task:%s -->", t.Score, review.Summary, t.ID)
 		body := description.String()
 
 		url, err := e.GitHub.CreatePR(ctx, t.Worktree, p.Repo, t.Branch, base, t.Issue.Title, body)
@@ -652,7 +652,7 @@ func (e *Engine) agent(ctx context.Context, p model.Project, t model.Task, role,
 				}
 			}
 		}, Event: func(kind string, data any) {
-			if kind == "khan/session" {
+			if kind == "whirlwind/session" {
 				b, _ := json.Marshal(data)
 				var current struct {
 					ID string `json:"session_id"`
@@ -663,7 +663,7 @@ func (e *Engine) agent(ctx context.Context, p model.Project, t model.Task, role,
 				_ = e.Store.Put(ctx, "sessions", sid, sessionState, record.Version)
 				return
 			}
-			if kind == "khan/quota" {
+			if kind == "whirlwind/quota" {
 				state, reset, x := provider.Quota(data)
 				if x == nil {
 					record, x := e.Store.Get(ctx, "providers", chosen.ID)
@@ -893,7 +893,7 @@ func (e *Engine) code(ctx context.Context, p model.Project, t *model.Task) error
 			return err
 		}
 		t.Base = base
-		t.Branch = fmt.Sprintf("codex/khan-%s-v%d", t.ID, t.PlanVersion)
+		t.Branch = fmt.Sprintf("codex/whirlwind-%s-v%d", t.ID, t.PlanVersion)
 		t.Worktree = filepath.Join(e.Root, "worktrees", t.ID, fmt.Sprintf("v%d", t.PlanVersion), "integration")
 		if err = e.worktree(ctx, p.Path, t.Worktree, t.Branch, base); err != nil {
 			return err
@@ -1083,7 +1083,7 @@ func (e *Engine) codeUnit(ctx context.Context, p model.Project, t model.Task, u 
 		}
 		unitPolicy.Policy.AllowedPaths = u.AllowedPaths
 	}
-	prompt := "Implement only this unit, satisfy acceptance criteria, test changes. Do not push, create PR, change .khan.yaml, or alter unrelated files.\nUnit:\n" + jsonText(u) + "\nPlan:\n" + planText + "\nHandoff:\n" + jsonText(t.Handoff)
+	prompt := "Implement only this unit, satisfy acceptance criteria, test changes. Do not push, create PR, change .whirlwind.yaml, or alter unrelated files.\nUnit:\n" + jsonText(u) + "\nPlan:\n" + planText + "\nHandoff:\n" + jsonText(t.Handoff)
 	out, err := e.agent(ctx, unitPolicy, t, "code", path, prompt, false, "")
 	if err != nil {
 		return err
@@ -1133,7 +1133,7 @@ func (e *Engine) worktree(ctx context.Context, repo, path, branch, base string) 
 	return err
 }
 
-// commit rejects changed paths outside approved scope, stages changes, and commits nonempty diffs with Khan identity.
+// commit rejects changed paths outside approved scope, stages changes, and commits nonempty diffs with Whirlwind identity.
 func (e *Engine) commit(ctx context.Context, p model.Project, path, message string) error {
 	files, err := github.Run(ctx, path, "git", "status", "--porcelain", "-uall")
 	if err != nil {
@@ -1159,7 +1159,7 @@ func (e *Engine) commit(ctx context.Context, p model.Project, path, message stri
 	if err != nil || diff == "" {
 		return err
 	}
-	_, err = github.Run(ctx, path, "git", "-c", "user.name=Khan", "-c", "user.email=khan@localhost", "commit", "-m", message)
+	_, err = github.Run(ctx, path, "git", "-c", "user.name=Whirlwind", "-c", "user.email=whirlwind@localhost", "commit", "-m", message)
 	return err
 }
 

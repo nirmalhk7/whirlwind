@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"khan/internal/store"
+	"whirlwind/internal/store"
 )
 
 // TestLeaseRenewal verifies long-running work retains ownership and stops when its lease or task version becomes invalid.

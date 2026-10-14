@@ -13,7 +13,7 @@ import (
 // TestRegistryReapsOrphanBeforeRestart verifies restart recovery kills registered orphan processes and clears their registry entries.
 func TestRegistryReapsOrphanBeforeRestart(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("KHAN_PROCESS_REGISTRY", root)
+	t.Setenv("WHIRLWIND_PROCESS_REGISTRY", root)
 	cmd := Command(context.Background(), "sleep", "60")
 	if e := Start(cmd); e != nil {
 		t.Fatal(e)
@@ -44,7 +44,7 @@ func TestRegistryReapsOrphanBeforeRestart(t *testing.T) {
 // TestReapHandlesCrashBeforePIDRegistration verifies token-based recovery finds an orphan launched before its PID was persisted.
 func TestReapHandlesCrashBeforePIDRegistration(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("KHAN_PROCESS_REGISTRY", root)
+	t.Setenv("WHIRLWIND_PROCESS_REGISTRY", root)
 	cmd := Command(context.Background(), "sleep", "60")
 	if err := Start(cmd); err != nil {
 		t.Fatal(err)

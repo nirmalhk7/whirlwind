@@ -3,7 +3,7 @@ package policy
 import (
 	"testing"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 // TestCommandsRequireExactPrefixAndWorkspacePaths verifies command prefixes must match exact arguments and allowed paths stay inside the workspace.
@@ -12,7 +12,7 @@ func TestCommandsRequireExactPrefixAndWorkspacePaths(t *testing.T) {
 	if !AllowedCommand(p, []string{"go", "test", "./..."}) || AllowedCommand(p, []string{"sh", "-c", "go test"}) {
 		t.Fatal("command authorization")
 	}
-	if !AllowedPath(p, "src/a.go") || AllowedPath(p, "../secret") || AllowedPath(p, ".khan.yaml") {
+	if !AllowedPath(p, "src/a.go") || AllowedPath(p, "../secret") || AllowedPath(p, ".whirlwind.yaml") {
 		t.Fatal("path authorization")
 	}
 }

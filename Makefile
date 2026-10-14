@@ -1,9 +1,9 @@
 .PHONY: run web
 
-KHAN_BACKEND_URL ?= http://127.0.0.1:8090
+WHIRLWIND_BACKEND_URL ?= http://127.0.0.1:8090
 
 run:
-	go run ./cmd/khan
+	go run ./cmd/whirlwind
 
 web:
-	cd web && KHAN_BACKEND_URL="$(KHAN_BACKEND_URL)" npm run dev
+	cd web && WHIRLWIND_BACKEND_URL="$(WHIRLWIND_BACKEND_URL)" npm run dev

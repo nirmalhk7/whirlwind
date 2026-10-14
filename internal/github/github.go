@@ -13,8 +13,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"khan/internal/model"
-	"khan/internal/process"
+	"whirlwind/internal/model"
+	"whirlwind/internal/process"
 )
 
 // ValidSignature compares the webhook body HMAC with the sha256 signature using a constant-time comparison.
@@ -32,7 +32,7 @@ func ValidSignature(secret, sig string, body []byte) bool {
 }
 
 type Client interface {
-	// Issues returns open khan:plan issues for reconciliation.
+	// Issues returns open whirlwind:plan issues for reconciliation.
 	Issues(context.Context, string) ([]model.Issue, error)
 	// Issue returns the current state and content of one repository issue.
 	Issue(context.Context, string, int) (model.Issue, error)
@@ -147,9 +147,9 @@ func parseIssues(text string) ([]model.Issue, error) {
 	return issues, nil
 }
 
-// Issues loads up to 1,000 open khan:plan issues for reconciliation.
+// Issues loads up to 1,000 open whirlwind:plan issues for reconciliation.
 func (c CLI) Issues(ctx context.Context, repo string) ([]model.Issue, error) {
-	b, e := gh(ctx, "issue", "list", "--repo", repo, "--state", "open", "--label", "khan:plan", "--limit", "1000", "--json", "number,title,body,updatedAt,state,url,labels")
+	b, e := gh(ctx, "issue", "list", "--repo", repo, "--state", "open", "--label", "whirlwind:plan", "--limit", "1000", "--json", "number,title,body,updatedAt,state,url,labels")
 	if e != nil {
 		return nil, e
 	}
@@ -177,7 +177,7 @@ func (c CLI) Sources(ctx context.Context, repo string) (any, error) {
 	return map[string]any{"issues": json.RawMessage(issues), "discussions": discussions, "discussions_available": de == nil}, nil
 }
 
-// ensureLabel creates or updates a Khan label before publishing an issue or PR.
+// ensureLabel creates or updates a Whirlwind label before publishing an issue or PR.
 func ensureLabel(ctx context.Context, repo, name string) error {
 	_, e := gh(ctx, "label", "create", name, "--repo", repo, "--force", "--color", "596579")
 	return e
@@ -198,10 +198,10 @@ func (c CLI) CreateIssue(ctx context.Context, repo, title, body, marker string) 
 			return i, nil
 		}
 	}
-	if e = ensureLabel(ctx, repo, "khan:plan"); e != nil {
+	if e = ensureLabel(ctx, repo, "whirlwind:plan"); e != nil {
 		return model.Issue{}, e
 	}
-	f, e := os.CreateTemp("", "khan-issue-*.md")
+	f, e := os.CreateTemp("", "whirlwind-issue-*.md")
 	if e != nil {
 		return model.Issue{}, e
 	}
@@ -211,7 +211,7 @@ func (c CLI) CreateIssue(ctx context.Context, repo, title, body, marker string) 
 	if e != nil {
 		return model.Issue{}, e
 	}
-	url, e := gh(ctx, "issue", "create", "--repo", repo, "--title", title, "--body-file", f.Name(), "--label", "khan:plan")
+	url, e := gh(ctx, "issue", "create", "--repo", repo, "--title", title, "--body-file", f.Name(), "--label", "whirlwind:plan")
 	if e != nil {
 		return model.Issue{}, e
 	}
@@ -223,7 +223,7 @@ func (c CLI) CreateIssue(ctx context.Context, repo, title, body, marker string) 
 	return c.Issue(ctx, repo, n)
 }
 
-// CreatePR reuses a PR for the branch, or pushes the branch and publishes a khan:work PR from a temporary body file.
+// CreatePR reuses a PR for the branch, or pushes the branch and publishes a whirlwind:work PR from a temporary body file.
 func (c CLI) CreatePR(ctx context.Context, path, repo, branch, base, title, body string) (string, error) {
 	b, e := gh(ctx, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "url")
 	if e != nil {
@@ -241,10 +241,10 @@ func (c CLI) CreatePR(ctx context.Context, path, repo, branch, base, title, body
 	if _, e = Run(ctx, path, "git", "push", "--set-upstream", "origin", branch); e != nil {
 		return "", e
 	}
-	if e = ensureLabel(ctx, repo, "khan:work"); e != nil {
+	if e = ensureLabel(ctx, repo, "whirlwind:work"); e != nil {
 		return "", e
 	}
-	f, e := os.CreateTemp("", "khan-pr-*.md")
+	f, e := os.CreateTemp("", "whirlwind-pr-*.md")
 	if e != nil {
 		return "", e
 	}
@@ -254,7 +254,7 @@ func (c CLI) CreatePR(ctx context.Context, path, repo, branch, base, title, body
 	if e != nil {
 		return "", e
 	}
-	return gh(ctx, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", title, "--body-file", f.Name(), "--label", "khan:work")
+	return gh(ctx, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", title, "--body-file", f.Name(), "--label", "whirlwind:work")
 }
 
 // RegisterWebhook reuses a hook with the same URL, or registers an issue webhook with its secret and TLS verification.
@@ -280,7 +280,7 @@ func (c CLI) RegisterWebhook(ctx context.Context, repo, url, secret string) erro
 		}
 	}
 	payload := map[string]any{"name": "web", "active": true, "events": []string{"issues"}, "config": map[string]any{"url": url, "content_type": "json", "secret": secret, "insecure_ssl": "0"}}
-	f, e := os.CreateTemp("", "khan-hook-*.json")
+	f, e := os.CreateTemp("", "whirlwind-hook-*.json")
 	if e != nil {
 		return e
 	}

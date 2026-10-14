@@ -42,19 +42,19 @@ func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 	var token [16]byte
 	_, _ = rand.Read(token[:])
 	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "KHAN_PROCESS_TOKEN=") {
+		if !strings.HasPrefix(entry, "WHIRLWIND_PROCESS_TOKEN=") {
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}
-	cmd.Env = append(cmd.Env, "KHAN_PROCESS_TOKEN="+hex.EncodeToString(token[:]))
+	cmd.Env = append(cmd.Env, "WHIRLWIND_PROCESS_TOKEN="+hex.EncodeToString(token[:]))
 	return cmd
 }
 
 // token extracts the recovery token from a command environment.
 func token(cmd *exec.Cmd) string {
 	for _, v := range cmd.Env {
-		if strings.HasPrefix(v, "KHAN_PROCESS_TOKEN=") {
-			return strings.TrimPrefix(v, "KHAN_PROCESS_TOKEN=")
+		if strings.HasPrefix(v, "WHIRLWIND_PROCESS_TOKEN=") {
+			return strings.TrimPrefix(v, "WHIRLWIND_PROCESS_TOKEN=")
 		}
 	}
 	return ""
@@ -85,7 +85,7 @@ func writeRegistration(root string, v registration) error {
 
 // Start registers a token before launch and its PID afterward; registration failure cancels and waits for the child.
 func Start(cmd *exec.Cmd) error {
-	root := os.Getenv("KHAN_PROCESS_REGISTRY")
+	root := os.Getenv("WHIRLWIND_PROCESS_REGISTRY")
 	if root != "" {
 		if err := os.MkdirAll(root, 0700); err != nil {
 			return err
@@ -115,7 +115,7 @@ func Forget(cmd *exec.Cmd) {
 	if cmd.Process != nil {
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
-	if root := os.Getenv("KHAN_PROCESS_REGISTRY"); root != "" {
+	if root := os.Getenv("WHIRLWIND_PROCESS_REGISTRY"); root != "" {
 		_ = os.Remove(filepath.Join(root, token(cmd)+".json"))
 	}
 }
@@ -156,7 +156,7 @@ func Reap(root string) error {
 		}
 		groups := map[int]bool{}
 		for _, line := range strings.Split(string(output), "\n") {
-			if !strings.Contains(line, "KHAN_PROCESS_TOKEN="+v.Token) {
+			if !strings.Contains(line, "WHIRLWIND_PROCESS_TOKEN="+v.Token) {
 				continue
 			}
 			fields := strings.Fields(line)

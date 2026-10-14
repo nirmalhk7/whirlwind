@@ -137,7 +137,7 @@ const nav: [View, string, string][] = [
 ];
 
 const descriptions: Record<View, string> = {
-  overview: "Choose a direction. Track implementation. Review the result.",
+  overview: "Autonomous software engineering, in continuous motion.",
   projects: "Trusted local repositories and execution policy.",
   providers: "Local agents, capabilities, and reported quota.",
   inbox: "Questions, permissions, and decisions.",
@@ -274,7 +274,8 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
   return (
     <div className="shell">
       <aside>
-        <div className="brand">Khan</div>
+        <div className="brand" aria-label="Whirlwind">whirlwind</div>
+        <p className="brand-tagline">ENGINEERING IN MOTION</p>
         <nav aria-label="Main navigation">
           {nav.map(([key, title, href]) => (
             <a
@@ -291,13 +292,19 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
       <main>
         <div className="desk-heading">
           <div>
-            <h1>{nav.find(([key]) => key === view)?.[1]}</h1>
+            <h1>{view === "overview" ? "Ideas in. Verified software out." : nav.find(([key]) => key === view)?.[1]}</h1>
             <p className="sub">{descriptions[view] ?? descriptions.tasks}</p>
           </div>
           <button className="button" onClick={() => void refresh()}>
             Refresh
           </button>
         </div>
+        {view === "overview" && <>
+          <p className="brand-positioning">Bring your agents. Whirlwind handles the engineering process: plan, build, test, review, and deliver through autonomous execution loops.</p>
+          <ul className="brand-traits" aria-label="Whirlwind capabilities">
+            <li>Agent-agnostic</li><li>ACP-native</li><li>Durable execution</li><li>Evidence-driven</li>
+          </ul>
+        </>}
         {error && (
           <div role="alert" className="error">
             <p>{error}</p>
@@ -335,7 +342,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
                 <p className="muted">
                   <code>{p.path}</code>
                 </p>
-                <div className="khan-actions">
+                <div className="whirlwind-actions">
                   <button
                     className="button"
                     disabled={busy}
@@ -367,7 +374,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
                 {inventory.directions
                   .filter((d) => d.data.project_id === id && !d.data.selected)
                   .map((d) => (
-                    <div className="khan-direction" key={d.id}>
+                    <div className="whirlwind-direction" key={d.id}>
                       <div>
                         <h4>{d.data.title}</h4>
                         <p>{d.data.description}</p>
@@ -401,10 +408,10 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
             <h2>Add project</h2>
             <p>
               Repository needs GitHub origin and committed{" "}
-              <code>.khan.yaml</code>. Authenticate GitHub CLI first. Agents and
+              <code>.whirlwind.yaml</code>. Authenticate GitHub CLI first. Agents and
               checks run with your local account permissions.
             </p>
-            <form className="khan-form" onSubmit={registerProject}>
+            <form className="whirlwind-form" onSubmit={registerProject}>
               <label>
                 Project name
                 <input name="name" required />
@@ -437,7 +444,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
             {loaded && !error && !inventory.tasks.length && (
               <p className="muted">
                 Select a direction or label a GitHub issue{" "}
-                <code>khan:plan</code> to start.
+                <code>whirlwind:plan</code> to start.
               </p>
             )}
             {inventory.tasks.map((t) => (
@@ -468,7 +475,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
           </section>
         )}
         {task && (
-          <section className="card khan-task" aria-label="Task details">
+          <section className="card whirlwind-task" aria-label="Task details">
             <div className="row">
               <h2>{task.data.issue.title}</h2>
               <button className="button" onClick={() => setSelected(null)}>
@@ -505,7 +512,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
             )}
             {task.data.stage === "questions" && (
               <form
-                className="khan-form"
+                className="whirlwind-form"
                 onSubmit={(event) => {
                   event.preventDefault();
                   void perform(
@@ -542,7 +549,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
                 </button>
               </form>
             )}
-            <div className="khan-actions">
+            <div className="whirlwind-actions">
               {task.data.stage === "approval" && (
                 <button
                   className="button primary"
@@ -661,7 +668,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
                     <details>
                       <summary>Edit provider setup</summary>
                       <form
-                        className="khan-form"
+                        className="whirlwind-form"
                         onSubmit={(event) => {
                           event.preventDefault();
                           const form = new FormData(event.currentTarget);
@@ -703,7 +710,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
             </section>
             <section className="card">
               <h2>Add ACP agent</h2>
-              <form className="khan-form" onSubmit={registerProvider}>
+              <form className="whirlwind-form" onSubmit={registerProvider}>
                 <label>
                   Provider ID
                   <input name="id" required />
@@ -735,7 +742,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
                 .filter((entry) => entry.data.status === "pending")
                 .map((entry) => (
                   <form
-                    className="action-card khan-form"
+                    className="action-card whirlwind-form"
                     key={entry.id}
                     onSubmit={(event) => {
                       event.preventDefault();
@@ -790,7 +797,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
                   <article className="action-card" key={p.id}>
                     <h3>{p.data.provider} requests permission</h3>
                     <pre>{JSON.stringify(p.data.request, null, 2)}</pre>
-                    <div className="khan-actions">
+                    <div className="whirlwind-actions">
                       {["allow", "deny"].map((decision) => (
                         <button
                           className="button"
@@ -824,7 +831,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
                   <article className="action-card" key={n.id}>
                     <h3>{n.data.kind.replaceAll("_", " ")}</h3>
                     <p>{n.data.message}</p>
-                    <div className="khan-actions">
+                    <div className="whirlwind-actions">
                       {n.data.task_id && (
                         <button
                           className="button"
@@ -853,7 +860,7 @@ export function ControlCenter({ view = "overview" }: { view?: View }) {
         )}
         {view === "settings" && settings && (
           <form
-            className="card khan-form"
+            className="card whirlwind-form"
             onSubmit={(event) => {
               event.preventDefault();
               const f = new FormData(event.currentTarget);

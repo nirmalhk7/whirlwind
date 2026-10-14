@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 // openTest opens a temporary SQLite store and registers cleanup with the test runner.
@@ -29,7 +29,7 @@ func TestIssueDeduplicationAndReplan(t *testing.T) {
 	if e := s.Put(ctx, "projects", p.ID, p, 0); e != nil {
 		t.Fatal(e)
 	}
-	issue := model.Issue{Number: 7, Title: "Add endpoint", Body: "first", UpdatedAt: "1", State: "OPEN", Labels: []string{"khan:plan"}}
+	issue := model.Issue{Number: 7, Title: "Add endpoint", Body: "first", UpdatedAt: "1", State: "OPEN", Labels: []string{"whirlwind:plan"}}
 	a, e := s.IngestIssue(ctx, p, issue)
 	if e != nil {
 		t.Fatal(e)
@@ -126,7 +126,7 @@ func TestReplanInvalidatesOldWorktreeAndAcceptance(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	p := model.Project{ID: "p", Repo: "o/r"}
-	issue := model.Issue{Number: 1, Body: "first", State: "OPEN", Labels: []string{"khan:plan"}, UpdatedAt: "1"}
+	issue := model.Issue{Number: 1, Body: "first", State: "OPEN", Labels: []string{"whirlwind:plan"}, UpdatedAt: "1"}
 	task, e := s.IngestIssue(ctx, p, issue)
 	if e != nil {
 		t.Fatal(e)
@@ -169,7 +169,7 @@ func TestOldWebhookCannotRevertNewerPlan(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	p := model.Project{ID: "p", Repo: "o/r"}
-	latest := model.Issue{Number: 2, Body: "new", State: "OPEN", Labels: []string{"khan:plan"}, UpdatedAt: "2026-10-12T10:00:00Z"}
+	latest := model.Issue{Number: 2, Body: "new", State: "OPEN", Labels: []string{"whirlwind:plan"}, UpdatedAt: "2026-10-12T10:00:00Z"}
 	task, e := s.IngestIssue(ctx, p, latest)
 	if e != nil {
 		t.Fatal(e)
@@ -190,7 +190,7 @@ func TestPlanIssueWebhookBindsExistingPlannerTask(t *testing.T) {
 	p := model.Project{ID: "p", Repo: "o/r"}
 	task := model.Task{ID: "direction-one", ProjectID: "p", PlanVersion: 1, Stage: "plan_ready", Plan: &model.Plan{Objective: "feature"}}
 	s.Put(ctx, "tasks", task.ID, task, 0)
-	issue := model.Issue{Number: 9, Body: "feature\n<!-- khan-plan:direction-one -->", State: "OPEN", Labels: []string{"khan:plan"}}
+	issue := model.Issue{Number: 9, Body: "feature\n<!-- whirlwind-plan:direction-one -->", State: "OPEN", Labels: []string{"whirlwind:plan"}}
 	bound, e := s.IngestIssue(ctx, p, issue)
 	if e != nil || bound.ID != task.ID || bound.Plan == nil || bound.Stage != "coding" {
 		t.Fatalf("planner duplicated: %+v %v", bound, e)
@@ -210,14 +210,14 @@ func TestRestoredEligibilityResumesEvenWithSameTimestamp(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	p := model.Project{ID: "p", Repo: "o/r"}
-	issue := model.Issue{Number: 3, Body: "work", State: "OPEN", Labels: []string{"khan:plan"}, UpdatedAt: "2026-10-12T10:00:00Z"}
+	issue := model.Issue{Number: 3, Body: "work", State: "OPEN", Labels: []string{"whirlwind:plan"}, UpdatedAt: "2026-10-12T10:00:00Z"}
 	_, e := s.IngestIssue(ctx, p, issue)
 	if e != nil {
 		t.Fatal(e)
 	}
 	issue.Labels = nil
 	s.IngestIssue(ctx, p, issue)
-	issue.Labels = []string{"khan:plan"}
+	issue.Labels = []string{"whirlwind:plan"}
 	restored, e := s.IngestIssue(ctx, p, issue)
 	if e != nil || restored.Stage != "planning" {
 		t.Fatalf("eligibility not resumed: %+v %v", restored, e)

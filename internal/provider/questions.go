@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 	"errors"
-	"khan/internal/model"
+	"whirlwind/internal/model"
 	"strings"
 )
 

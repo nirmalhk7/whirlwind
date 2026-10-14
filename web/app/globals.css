@@ -1,16 +1,20 @@
 :root {
   color-scheme: dark;
-  --ink: #e7edf4;
+  --ink: #F8FAFC;
   --muted: #96a4b3;
   --line: #283645;
-  --paper: #080d13;
+  --paper: #0B1220;
   --panel: #101923;
   --panel-raised: #141f2b;
-  --cyan: #59e1ed;
-  --lime: #b8f36b;
-  --violet: #c6a0ff;
+  --ion-teal: #5EEAD4;
+  --velocity-blue: #38BDF8;
+  --energy-violet: #A78BFA;
+  --signal-amber: #FBBF24;
+  --cyan: var(--ion-teal);
+  --lime: var(--ion-teal);
+  --violet: var(--energy-violet);
   --red: #ff7d8e;
-  --focus: #f4d35e;
+  --focus: var(--signal-amber);
 }
 
 * { box-sizing: border-box; }
@@ -27,16 +31,16 @@ button, input { font: inherit; }
 
 .shell { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); }
 aside {
-  background: #0c131b;
+  background: var(--paper);
   border-right: 1px solid var(--line);
   padding: 28px 18px;
 }
 .brand {
   font: 700 25px/1 ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: -.055em;
-  margin: 0 0 34px;
+  letter-spacing: -.03em;
+  margin: 0 0 8px;
 }
-.brand::after { content: "."; color: var(--cyan); }
+.brand::after { content: "_"; color: var(--cyan); }
 nav { display: grid; gap: 6px; }
 nav a {
   padding: 10px 12px;
@@ -55,7 +59,7 @@ nav a.active {
 main { padding: 40px clamp(22px, 5vw, 76px); max-width: 1400px; width: 100%; }
 h1 {
   font: 650 clamp(32px, 4vw, 46px)/1.1 ui-sans-serif, system-ui, sans-serif;
-  letter-spacing: -.045em;
+  letter-spacing: -.03em;
   margin: 8px 0;
   max-width: 18ch;
 }
@@ -183,7 +187,7 @@ h2 { letter-spacing: -.02em; }
 }
 .empty { padding: 18px 0; border-top: 1px solid var(--line); color: var(--muted); }
 .button {
-  border: 1px solid #58d7df;
+  border: 1px solid var(--ion-teal);
   color: #061216;
   background: var(--cyan);
   font-weight: 700;
@@ -192,7 +196,7 @@ h2 { letter-spacing: -.02em; }
   cursor: pointer;
   transition: background-color .15s ease, box-shadow .15s ease, transform .15s ease;
 }
-.button:hover { background: #8af2f3; box-shadow: 0 0 18px #59e1ed35; }
+.button:hover { background: #99f6e4; }
 .button:active { transform: translateY(1px); }
 .button.secondary { color: var(--cyan); background: #10232c; border-color: #1b4951; }
 .button.secondary:hover { background: #15303a; }
@@ -233,7 +237,7 @@ h2 { letter-spacing: -.02em; }
   background: #080f16;
   width: min(420px, 100%);
 }
-.input::placeholder { color: #728293; }
+.input::placeholder { color: var(--muted); }
 .connection-status {
   display: grid;
   gap: 12px;
@@ -267,7 +271,7 @@ h2 { letter-spacing: -.02em; }
   font-weight: 650;
   animation: toast-in .18s ease-out;
 }
-.toast-success { color: var(--lime); border-color: #52783a; background: #142018; }
+.toast-success { color: var(--ion-teal); border-color: #27665c; background: #102b29; }
 .toast-error { color: var(--red); border-color: #87404c; background: #28161c; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 pre {
@@ -306,19 +310,28 @@ pre {
 }
 
 /* Workflow controls extend the existing control-center palette. */
-.khan-form { display: grid; gap: 18px; max-width: 680px; }
-.khan-form label { display: grid; gap: 7px; color: var(--ink); }
-.khan-form input, .khan-form textarea { width: 100%; padding: 11px 12px; background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font: inherit; caret-color: var(--cyan); }
-.khan-form input::placeholder { color: var(--muted); }
-.khan-form textarea { min-height: 100px; resize: vertical; }
-.khan-form button { justify-self: start; }
-.khan-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
-.khan-direction { display: flex; align-items: start; justify-content: space-between; gap: 24px; border-top: 1px solid var(--line); padding: 18px 0; }
-.khan-direction h4 { margin: 0 0 6px; font-size: 17px; }
-.khan-direction p { margin: 4px 0; max-width: 70ch; }
-.khan-direction button { flex-shrink: 0; }
-.khan-task pre, .action-card pre { overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
-.khan-task { margin-top: 30px; }
+.whirlwind-form { display: grid; gap: 18px; max-width: 680px; }
+.whirlwind-form label { display: grid; gap: 7px; color: var(--ink); }
+.whirlwind-form input, .whirlwind-form textarea { width: 100%; padding: 11px 12px; background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; font: inherit; caret-color: var(--cyan); }
+.whirlwind-form input::placeholder { color: var(--muted); }
+.whirlwind-form textarea { min-height: 100px; resize: vertical; }
+.whirlwind-form button { justify-self: start; }
+.whirlwind-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+.whirlwind-direction { display: flex; align-items: start; justify-content: space-between; gap: 24px; border-top: 1px solid var(--line); padding: 18px 0; }
+.whirlwind-direction h4 { margin: 0 0 6px; font-size: 17px; }
+.whirlwind-direction p { margin: 4px 0; max-width: 70ch; }
+.whirlwind-direction button { flex-shrink: 0; }
+.whirlwind-task pre, .action-card pre { overflow-x: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.whirlwind-task { margin-top: 30px; }
 .provider-row code, .action-card code { overflow-wrap: anywhere; }
 .button:disabled { opacity: .5; cursor: wait; }
-@media (max-width: 700px) { .khan-direction { flex-direction: column; gap: 12px; } .desk-heading { flex-wrap: wrap; } }
+@media (max-width: 700px) { .whirlwind-direction { flex-direction: column; gap: 12px; } .desk-heading { flex-wrap: wrap; } }
+
+.brand-tagline { margin: 0 0 30px; color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .08em; }
+.brand-positioning { max-width: 70ch; margin: 0 0 22px; color: var(--muted); }
+.brand-traits { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 0; margin: 0 0 28px; list-style: none; font-size: 13px; color: var(--velocity-blue); }
+.brand-traits li:last-child { color: var(--energy-violet); }
+input, textarea { caret-color: var(--ion-teal); }
+* { scrollbar-color: #3b5266 var(--paper); }
+a { text-underline-offset: .2em; }
+@media (max-width: 700px) { .brand { margin-bottom: 6px; } .brand-tagline { margin-bottom: 16px; } }

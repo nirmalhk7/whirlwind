@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 var ErrConflict = errors.New("version conflict")
@@ -200,7 +200,7 @@ func (s *Store) IngestIssue(ctx context.Context, p model.Project, i model.Issue)
 			if !i.Eligible() {
 				return ErrNotFound
 			}
-			marker := "<!-- khan-plan:"
+			marker := "<!-- whirlwind-plan:"
 			if begin := strings.Index(i.Body, marker); begin >= 0 {
 				rest := i.Body[begin+len(marker):]
 				if end := strings.Index(rest, " -->"); end >= 0 {
@@ -252,11 +252,11 @@ func (s *Store) IngestIssue(ctx context.Context, p model.Project, i model.Issue)
 			}
 			t.ResumeStage = t.Stage
 			t.Stage = "paused"
-			t.Error = "Issue closed or khan:plan removed"
+			t.Error = "Issue closed or whirlwind:plan removed"
 			t.Issue = i
 			return put(ctx, tx, "tasks", id, t, version)
 		}
-		if !t.Issue.Eligible() && t.Stage == "paused" && t.Error == "Issue closed or khan:plan removed" && t.Issue.Body == i.Body && t.Issue.Title == i.Title {
+		if !t.Issue.Eligible() && t.Stage == "paused" && t.Error == "Issue closed or whirlwind:plan removed" && t.Issue.Body == i.Body && t.Issue.Title == i.Title {
 			t.Stage = t.ResumeStage
 			if t.Stage == "" {
 				t.Stage = "planning"

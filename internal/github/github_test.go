@@ -27,9 +27,9 @@ func TestIssueCreationReconcilesUncertainRemoteWrite(t *testing.T) {
 	state := filepath.Join(dir, "remote.json")
 	script := `#!/bin/sh
 case "$1 $2" in
-"issue list") if [ -f "$KHAN_REMOTE_STATE" ]; then cat "$KHAN_REMOTE_STATE"; else printf '[]'; fi ;;
+"issue list") if [ -f "$WHIRLWIND_REMOTE_STATE" ]; then cat "$WHIRLWIND_REMOTE_STATE"; else printf '[]'; fi ;;
 "label create") exit 0 ;;
-"issue create") printf '[{"number":7,"title":"Feature","body":"<!-- khan-plan:test -->","state":"OPEN","labels":[{"name":"khan:plan"}],"updatedAt":"1","url":"https://github.com/o/r/issues/7"}]' > "$KHAN_REMOTE_STATE"; echo 'connection lost after remote write' >&2; exit 1 ;;
+"issue create") printf '[{"number":7,"title":"Feature","body":"<!-- whirlwind-plan:test -->","state":"OPEN","labels":[{"name":"whirlwind:plan"}],"updatedAt":"1","url":"https://github.com/o/r/issues/7"}]' > "$WHIRLWIND_REMOTE_STATE"; echo 'connection lost after remote write' >&2; exit 1 ;;
 *) exit 2 ;;
 esac
 `
@@ -37,13 +37,13 @@ esac
 		t.Fatal(e)
 	}
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-	t.Setenv("KHAN_REMOTE_STATE", state)
+	t.Setenv("WHIRLWIND_REMOTE_STATE", state)
 	c := CLI{}
 	ctx := context.Background()
-	if _, e := c.CreateIssue(ctx, "o/r", "Feature", "body", "<!-- khan-plan:test -->"); e == nil {
+	if _, e := c.CreateIssue(ctx, "o/r", "Feature", "body", "<!-- whirlwind-plan:test -->"); e == nil {
 		t.Fatal("uncertain write must report failure")
 	}
-	issue, e := c.CreateIssue(ctx, "o/r", "Feature", "body", "<!-- khan-plan:test -->")
+	issue, e := c.CreateIssue(ctx, "o/r", "Feature", "body", "<!-- whirlwind-plan:test -->")
 	if e != nil || issue.Number != 7 {
 		t.Fatalf("reconciliation %+v %v", issue, e)
 	}

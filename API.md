@@ -1,6 +1,6 @@
-# Khan HTTP API
+# Whirlwind HTTP API
 
-Go server owns `/api/v1`; Next.js forwards same-origin requests to loopback `KHAN_BACKEND_URL` (default `http://127.0.0.1:8090`). See [OpenAPI contract](docs/openapi.json).
+Go server owns `/api/v1`; Next.js forwards same-origin requests to loopback `WHIRLWIND_BACKEND_URL` (default `http://127.0.0.1:8090`). See [OpenAPI contract](docs/openapi.json).
 
 ## Contracts
 
@@ -42,7 +42,7 @@ SSE emits `event: update`, ordered numeric `id`, and JSON `{id,kind,resource_id,
 
 ## Public webhook listener
 
-Separate optional listener exposes only `POST /webhooks/github`. Requires `X-Hub-Signature-256`, `X-GitHub-Delivery`, and `X-GitHub-Event`. HMAC uses `KHAN_WEBHOOK_SECRET`. Supported events: `issues` and `ping`. Valid issue events return 202; unregistered repository returns 404. Control routes are never registered on this listener.
+Separate optional listener exposes only `POST /webhooks/github`. Requires `X-Hub-Signature-256`, `X-GitHub-Delivery`, and `X-GitHub-Event`. HMAC uses `WHIRLWIND_WEBHOOK_SECRET`. Supported events: `issues` and `ping`. Valid issue events return 202; unregistered repository returns 404. Control routes are never registered on this listener.
 
 ## Errors
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 // TestRoutingRejectsIncapableAndExhaustedProviders verifies routing excludes unavailable, exhausted, and role-incompatible providers.

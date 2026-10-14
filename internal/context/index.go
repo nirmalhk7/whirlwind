@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 type Entry struct {

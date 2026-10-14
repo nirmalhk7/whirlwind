@@ -17,13 +17,13 @@ import (
 	"sync"
 	"time"
 
-	ctxengine "khan/internal/context"
-	"khan/internal/github"
-	"khan/internal/model"
-	"khan/internal/policy"
-	"khan/internal/provider"
-	"khan/internal/store"
-	"khan/internal/workflow"
+	ctxengine "whirlwind/internal/context"
+	"whirlwind/internal/github"
+	"whirlwind/internal/model"
+	"whirlwind/internal/policy"
+	"whirlwind/internal/provider"
+	"whirlwind/internal/store"
+	"whirlwind/internal/workflow"
 )
 
 type Server struct {
@@ -43,8 +43,8 @@ func New(s *store.Store, e *workflow.Engine, secret string) *Server {
 // Handler returns the private control API handler with loopback, origin, and mutation protections.
 func (s *Server) Handler() http.Handler { return http.HandlerFunc(s.control) }
 
-// WebhookHandler exposes only POST /webhooks/github on the separate ingress listener.
-func (s *Server) WebhookHandler() http.Handler {
+// Webhoowhirlwinddler exposes only POST /webhooks/github on the separate ingress listener.
+func (s *Server) Webhoowhirlwinddler() http.Handler {
 	m := http.NewServeMux()
 	m.HandleFunc("POST /webhooks/github", s.webhook)
 	return m

@@ -1,4 +1,4 @@
-Khan is an AI orchestration system with a Go server. The user controls the system through the web interface. Use Go to get the performance benefits of the language.
+Whirlwind is an AI orchestration system with a Go server. The user controls the system through the web interface. Use Go to get the performance benefits of the language.
 
 ## Deployment and storage
 - Run as a single-user local service. Bind the control API to loopback; the web interface calls its HTTP API through a same-origin proxy.
@@ -60,15 +60,15 @@ Khan is an AI orchestration system with a Go server. The user controls the syste
         - Then, implement the OAuth service.
         - Then, add API endpoints.
         - Finally, add integration tests.
-    - When the plan is ready, create a GitHub issue. Add the "khan:plan" label to the issue.
+    - When the plan is ready, create a GitHub issue. Add the "whirlwind:plan" label to the issue.
     - Move the plan to the Worker Loop.
 
 ## Worker Loop
 - Agents: Coding Agent and Reviewer Agent.
 - The Worker Loop monitors issues in the project repositories.
-- Use GitHub issue webhooks to start work when an issue is created or receives the "khan:plan" label.
+- Use GitHub issue webhooks to start work when an issue is created or receives the "whirlwind:plan" label.
 - The Go server must validate each webhook signature.
-- The Go server must check that the issue has the "khan:plan" label.
+- The Go server must check that the issue has the "whirlwind:plan" label.
 - Store one task for each eligible issue in SQLite.
 - Duplicate webhook deliveries must not create duplicate tasks.
 - Use periodic reconciliation to find eligible issues that the webhooks missed.
@@ -115,14 +115,14 @@ Khan is an AI orchestration system with a Go server. The user controls the syste
     - Create a pull request (PR) only after acceptance and any required human approval.
     - The Coding Agent creates the PR from the worktree's branch in the project repository.
     - The PR description explains the plan and implementation to a human reader.
-    - Add the "khan:work" label to the PR.
+    - Add the "whirlwind:work" label to the PR.
 - After PR creation, send the user an Inbox notification with the PR link.
 - The user reviews the PR and merges it if the implementation is satisfactory.
 
 ## Project execution policy
-- Require a trusted local GitHub repository, authenticated `gh`, and committed `.khan.yaml` before enabling execution.
+- Require a trusted local GitHub repository, authenticated `gh`, and committed `.whirlwind.yaml` before enabling execution.
 - Project policy defines baseline checks, risk rules, allowed paths, allowed commands, and provider preferences. Policy changes require explicit confirmation in the web interface.
-- The `khan:plan` label authorizes eligible issue execution. Issue edits cancel active work and trigger replanning; closure or label removal pauses the task and preserves artifacts.
+- The `whirlwind:plan` label authorizes eligible issue execution. Issue edits cancel active work and trigger replanning; closure or label removal pauses the task and preserves artifacts.
 - Run up to four agent processes globally and two per project by default. Parallel units use separate worktrees and integrate serially in dependency order; Coding Agent resolves conflicts before full verification.
 - Route only to available providers with required capabilities. Unknown quota remains unknown; exclude providers after confirmed exhaustion until reset or recovery. Coding and review may use the same provider in separate sessions.
 - Use machine timezone for daily 10AM ideation. On startup, catch up only the latest missed day.
@@ -130,7 +130,7 @@ Khan is an AI orchestration system with a Go server. The user controls the syste
 - Permit critical-risk PR publication only after explicit user approval. Never merge automatically.
 
 # Under The Hood
-- Khan has four agent roles: Ideation Agent, Planner Agent, Coding Agent, and Reviewer Agent.
+- Whirlwind has four agent roles: Ideation Agent, Planner Agent, Coding Agent, and Reviewer Agent.
 - The shared features operate in the Go server. They support both loops.
 - Workflow Engine:
     - Durable Task State [P0]:
@@ -143,7 +143,7 @@ Khan is an AI orchestration system with a Go server. The user controls the syste
         - Include completed work, completed acceptance criteria, failing tests, and the next action.
         - Let another provider continue from the last valid checkpoint under a task lease.
     - Example: Codex reaches its quota.
-        - Khan gives Claude the current worktree, completed work, failing tests, and next action.
+        - Whirlwind gives Claude the current worktree, completed work, failing tests, and next action.
         - Claude continues the task without starting again.
     - Progress / Stall Detection [P1]:
         - Record commits, changed files, test results, and tool errors.
@@ -152,7 +152,7 @@ Khan is an AI orchestration system with a Go server. The user controls the syste
         - Stop an attempt when it exceeds its configured progress or budget limit.
         - Continue with new context, a smaller task, or another provider.
     - Example: The Coding Agent runs the same failing test five times without a related code change.
-        - Khan stops the attempt and starts recovery.
+        - Whirlwind stops the attempt and starts recovery.
     - GitHub Webhooks [P0]:
         - Register GitHub issue webhooks.
         - Validate webhook signatures.
@@ -184,7 +184,7 @@ Khan is an AI orchestration system with a Go server. The user controls the syste
         - Compare providers on similar task types.
         - Use measured success rates to update provider selection preferences.
     - Example: Claude completes similar Go refactoring tasks with fewer repair attempts than Codex.
-        - Khan can prefer Claude for these tasks.
+        - Whirlwind can prefer Claude for these tasks.
 - Place the components in the Go server as follows:
     - The Workflow Engine, Context Engine, and Decision Engine support both loops.
     - In the Ideation Loop, the Ideation Agent uses Repository Intelligence.

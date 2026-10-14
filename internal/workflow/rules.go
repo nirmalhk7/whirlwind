@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"time"
 
-	"khan/internal/model"
+	"whirlwind/internal/model"
 )
 
 // Accepted requires passing checks, a score from 9 through 10, and no unresolved blocking findings.

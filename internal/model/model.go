@@ -66,12 +66,12 @@ type Issue struct {
 	URL       string   `json:"url"`
 }
 
-// Eligible requires an open issue carrying the khan:plan label before automatic execution.
+// Eligible requires an open issue carrying the whirlwind:plan label before automatic execution.
 func (i Issue) Eligible() bool {
 	if i.State != "OPEN" && i.State != "open" {
 		return false
 	}
-	return slices.Contains(i.Labels, "khan:plan")
+	return slices.Contains(i.Labels, "whirlwind:plan")
 }
 
 type Task struct {

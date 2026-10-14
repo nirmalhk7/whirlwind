@@ -73,7 +73,7 @@ test("project, provider, and runtime changes are completable from the Action Des
 
   await page.getByLabel("Validation commands, one per line").fill("pytest -q\nruff check .");
   await page.getByLabel("Scan interval in minutes").fill("90");
-  await page.getByRole("checkbox", { name: "Run deterministic scans while Khan's daemon is active" }).uncheck();
+  await page.getByRole("checkbox", { name: "Run deterministic scans while Whirlwind's daemon is active" }).uncheck();
   await page.getByRole("button", { name: "Save project direction and policy" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Project direction and policy saved" })).toBeVisible();
   expect(mutations.at(-1)).toMatchObject({

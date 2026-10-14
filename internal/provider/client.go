@@ -13,8 +13,8 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"khan/internal/process"
-	"khan/internal/store"
+	"whirlwind/internal/process"
+	"whirlwind/internal/store"
 )
 
 type Client struct {
@@ -177,7 +177,7 @@ func (c *Client) Handle(ctx context.Context, m Message) (any, error) {
 		cmd := process.Command(run, p.Command, p.Args...)
 		cmd.Dir = cwd
 		for _, env := range p.Env {
-			if strings.HasPrefix(env.Name, "KHAN_PROCESS_") {
+			if strings.HasPrefix(env.Name, "WHIRLWIND_PROCESS_") {
 				cancel()
 				return nil, errors.New("reserved process environment")
 			}

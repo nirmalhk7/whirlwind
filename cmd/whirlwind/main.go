@@ -14,15 +14,15 @@ import (
 	"syscall"
 	"time"
 
-	"khan/internal/github"
-	"khan/internal/httpapi"
-	"khan/internal/process"
-	"khan/internal/provider"
-	"khan/internal/store"
-	"khan/internal/workflow"
+	"whirlwind/internal/github"
+	"whirlwind/internal/httpapi"
+	"whirlwind/internal/process"
+	"whirlwind/internal/provider"
+	"whirlwind/internal/store"
+	"whirlwind/internal/workflow"
 )
 
-// main starts Khan and logs a fatal error if startup or serving fails.
+// main starts Whirlwind and logs a fatal error if startup or serving fails.
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -50,17 +50,17 @@ func run() error {
 	}
 	lock, e := process.Lock(filepath.Join(*data, "server.lock"))
 	if e != nil {
-		return fmt.Errorf("another Khan process owns data directory: %w", e)
+		return fmt.Errorf("another Whirlwind process owns data directory: %w", e)
 	}
 	defer lock.Close()
 	registry := filepath.Join(*data, "processes")
 	if e = process.Reap(registry); e != nil {
 		return e
 	}
-	if e = os.Setenv("KHAN_PROCESS_REGISTRY", registry); e != nil {
+	if e = os.Setenv("WHIRLWIND_PROCESS_REGISTRY", registry); e != nil {
 		return e
 	}
-	s, e := store.Open(filepath.Join(*data, "khan.db"))
+	s, e := store.Open(filepath.Join(*data, "whirlwind.db"))
 	if e != nil {
 		return e
 	}
@@ -88,22 +88,22 @@ func run() error {
 			return e
 		}
 	}
-	_ = s.Notify(ctx, "", "startup", "Khan started; interrupted sessions require fresh lease before resumption")
+	_ = s.Notify(ctx, "", "startup", "Whirlwind started; interrupted sessions require fresh lease before resumption")
 	engine := workflow.New(s, github.CLI{}, *data)
-	api := httpapi.New(s, engine, os.Getenv("KHAN_WEBHOOK_SECRET"))
+	api := httpapi.New(s, engine, os.Getenv("WHIRLWIND_WEBHOOK_SECRET"))
 	api.Context = ctx
 	server := &http.Server{Addr: *listen, Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	servers := []*http.Server{server}
 	if *webhooks != "" {
 		if api.Secret == "" {
-			return errors.New("KHAN_WEBHOOK_SECRET required for webhook listener")
+			return errors.New("WHIRLWIND_WEBHOOK_SECRET required for webhook listener")
 		}
-		servers = append(servers, &http.Server{Addr: *webhooks, Handler: api.WebhookHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second})
+		servers = append(servers, &http.Server{Addr: *webhooks, Handler: api.Webhoowhirlwinddler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second})
 	}
 	errs := make(chan error, len(servers))
 	for _, server := range servers {
 		go func(server *http.Server) {
-			log.Printf("Khan listening on %s", server.Addr)
+			log.Printf("Whirlwind listening on %s", server.Addr)
 			errs <- server.ListenAndServe()
 		}(server)
 	}
@@ -126,14 +126,14 @@ func run() error {
 	return nil
 }
 
-// defaultData selects KHAN_DATA_DIR or the user-local Khan state directory, falling back to a relative directory if home lookup fails.
+// defaultData selects WHIRLWIND_DATA_DIR or the user-local Whirlwind state directory, falling back to a relative directory if home lookup fails.
 func defaultData() string {
-	if v := os.Getenv("KHAN_DATA_DIR"); v != "" {
+	if v := os.Getenv("WHIRLWIND_DATA_DIR"); v != "" {
 		return v
 	}
 	home, e := os.UserHomeDir()
 	if e != nil {
-		return ".khan-state"
+		return ".whirlwind-state"
 	}
-	return filepath.Join(home, ".local", "share", "khan")
+	return filepath.Join(home, ".local", "share", "whirlwind")
 }

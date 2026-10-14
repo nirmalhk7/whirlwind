@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"khan/internal/model"
-	"khan/internal/policy"
-	"khan/internal/process"
+	"whirlwind/internal/model"
+	"whirlwind/internal/policy"
+	"whirlwind/internal/process"
 )
 
 type Result struct {

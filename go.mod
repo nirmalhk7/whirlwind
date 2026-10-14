@@ -1,4 +1,4 @@
-module khan
+module whirlwind
 
 go 1.25.0
 

@@ -31,7 +31,7 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
         if (read_only && !["Read", "Glob", "Grep"].includes(tool)) return { behavior: "deny", message: "Read-only role" };
         if (read_only) return { behavior: "allow", updatedInput: input };
         const answer = await permission(tool, input, signal);
-        return answer.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "Khan permission denied" };
+        return answer.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "Whirlwind permission denied" };
       },
     };
     let text = "", sid = "", cost = null, tokens = null, succeeded = false;
