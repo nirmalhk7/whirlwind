@@ -1,4 +1,5 @@
 import "./globals.css";
+import "./command.css";
 import type { ReactNode } from "react";
 import { ToastProvider } from "../components/ToastProvider";
 

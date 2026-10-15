@@ -1,2 +1,2 @@
-import { ControlCenter } from "../../components/ControlCenter";
-export default function Page() { return <ControlCenter view="providers" />; }
+import { redirect } from "next/navigation";
+export default function Page() { redirect("/settings#providers"); }

@@ -1,0 +1,344 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-14T16:58:00Z",
+  "title": "Design System: Whirlwind",
+  "extensions": {
+    "colorMeta": {
+      "ion-teal": {
+        "role": "primary",
+        "displayName": "Ion Teal",
+        "canonical": "#5EEAD4"
+      },
+      "ion-teal-hover": {
+        "role": "primary",
+        "displayName": "Ion Teal Hover",
+        "canonical": "#99F6E4"
+      },
+      "ion-teal-pressed": {
+        "role": "primary",
+        "displayName": "Ion Teal Pressed",
+        "canonical": "#2DD4BF"
+      },
+      "midnight": {
+        "role": "neutral",
+        "displayName": "Midnight",
+        "canonical": "#0B1220"
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite",
+        "canonical": "#101C2D"
+      },
+      "raised-graphite": {
+        "role": "neutral",
+        "displayName": "Raised Graphite",
+        "canonical": "#162438"
+      },
+      "sidebar-ground": {
+        "role": "neutral",
+        "displayName": "Sidebar Ground",
+        "canonical": "#0E1726"
+      },
+      "cloud": {
+        "role": "neutral",
+        "displayName": "Cloud",
+        "canonical": "#F8FAFC"
+      },
+      "quiet-cloud": {
+        "role": "neutral",
+        "displayName": "Quiet Cloud",
+        "canonical": "#A8B8CC"
+      },
+      "ruled-edge": {
+        "role": "neutral",
+        "displayName": "Ruled Edge",
+        "canonical": "#304158"
+      },
+      "teal-ink": {
+        "role": "neutral",
+        "displayName": "Teal Ink",
+        "canonical": "#071B1B"
+      },
+      "field-ground": {
+        "role": "neutral",
+        "displayName": "Field Ground",
+        "canonical": "#0B1525"
+      },
+      "control-edge": {
+        "role": "neutral",
+        "displayName": "Control Edge",
+        "canonical": "#51657E"
+      },
+      "control-hover": {
+        "role": "neutral",
+        "displayName": "Control Hover",
+        "canonical": "#1B3046"
+      },
+      "control-pressed": {
+        "role": "neutral",
+        "displayName": "Control Pressed",
+        "canonical": "#244057"
+      },
+      "field-edge": {
+        "role": "neutral",
+        "displayName": "Field Edge",
+        "canonical": "#51657E"
+      },
+      "field-placeholder": {
+        "role": "neutral",
+        "displayName": "Field Placeholder",
+        "canonical": "#A0B1C8"
+      },
+      "ready-teal": {
+        "role": "secondary",
+        "displayName": "Ready Teal",
+        "canonical": "#5EEAD4"
+      },
+      "ready-ground": {
+        "role": "secondary",
+        "displayName": "Ready Ground",
+        "canonical": "#102E2C"
+      },
+      "ready-edge": {
+        "role": "secondary",
+        "displayName": "Ready Edge",
+        "canonical": "#28655B"
+      },
+      "failure-coral": {
+        "role": "secondary",
+        "displayName": "Failure Coral",
+        "canonical": "#FDA4AF"
+      },
+      "failure-ground": {
+        "role": "secondary",
+        "displayName": "Failure Ground",
+        "canonical": "#351C28"
+      },
+      "failure-edge": {
+        "role": "secondary",
+        "displayName": "Failure Edge",
+        "canonical": "#8B485F"
+      },
+      "inactive-ground": {
+        "role": "neutral",
+        "displayName": "Inactive Ground",
+        "canonical": "#1B293B"
+      },
+      "inactive-edge": {
+        "role": "neutral",
+        "displayName": "Inactive Edge",
+        "canonical": "#3F526C"
+      },
+      "pending-ground": {
+        "role": "neutral",
+        "displayName": "Pending Ground",
+        "canonical": "#342C17"
+      },
+      "pending-edge": {
+        "role": "neutral",
+        "displayName": "Pending Edge",
+        "canonical": "#806A2B"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Inbox identity only."
+      },
+      "wordmark": {
+        "displayName": "Wordmark",
+        "purpose": "WHIRLWIND brand lettering."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Operational page titles."
+      },
+      "empty-title": {
+        "displayName": "Empty Title",
+        "purpose": "Empty-state prompts."
+      },
+      "section-title": {
+        "displayName": "Section Title",
+        "purpose": "Work list grouping."
+      },
+      "record-title": {
+        "displayName": "Record Title",
+        "purpose": "Individual work record titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "General operational reading."
+      },
+      "button-label": {
+        "displayName": "Button Label",
+        "purpose": "Compact action controls."
+      },
+      "status-label": {
+        "displayName": "Status Label",
+        "purpose": "Text-labelled state badges."
+      }
+    },
+    "shadows": [
+      {
+        "name": "toast-float",
+        "value": "0 8px 28px #0006",
+        "purpose": "Transient success or failure feedback only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control-state",
+        "value": "background-color .18s ease, border-color .18s ease, color .18s ease",
+        "purpose": "Compact button state response."
+      },
+      {
+        "name": "field-boundary",
+        "value": "border-color .18s ease",
+        "purpose": "Input hover and focus response."
+      },
+      {
+        "name": "navigation-state",
+        "value": "background-color .15s ease, border-color .15s ease, color .15s ease",
+        "purpose": "Inherited navigation state response."
+      },
+      {
+        "name": "direction-arrow",
+        "value": "transform .2s cubic-bezier(.16, 1, .3, 1)",
+        "purpose": "Four-pixel directional link arrow travel; disabled for reduced motion."
+      },
+      {
+        "name": "toast-entry",
+        "value": "toast-in .18s ease-out",
+        "purpose": "Opacity and eight-pixel vertical entrance for transient feedback."
+      },
+      {
+        "name": "reduced-motion",
+        "value": ".01ms",
+        "purpose": "Transition and animation duration when reduced motion is requested."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sidebar-compact",
+        "value": "1150px"
+      },
+      {
+        "name": "single-work-column",
+        "value": "950px"
+      },
+      {
+        "name": "mobile-navigation",
+        "value": "700px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Teal action with compact arrow, hover, pressed, and disabled feedback.",
+      "html": "<button class=\"ds-primary\">Register a project <svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14 M13 6l6 6-6 6\"/></svg></button>",
+      "css": ".ds-primary{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:42px;padding:10px 16px;border:1px solid #51657E;border-radius:6px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:13px;font-weight:600;line-height:1.4;cursor:pointer;box-shadow:none;transition:background-color .18s ease,border-color .18s ease,color .18s ease;background:var(--teal,#5EEAD4);color:#071B1B;border-color:var(--teal,#5EEAD4);}.ds-primary:hover{background:var(--teal-hover,#99F6E4);border-color:var(--teal-hover,#99F6E4);}.ds-primary:active{background:#2DD4BF;}.ds-primary:focus-visible{outline:2px solid var(--focus,#FBBF24);outline-offset:4px;}.ds-primary:disabled{color:var(--muted,#A8B8CC);background:#1B293B;border-color:#3F526C;cursor:not-allowed;}@media(prefers-reduced-motion:reduce){.ds-primary{transition-duration:.01ms;}}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Quiet outlined action with visible tonal feedback.",
+      "html": "<button class=\"ds-secondary\">Close details</button>",
+      "css": ".ds-secondary{display:inline-flex;align-items:center;justify-content:center;gap:9px;min-height:42px;padding:10px 16px;border:1px solid #51657E;border-radius:6px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:13px;font-weight:600;line-height:1.4;cursor:pointer;box-shadow:none;transition:background-color .18s ease,border-color .18s ease,color .18s ease;background:transparent;color:var(--ink,#F8FAFC);}.ds-secondary:hover{background:#1B3046;border-color:#8CA2BC;}.ds-secondary:active{background:#244057;}.ds-secondary:focus-visible{outline:2px solid var(--focus,#FBBF24);outline-offset:4px;}.ds-secondary:disabled{color:var(--muted,#A8B8CC);background:#1B293B;border-color:#3F526C;cursor:not-allowed;}@media(prefers-reduced-motion:reduce){.ds-secondary{transition-duration:.01ms;}}"
+    },
+    {
+      "name": "Repository Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Labelled working field with teal caret and focus boundary.",
+      "html": "<label class=\"ds-field\">Local repository<input type=\"text\" placeholder=\"/path/to/repository\"/><span>Trusted local repository path.</span></label>",
+      "css": ".ds-field{display:grid;gap:8px;max-width:680px;color:var(--ink,#F8FAFC);font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:13px;font-weight:500;}.ds-field input{width:100%;min-height:44px;border:1px solid #51657E;border-radius:6px;background:#0B1525;color:var(--ink,#F8FAFC);padding:12px 14px;caret-color:var(--teal,#5EEAD4);font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;font-size:14px;transition:border-color .18s ease;}.ds-field input:hover{border-color:#8CA2BC;}.ds-field input:focus{border-color:var(--teal,#5EEAD4);}.ds-field input:focus-visible{outline:2px solid var(--focus,#FBBF24);outline-offset:4px;}.ds-field input::placeholder{color:#A0B1C8;font-weight:400;}.ds-field span{color:var(--muted,#A8B8CC);font-size:12px;font-weight:400;}@media(prefers-reduced-motion:reduce){.ds-field input{transition-duration:.01ms;}}"
+    },
+    {
+      "name": "Selected Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item-active",
+      "description": "Teal current-page marker paired with a quiet adjacent link.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Main navigation\"><a href=\"/inbox\">Inbox</a><a href=\"#projects\" aria-current=\"page\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 7h6l2-3h10v16H3z M3 9h18\"/></svg>Projects</a></nav>",
+      "css": ".ds-nav{display:grid;gap:5px;width:184px;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;}.ds-nav a{display:flex;align-items:center;gap:12px;min-height:46px;padding:11px 13px;border-radius:6px;color:var(--muted,#A8B8CC);font-size:14px;font-weight:500;text-decoration:none;transition:background-color .15s ease,color .15s ease;}.ds-nav a:hover{color:var(--ink,#F8FAFC);background:#172A3D;}.ds-nav a[aria-current=\"page\"]{background:var(--teal,#5EEAD4);color:#071B1B;font-weight:700;}.ds-nav a:focus-visible{outline:2px solid var(--focus,#FBBF24);outline-offset:4px;}@media(prefers-reduced-motion:reduce){.ds-nav a{transition-duration:.01ms;}}"
+    },
+    {
+      "name": "Workflow Status",
+      "kind": "chip",
+      "refersTo": "status",
+      "description": "Text-labelled ready, pending, and paused state badges.",
+      "html": "<div class=\"ds-statuses\"><span class=\"ds-status ds-ready\">Available</span><span class=\"ds-status ds-pending\">Approval</span><span class=\"ds-status ds-paused\">Paused</span></div>",
+      "css": ".ds-statuses{display:flex;flex-wrap:wrap;gap:10px;}.ds-status{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;white-space:nowrap;border:1px solid #536882;border-radius:4px;background:#1B3046;color:var(--teal,#5EEAD4);padding:4px 8px;font-size:11px;font-weight:500;letter-spacing:.015em;}.ds-ready{background:#102E2C;border-color:#28655B;color:var(--lime,#5EEAD4);}.ds-pending{background:#342C17;border-color:#806A2B;color:var(--teal-hover,#99F6E4);}.ds-paused{background:#213449;border-color:#3F526C;color:var(--muted,#A8B8CC);}"
+    },
+    {
+      "name": "Working Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Flat bounded container for forms and focused details.",
+      "html": "<section class=\"ds-panel\"><h2>Add project</h2><p>Register a repository to begin choosing directions.</p></section>",
+      "css": ".ds-panel{background:var(--panel,#101C2D);color:var(--ink,#F8FAFC);border:1px solid var(--line,#304158);border-radius:var(--radius,12px);padding:26px;box-shadow:none;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;}.ds-panel h2{margin:0 0 14px;font-size:20px;letter-spacing:-.02em;}.ds-panel p{margin:0;max-width:70ch;color:var(--muted,#A8B8CC);font-size:14px;line-height:1.75;}@media(max-width:700px){.ds-panel{padding:20px;}}"
+    },
+    {
+      "name": "Whirlwind Wordmark",
+      "kind": "custom",
+      "refersTo": "wordmark",
+      "description": "Geometric wind mark with condensed identity lettering.",
+      "html": "<a class=\"ds-wordmark\" href=\"/inbox\" aria-label=\"Whirlwind Inbox\"><svg width=\"28\" height=\"28\" viewBox=\"0 0 32 32\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M4 10h16a5 5 0 1 0-5-5 M3 16h23a4 4 0 1 1-4 4 M7 22h7a4 4 0 1 1-4 4\"/></svg><span>whirlwind<span style=\"color:var(--teal,#5EEAD4)\">_</span></span></a>",
+      "css": ".ds-wordmark{display:inline-flex;align-items:center;gap:13px;padding:0 12px;color:var(--ink,#F8FAFC);text-decoration:none;}.ds-wordmark svg{color:var(--teal,#5EEAD4);flex-shrink:0;}.ds-wordmark span{font:700 27px/1.1 var(--display,\"Barlow Condensed\",sans-serif);letter-spacing:.01em;}.ds-wordmark:focus-visible{outline:2px solid var(--focus,#FBBF24);outline-offset:4px;}@media(max-width:700px){.ds-wordmark{gap:10px;padding:0 6px;}.ds-wordmark span{font-size:28px;}.ds-wordmark svg{width:25px;height:29px;}}"
+    },
+    {
+      "name": "Ruled Work Record",
+      "kind": "custom",
+      "refersTo": "status",
+      "description": "Open work row with stable stage placement and quiet metadata.",
+      "html": "<article class=\"ds-record\"><div class=\"ds-record-top\"><h3>Selected project direction</h3><span class=\"ds-record-stage\">Planning</span></div><p>Implementation attempt \u00b7 Evidence remains inspectable.</p></article>",
+      "css": ".ds-record{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;padding:20px 0;border-bottom:1px solid var(--line,#304158);color:var(--ink,#F8FAFC);}.ds-record-top{display:flex;justify-content:space-between;align-items:center;gap:18px;}.ds-record h3{margin:0;font-size:16px;font-weight:600;line-height:1.5;}.ds-record p{max-width:70ch;color:var(--muted,#A8B8CC);font-size:13px;line-height:1.7;}.ds-record-stage{white-space:nowrap;background:#1B3046;border:1px solid #536882;border-radius:4px;color:var(--teal,#5EEAD4);padding:4px 8px;font-size:11px;font-weight:500;letter-spacing:.015em;}@media(max-width:700px){.ds-record-top{flex-wrap:wrap;gap:8px 12px;}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Engineering in motion",
+    "overview": "Whirlwind expresses velocity, control, and correctness through a midnight canvas, cloud-white reading text, ion-teal actions, blue information, violet evidence, and amber focus. Preserve the daily working control center and current Inbox-first navigation.",
+    "keyCharacteristics": [
+      "Dark midnight and graphite grounds with cloud white text.",
+      "Teal marks action, selection, and directional links.",
+      "Barlow Condensed identity paired with familiar system sans operations.",
+      "Ruled records, fixed status positions, and visible operator actions.",
+      "Flat containers, compact geometric SVG, and restrained state transitions."
+    ],
+    "rules": [
+      {
+        "name": "The Ion Teal Rule",
+        "body": "Use teal for action, selection, and directional links; reserve teal and coral for truthful readiness and failure.",
+        "section": "colors"
+      },
+      {
+        "name": "The Two Voices Rule",
+        "body": "Use Barlow Condensed for identity and prominent empty-state language; use system sans for operational headings, controls, and records.",
+        "section": "typography"
+      },
+      {
+        "name": "The Ruled Record Rule",
+        "body": "Separate repeated work records with rules and spacing; reserve enclosed panels for forms and focused details.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep status labels beside their records and pair color with readable state text.",
+      "Do use the two type voices consistently: condensed identity, system sans operations.",
+      "Do preserve the two-pixel amber focus outline and visible keyboard path.",
+      "Do use ruled lists for repeated work and enclosed panels for forms or focused detail.",
+      "Do provide a concrete next action in empty states.",
+      "Do keep navigation available as a three-column, two-row grid on small screens."
+    ],
+    "donts": [
+      "Don't replace truthful unavailable, loading, or failed state with decorative success.",
+      "Don't apply glow, gradients, or promotional imagery to the grounded operational surface.",
+      "Don't spread display lettering into form fields, long evidence, or routine control labels.",
+      "Don't use color as the sole status signal.",
+      "Keep shared and command-shell tokens aligned with the Whirlwind palette."
+    ]
+  }
+}

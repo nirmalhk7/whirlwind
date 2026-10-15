@@ -1,2 +1,2 @@
-import { ControlCenter } from "../components/ControlCenter";
-export default function Page() { return <ControlCenter view="overview" />; }
+import { redirect } from "next/navigation";
+export default function Page() { redirect("/inbox"); }
