@@ -10,11 +10,20 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/process"
+)
+
+const (
+	jsonFlag    = "--json"
+	labelFlag   = "--label"
+	limitFlag   = "--limit"
+	repoFlag    = "--repo"
+	stateFlag   = "--state"
+	planLabel   = "whirlwind:plan"
+	issueFields = "number,title,body,updatedAt,state,url,labels"
 )
 
 // ValidSignature compares the webhook body HMAC with the sha256 signature using a constant-time comparison.
@@ -69,44 +78,18 @@ func gh(ctx context.Context, args ...string) (string, error) { return Run(ctx, "
 
 // Check requires authenticated gh and a github.com origin, then resolves the repository canonical owner/name.
 func Check(ctx context.Context, path string) (string, error) {
-	if _, e := exec.LookPath("gh"); e != nil {
-		return "", errors.New("gh required")
+	if err := checkLocalRepository(ctx, path); err != nil {
+		return "", err
 	}
-	if _, e := gh(ctx, "auth", "status"); e != nil {
-		return "", e
+	remote, err := Run(ctx, path, "git", "remote", "get-url", "origin")
+	if err != nil {
+		return "", err
 	}
-	if _, e := Run(ctx, path, "git", "rev-parse", "--show-toplevel"); e != nil {
-		return "", e
+	repo, err := repositoryFromRemote(remote)
+	if err != nil {
+		return "", err
 	}
-	remote, e := Run(ctx, path, "git", "remote", "get-url", "origin")
-	if e != nil {
-		return "", e
-	}
-	remote = strings.TrimSuffix(remote, ".git")
-	var repo string
-	switch {
-	case strings.HasPrefix(remote, "git@github.com:"):
-		repo = strings.TrimPrefix(remote, "git@github.com:")
-	case strings.HasPrefix(remote, "https://github.com/"):
-		repo = strings.TrimPrefix(remote, "https://github.com/")
-	default:
-		return "", errors.New("origin must reference github.com repository")
-	}
-	parts := strings.Split(repo, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return "", errors.New("invalid GitHub repository")
-	}
-	description, e := gh(ctx, "repo", "view", repo, "--json", "nameWithOwner")
-	if e != nil {
-		return "", e
-	}
-	var canonical struct {
-		Name string `json:"nameWithOwner"`
-	}
-	if e = json.Unmarshal([]byte(description), &canonical); e != nil || canonical.Name == "" {
-		return "", errors.New("GitHub repository identity unavailable")
-	}
-	return canonical.Name, nil
+	return canonicalRepository(ctx, repo)
 }
 
 // parseIssue converts GitHub CLI issue JSON and label objects into the internal issue snapshot.
@@ -149,7 +132,7 @@ func parseIssues(text string) ([]model.Issue, error) {
 
 // Issues loads up to 1,000 open whirlwind:plan issues for reconciliation.
 func (c CLI) Issues(ctx context.Context, repo string) ([]model.Issue, error) {
-	b, e := gh(ctx, "issue", "list", "--repo", repo, "--state", "open", "--label", "whirlwind:plan", "--limit", "1000", "--json", "number,title,body,updatedAt,state,url,labels")
+	b, e := gh(ctx, "issue", "list", repoFlag, repo, stateFlag, "open", labelFlag, planLabel, limitFlag, "1000", jsonFlag, issueFields)
 	if e != nil {
 		return nil, e
 	}
@@ -158,7 +141,7 @@ func (c CLI) Issues(ctx context.Context, repo string) ([]model.Issue, error) {
 
 // Issue fetches one issue snapshot, including its state, labels, and update timestamp.
 func (c CLI) Issue(ctx context.Context, repo string, n int) (model.Issue, error) {
-	b, e := gh(ctx, "issue", "view", fmt.Sprint(n), "--repo", repo, "--json", "number,title,body,updatedAt,state,url,labels")
+	b, e := gh(ctx, "issue", "view", fmt.Sprint(n), repoFlag, repo, jsonFlag, issueFields)
 	if e != nil {
 		return model.Issue{}, e
 	}
@@ -167,7 +150,7 @@ func (c CLI) Issue(ctx context.Context, repo string, n int) (model.Issue, error)
 
 // Sources collects issues and attempts to fetch discussions, reporting discussion availability without failing the issue collection.
 func (c CLI) Sources(ctx context.Context, repo string) (any, error) {
-	issues, e := gh(ctx, "issue", "list", "--repo", repo, "--limit", "100", "--json", "number,title,body,labels")
+	issues, e := gh(ctx, "issue", "list", repoFlag, repo, limitFlag, "100", jsonFlag, "number,title,body,labels")
 	if e != nil {
 		return nil, e
 	}
@@ -179,64 +162,36 @@ func (c CLI) Sources(ctx context.Context, repo string) (any, error) {
 
 // ensureLabel creates or updates a Whirlwind label before publishing an issue or PR.
 func ensureLabel(ctx context.Context, repo, name string) error {
-	_, e := gh(ctx, "label", "create", name, "--repo", repo, "--force", "--color", "596579")
+	_, e := gh(ctx, "label", "create", name, repoFlag, repo, "--force", "--color", "596579")
 	return e
 }
 
 // CreateIssue reuses an issue containing the plan marker, or publishes a labeled issue from a temporary body file.
 func (c CLI) CreateIssue(ctx context.Context, repo, title, body, marker string) (model.Issue, error) {
-	all, e := gh(ctx, "issue", "list", "--repo", repo, "--state", "all", "--limit", "1000", "--json", "number,title,body,updatedAt,state,url,labels")
+	issue, found, e := existingIssue(ctx, repo, title, body, marker)
+	if e != nil || found {
+		return issue, e
+	}
+	if e = ensureLabel(ctx, repo, planLabel); e != nil {
+		return model.Issue{}, e
+	}
+	filename, cleanup, e := publicationBodyFile("whirlwind-issue-*.md", body+"\n\n"+marker)
 	if e != nil {
 		return model.Issue{}, e
 	}
-	issues, e := parseIssues(all)
+	defer cleanup()
+	url, e := gh(ctx, "issue", "create", repoFlag, repo, "--title", title, "--body-file", filename, labelFlag, planLabel)
 	if e != nil {
 		return model.Issue{}, e
 	}
-	for _, i := range issues {
-		if strings.Contains(i.Body, marker) {
-			return i, nil
-		}
-	}
-	if e = ensureLabel(ctx, repo, "whirlwind:plan"); e != nil {
-		return model.Issue{}, e
-	}
-	f, e := os.CreateTemp("", "whirlwind-issue-*.md")
-	if e != nil {
-		return model.Issue{}, e
-	}
-	defer os.Remove(f.Name())
-	_, e = f.WriteString(body + "\n\n" + marker)
-	f.Close()
-	if e != nil {
-		return model.Issue{}, e
-	}
-	url, e := gh(ctx, "issue", "create", "--repo", repo, "--title", title, "--body-file", f.Name(), "--label", "whirlwind:plan")
-	if e != nil {
-		return model.Issue{}, e
-	}
-	var n int
-	_, e = fmt.Sscanf(url[strings.LastIndex(url, "/")+1:], "%d", &n)
-	if e != nil {
-		return model.Issue{}, e
-	}
-	return c.Issue(ctx, repo, n)
+	return c.issueAtURL(ctx, repo, url)
 }
 
 // CreatePR reuses a PR for the branch, or pushes the branch and publishes a whirlwind:work PR from a temporary body file.
 func (c CLI) CreatePR(ctx context.Context, path, repo, branch, base, title, body string) (string, error) {
-	b, e := gh(ctx, "pr", "list", "--repo", repo, "--head", branch, "--state", "all", "--json", "url")
-	if e != nil {
-		return "", e
-	}
-	var found []struct {
-		URL string `json:"url"`
-	}
-	if e = json.Unmarshal([]byte(b), &found); e != nil {
-		return "", e
-	}
-	if len(found) > 0 {
-		return found[0].URL, nil
+	url, found, e := existingPR(ctx, path, repo, branch, base, title, body)
+	if e != nil || found {
+		return url, e
 	}
 	if _, e = Run(ctx, path, "git", "push", "--set-upstream", "origin", branch); e != nil {
 		return "", e
@@ -244,17 +199,12 @@ func (c CLI) CreatePR(ctx context.Context, path, repo, branch, base, title, body
 	if e = ensureLabel(ctx, repo, "whirlwind:work"); e != nil {
 		return "", e
 	}
-	f, e := os.CreateTemp("", "whirlwind-pr-*.md")
+	filename, cleanup, e := publicationBodyFile("whirlwind-pr-*.md", body)
 	if e != nil {
 		return "", e
 	}
-	defer os.Remove(f.Name())
-	_, e = f.WriteString(body)
-	f.Close()
-	if e != nil {
-		return "", e
-	}
-	return gh(ctx, "pr", "create", "--repo", repo, "--head", branch, "--base", base, "--title", title, "--body-file", f.Name(), "--label", "whirlwind:work")
+	defer cleanup()
+	return gh(ctx, "pr", "create", repoFlag, repo, "--head", branch, "--base", base, "--title", title, "--body-file", filename, labelFlag, "whirlwind:work")
 }
 
 // RegisterWebhook reuses a hook with the same URL, or registers an issue webhook with its secret and TLS verification.
@@ -262,41 +212,25 @@ func (c CLI) RegisterWebhook(ctx context.Context, repo, url, secret string) erro
 	if secret == "" {
 		return errors.New("webhook secret required")
 	}
-	b, e := gh(ctx, "api", "repos/"+repo+"/hooks")
-	if e != nil {
+	found, e := existingWebhook(ctx, repo, url)
+	if e != nil || found {
 		return e
-	}
-	var hooks []struct {
-		Config struct {
-			URL string `json:"url"`
-		} `json:"config"`
-	}
-	if e = json.Unmarshal([]byte(b), &hooks); e != nil {
-		return e
-	}
-	for _, h := range hooks {
-		if h.Config.URL == url {
-			return nil
-		}
 	}
 	payload := map[string]any{"name": "web", "active": true, "events": []string{"issues"}, "config": map[string]any{"url": url, "content_type": "json", "secret": secret, "insecure_ssl": "0"}}
-	f, e := os.CreateTemp("", "whirlwind-hook-*.json")
+	filename, cleanup, e := publicationFile("whirlwind-hook-*.json", func(f *os.File) error {
+		return json.NewEncoder(f).Encode(payload)
+	})
 	if e != nil {
 		return e
 	}
-	defer os.Remove(f.Name())
-	e = json.NewEncoder(f).Encode(payload)
-	f.Close()
-	if e != nil {
-		return e
-	}
-	_, e = gh(ctx, "api", "repos/"+repo+"/hooks", "--method", "POST", "--input", f.Name())
+	defer cleanup()
+	_, e = gh(ctx, "api", "repos/"+repo+"/hooks", "--method", "POST", "--input", filename)
 	return e
 }
 
 // PRState fetches the published PR state so reconciliation can record closure or merge.
 func (c CLI) PRState(ctx context.Context, repo, url string) (string, error) {
-	b, e := gh(ctx, "pr", "view", url, "--repo", repo, "--json", "state")
+	b, e := gh(ctx, "pr", "view", url, repoFlag, repo, jsonFlag, "state")
 	var v struct {
 		State string `json:"state"`
 	}
@@ -309,5 +243,5 @@ func (c CLI) PRState(ctx context.Context, repo, url string) (string, error) {
 
 // DefaultBranch asks GitHub for the repository default branch name.
 func DefaultBranch(ctx context.Context, repo string) (string, error) {
-	return gh(ctx, "repo", "view", repo, "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")
+	return gh(ctx, "repo", "view", repo, jsonFlag, "defaultBranchRef", "--jq", ".defaultBranchRef.name")
 }

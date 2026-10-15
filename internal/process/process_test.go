@@ -18,7 +18,7 @@ func TestRegistryReapsOrphanBeforeRestart(t *testing.T) {
 	if e := Start(cmd); e != nil {
 		t.Fatal(e)
 	}
-	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	entries, e := os.ReadDir(root)
 	if e != nil || len(entries) != 1 {
 		t.Fatalf("registry %v %v", entries, e)
@@ -49,10 +49,12 @@ func TestReapHandlesCrashBeforePIDRegistration(t *testing.T) {
 	if err := Start(cmd); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	file := filepath.Join(root, token(cmd)+".json")
 	b, _ := json.Marshal(registration{Token: token(cmd)})
-	os.WriteFile(file, b, 0600)
+	if err := os.WriteFile(file, b, 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := Reap(root); err != nil {
 		t.Fatalf("pre-registration recovery: %v", err)
 	}

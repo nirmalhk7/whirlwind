@@ -1,9 +1,14 @@
-.PHONY: run web
+.PHONY: dev run web
 
-WHIRLWIND_BACKEND_URL ?= http://127.0.0.1:8090
+WHIRLWIND_LISTEN ?= 127.0.0.1:9877
+WHIRLWIND_WEB_PORT ?= 9876
+WHIRLWIND_BACKEND_URL ?= http://$(WHIRLWIND_LISTEN)
+
+dev:
+	WHIRLWIND_LISTEN="$(WHIRLWIND_LISTEN)" WHIRLWIND_WEB_PORT="$(WHIRLWIND_WEB_PORT)" WHIRLWIND_BACKEND_URL="$(WHIRLWIND_BACKEND_URL)" node scripts/dev.mjs
 
 run:
-	go run ./cmd/whirlwind
+	go run ./cmd/whirlwind --listen "$(WHIRLWIND_LISTEN)"
 
 web:
-	cd web && WHIRLWIND_BACKEND_URL="$(WHIRLWIND_BACKEND_URL)" npm run dev
+	cd web && WHIRLWIND_BACKEND_URL="$(WHIRLWIND_BACKEND_URL)" npm run dev -- --port "$(WHIRLWIND_WEB_PORT)"

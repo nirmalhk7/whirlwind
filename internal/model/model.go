@@ -45,6 +45,7 @@ type Project struct {
 	WebhookURL    string `json:"webhook_url,omitempty"`
 }
 type Provider struct {
+	ModelCommand []string `json:"model_command,omitempty"`
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
 	Kind         string   `json:"kind"`
@@ -75,29 +76,34 @@ func (i Issue) Eligible() bool {
 }
 
 type Task struct {
-	ResumeStage         string  `json:"resume_stage,omitempty"`
-	EligibilityOverride bool    `json:"eligibility_override,omitempty"`
-	ID                  string  `json:"id"`
-	ProjectID           string  `json:"project_id"`
-	Issue               Issue   `json:"issue"`
-	PlanVersion         int     `json:"plan_version"`
-	Stage               string  `json:"stage"`
-	Plan                *Plan   `json:"plan,omitempty"`
-	Worktree            string  `json:"worktree,omitempty"`
-	Branch              string  `json:"branch,omitempty"`
-	Base                string  `json:"base,omitempty"`
-	ReviewedCommit      string  `json:"reviewed_commit,omitempty"`
-	Score               float64 `json:"score"`
-	ReviewPasses        int     `json:"review_passes"`
-	UnchangedFailures   int     `json:"unchanged_failures"`
-	Recoveries          int     `json:"recoveries"`
-	Fingerprint         string  `json:"fingerprint,omitempty"`
-	Risk                string  `json:"risk,omitempty"`
-	Approved            bool    `json:"approved"`
-	ChecksPassed        bool    `json:"checks_passed"`
-	PR                  string  `json:"pr,omitempty"`
-	Error               string  `json:"error,omitempty"`
-	Handoff             Handoff `json:"handoff"`
+	ImplementationAttempts []string    `json:"implementation_attempts,omitempty"`
+	LastAttemptID          string      `json:"last_attempt_id,omitempty"`
+	VerificationID         string      `json:"verification_id,omitempty"`
+	ReviewID               string      `json:"review_id,omitempty"`
+	Approval               *Provenance `json:"approval_evidence,omitempty"`
+	ResumeStage            string      `json:"resume_stage,omitempty"`
+	EligibilityOverride    bool        `json:"eligibility_override,omitempty"`
+	ID                     string      `json:"id"`
+	ProjectID              string      `json:"project_id"`
+	Issue                  Issue       `json:"issue"`
+	PlanVersion            int         `json:"plan_version"`
+	Stage                  string      `json:"stage"`
+	Plan                   *Plan       `json:"plan,omitempty"`
+	Worktree               string      `json:"worktree,omitempty"`
+	Branch                 string      `json:"branch,omitempty"`
+	Base                   string      `json:"base,omitempty"`
+	ReviewedCommit         string      `json:"reviewed_commit,omitempty"`
+	Score                  float64     `json:"score"`
+	ReviewPasses           int         `json:"review_passes"`
+	UnchangedFailures      int         `json:"unchanged_failures"`
+	Recoveries             int         `json:"recoveries"`
+	Fingerprint            string      `json:"fingerprint,omitempty"`
+	Risk                   string      `json:"risk,omitempty"`
+	Approved               bool        `json:"approved"`
+	ChecksPassed           bool        `json:"checks_passed"`
+	PR                     string      `json:"pr,omitempty"`
+	Error                  string      `json:"error,omitempty"`
+	Handoff                Handoff     `json:"handoff"`
 }
 type Plan struct {
 	Objective          string     `json:"objective"`
@@ -113,6 +119,7 @@ type Question struct {
 	Answer  string   `json:"answer"`
 }
 type Unit struct {
+	AttemptID    string   `json:"attempt_id,omitempty"`
 	Base         string   `json:"base,omitempty"`
 	ID           string   `json:"id"`
 	Objective    string   `json:"objective"`
@@ -132,11 +139,14 @@ type Finding struct {
 	Resolved bool   `json:"resolved"`
 }
 type Review struct {
-	Score    float64   `json:"score"`
-	Findings []Finding `json:"findings"`
-	Summary  string    `json:"summary"`
+	Provenance  *Provenance `json:"provenance,omitempty"`
+	Perspective string      `json:"perspective,omitempty"`
+	Score       float64     `json:"score"`
+	Findings    []Finding   `json:"findings"`
+	Summary     string      `json:"summary"`
 }
 type Direction struct {
+	Category    string `json:"category,omitempty"`
 	ID          string `json:"id"`
 	ProjectID   string `json:"project_id"`
 	Title       string `json:"title"`
@@ -177,6 +187,7 @@ type Notification struct {
 }
 
 type QuestionSet struct {
+	AttemptID   string            `json:"attempt_id,omitempty"`
 	ID          string            `json:"id"`
 	TaskID      string            `json:"task_id"`
 	Provider    string            `json:"provider"`

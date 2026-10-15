@@ -30,29 +30,36 @@ func Quota(data any) (string, string, error) {
 	if len(v.Limits) == 0 && v.Limit != nil {
 		v.Limits = map[string]quotaLimit{"default": *v.Limit}
 	}
-	state := "unknown"
-	var reset int64
-	unknownReset := false
+	quota := quotaStatus{state: "unknown"}
 	for _, limit := range v.Limits {
-		for _, window := range []*quotaWindow{limit.Primary, limit.Secondary} {
-			if window == nil || window.Used == nil {
-				continue
-			}
-			if state == "unknown" {
-				state = "available"
-			}
-			if *window.Used >= 100 {
-				state = "exhausted"
-				if window.Resets == nil || *window.Resets <= 0 {
-					unknownReset = true
-				} else if *window.Resets > reset {
-					reset = *window.Resets
-				}
-			}
+		quota.add(limit.Primary)
+		quota.add(limit.Secondary)
+	}
+	if quota.reset > 0 && !quota.unknownReset {
+		return quota.state, time.Unix(quota.reset, 0).UTC().Format(time.RFC3339), nil
+	}
+	return quota.state, "", nil
+}
+
+type quotaStatus struct {
+	state        string
+	reset        int64
+	unknownReset bool
+}
+
+func (q *quotaStatus) add(window *quotaWindow) {
+	if window == nil || window.Used == nil {
+		return
+	}
+	if q.state == "unknown" {
+		q.state = "available"
+	}
+	if *window.Used >= 100 {
+		q.state = "exhausted"
+		if window.Resets == nil || *window.Resets <= 0 {
+			q.unknownReset = true
+		} else if *window.Resets > q.reset {
+			q.reset = *window.Resets
 		}
 	}
-	if reset > 0 && !unknownReset {
-		return state, time.Unix(reset, 0).UTC().Format(time.RFC3339), nil
-	}
-	return state, "", nil
 }

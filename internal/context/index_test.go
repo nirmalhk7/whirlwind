@@ -22,7 +22,9 @@ func testGit(t *testing.T, dir string, args ...string) {
 func TestIncrementalIndexUpdatesOnlyChangedEntries(t *testing.T) {
 	d := t.TempDir()
 	testGit(t, d, "init")
-	os.WriteFile(filepath.Join(d, "a.go"), []byte("package a\nfunc Login() {}\n// TODO improve auth\n"), 0600)
+	if err := os.WriteFile(filepath.Join(d, "a.go"), []byte("package a\nfunc Login() {}\n// TODO improve auth\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	testGit(t, d, "add", ".")
 	testGit(t, d, "commit", "-m", "initial")
 	idx, e := Build(context.Background(), d, nil)
@@ -32,7 +34,9 @@ func TestIncrementalIndexUpdatesOnlyChangedEntries(t *testing.T) {
 	if len(idx.Files) != 1 || len(idx.Files["a.go"].Symbols) != 1 {
 		t.Fatalf("%+v", idx)
 	}
-	os.WriteFile(filepath.Join(d, "a.go"), []byte("package a\nfunc Logout() {}\n"), 0600)
+	if err := os.WriteFile(filepath.Join(d, "a.go"), []byte("package a\nfunc Logout() {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	testGit(t, d, "add", ".")
 	testGit(t, d, "commit", "-m", "update")
 	next, e := Build(context.Background(), d, &idx)

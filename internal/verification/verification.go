@@ -3,7 +3,9 @@ package verification
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -15,21 +17,32 @@ import (
 )
 
 type Result struct {
-	Name       string `json:"name"`
-	Passed     bool   `json:"passed"`
-	Output     string `json:"output"`
-	Error      string `json:"error,omitempty"`
-	DurationMS int64  `json:"duration_ms"`
+	Command        []string `json:"command"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+	StartedAt      string   `json:"started_at"`
+	FinishedAt     string   `json:"finished_at"`
+	ExitCode       *int     `json:"exit_code"`
+	Truncated      bool     `json:"truncated"`
+	OutputArtifact string   `json:"output_artifact,omitempty"`
+	Name           string   `json:"name"`
+	Passed         bool     `json:"passed"`
+	Output         string   `json:"output"`
+	Error          string   `json:"error,omitempty"`
+	DurationMS     int64    `json:"duration_ms"`
 }
 type Report struct {
 	Passed  bool     `json:"passed"`
 	Results []Result `json:"results"`
 }
-type capped struct{ bytes.Buffer }
+type capped struct {
+	bytes.Buffer
+	total int
+}
 
 // Write retains the first MiB of check output while reporting all input bytes consumed to the subprocess.
 func (b *capped) Write(p []byte) (int, error) {
 	n := len(p)
+	b.total += n
 	if b.Len() < 1024*1024 {
 		remaining := min(len(p), 1024*1024-b.Len())
 		_, _ = b.Buffer.Write(p[:remaining])
@@ -39,52 +52,79 @@ func (b *capped) Write(p []byte) (int, error) {
 
 // Run executes checks sequentially with per-check timeouts, captures bounded diagnostics, and marks the report failed on any error.
 func Run(ctx context.Context, cwd string, checks []model.Check) Report {
+	report, _ := RunObserved(ctx, cwd, checks, nil)
+	return report
+}
+
+func RunObserved(ctx context.Context, cwd string, checks []model.Check, observe func(Result) error) (Report, error) {
 	out := Report{Passed: len(checks) > 0, Results: []Result{}}
 	for _, c := range checks {
-		r := Result{Name: c.Name}
-		start := time.Now()
-		timeout := time.Duration(c.TimeoutSeconds) * time.Second
-		if timeout <= 0 {
-			timeout = 10 * time.Minute
-		}
-		run, cancel := context.WithTimeout(ctx, timeout)
-		var b capped
-		var e error
-		if len(c.Command) == 0 {
-			e = fmt.Errorf("missing command")
-		} else {
-			cmd := process.Command(run, c.Command[0], c.Command[1:]...)
-			cmd.Dir = cwd
-			cmd.Stdout = &b
-			cmd.Stderr = &b
-			e = process.Run(cmd)
-		}
-		cancel()
-		r.Passed = e == nil
-		r.Output = b.String()
-		if e != nil {
-			r.Error = e.Error()
+		r := runCheck(ctx, cwd, c)
+		if !r.Passed {
 			out.Passed = false
 		}
-		r.DurationMS = time.Since(start).Milliseconds()
 		out.Results = append(out.Results, r)
+		if observe != nil {
+			if err := observe(r); err != nil {
+				out.Passed = false
+				return out, err
+			}
+		}
 		if ctx.Err() != nil {
-			break
+			out.Passed = false
+			return out, ctx.Err()
 		}
 	}
-	return out
+	return out, nil
+}
+
+// runCheck captures one bounded check result before observers or cancellation are considered.
+func runCheck(ctx context.Context, cwd string, c model.Check) Result {
+	r := Result{Name: c.Name, Command: c.Command}
+	r.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	start := time.Now()
+	timeout := time.Duration(c.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
+	r.TimeoutSeconds = int(timeout.Seconds())
+	run, cancel := context.WithTimeout(ctx, timeout)
+	var b capped
+	var e error
+	if len(c.Command) == 0 {
+		e = fmt.Errorf("missing command")
+	} else {
+		cmd := process.Command(run, c.Command[0], c.Command[1:]...)
+		cmd.Dir = cwd
+		cmd.Stdout = &b
+		cmd.Stderr = &b
+		e = process.Run(cmd)
+	}
+	cancel()
+	r.Passed = e == nil
+	r.Output = b.String()
+	r.Truncated = b.total > b.Len()
+	r.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if e == nil {
+		code := 0
+		r.ExitCode = &code
+	} else {
+		var exit *exec.ExitError
+		if errors.As(e, &exit) {
+			code := exit.ExitCode()
+			r.ExitCode = &code
+		}
+	}
+	if e != nil {
+		r.Error = e.Error()
+	}
+	r.DurationMS = time.Since(start).Milliseconds()
+	return r
 }
 
 // Select keeps baseline checks, adds checks for matching path, code-type, or API rules, and selects the highest matched risk.
 func Select(p model.Policy, files []string, diff ...string) (string, []model.Check) {
-	symbols := []string{}
-	for _, patch := range diff {
-		for _, pattern := range apiPatterns {
-			for _, match := range pattern.FindAllStringSubmatch(patch, -1) {
-				symbols = append(symbols, match[1])
-			}
-		}
-	}
+	symbols := changedAPISymbols(diff)
 	extensions := make([]string, len(files))
 	for n, file := range files {
 		extensions[n] = filepath.Ext(file)
@@ -137,4 +177,16 @@ var apiPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?m)^[-+]\s*type\s+([A-Z][A-Za-z0-9_]*)`),
 	regexp.MustCompile(`(?m)^[-+]\s*export\s+(?:default\s+)?(?:function|class|type|interface|const)\s+([A-Za-z_][A-Za-z0-9_]*)`),
 	regexp.MustCompile(`(?m)^[-+].*HandleFunc\("([A-Z]+ /[^" ]*)"`),
+}
+
+func changedAPISymbols(diff []string) []string {
+	symbols := []string{}
+	for _, patch := range diff {
+		for _, pattern := range apiPatterns {
+			for _, match := range pattern.FindAllStringSubmatch(patch, -1) {
+				symbols = append(symbols, match[1])
+			}
+		}
+	}
+	return symbols
 }

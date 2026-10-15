@@ -18,6 +18,9 @@ import (
 	"whirlwind/internal/workflow"
 )
 
+const idempotencyKeyHeader = "Idempotency-Key"
+const ifMatchHeader = "If-Match"
+
 // setup constructs a temporary real store, workflow engine, and HTTP server for request tests.
 func setup(t *testing.T) *Server {
 	t.Helper()
@@ -25,7 +28,7 @@ func setup(t *testing.T) *Server {
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return New(s, workflow.New(s, github.CLI{}, t.TempDir()), "secret")
 }
 
@@ -50,7 +53,7 @@ func TestProviderMutationIdempotencyAndVersionConflict(t *testing.T) {
 	body := []byte(`{"id":"fake","name":"Fake","kind":"acp","command":["sh"],"capabilities":["code"],"quota":"unknown"}`)
 	send := func(b []byte, key string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "http://localhost/api/v1/providers", bytes.NewReader(b))
-		r.Header.Set("Idempotency-Key", key)
+		r.Header.Set(idempotencyKeyHeader, key)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		return w
@@ -64,8 +67,8 @@ func TestProviderMutationIdempotencyAndVersionConflict(t *testing.T) {
 		t.Fatal("key reuse accepted")
 	}
 	r := httptest.NewRequest("PATCH", "http://localhost/api/v1/providers/fake", bytes.NewReader(body))
-	r.Header.Set("Idempotency-Key", "two")
-	r.Header.Set("If-Match", "99")
+	r.Header.Set(idempotencyKeyHeader, "two")
+	r.Header.Set(ifMatchHeader, "99")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != 409 {
@@ -76,7 +79,9 @@ func TestProviderMutationIdempotencyAndVersionConflict(t *testing.T) {
 // TestSignedWebhookDeduplicatesEligibleIssue verifies repeated signed issue deliveries create only one eligible task.
 func TestSignedWebhookDeduplicatesEligibleIssue(t *testing.T) {
 	s := setup(t)
-	s.Store.Put(context.Background(), "projects", "p", model.Project{ID: "p", Repo: "o/r"}, 0)
+	if err := s.Store.Put(context.Background(), "projects", "p", model.Project{ID: "p", Repo: "o/r"}, 0); err != nil {
+		t.Fatal(err)
+	}
 	payload := map[string]any{"action": "labeled", "repository": map[string]any{"full_name": "o/r"}, "issue": map[string]any{"number": 4, "title": "work", "body": "do it", "state": "open", "updated_at": "now", "labels": []any{map[string]any{"name": "whirlwind:plan"}}}}
 	b, _ := json.Marshal(payload)
 	mac := hmac.New(sha256.New, []byte("secret"))
@@ -107,10 +112,12 @@ func TestSignedWebhookDeduplicatesEligibleIssue(t *testing.T) {
 // TestSettingsRejectZeroCapacity verifies settings cannot disable execution by setting slot capacity to zero.
 func TestSettingsRejectZeroCapacity(t *testing.T) {
 	s := setup(t)
-	s.Store.Put(context.Background(), "settings", "global", map[string]int{"global_slots": 4, "project_slots": 2, "reconciliation_seconds": 300}, 0)
+	if err := s.Store.Put(context.Background(), "settings", "global", map[string]int{"global_slots": 4, "project_slots": 2, "reconciliation_seconds": 300}, 0); err != nil {
+		t.Fatal(err)
+	}
 	r := httptest.NewRequest("PATCH", "http://localhost/api/v1/settings", bytes.NewReader([]byte(`{"global_slots":0,"project_slots":2,"reconciliation_seconds":300}`)))
-	r.Header.Set("Idempotency-Key", "invalid-settings")
-	r.Header.Set("If-Match", "1")
+	r.Header.Set(idempotencyKeyHeader, "invalid-settings")
+	r.Header.Set(ifMatchHeader, "1")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != 422 {
@@ -121,8 +128,12 @@ func TestSettingsRejectZeroCapacity(t *testing.T) {
 // TestEventReplayHonorsCursor verifies SSE resumes after the supplied event ID instead of replaying earlier records.
 func TestEventReplayHonorsCursor(t *testing.T) {
 	s := setup(t)
-	s.Store.Put(context.Background(), "settings", "one", map[string]int{"x": 1}, 0)
-	s.Store.Put(context.Background(), "settings", "two", map[string]int{"x": 2}, 0)
+	if err := s.Store.Put(context.Background(), "settings", "one", map[string]int{"x": 1}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.Put(context.Background(), "settings", "two", map[string]int{"x": 2}, 0); err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	r := httptest.NewRequest("GET", "http://localhost/api/v1/events?after=1", nil).WithContext(ctx)
 	w := &cancelWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
@@ -145,11 +156,13 @@ func TestResumePreservesPendingPlannerQuestions(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
 	task := model.Task{ID: "q", Stage: "questions", Plan: &model.Plan{Questions: []model.Question{{ID: "q1", Text: "Which callback?"}}}}
-	s.Store.Put(ctx, "tasks", task.ID, task, 0)
+	if err := s.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
+		t.Fatal(err)
+	}
 	send := func(action, key, version string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "http://localhost/api/v1/tasks/q/"+action, bytes.NewReader([]byte(`{}`)))
-		r.Header.Set("Idempotency-Key", key)
-		r.Header.Set("If-Match", version)
+		r.Header.Set(idempotencyKeyHeader, key)
+		r.Header.Set(ifMatchHeader, version)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		return w
@@ -172,10 +185,12 @@ func TestResumePreservesPendingPlannerQuestions(t *testing.T) {
 func TestNativeQuestionAnswersRequireCurrentVersion(t *testing.T) {
 	s := setup(t)
 	set := model.QuestionSet{ID: "native", Status: "pending", Questions: []model.Question{{ID: "db", Text: "Which database?"}}}
-	s.Store.Put(context.Background(), "questions", set.ID, set, 0)
+	if err := s.Store.Put(context.Background(), "questions", set.ID, set, 0); err != nil {
+		t.Fatal(err)
+	}
 	r := httptest.NewRequest("POST", "http://localhost/api/v1/questions/native/answers", bytes.NewReader([]byte(`{"answers":{"db":"SQLite"}}`)))
-	r.Header.Set("Idempotency-Key", "native-answer")
-	r.Header.Set("If-Match", "1")
+	r.Header.Set(idempotencyKeyHeader, "native-answer")
+	r.Header.Set(ifMatchHeader, "1")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != 200 {
@@ -185,5 +200,37 @@ func TestNativeQuestionAnswersRequireCurrentVersion(t *testing.T) {
 	answered, _ := store.Decode[model.QuestionSet](record)
 	if answered.Status != "answered" || answered.Answers["db"] != "SQLite" {
 		t.Fatalf("%+v", answered)
+	}
+}
+
+func TestSettingsIdeationScheduleValidationAndPersistence(t *testing.T) {
+	s := setup(t)
+	_ = s.Store.Put(context.Background(), "settings", "global", map[string]int{"global_slots": 4, "project_slots": 2, "reconciliation_seconds": 300}, 0)
+	for _, tc := range []struct {
+		schedule string
+		status   int
+	}{
+		{`{"enabled":true,"time":"25:00","timezone":"America/Denver"}`, 422},
+		{`{"enabled":true,"time":"09:30","timezone":"Invalid/Zone"}`, 422},
+		{`{"enabled":false,"time":"09:30","timezone":"America/Denver"}`, 200},
+	} {
+		body := `{"global_slots":4,"project_slots":2,"reconciliation_seconds":300,"ideation":` + tc.schedule + `}`
+		r := httptest.NewRequest("PATCH", "http://localhost/api/v1/settings", bytes.NewBufferString(body))
+		r.Header.Set("Idempotency-Key", store.ID())
+		r.Header.Set("If-Match", "1")
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != tc.status {
+			t.Fatalf("schedule %s: %d %s", tc.schedule, w.Code, w.Body)
+		}
+		if tc.status == 200 {
+			var record model.Record
+			_ = json.Unmarshal(w.Body.Bytes(), &record)
+			var data map[string]any
+			_ = json.Unmarshal(record.Data, &data)
+			if data["ideation"] == nil || data["ideation"].(map[string]any)["enabled"] != false {
+				t.Fatalf("schedule lost: %s", record.Data)
+			}
+		}
 	}
 }

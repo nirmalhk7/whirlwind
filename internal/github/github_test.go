@@ -29,7 +29,7 @@ func TestIssueCreationReconcilesUncertainRemoteWrite(t *testing.T) {
 case "$1 $2" in
 "issue list") if [ -f "$WHIRLWIND_REMOTE_STATE" ]; then cat "$WHIRLWIND_REMOTE_STATE"; else printf '[]'; fi ;;
 "label create") exit 0 ;;
-"issue create") printf '[{"number":7,"title":"Feature","body":"<!-- whirlwind-plan:test -->","state":"OPEN","labels":[{"name":"whirlwind:plan"}],"updatedAt":"1","url":"https://github.com/o/r/issues/7"}]' > "$WHIRLWIND_REMOTE_STATE"; echo 'connection lost after remote write' >&2; exit 1 ;;
+"issue create") printf '[{"number":7,"title":"Feature","body":"body\\n\\n<!-- whirlwind-plan:test -->","state":"OPEN","labels":[{"name":"whirlwind:plan"}],"updatedAt":"1","url":"https://github.com/o/r/issues/7"}]' > "$WHIRLWIND_REMOTE_STATE"; echo 'connection lost after remote write' >&2; exit 1 ;;
 *) exit 2 ;;
 esac
 `

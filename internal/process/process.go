@@ -7,16 +7,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
 )
+
+const processTokenPrefix = "WHIRLWIND_PROCESS_TOKEN="
 
 type registration struct {
 	PID   int    `json:"pid"`
@@ -42,19 +41,19 @@ func Command(ctx context.Context, name string, args ...string) *exec.Cmd {
 	var token [16]byte
 	_, _ = rand.Read(token[:])
 	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "WHIRLWIND_PROCESS_TOKEN=") {
+		if !strings.HasPrefix(entry, processTokenPrefix) {
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}
-	cmd.Env = append(cmd.Env, "WHIRLWIND_PROCESS_TOKEN="+hex.EncodeToString(token[:]))
+	cmd.Env = append(cmd.Env, processTokenPrefix+hex.EncodeToString(token[:]))
 	return cmd
 }
 
 // token extracts the recovery token from a command environment.
 func token(cmd *exec.Cmd) string {
 	for _, v := range cmd.Env {
-		if strings.HasPrefix(v, "WHIRLWIND_PROCESS_TOKEN=") {
-			return strings.TrimPrefix(v, "WHIRLWIND_PROCESS_TOKEN=")
+		if strings.HasPrefix(v, processTokenPrefix) {
+			return strings.TrimPrefix(v, processTokenPrefix)
 		}
 	}
 	return ""
@@ -68,13 +67,13 @@ func writeRegistration(root string, v registration) error {
 		return err
 	}
 	name := f.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if _, err = f.Write(b); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err = f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err = f.Close(); err != nil {
@@ -129,58 +128,6 @@ func Run(cmd *exec.Cmd) error {
 	return cmd.Wait()
 }
 
-// Reap finds process groups carrying registered tokens, kills them, and removes their orphan registrations before restart.
-func Reap(root string) error {
-	files, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	for _, file := range files {
-		if !strings.HasSuffix(file.Name(), ".json") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(root, file.Name()))
-		if err != nil {
-			return err
-		}
-		var v registration
-		if json.Unmarshal(b, &v) != nil || v.PID < 0 || v.PID == 1 || len(v.Token) != 32 {
-			return errors.New("invalid orphan process registration")
-		}
-		output, err := exec.Command("ps", "eww", "-A", "-o", "pid=", "-o", "pgid=", "-o", "command=").Output()
-		if err != nil {
-			return fmt.Errorf("cannot reconcile process registry: %w", err)
-		}
-		groups := map[int]bool{}
-		for _, line := range strings.Split(string(output), "\n") {
-			if !strings.Contains(line, "WHIRLWIND_PROCESS_TOKEN="+v.Token) {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) < 3 {
-				continue
-			}
-			group, err := strconv.Atoi(fields[1])
-			if err != nil || group <= 1 {
-				return errors.New("invalid orphan process group")
-			}
-			groups[group] = true
-		}
-		for group := range groups {
-			if err = syscall.Kill(-group, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
-				return err
-			}
-		}
-		if err = os.Remove(filepath.Join(root, file.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // Lock takes a nonblocking exclusive file lock to prevent multiple servers from owning one data directory.
 func Lock(path string) (*os.File, error) {
 	f, e := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
@@ -188,7 +135,7 @@ func Lock(path string) (*os.File, error) {
 		return nil, e
 	}
 	if e = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); e != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, e
 	}
 	return f, nil

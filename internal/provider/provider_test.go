@@ -11,12 +11,17 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	valueErrorFormat = "%+v %v"
+	testSessionID    = "session-one"
+)
+
 // TestRoutingRejectsIncapableAndExhaustedProviders verifies routing excludes unavailable, exhausted, and role-incompatible providers.
 func TestRoutingRejectsIncapableAndExhaustedProviders(t *testing.T) {
 	ps := []model.Provider{{ID: "cheap", Available: true, Quota: "exhausted", Capabilities: []string{"code"}}, {ID: "read", Available: true, Quota: "unknown", Capabilities: []string{"ideate"}}, {ID: "good", Available: true, Quota: "unknown", Capabilities: []string{"code"}}}
 	p, e := Route(ps, "code", nil, nil)
 	if e != nil || p.ID != "good" {
-		t.Fatalf("%+v %v", p, e)
+		t.Fatalf(valueErrorFormat, p, e)
 	}
 }
 
@@ -31,7 +36,7 @@ func TestJSONRPCProcessAndCancellation(t *testing.T) {
 		OK bool `json:"ok"`
 	}
 	if e = rpc.Call(context.Background(), "initialize", map[string]any{}, &out); e != nil || !out.OK {
-		t.Fatalf("%+v %v", out, e)
+		t.Fatalf(valueErrorFormat, out, e)
 	}
 }
 
@@ -47,8 +52,8 @@ func TestNativeProtocolsStreamBeforeCompletion(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			out, e := a.Run(ctx, Input{CWD: t.TempDir(), Prompt: "test", ReadOnly: true}, Hooks{})
-			if e != nil || out.Text != "first second" || out.SessionID != "session-one" {
-				t.Fatalf("%+v %v", out, e)
+			if e != nil || out.Text != "first second" || out.SessionID != testSessionID {
+				t.Fatalf(valueErrorFormat, out, e)
 			}
 		})
 	}
@@ -74,29 +79,7 @@ func TestHelperProvider(t *testing.T) {
 		if m.Method == "initialized" {
 			continue
 		}
-		result := any(map[string]any{})
-		emit := func(v any) { json.NewEncoder(os.Stdout).Encode(v) }
-		switch m.Method {
-		case "initialize":
-			result = map[string]any{"agentCapabilities": map[string]any{"loadSession": true}}
-		case "session/new":
-			result = map[string]any{"sessionId": "session-one", "modes": map[string]any{"availableModes": []any{map[string]any{"id": "ask"}}}}
-		case "thread/start":
-			result = map[string]any{"thread": map[string]any{"id": "session-one"}}
-		case "session/prompt":
-			for _, text := range []string{"first ", "second"} {
-				emit(map[string]any{"method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}}}})
-			}
-			result = map[string]any{"stopReason": "end_turn"}
-		case "turn/start":
-			emit(map[string]any{"id": m.ID, "result": map[string]any{}})
-			for _, text := range []string{"first ", "second"} {
-				emit(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"delta": text}})
-			}
-			emit(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "completed"}}})
-			continue
-		}
-		emit(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
+		helperProviderReply(t, m)
 	}
 	os.Exit(0)
 }
@@ -114,4 +97,34 @@ func TestNativeQuestionResponseUsesProtocolShape(t *testing.T) {
 	if string(b) != `{"answers":{"callback":{"answers":["localhost"]}}}` {
 		t.Fatal(string(b))
 	}
+}
+
+func helperProviderReply(t *testing.T, m Message) {
+	result := any(map[string]any{})
+	emit := func(v any) {
+		if err := json.NewEncoder(os.Stdout).Encode(v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	switch m.Method {
+	case "initialize":
+		result = map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{"loadSession": true}}
+	case "session/new":
+		result = map[string]any{"sessionId": testSessionID, "modes": map[string]any{"availableModes": []any{map[string]any{"id": "ask"}}}}
+	case "thread/start":
+		result = map[string]any{"thread": map[string]any{"id": testSessionID}}
+	case "session/prompt":
+		for _, text := range []string{"first ", "second"} {
+			emit(map[string]any{"method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}}}})
+		}
+		result = map[string]any{"stopReason": "end_turn"}
+	case "turn/start":
+		emit(map[string]any{"id": m.ID, "result": map[string]any{}})
+		for _, text := range []string{"first ", "second"} {
+			emit(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"delta": text}})
+		}
+		emit(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "completed"}}})
+		return
+	}
+	emit(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
 }

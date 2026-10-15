@@ -19,6 +19,8 @@ import (
 	"whirlwind/internal/store"
 )
 
+const resultFile = "result.txt"
+
 type fakeGitHub struct{}
 
 // Issues returns no remote issue inventory for workflow fixtures.
@@ -66,7 +68,7 @@ func (f fakeAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks)
 		b, _ := json.Marshal(model.Plan{Objective: "Add file", AcceptanceCriteria: []string{"file exists"}, Units: []model.Unit{{ID: "one", Objective: "add result.txt"}}})
 		return provider.Output{Text: string(b), SessionID: "planner"}, nil
 	case "code":
-		if e := os.WriteFile(filepath.Join(in.CWD, "result.txt"), []byte("verified\n"), 0600); e != nil {
+		if e := os.WriteFile(filepath.Join(in.CWD, resultFile), []byte("verified\n"), 0600); e != nil {
 			return provider.Output{}, e
 		}
 		return provider.Output{Text: "done", SessionID: "coder"}, nil
@@ -82,7 +84,9 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	ctx := context.Background()
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
-	os.Mkdir(repo, 0700)
+	if err := os.Mkdir(repo, 0700); err != nil {
+		t.Fatal(err)
+	}
 	run := func(args ...string) {
 		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
 		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
@@ -93,7 +97,9 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	run("init", "-b", "main")
 	run("config", "user.name", "Test")
 	run("config", "user.email", "test@example.com")
-	os.WriteFile(filepath.Join(repo, ".whirlwind.yaml"), []byte("checks:\n  - name: test\n    command: [sh, -c, 'test -f result.txt']\nallowed_paths: ['**']\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\ncommands: []\n"), 0600)
+	if err := os.WriteFile(filepath.Join(repo, ".whirlwind.yaml"), []byte("checks:\n  - name: test\n    command: [sh, -c, 'test -f result.txt']\nallowed_paths: ['**']\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\ncommands: []\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	run("add", ".")
 	run("commit", "-m", "initial")
 	p, hash, e := policy.Load(repo)
@@ -104,10 +110,14 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	project := model.Project{ID: "p", Repo: "o/r", Path: repo, Policy: p, PolicyHash: hash}
-	s.Put(ctx, "projects", "p", project, 0)
-	s.Put(ctx, "providers", "fake", model.Provider{ID: "fake", Kind: "acp", Available: true, Quota: "unknown", Capabilities: []string{"plan", "code", "review"}}, 0)
+	if err := s.Put(ctx, "projects", "p", project, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Put(ctx, "providers", "fake", model.Provider{ID: "fake", Kind: "acp", Available: true, Quota: "unknown", Capabilities: []string{"plan", "code", "review"}}, 0); err != nil {
+		t.Fatal(err)
+	}
 	task, e := s.IngestIssue(ctx, project, model.Issue{Number: 1, Title: "file", Body: "add file", State: "OPEN", Labels: []string{"whirlwind:plan"}})
 	if e != nil {
 		t.Fatal(e)
@@ -136,10 +146,10 @@ func TestIssueToPRUsesWorktreeAndVerification(t *testing.T) {
 	if e != nil || done.Stage != "pr_created" || done.PR == "" || !done.ChecksPassed {
 		t.Fatalf("%+v %v", done, e)
 	}
-	if _, e = os.Stat(filepath.Join(repo, "result.txt")); !os.IsNotExist(e) {
+	if _, e = os.Stat(filepath.Join(repo, resultFile)); !os.IsNotExist(e) {
 		t.Fatal("original checkout modified")
 	}
-	if _, e = os.Stat(filepath.Join(done.Worktree, "result.txt")); e != nil {
+	if _, e = os.Stat(filepath.Join(done.Worktree, resultFile)); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -173,7 +183,9 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 	p, _ := e.Project(ctx, task.ProjectID)
 	p.Policy.Checks = []model.Check{{Name: "failing", Command: []string{"false"}}}
 	r, _ := e.Store.Get(ctx, "projects", p.ID)
-	e.Store.Put(ctx, "projects", p.ID, p, r.Version)
+	if err := e.Store.Put(ctx, "projects", p.ID, p, r.Version); err != nil {
+		t.Fatal(err)
+	}
 	if err := e.Step(ctx, task.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -200,9 +212,11 @@ func TestQuotaFailureHandsOffToAnotherProvider(t *testing.T) {
 	e, task, repo := testEngine(t)
 	p, _ := e.Project(ctx, task.ProjectID)
 	p.Policy.Providers = []string{"fake", "backup"}
-	e.Store.Put(ctx, "providers", "backup", model.Provider{ID: "backup", Available: true, Quota: "unknown", Capabilities: []string{"code"}}, 0)
+	if err := e.Store.Put(ctx, "providers", "backup", model.Provider{ID: "backup", Available: true, Quota: "unknown", Capabilities: []string{"code"}}, 0); err != nil {
+		t.Fatal(err)
+	}
 	e.Adapter = func(p model.Provider) provider.Adapter { return quotaAgent{fail: p.ID == "fake"} }
-	out, err := e.agent(ctx, p, task, "code", repo, "continue", false, "")
+	out, err := e.agent(ctx, p, task, provider.Input{Role: "code", CWD: repo, Prompt: "continue", ReadOnly: false, SessionID: ""})
 	if err != nil || out.Text != "continued" {
 		t.Fatalf("handoff: %+v %v", out, err)
 	}
@@ -225,7 +239,9 @@ func (unitAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks) (
 				}
 			}
 		}
-		os.WriteFile(filepath.Join(in.CWD, "result.txt"), []byte("ok"), 0600)
+		if err := os.WriteFile(filepath.Join(in.CWD, resultFile), []byte("ok"), 0600); err != nil {
+			return provider.Output{}, err
+		}
 	}
 	return provider.Output{Text: "done"}, nil
 }
@@ -237,7 +253,9 @@ func TestParallelUnitsIntegrateAllCommits(t *testing.T) {
 	task.Stage = "coding"
 	task.Plan = &model.Plan{Objective: "two units", AcceptanceCriteria: []string{"both complete"}, Units: []model.Unit{{ID: "a", Objective: "first"}, {ID: "b", Objective: "second"}}}
 	r, _ := e.Store.Get(ctx, "tasks", task.ID)
-	e.Store.Put(ctx, "tasks", task.ID, task, r.Version)
+	if err := e.Store.Put(ctx, "tasks", task.ID, task, r.Version); err != nil {
+		t.Fatal(err)
+	}
 	e.Adapter = func(model.Provider) provider.Adapter { return unitAgent{} }
 	if err := e.Step(ctx, task.ID); err != nil {
 		t.Fatal(err)
@@ -254,14 +272,67 @@ func TestParallelUnitsIntegrateAllCommits(t *testing.T) {
 	}
 }
 
+type partialFailureAgent struct {
+	started chan struct{}
+	err     error
+}
+
+// Run fails one unit while another completes, checking that errors do not cancel sibling work.
+func (a partialFailureAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks) (provider.Output, error) {
+	if filepath.Base(in.CWD) == "fail" {
+		select {
+		case <-a.started:
+			return provider.Output{}, a.err
+		case <-ctx.Done():
+			return provider.Output{}, ctx.Err()
+		}
+	}
+	close(a.started)
+	select {
+	case <-ctx.Done():
+		return provider.Output{}, ctx.Err()
+	case <-time.After(250 * time.Millisecond):
+		return (fakeAgent{9}).Run(ctx, in, h)
+	}
+}
+
+// TestUnitFailureWaitsForSiblingCheckpoint preserves successful work for recovery even when another unit fails.
+func TestUnitFailureWaitsForSiblingCheckpoint(t *testing.T) {
+	e, task, _ := testEngine(t)
+	task.Stage = "coding"
+	task.Plan = &model.Plan{Objective: "two units", Units: []model.Unit{{ID: "fail", Objective: "fail deliberately"}, {ID: "keep", Objective: "complete sibling"}}}
+	failure := errors.New("unit failed")
+	agent := partialFailureAgent{started: make(chan struct{}), err: failure}
+	e.Adapter = func(model.Provider) provider.Adapter { return agent }
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	project, err := e.Project(ctx, task.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.code(ctx, project, &task); !errors.Is(err, failure) {
+		t.Fatalf("expected unit failure, got %v", err)
+	}
+	record, err := e.Store.Get(ctx, "units", fmt.Sprintf("%s:%d:keep", task.ID, task.PlanVersion))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unit, err := store.Decode[model.Unit](record)
+	if err != nil || unit.Stage != "complete" || unit.Commit == "" {
+		t.Fatalf("successful sibling checkpoint lost: %+v, %v", unit, err)
+	}
+}
+
 // TestCriticalChangeWaitsForHumanBeforePR verifies critical-risk acceptance pauses for human approval before publication.
 func TestCriticalChangeWaitsForHumanBeforePR(t *testing.T) {
 	ctx := context.Background()
 	e, task, _ := testEngine(t)
 	p, _ := e.Project(ctx, task.ProjectID)
-	p.Policy.RiskRules = []model.RiskRule{{Level: "critical", Paths: []string{"result.txt"}}}
+	p.Policy.RiskRules = []model.RiskRule{{Level: "critical", Paths: []string{resultFile}}}
 	r, _ := e.Store.Get(ctx, "projects", p.ID)
-	e.Store.Put(ctx, "projects", p.ID, p, r.Version)
+	if err := e.Store.Put(ctx, "projects", p.ID, p, r.Version); err != nil {
+		t.Fatal(err)
+	}
 	for n := 0; n < 3; n++ {
 		if err := e.Step(ctx, task.ID); err != nil {
 			t.Fatal(err)
@@ -340,7 +411,7 @@ func (permissionAgent) Run(ctx context.Context, in provider.Input, h provider.Ho
 	if err != nil {
 		return provider.Output{}, err
 	}
-	allowed, err := h.Permission(ctx, provider.Permission{Tool: "fs/write_text_file", Paths: []string{filepath.Join(canonical, "result.txt")}})
+	allowed, err := h.Permission(ctx, provider.Permission{Tool: "fs/write_text_file", Paths: []string{filepath.Join(canonical, resultFile)}})
 	if err != nil {
 		return provider.Output{}, err
 	}
@@ -357,7 +428,7 @@ func TestPermissionNormalizesWorktreeAliases(t *testing.T) {
 	e.Adapter = func(model.Provider) provider.Adapter { return permissionAgent{} }
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 	defer cancel()
-	out, err := e.agent(ctx, p, task, "code", repo, "test", false, "")
+	out, err := e.agent(ctx, p, task, provider.Input{Role: "code", CWD: repo, Prompt: "test", ReadOnly: false, SessionID: ""})
 	if err != nil || out.Text != "allowed" {
 		t.Fatalf("alias permission: %+v %v", out, err)
 	}
@@ -414,7 +485,7 @@ func TestConfiguredRunBudgetStopsAttempt(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	start := time.Now()
-	_, err := e.agent(ctx, p, task, "code", repo, "test", false, "")
+	_, err := e.agent(ctx, p, task, provider.Input{Role: "code", CWD: repo, Prompt: "test", ReadOnly: false, SessionID: ""})
 	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 3*time.Second {
 		t.Fatalf("run budget not enforced: %v %s", err, time.Since(start))
 	}

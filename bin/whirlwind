@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+import("../scripts/whirlwind-cli.mjs")
+  .then(({ runCLI }) => runCLI(process.argv.slice(2)))
+  .then((code) => { process.exitCode = code; })
+  .catch((error) => { console.error(`Whirlwind: ${error.message}`); process.exitCode = 1; });

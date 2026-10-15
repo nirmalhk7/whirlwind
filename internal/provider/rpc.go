@@ -24,39 +24,32 @@ type Message struct {
 }
 type Handler func(context.Context, Message) (any, error)
 type RPC struct {
-	cmd     *exec.Cmd
-	input   io.WriteCloser
-	write   sync.Mutex
-	mu      sync.Mutex
-	pending map[string]chan Message
-	next    atomic.Int64
-	done    chan struct{}
-	ctx     context.Context
-	cancel  context.CancelFunc
-	handler Handler
-	err     error
-	once    sync.Once
+	cmd         *exec.Cmd
+	input       io.WriteCloser
+	write       sync.Mutex
+	mu          sync.Mutex
+	pending     map[string]chan Message
+	next        atomic.Int64
+	done        chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
+	handler     Handler
+	err         error
+	once        sync.Once
+	observe     func(string, any)
+	diagnostics sync.WaitGroup
+	callbacks   sync.WaitGroup
 }
 
 // Start starts a registered provider process and initializes newline-delimited JSON-RPC transport with a background reader.
-func Start(ctx context.Context, command []string, cwd string, handler Handler) (*RPC, error) {
+func Start(ctx context.Context, command []string, cwd string, handler Handler, observers ...func(string, any)) (*RPC, error) {
 	if len(command) == 0 {
 		return nil, errors.New("provider command required")
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	cmd := process.Command(ctx, command[0], command[1:]...)
 	cmd.Dir = cwd
-	input, e := cmd.StdinPipe()
-	if e != nil {
-		cancel()
-		return nil, e
-	}
-	output, e := cmd.StdoutPipe()
-	if e != nil {
-		cancel()
-		return nil, e
-	}
-	stderr, e := cmd.StderrPipe()
+	pipes, e := rpcPipes(cmd)
 	if e != nil {
 		cancel()
 		return nil, e
@@ -65,9 +58,13 @@ func Start(ctx context.Context, command []string, cwd string, handler Handler) (
 		cancel()
 		return nil, e
 	}
-	r := &RPC{cmd: cmd, input: input, pending: map[string]chan Message{}, done: make(chan struct{}), ctx: ctx, cancel: cancel, handler: handler}
-	go io.Copy(io.Discard, stderr)
-	go r.read(output)
+	r := &RPC{cmd: cmd, input: pipes.input, pending: map[string]chan Message{}, done: make(chan struct{}), ctx: ctx, cancel: cancel, handler: handler}
+	if len(observers) > 0 {
+		r.observe = observers[0]
+	}
+	r.diagnostics.Add(1)
+	go r.readStderr(pipes.stderr)
+	go r.read(pipes.output)
 	return r, nil
 }
 
@@ -84,34 +81,9 @@ func (r *RPC) read(output io.Reader) {
 			r.cancel()
 			break
 		}
-		if m.Method != "" {
-			if len(m.ID) > 0 {
-				go r.handle(m)
-			} else {
-				r.handle(m)
-			}
-			continue
-		}
-		r.mu.Lock()
-		ch := r.pending[string(m.ID)]
-		r.mu.Unlock()
-		if ch != nil {
-			select {
-			case ch <- m:
-			case <-r.ctx.Done():
-			}
-		}
+		r.dispatchFrame(m)
 	}
-	e := scanner.Err()
-	r.mu.Lock()
-	if r.err == nil {
-		r.err = e
-	}
-	r.mu.Unlock()
-	r.cancel()
-	_ = r.cmd.Wait()
-	process.Forget(r.cmd)
-	close(r.done)
+	r.finishRead(scanner.Err())
 }
 
 // handle runs the callback handler and replies to provider requests, returning protocol errors when handling fails or is unsupported.
@@ -131,6 +103,9 @@ func (r *RPC) handle(m Message) {
 		reply["error"] = map[string]any{"code": -32603, "message": e.Error()}
 	} else {
 		reply["result"] = v
+	}
+	if r.observe != nil {
+		r.observe("whirlwind/tool_result", map[string]any{"method": m.Method, "request_id": m.ID, "reply": reply})
 	}
 	_ = r.send(reply)
 }
@@ -160,24 +135,37 @@ func (r *RPC) Call(ctx context.Context, method string, params any, out any) erro
 	}
 	select {
 	case m := <-ch:
-		if len(m.Error) > 0 {
-			return fmt.Errorf("provider RPC: %s", m.Error)
-		}
-		if out == nil {
-			return nil
-		}
-		return json.Unmarshal(m.Result, out)
+		return r.decodeResponse(method, m, out)
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-r.done:
-		r.mu.Lock()
-		defer r.mu.Unlock()
-		if r.err != nil {
-			return r.err
-		}
-		return errors.New("provider exited before response")
+		return r.closedError()
 	}
 }
 
 // Close cancels the provider, closes its input, and waits for reader cleanup exactly once.
 func (r *RPC) Close() { r.once.Do(func() { r.cancel(); _ = r.input.Close(); <-r.done }) }
+
+// Drain stderr throughout execution; detailed output is bounded independently of process lifetime.
+func (r *RPC) readStderr(reader io.Reader) {
+	defer r.diagnostics.Done()
+	var seen, stored int64
+	buffer := make([]byte, 32*1024)
+	for {
+		n, err := reader.Read(buffer)
+		if n > 0 {
+			seen += int64(n)
+			retain := min(n, max(0, 1024*1024-int(stored)))
+			if retain > 0 && r.observe != nil {
+				r.observe("whirlwind/stderr", map[string]any{"text": string(buffer[:retain])})
+				stored += int64(retain)
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	if seen > stored && r.observe != nil {
+		r.observe("whirlwind/stderr_truncated", map[string]any{"bytes": seen, "stored_bytes": stored})
+	}
+}

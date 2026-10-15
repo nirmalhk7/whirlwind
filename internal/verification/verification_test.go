@@ -2,6 +2,7 @@ package verification
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"whirlwind/internal/model"
@@ -12,6 +13,20 @@ func TestChecksExecuteAndFailureBlocksAcceptance(t *testing.T) {
 	r := Run(context.Background(), t.TempDir(), []model.Check{{Name: "pass", Command: []string{"sh", "-c", "exit 0"}}, {Name: "fail", Command: []string{"sh", "-c", "echo diagnostic; exit 2"}}})
 	if r.Passed || len(r.Results) != 2 || r.Results[1].Output != "diagnostic\n" {
 		t.Fatalf("%+v", r)
+	}
+}
+
+func TestInterruptedSuiteRetainsCompletedChecksWithoutPassing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	observed := []Result{}
+	report, err := RunObserved(ctx, t.TempDir(), []model.Check{{Name: "first", Command: []string{"sh", "-c", "printf completed"}}, {Name: "second", Command: []string{"sh", "-c", "exit 0"}}}, func(result Result) error {
+		observed = append(observed, result)
+		cancel()
+		return nil
+	})
+	if report.Passed || !errors.Is(err, context.Canceled) || len(observed) != 1 || len(report.Results) != 1 || !report.Results[0].Passed || report.Results[0].Output != "completed" {
+		t.Fatal("interrupted suite mislabeled or completed check lost", report, err)
 	}
 }
 
