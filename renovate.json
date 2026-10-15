@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "minimumReleaseAge": "7 days",
+  "postUpdateOptions": ["gomodTidy"],
+  "lockFileMaintenance": { "enabled": true },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^internal/provider/.*\\.go$/"],
+      "matchStrings": ["\"(?<depName>@agentclientprotocol/[a-z-]+)@(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""],
+      "datasourceTemplate": "npm"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "matchDepTypes": ["golang", "indirect"],
+      "rangeStrategy": "bump",
+      "enabled": true,
+      "minimumReleaseAge": "7 days"
+    }
+  ]
+}

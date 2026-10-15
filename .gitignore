@@ -1,0 +1,19 @@
+# Local application settings (created on first startup).
+/settings.yaml
+
+# Generated investigation output and tool state.
+/output/
+/.playwright-cli/
+/.qlty-reports/
+/.impeccable/hook.cache.json
+/.impeccable/hook.pending.json
+/.impeccable/config.local.json
+/.impeccable/review/*.json
+
+# Local credentials and editor/runtime caches.
+.env
+.env.local
+.env.*.local
+.DS_Store
+__pycache__/
+*.pyc
