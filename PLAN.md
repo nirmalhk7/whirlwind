@@ -209,3 +209,12 @@ Whirlwind is an AI orchestration system with a Go server. The user controls the 
 - Stream ordered, resumable task events using Server-Sent Events.
 - Use Codex app-server, Cursor ACP, and the official Claude Agent SDK through a pinned Node.js bridge behind one Go provider interface. Support generic ACP executable/argument configuration. Keep Antigravity visibly unavailable while consumer-plan wrapping remains unsupported.
 - Build Git, text, and symbol repository retrieval first. Add configured embeddings only when comparative evaluation demonstrates improved retrieval without reduced acceptance-criteria coverage.
+
+
+## Operator controls update — October 14, 2026
+
+- Enforce 35-word generated descriptions and expandable 35-word historical previews. Whole-card selection turns cyan, preserving existing task/GitHub workflow.
+- Configure ACP-advertised thinking independently for each primary/fallback provider/model. Persist exact config ID/value; validate after model selection, test the chosen setting, and include transport/thinking in resume identity. Native defaults remain native; explicit thinking uses maintained ACP adapters.
+- Add read-only Run history for actual workflow attempts, with agent/provider/model/thinking/transport, project/task, timing, and outcome. Preserve historical unknowns.
+- Add global ideation Settings: automatic on/off, daily HH:MM time, explicit IANA timezone. Default 10:00 America/Denver; once per project/latest due date, latest-day catch-up after downtime, completed-day deduplication, existing retry delay, and manual runs while disabled. Settings apply without restart; disabling does not cancel an active run.
+- Verify word boundaries, selection failure/keyboard behavior, ACP metadata and setting order, session compatibility, scheduling/DST, history, and preserved issue-to-PR flow. Test desktop/mobile and production build.

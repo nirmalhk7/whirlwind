@@ -4,14 +4,14 @@ Whirlwind runs locally on macOS or Linux. Go owns scheduling, worktrees, verific
 
 ## Run
 
-Requirements: Go 1.25+, Git, authenticated GitHub CLI, Node.js for web UI and optional Claude SDK bridge. Install an agent separately and authenticate using its own documented setup.
+Requirements: Go 1.26.9+, Git, authenticated GitHub CLI, Node.js for web UI and optional Claude SDK bridge. Install an agent separately and authenticate using its own documented setup.
 
 ```sh
 go mod download
 go run ./cmd/whirlwind --data /absolute/path/to/whirlwind-state
 ```
 
-Control server binds `127.0.0.1:8090`. From repository root, run backend and web UI in separate terminals:
+Control server binds `127.0.0.1:9877`. From repository root, run both with `make dev`, or run backend and web UI in separate terminals:
 
 ```sh
 make run
@@ -21,14 +21,14 @@ make run
 make web
 ```
 
-Open `http://127.0.0.1:3000`. The browser uses same-origin `/api/v1` requests; Next.js forwards requests and live events to the Go server. `make web` defaults to `http://127.0.0.1:8090`; override with `make web WHIRLWIND_BACKEND_URL=http://127.0.0.1:PORT` when running Go on another loopback port.
+Open `http://127.0.0.1:9876`. The browser uses same-origin `/api/v1` requests; Next.js forwards requests and live events to the Go server. `make web` defaults to `http://127.0.0.1:9877`; override with `make web WHIRLWIND_BACKEND_URL=http://127.0.0.1:PORT` when running Go on another loopback port.
 
 Install web dependencies before first launch, or run web directly:
 
 ```sh
 cd web
 npm ci
-WHIRLWIND_BACKEND_URL=http://127.0.0.1:8090 npm run dev -- --hostname 127.0.0.1
+WHIRLWIND_BACKEND_URL=http://127.0.0.1:9877 npm run dev
 ```
 
 For direct `npm run dev` or `npm start`, optional `web/.env.local` can supply `WHIRLWIND_BACKEND_URL`; copy `web/.env.example` to start. Next.js keeps this setting on the server. Restart Next.js after changing it.
@@ -42,9 +42,17 @@ npm ci
 
 Start Whirlwind from repository root or pass absolute `--claude-bridge` path. Default providers are Codex (`codex app-server`), Cursor (`agent acp`), Claude SDK, and an unavailable Antigravity entry. Register other ACP agents through Providers. Use existing provider login; Whirlwind does not install agents, copy credentials, or rotate accounts. Availability means executable/dependency exists, not successful login. Quota stays unknown unless provider reports it or rejects a run for quota exhaustion.
 
+## Agents and model fallbacks
+
+Settings combines worker settings, provider commands/login, and agent roles. Its Providers section configures model sources; its Agents section configures Ideation, Planner, Coding, and Reviewer roles. Choose a primary provider/model, use **Load models** to inspect the source's catalog, and add/reorder explicit fallback pairs. **Test model** sends Hello World to the selected model; **Save agent** persists the order across restarts. Model discovery uses ACP session metadata for Codex, Claude, and custom ACP providers; it sends no inference prompt. Native providers launch pinned official ACP adapters via npm, or their optional `model_command` override. Catalog entries are provider-reported IDs, not proof of account access; connection tests verify actual inference.
+
+Configured roles follow that exact order rather than cost/outcome ranking. Quota exhaustion advances to the next available source/model while preserving worktree and handoff; exhausted source quotas apply across its models. All choices exhausted pauses work for recovery. Codex receives explicit thread model, ACP uses advertised session configuration/model selection, and Claude receives SDK model option. Unsupported ACP model selection fails explicitly. Unconfigured roles retain existing routing. Task inspection remains at `/tasks`; Agents and Providers are sections of `/settings`, controlled by root `settings.yaml`. Old UI links redirect to those sections.
+
 ## Project policy
 
-Register a trusted existing local repository with GitHub `origin`. Commit `.whirlwind.yaml` before registration; uncommitted policy is rejected. The web registration and “Confirm committed policy” actions authorize policy changes. Worker pauses if committed policy differs from approved hash.
+Register a trusted existing local repository with GitHub `origin`. Project name defaults to the selected directory name and can be edited. Registration checks installed/authenticated `gh`, repository access, and default branch before writing project files. Missing `gh` or failed authentication blocks setup. Install `qlty` and `codegraph` on the backend's PATH. Missing `.qlty/qlty.toml` is configured with `qlty init --yes --no-upgrade-check`; every registration validates it with `qlty config validate --no-upgrade-check`. Missing `.codegraph/codegraph.db` uses `codegraph init`. Initialization must produce nonempty regular configuration/index files. Invalid existing Qlty configuration blocks registration with a repair message; it is not overwritten.
+
+When no policy exists, registration generates a committed execution policy with Qlty and declared checks from committed `package.json`/`go.mod`, scoped source/test/docs directories and tracked non-hidden root files. Required Qlty configuration is committed alongside it so Git worktrees receive it. The generated policy applies high-risk reviews by default and requires publication approval for dependency/database changes. Existing custom policies, unrelated staging and application edits remain unchanged. Edits to existing tracked/staged Qlty config must be committed before generated setup; uncommitted manifests are preserved. Exact unchanged app-generated empty starters upgrade during onboarding or via **Finish execution setup**. Customized empty drafts still permit ideation only and require explicit policy configuration. Setup failures block readiness; unchanged generated files/index entries are restored after a failed commit. Git identity must be configured and active merge/rebase/cherry-pick/revert must finish first. **Confirm committed policy** refreshes the approved hash after later policy edits. Keep one policy filename; `.whirlwind.yaml` remains supported.
 
 Example for a Go project:
 
@@ -77,11 +85,11 @@ project_slots: 2
 
 Commands are argument arrays, not implicit shell snippets. A shell check must explicitly invoke its interpreter. Checks default to ten-minute timeout; override `timeout_seconds`. Optional project `run_timeout_seconds` limits each agent attempt; zero (default) leaves productive runs uncapped. Timeout pauses task for operator decision. Required baseline commands are defined by project policy, remain enabled at all risk levels, and run before AI review. Diff/scope checks are added by server. Risk rules can match module/file `paths`, extension `code_types` (such as `.sql`), or changed exported `api_symbols` (such as `Authorize*`). Selectors within one rule are alternatives; highest matching risk wins. Baseline checks remain required. High/critical changes receive dedicated security and architecture reviews; critical changes require user approval before PR publication.
 
-Allowed paths use glob patterns and directory suffix `/**`; `**` allows repository-wide changes except `.git` and `.whirlwind.yaml`. Agent commands use configured exact argument prefixes when protocol exposes a safely parseable command. Complex shell requests and incomplete permission metadata require Inbox decision. Local agents may implement their own approval behavior; this is trusted local execution, not container isolation. Worktree scope is checked before acceptance.
+Allowed paths use glob patterns and directory suffix `/**`; `**` allows repository-wide changes except `.git`, `.whirlwind.yml` and `.whirlwind.yaml`. Agent commands use configured exact argument prefixes when protocol exposes a safely parseable command. Complex shell requests and incomplete permission metadata require Inbox decision. Local agents may implement their own approval behavior; this is trusted local execution, not container isolation. Worktree scope is checked before acceptance.
 
 ## Lifecycle
 
-At 10AM machine time, Whirlwind updates Git-based index and caches GitHub sources, then requests exactly four distinct directions. After downtime, only latest due day catches up. Selecting direction starts planner; unanswered questions pause planning. Ready plan becomes `whirlwind:plan` issue before coding begins. Codex native user-input requests and Claude `AskUserQuestion` use Inbox question forms; replies return to suspended provider session. Cursor vendor-specific ask/create-plan extensions return explicit unsupported-method errors; portable structured planner questions are supported.
+At 10AM machine time, Whirlwind updates Git-based index and caches GitHub sources, then requests exactly four distinct directions: one each for Expand (new capabilities), Optimize (efficiency without changing behavior), Harden (correctness, security, reliability), and Simplify (less complexity). Each direction records its `category`. Before saving, Whirlwind rejects normalized duplicate titles/descriptions and asks the configured Ideation Agent, in a separate session, to compare the batch semantically against itself and the complete project history, including selected and older suggestions. Rejected batches regenerate up to three attempts; unreadable history, unavailable or malformed novelty review, and exhausted attempts fail without saving directions or completing the daily schedule. Semantic novelty remains a model judgment; it is not an absolute proof of uniqueness. After downtime, only latest due day catches up. Selecting direction starts planner; unanswered questions pause planning. Ready plan becomes `whirlwind:plan` issue before coding begins. Codex native user-input requests and Claude `AskUserQuestion` use Inbox question forms; replies return to suspended provider session. Cursor vendor-specific ask/create-plan extensions return explicit unsupported-method errors; portable structured planner questions are supported.
 
 Eligible issue label authorizes execution. Webhooks and five-minute reconciliation share repository/issue identity. Issue edits cancel current run and invalidate plan/worktree/approval evidence; old artifacts remain retained. Closure or label removal pauses work. Resume preserves paused stage, including pending planner questions. Explicit Resume authorizes continuing withdrawn issue snapshot; later content changes invalidate that authorization. Issue changes after PR publication pause for review in GitHub; published tasks cannot restart coding.
 
@@ -109,6 +117,8 @@ Policy supports `embeddings: {endpoint, model, key_env, enabled}`. Endpoint uses
 
 ## Verification
 
+See [Go adapter and onboarding verification](acp-codex-verification.md) for real Codex new-thread/resume results, ACP regression coverage, and opt-in live test commands.
+
 ```sh
 go test -race ./...
 go vet ./...
@@ -118,3 +128,13 @@ npm run test:e2e
 ```
 
 Go tests use real SQLite and Git worktrees, fake provider processes, and fake external GitHub boundary. Browser suite starts real Go and Next servers. Full onboarding-to-PR scenario uses real storage, ACP client tools, worktrees, verification, and review routing, with local fake external CLIs. Planner/approval interaction also has focused HTTP fixtures. Historical Python-era browser specs remain on disk but are excluded by new test configuration.
+
+## Run evidence and recovery
+
+Schema migrations add bounded artifact storage and attempt event history without
+backfilling unknown historical values. Run inspection now exposes exact supplied
+inputs, streamed visible output/tools, diagnostics, scoped usage, and linked
+verification/review decisions. Startup reconciles interrupted attempts and orphaned
+transport requests after process reaping. Publication intent and related progress
+writes are durable and version checked. See [durable execution evidence](persistence.md)
+for limits, read endpoints, atomicity, and retention behavior.
