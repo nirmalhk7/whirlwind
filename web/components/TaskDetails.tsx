@@ -3,6 +3,7 @@ import { api } from "./controlApi";
 import { stages, type Resource, type Task, type Review } from "./controlTypes";
 
 type Props = {
+ selectedIdeas: number;
  task: Resource<Task>;
  answers: Record<string, string>;
  setAnswers: Dispatch<SetStateAction<Record<string, string>>>;
@@ -12,7 +13,7 @@ type Props = {
  reviews: Resource<Review>[];
 };
 
-export function TaskDetails({task, answers, setAnswers, busy, perform, setSelected, reviews}: Props) {
+export function TaskDetails({task, selectedIdeas, answers, setAnswers, busy, perform, setSelected, reviews}: Props) {
  return (
           <section className="card whirlwind-task" aria-label="Task details">
             <div className="row">
@@ -26,6 +27,7 @@ export function TaskDetails({task, answers, setAnswers, busy, perform, setSelect
               {task.data.score}/10 · {task.data.review_passes ?? 0} review
               passes
             </p>
+            <p><span className="command-count-value" key={selectedIdeas}>{selectedIdeas}</span> {selectedIdeas === 1 ? "idea" : "ideas"} selected for plan generation</p>
             {task.data.error && <p className="error">{task.data.error}</p>}
             {task.data.plan && (
               <>

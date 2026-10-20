@@ -50,12 +50,14 @@ func (q apiRequest) applySettingsPatch(v *workflow.Settings) error {
 		return &apiError{422, "invalid_input", err.Error()}
 	}
 	if !settingsValid(*v) {
-		return &apiError{422, "invalid_input", "slots must be 1..32; reconciliation_seconds 30..86400"}
+		return &apiError{422, "invalid_input", "slots must be 1..32; reconciliation_seconds 30..86400; provider_status_check_seconds 1..86400"}
 	}
 	return nil
 }
 
 func settingsValid(v workflow.Settings) bool {
 	slotsValid := v.GlobalSlots >= 1 && v.GlobalSlots <= 32 && v.ProjectSlots >= 1 && v.ProjectSlots <= 32
-	return slotsValid && v.ReconciliationSeconds >= 30 && v.ReconciliationSeconds <= 86400
+	reconciliationValid := v.ReconciliationSeconds >= 30 && v.ReconciliationSeconds <= 86400
+	statusIntervalValid := v.ProviderStatusCheckSeconds >= 1 && v.ProviderStatusCheckSeconds <= 86400
+	return slotsValid && reconciliationValid && statusIntervalValid
 }

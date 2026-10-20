@@ -9,6 +9,9 @@ import (
 
 // put performs a version-checked resource write inside an existing transaction and appends the matching event.
 func put(ctx context.Context, tx *sql.Tx, kind, id string, v any, expected int) error {
+	if _, removal := v.(directionRemoval); removal {
+		return removeDirection(ctx, tx, id, expected)
+	}
 	if _, remove := v.(ConfigurationRemoval); remove {
 		return removeConfiguration(ctx, tx, kind, id, expected)
 	}

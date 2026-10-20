@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"whirlwind/internal/model"
+	"whirlwind/internal/settingsfile"
 	"whirlwind/internal/store"
 )
 
@@ -85,7 +86,21 @@ func (s *Server) commitMutation(r *http.Request, batch *store.Batch, buffer *res
 	var err error
 	if buffer.status < 400 {
 		extras = append(extras, store.Change{Kind: "audit", ID: store.ID(), Value: model.Audit{Source: "local_operator", Action: r.Method + " " + r.URL.Path, Target: r.URL.Path, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}})
-		err = batch.Commit(r.Context(), s.Store, receipt, extras...)
+		if r.Method == "PATCH" && r.URL.Path == "/api/v1/settings/file" {
+			var input settingsFileInput
+			if err = json.Unmarshal(m.body, &input); err != nil {
+				return err
+			}
+			source, ok := s.Store.Source.(*settingsfile.Source)
+			if !ok {
+				return &apiError{503, "settings_file_unavailable", "No startup settings file is attached to this process"}
+			}
+			err = source.SaveFile(r.Context(), input.Content, input.Revision, func(changes []store.Change) error {
+				return batch.Commit(store.WithoutSettingsSource(r.Context()), s.Store, receipt, append(extras, changes...)...)
+			})
+		} else {
+			err = batch.Commit(r.Context(), s.Store, receipt, extras...)
+		}
 		if errors.Is(err, store.ErrProjectBusy) {
 			return &apiError{409, "project_busy", err.Error()}
 		}

@@ -14,7 +14,7 @@ const descriptions: Record<ControlView, string> = {
   providers: "Connect model sources. Manage provider commands, login, and availability.",
   agents: "Choose a provider and model for each role. Set the order when quota runs out.",
   inbox: "Autonomous software engineering, in continuous motion. Bring your agents. Whirlwind handles the engineering process.",
-  settings: "Configure workers, agent roles, and model providers.",
+  settings: "The YAML this process started with. Inspect the snapshot or edit its source file.",
 };
 const iconPaths: Record<ControlView | "refresh" | "arrow" | "trash", string> = {
   overview: "M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z",
@@ -33,13 +33,13 @@ export function CommandIcon({ name }: { name: keyof typeof iconPaths }) {
   return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={iconPaths[name]} /></svg>;
 }
 type ShellProps = {
-  view: ControlView; loaded: boolean; error: string; busy: boolean;
-  onRefresh: () => void; activeTasks: number; availableProviders: number;
+  view: ControlView; loaded: boolean; error: string; busy: boolean; workersStopped: boolean | null; processing: boolean;
+  onToggleRunners: () => void; onRefresh: () => void; activeTasks: number; availableProviders: number | null;
   decisions: number; children: ReactNode;
 };
-export function CommandShell({ view, loaded, error, busy, onRefresh, activeTasks, availableProviders, decisions, children }: ShellProps) {
-  const title = navigation.find(([key]) => key === view)?.[1] ?? (view === "tasks" ? "Tasks" : "Inbox");
-  const connection = error ? "Offline" : loaded ? "Connected" : "Connecting";
+export function CommandShell({ view, loaded, error, busy, onRefresh, onToggleRunners, workersStopped, processing, activeTasks, availableProviders, decisions, children }: ShellProps) {
+  const title = navigation.find(([key]) => key === view)?.[1] ?? fallbackTitle(view);
+  const connection = error ? "Offline" : !loaded ? "Connecting" : processing ? "Processing" : "Connected";
   return (
     <div className="shell command-shell">
       <a className="skip-link" href="#command-main">Skip to content</a>
@@ -66,25 +66,38 @@ export function CommandShell({ view, loaded, error, busy, onRefresh, activeTasks
       <main id="command-main">
         <div className="command-toolbar">
           <span>Local control center <span className="toolbar-divider" aria-hidden="true">/</span> <strong>{title}</strong></span>
-          <div className="command-toolbar-actions">
-            <span className={`connection-indicator connection-${connection.toLowerCase()}`} role="status"><span aria-hidden="true" />{connection}</span>
+          <div className="command-toolbar-actions" role="group" aria-label="Runner controls">
+            <button className={`button command-connection connection-indicator connection-${connection.toLowerCase()}`} type="button" aria-label={connection} disabled><span className="connection-dot" aria-hidden="true" /><span role="status">{connection}</span></button>
             <button className="button command-refresh" disabled={busy} onClick={onRefresh}><CommandIcon name="refresh" /><span>Refresh</span></button>
+            <button className={`button command-stop-all${workersStopped === false ? " command-stop-all-danger" : ""}`} type="button" disabled={busy || !loaded || !!error || workersStopped === null} onClick={onToggleRunners}><span className="command-runner-label" key={workersStopped ? "stopped" : "enabled"}>{workersStopped ? "Resume all runners" : "Stop all runners"}</span></button>
           </div>
         </div>
-        <header className={`command-heading ${view === "inbox" ? "command-hero" : ""}`}>
-          <div><h1>{view === "inbox" ? "Ideas in. Verified software out." : title}</h1><p className="sub">{descriptions[view]}</p></div>
-
-        </header>
+        <CommandHeading view={view} title={title} />
         {view === "inbox" && <ul className="command-brand-pillars" aria-label="Whirlwind capabilities"><li>Agent-agnostic</li><li>ACP-native</li><li>Durable execution</li><li>Evidence-driven</li></ul>}
-        {view === "inbox" && <div className="command-readiness" aria-label="Inbox status">
-          <a href="/tasks"><span className="readiness-value">{loaded && !error ? activeTasks : "—"}</span> active tasks <CommandIcon name="arrow" /></a>
-          <a href="/settings#providers"><span className="readiness-value">{loaded && !error ? availableProviders : "—"}</span> available providers <CommandIcon name="arrow" /></a>
-          <a href="/inbox"><span className="readiness-value">{loaded && !error ? decisions : "—"}</span> Inbox items <CommandIcon name="arrow" /></a>
-          <p>Acceptance standard <strong>9/10 + passing checks</strong></p>
-        </div>}
+        {view === "inbox" && <CommandReadiness loaded={loaded} error={error} activeTasks={activeTasks} availableProviders={availableProviders} decisions={decisions} />}
         <div className={`command-content command-view-${view}`}>{children}</div>
         <footer className="command-main-footer"><span>WHIRLWIND</span><p>Plan with intent. Execute with discipline. Finish with evidence.</p></footer>
       </main>
     </div>
   );
+}
+
+function fallbackTitle(view: ControlView) {
+  return view === "tasks" ? "Tasks" : "Inbox";
+}
+
+function CommandHeading({ view, title }: { view: ControlView; title: string }) {
+  return <header className={`command-heading ${view === "inbox" ? "command-hero" : ""}`}>
+    <div><h1>{view === "inbox" ? "Ideas in. Verified software out." : title}</h1><p className="sub">{descriptions[view]}</p></div>
+  </header>;
+}
+
+function CommandReadiness({ loaded, error, activeTasks, availableProviders, decisions }: Pick<ShellProps, "loaded" | "error" | "activeTasks" | "availableProviders" | "decisions">) {
+  const value = (count: number | null) => loaded && !error && count !== null ? count : "—";
+  return <div className="command-readiness" aria-label="Inbox status">
+    <a href="/tasks"><span className="readiness-value">{value(activeTasks)}</span> active tasks <CommandIcon name="arrow" /></a>
+    <a href="/settings#providers"><span className="readiness-value">{value(availableProviders)}</span> working providers <CommandIcon name="arrow" /></a>
+    <a href="/inbox"><span className="readiness-value">{value(decisions)}</span> Inbox items <CommandIcon name="arrow" /></a>
+    <p>Acceptance standard <strong>9/10 + passing checks</strong></p>
+  </div>;
 }

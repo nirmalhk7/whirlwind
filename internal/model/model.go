@@ -146,6 +146,7 @@ type Review struct {
 	Summary     string      `json:"summary"`
 }
 type Direction struct {
+	GroupID     string `json:"group_id,omitempty"`
 	Category    string `json:"category,omitempty"`
 	ID          string `json:"id"`
 	ProjectID   string `json:"project_id"`
@@ -173,10 +174,11 @@ type Event struct {
 	CreatedAt  string          `json:"created_at"`
 }
 type Record struct {
-	ID        string          `json:"id"`
-	Version   int             `json:"version"`
-	Data      json.RawMessage `json:"data"`
-	UpdatedAt string          `json:"updated_at"`
+	CreatedOrder int64           `json:"created_order,omitempty"`
+	ID           string          `json:"id"`
+	Version      int             `json:"version"`
+	Data         json.RawMessage `json:"data"`
+	UpdatedAt    string          `json:"updated_at"`
 }
 type Notification struct {
 	ID       string `json:"id"`

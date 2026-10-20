@@ -9,6 +9,9 @@ import (
 
 // dispatch counts active tasks once, then starts eligible work within each project's capacity.
 func (e *Engine) dispatch(ctx context.Context) {
+	if e.settings(ctx).Stopped {
+		return
+	}
 	records, err := e.Store.List(ctx, "tasks")
 	if err != nil {
 		return

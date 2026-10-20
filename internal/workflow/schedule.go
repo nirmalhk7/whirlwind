@@ -14,7 +14,7 @@ type IdeationSchedule struct {
 }
 
 func DefaultSettings() Settings {
-	return Settings{GlobalSlots: 4, ProjectSlots: 2, ReconciliationSeconds: 300, Ideation: IdeationSchedule{Enabled: true, Time: "10:00", Timezone: "America/Denver"}}
+	return Settings{GlobalSlots: 4, ProjectSlots: 2, ReconciliationSeconds: 300, ProviderStatusCheckSeconds: 30, Ideation: IdeationSchedule{Enabled: true, Time: "10:00", Timezone: "America/Denver"}}
 }
 
 func (s IdeationSchedule) Validate() error {

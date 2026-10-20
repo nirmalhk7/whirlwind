@@ -17,6 +17,8 @@ const ideationPrefix = "ideation:"
 
 // Ideate retains a generation lease while preparing, validating, and saving four directions.
 func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) error {
+	ctx, release := e.runnerContext(ctx)
+	defer release()
 	key := "generation:" + p.ID
 	lease, err := e.Store.Claim(ctx, key, e.owner, time.Minute)
 	if err != nil {
@@ -49,6 +51,8 @@ func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) error 
 
 // IdeateWhenAvailable queues a manual run behind active generation for this project.
 func (e *Engine) IdeateWhenAvailable(ctx context.Context, p model.Project, day string) error {
+	ctx, release := e.runnerContext(ctx)
+	defer release()
 	for {
 		err := e.Ideate(ctx, p, day)
 		if !errors.Is(err, store.ErrLeased) {

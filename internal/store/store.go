@@ -85,7 +85,7 @@ func (s *Store) Get(ctx context.Context, kind, id string) (model.Record, error) 
 	}
 	r := model.Record{ID: id}
 	var data []byte
-	e := s.DB.QueryRowContext(ctx, "SELECT version,data,updated_at FROM resources WHERE kind=? AND id=?", kind, id).Scan(&r.Version, &data, &r.UpdatedAt)
+	e := s.DB.QueryRowContext(ctx, "SELECT rowid,version,data,updated_at FROM resources WHERE kind=? AND id=?", kind, id).Scan(&r.CreatedOrder, &r.Version, &data, &r.UpdatedAt)
 	r.Data = json.RawMessage(data)
 	if errors.Is(e, sql.ErrNoRows) {
 		e = ErrNotFound
@@ -100,7 +100,7 @@ func (s *Store) List(ctx context.Context, kind string) ([]model.Record, error) {
 			return nil, err
 		}
 	}
-	rows, e := s.DB.QueryContext(ctx, "SELECT id,version,data,updated_at FROM resources WHERE kind=? ORDER BY updated_at,id", kind)
+	rows, e := s.DB.QueryContext(ctx, "SELECT rowid,id,version,data,updated_at FROM resources WHERE kind=? ORDER BY updated_at,id", kind)
 	if e != nil {
 		return nil, e
 	}
@@ -109,7 +109,7 @@ func (s *Store) List(ctx context.Context, kind string) ([]model.Record, error) {
 	for rows.Next() {
 		var r model.Record
 		var data []byte
-		if e = rows.Scan(&r.ID, &r.Version, &data, &r.UpdatedAt); e != nil {
+		if e = rows.Scan(&r.CreatedOrder, &r.ID, &r.Version, &data, &r.UpdatedAt); e != nil {
 			return nil, e
 		}
 		r.Data = json.RawMessage(data)

@@ -6,6 +6,8 @@ Go server owns `/api/v1`; Next.js forwards same-origin requests to loopback `WHI
 
 JSON resources use `{id,version,data,updated_at}`. Lists return resource arrays. Versions start at 1. Mutations require `Idempotency-Key`; resource updates/actions additionally require `If-Match` containing current numeric version. Same key/request returns recorded response; reusing key for different input returns 409. Keys are server-global. Requests require JSON objects and are limited to 1 MiB. External writes reconcile their GitHub marker/branch before retrying; DB resource and event updates commit atomically. Mutation response receipts are stored after action completion, so clients must retain current resource versions when recovering interrupted mutations.
 
+Persisted resource envelopes also include `created_order`, an original insertion position shared across resource kinds. Inbox uses this value to keep messages and idea batches in creation order; changes to `updated_at` never move existing entries.
+
 Control Host must be localhost/loopback; Origin, when present, must exactly match HTTP Host. Responses disable caching and include `nosniff` and `no-referrer`. Errors use `{error:{code,message,request_id}}`.
 
 ## Routes
@@ -28,14 +30,22 @@ Control Host must be localhost/loopback; Origin, when present, must exactly matc
 | POST | `/providers/{id}/models` | Load advertised model IDs over ACP without inference; If-Match required; 202 `{operation_id}` |
 | GET | `/agents`, `/agents/{role}` | Agent configurations for `ideate`, `plan`, `code`, `review`; unconfigured roles have version 0 |
 | PATCH | `/agents/{role}` | `{chain:[{provider,model,thinking?:{config_id,value}},...]}` in strict primary/fallback order; If-Match required (0 for first save) |
-| POST | `/directions/{id}/select` | Begin planner task; If-Match required; 202 task resource |
+| POST | `/directions/{id}/select` | Select the sole idea in its `group_id`, pausing the previous choice and beginning or restoring its planner task; If-Match required; 202 task resource |
+| POST | `/directions/{id}/deselect` | Unselect idea and pause linked unfinished task; If-Match required; 200 direction |
+| DELETE | `/directions/{id}/group` | Delete the idea's entire generation group and pause linked unfinished tasks, preserving task history; `{versions:{idea_id:version,...}}` for every member and If-Match for the target required; 200 `{deleted:number}` |
 | POST | `/tasks/{id}/answers` | `{answers:{question_id:string}}`; If-Match required |
+| GET | `/runners/status` | `{processing:boolean}`; true while a session has status `running` and is unfinished, including ideation and provider tests |
+| POST | `/runners/stop` | Cancel current task, ideation, and connectivity runners, including capacity waits; pause all unfinished tasks with resume state retained; 200 `{paused:number}`; Idempotency-Key required; sets `workers.stopped: true` in the startup settings file; blocks new runners and scheduled work across restarts until explicitly cleared |
 | POST | `/tasks/{id}/pause` | Stop active run, retain artifacts; If-Match required |
 | POST | `/tasks/{id}/resume` | Resume paused task; explicit operator authorization; If-Match required |
 | POST | `/tasks/{id}/approve` | Approve critical-risk PR publication; If-Match required |
 | POST | `/questions/{id}/answers` | Native agent `{answers:{question_id:string}}`; If-Match required |
 | POST | `/permissions/{id}/decisions` | `{decision:"allow"\|"deny"}`; If-Match required |
 | PATCH | `/inbox/{id}` | Resolve notification; If-Match required |
+| POST | `/inbox/clear` | Resolve all unresolved notifications atomically; retains history and pending agent questions/permissions; 200 `{resolved:number}`; Idempotency-Key required |
+| POST | `/runners/resume` | Set `workers.stopped: false` and restore tasks paused by global stop to their saved stages; manual pauses remain; 200 `{resumed:number}`; Idempotency-Key required |
+| GET | `/settings/file` | Exact startup `{path,content,loaded_at}`; never rereads disk. `?view=file` explicitly reads current `{path,content,revision}` at the startup path |
+| PATCH | `/settings/file` | `{content,revision}`; validate and preserve raw YAML, atomically save file/runtime changes/receipt; 409 for stale file revision; Idempotency-Key required. Startup snapshot remains unchanged |
 | GET | `/settings` | Global settings resource |
 | PATCH | `/settings` | `{global_slots,project_slots,reconciliation_seconds,ideation?:{enabled,time,timezone}}`; If-Match required (0 for first save) |
 | GET | `/events` | SSE, query `after` or `Last-Event-ID`; defaults 0 |
@@ -106,5 +116,7 @@ See [persistence and recovery](docs/persistence.md) for capture limits, credenti
 handling, restart reconciliation, and publication intent guarantees.
 
 ## Authoritative settings file
+
+`GET /provider-status` returns `{providers,interval_seconds,stopped}`. Each provider contains `id`, `name`, `kind`, `status` (`working`, `failed`, `unavailable`, `paused`, or `unknown`), `detail`, and `checked_at`. Metadata-only connection checks are bounded to ten seconds (including capacity waits), cached across tabs for `workers.provider_status_check_seconds` (default 30; valid 1–86400), and invalidated by configuration/stop changes. Checks send no model prompts. `workers.stopped: true` prevents provider process launches; the response marks installed providers paused. A successful check confirms protocol readiness, not an inference result.
 
 Root `settings.yaml` owns worker settings, provider definitions and ordered agent choices. Existing API shapes and numeric versions remain unchanged. UI POST/PATCH configuration mutations write YAML and cache state together; failed receipts restore the previous file. Valid external file edits refresh cache versions and emit normal events, so stale UI saves fail rather than overwrite those edits. Quota and availability observations remain runtime state and never rewrite YAML. Invalid YAML/schema/configuration returns an error instead of silently reverting to defaults. UI routes `/agents` and `/providers` redirect to `/settings#agents` and `/settings#providers`; API routes remain available.

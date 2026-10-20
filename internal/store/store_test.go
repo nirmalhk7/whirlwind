@@ -145,7 +145,13 @@ func TestReplanInvalidatesOldWorktreeAndAcceptance(t *testing.T) {
 	issue.Body = "updated"
 	issue.UpdatedAt = "2"
 	task, e = s.IngestIssue(ctx, p, issue)
-	if e != nil || task.Worktree != "" || task.Base != "" || task.Branch != "" || task.ChecksPassed || task.Approved {
+	if e != nil {
+		t.Fatal(e)
+	}
+	if task.Worktree != "" || task.Base != "" || task.Branch != "" {
+		t.Fatalf("stale worktree %+v", task)
+	}
+	if task.ChecksPassed || task.Approved {
 		t.Fatalf("stale state %+v %v", task, e)
 	}
 }

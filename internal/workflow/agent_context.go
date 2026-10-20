@@ -39,7 +39,10 @@ func (a *agentRun) loadProviders() error {
 	}
 	a.providers = []model.Provider{}
 	for _, record := range records {
-		value, _ := store.Decode[model.Provider](record)
+		value, err := a.refreshBlockedQuota(record)
+		if err != nil {
+			return err
+		}
 		a.providers = append(a.providers, value)
 	}
 	return nil

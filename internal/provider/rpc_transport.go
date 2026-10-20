@@ -2,7 +2,6 @@ package provider
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -59,6 +58,11 @@ func (r *RPC) finishRead(e error) {
 	r.cancel()
 	r.callbacks.Wait()
 	exitErr := r.cmd.Wait()
+	r.mu.Lock()
+	if r.err == nil {
+		r.err = exitErr
+	}
+	r.mu.Unlock()
 	r.diagnostics.Wait()
 	if r.observe != nil {
 		exit := map[string]any{"exit_code": r.cmd.ProcessState.ExitCode()}
@@ -79,7 +83,11 @@ func (r *RPC) decodeResponse(method string, m Message, out any) error {
 		if r.observe != nil {
 			r.observe("whirlwind/protocol_error", map[string]any{"method": method, "error": m.Error})
 		}
-		return fmt.Errorf("provider RPC: %s", m.Error)
+		var failure RPCError
+		if err := json.Unmarshal(m.Error, &failure); err != nil {
+			return fmt.Errorf("provider RPC: %s: %w", m.Error, err)
+		}
+		return &failure
 	}
 	if out == nil {
 		return nil
@@ -91,7 +99,7 @@ func (r *RPC) closedError() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.err != nil {
-		return r.err
+		return &TransportError{Cause: fmt.Errorf("provider exited before response: %w", r.err)}
 	}
-	return errors.New("provider exited before response")
+	return &TransportError{Cause: fmt.Errorf("provider exited before response: %w", io.ErrUnexpectedEOF)}
 }

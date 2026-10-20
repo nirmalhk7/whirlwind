@@ -2,17 +2,20 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
-
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
+)
+
+const (
+	quotaExhaustedFailure = "quota exhausted"
+	chosenModelID         = "chosen-model"
 )
 
 func TestConfiguredAgentUsesOrderedProviderModelsAndPreservesWork(t *testing.T) {
@@ -55,11 +58,11 @@ func TestConfiguredAgentUsesOrderedProviderModelsAndPreservesWork(t *testing.T) 
 }
 
 func TestConfiguredAgentDoesNotTryUnlistedProviderOrRetryOrdinaryErrors(t *testing.T) {
-	for _, failure := range []string{"quota exhausted", "invalid model"} {
+	for _, failure := range []string{quotaExhaustedFailure, "invalid model"} {
 		t.Run(failure, func(t *testing.T) {
 			e, task, cwd := testEngine(t)
 			ctx := context.Background()
-			if err := e.Store.Put(ctx, "agents", "code", map[string]any{"role": "code", "chain": []map[string]string{{"provider": "fake", "model": "chosen-model"}}}, 0); err != nil {
+			if err := e.Store.Put(ctx, "agents", "code", map[string]any{"role": "code", "chain": []map[string]string{{"provider": "fake", "model": chosenModelID}}}, 0); err != nil {
 				t.Fatal(err)
 			}
 			var calls int
@@ -126,45 +129,4 @@ func orderedFallbackOutput(t *testing.T, p model.Provider, in provider.Input, cw
 		t.Errorf("partial work lost: %v", err)
 	}
 	return provider.Output{Text: "completed", SessionID: "fallback-session"}, nil
-}
-
-func thinkingFallbackOutput(t *testing.T, source model.Provider, input provider.Input, chain model.AgentConfig) (provider.Output, error) {
-	t.Helper()
-	if source.Kind != "acp" {
-		t.Errorf("thinking used native transport: %s", source.Kind)
-	}
-	want := chain.Chain[0].Thinking
-	if source.ID == "fallback" {
-		want = chain.Chain[1].Thinking
-	}
-	if input.Thinking == nil || *input.Thinking != *want {
-		t.Errorf("thinking crossed fallback: %+v", input.Thinking)
-	}
-	if source.ID == "primary" {
-		return provider.Output{}, errors.New("quota exhausted")
-	}
-	return provider.Output{Text: "done"}, nil
-}
-
-func assertThinkingFallbackAttempts(t *testing.T, e *Engine, ctx context.Context) {
-	t.Helper()
-	records, _ := e.Store.List(ctx, "sessions")
-	if len(records) != 2 {
-		t.Fatalf("attempts collapsed: %d", len(records))
-	}
-	for _, record := range records {
-		var state struct {
-			Provider string                `json:"provider"`
-			Success  bool                  `json:"success"`
-			Error    string                `json:"error"`
-			Thinking *model.ThinkingChoice `json:"thinking"`
-		}
-		_ = json.Unmarshal(record.Data, &state)
-		if state.Provider == "primary" && (state.Success || state.Error == "" || state.Thinking.Value != "high") {
-			t.Fatalf("failed attempt lost: %+v", state)
-		}
-		if state.Provider == "fallback" && (!state.Success || state.Thinking.Value != "low") {
-			t.Fatalf("fallback attempt lost: %+v", state)
-		}
-	}
 }

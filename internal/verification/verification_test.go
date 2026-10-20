@@ -25,7 +25,13 @@ func TestInterruptedSuiteRetainsCompletedChecksWithoutPassing(t *testing.T) {
 		cancel()
 		return nil
 	})
-	if report.Passed || !errors.Is(err, context.Canceled) || len(observed) != 1 || len(report.Results) != 1 || !report.Results[0].Passed || report.Results[0].Output != "completed" {
+	if report.Passed || !errors.Is(err, context.Canceled) {
+		t.Fatal("interrupted suite accepted", report, err)
+	}
+	if len(observed) != 1 || len(report.Results) != 1 {
+		t.Fatal("completed check lost", report)
+	}
+	if !report.Results[0].Passed || report.Results[0].Output != "completed" {
 		t.Fatal("interrupted suite mislabeled or completed check lost", report, err)
 	}
 }

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"log"
 	"sync"
 	"time"
@@ -12,16 +13,19 @@ import (
 )
 
 type Engine struct {
-	Store      *store.Store
-	GitHub     github.Client
-	Root       string
-	Adapter    func(model.Provider) provider.Adapter
-	owner      string
-	mu         sync.Mutex
-	running    map[string]context.CancelFunc
-	active     map[string]int
-	gitMu      sync.Mutex
-	background sync.WaitGroup
+	Store            *store.Store
+	GitHub           github.Client
+	Root             string
+	Adapter          func(model.Provider) provider.Adapter
+	owner            string
+	mu               sync.Mutex
+	runners          map[string]context.CancelFunc
+	running          map[string]context.CancelFunc
+	active           map[string]int
+	gitMu            sync.Mutex
+	background       sync.WaitGroup
+	providerStatuses providerStatusCache
+	retryWait        func(context.Context, time.Duration) error
 }
 
 // New constructs the workflow engine with default process adapters, a unique lease owner, and execution tracking.
@@ -37,7 +41,9 @@ func (e *Engine) Run(ctx context.Context) {
 	defer ticker.Stop()
 	lastSettingsError := ""
 	nextReconcile := time.Now().Add(5 * time.Minute)
-	e.background.Go(func() { e.Reconcile(ctx) })
+	if !e.settings(ctx).Stopped {
+		e.background.Go(func() { e.Reconcile(ctx) })
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -49,23 +55,31 @@ func (e *Engine) Run(ctx context.Context) {
 			e.background.Wait()
 			return
 		case <-ticker.C:
-			if err := e.Store.RefreshSettings(ctx); err != nil {
-				if err.Error() != lastSettingsError {
-					log.Printf("settings configuration: %v", err)
-					lastSettingsError = err.Error()
-				}
-				continue
-			}
-			lastSettingsError = ""
-			e.dispatch(ctx)
-			if !time.Now().Before(nextReconcile) {
-				e.background.Go(func() { e.Reconcile(ctx) })
-				settings := e.settings(ctx)
-				nextReconcile = time.Now().Add(time.Duration(settings.ReconciliationSeconds) * time.Second)
-			}
-			e.background.Go(func() { e.Daily(ctx) })
+			lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
 		}
 	}
+}
+
+func (e *Engine) runCycle(ctx context.Context, lastSettingsError string, nextReconcile time.Time) (string, time.Time) {
+	if err := e.Store.RefreshSettings(ctx); err != nil {
+		if err.Error() != lastSettingsError {
+			log.Printf("settings configuration: %v", err)
+			lastSettingsError = err.Error()
+		}
+		return lastSettingsError, nextReconcile
+	}
+	if e.settings(ctx).Stopped {
+		e.StopAll()
+		return "", nextReconcile
+	}
+	e.dispatch(ctx)
+	if !time.Now().Before(nextReconcile) {
+		e.background.Go(func() { e.Reconcile(ctx) })
+		settings := e.settings(ctx)
+		nextReconcile = time.Now().Add(time.Duration(settings.ReconciliationSeconds) * time.Second)
+	}
+	e.background.Go(func() { e.Daily(ctx) })
+	return "", nextReconcile
 }
 
 // Stop cancels an active task step so its agent processes can terminate.
@@ -78,23 +92,24 @@ func (e *Engine) Stop(id string) {
 }
 
 // fail pauses a failed task at its resumable stage and creates an Inbox recovery notification.
-func (e *Engine) fail(ctx context.Context, id string, err error) {
-	r, x := e.Store.Get(ctx, "tasks", id)
-	if x != nil {
-		return
+func (e *Engine) fail(ctx context.Context, id string, failure error) {
+	if err := e.pauseFailure(ctx, id, failure); err != nil && !errors.Is(err, store.ErrConflict) {
+		log.Printf("persist task recovery %s: %v", id, err)
 	}
-	t, x := store.Decode[model.Task](r)
-	if x != nil {
-		return
+}
+
+func (e *Engine) pauseFailure(ctx context.Context, id string, failure error) error {
+	r, err := e.Store.Get(ctx, "tasks", id)
+	if err != nil {
+		return err
 	}
-	if t.Stage != "paused" {
-		t.ResumeStage = t.Stage
+	task, err := store.Decode[model.Task](r)
+	if err != nil || task.Stage == "paused" {
+		return err
 	}
-	t.Stage = "paused"
-	t.Error = err.Error()
-	if e.Store.Put(ctx, "tasks", id, t, r.Version) == nil {
-		_ = e.Store.Notify(ctx, id, "recovery", err.Error())
-	}
+	task.ResumeStage, task.Stage, task.Error = task.Stage, "paused", failure.Error()
+	notice := model.Notification{ID: store.ID(), TaskID: id, Kind: "recovery", Message: failure.Error()}
+	return e.Store.Write(ctx, []store.Change{{Kind: "tasks", ID: id, Value: task, Expected: r.Version}, {Kind: "inbox", ID: notice.ID, Value: notice}}, nil)
 }
 
 // Project loads and decodes the registered project used by a task.

@@ -316,3 +316,19 @@ Idea descriptions use 35-word previews with independently operable full-text exp
 Run joins sidebar as read-only execution history. Ruled rows show role, provider, model, thinking level, transport, project/task, timing, and truthful outcome; unknown historical fields stay explicit. Desktop metadata uses four columns, medium widths two, mobile one.
 
 Agents pairs provider, model, and ACP-advertised Thinking level in three desktop columns and stacks them on mobile. Settings adds automatic daily ideation toggle, local time, and explicit timezone using incumbent fields and flat ruled grouping.
+
+## Command feedback motion
+
+Motion reinforces operator decisions inside fixed controls. Inbox entries never animate their position, and routine navigation has no entrance sequence. Idea cards retain immediate cyan intent feedback; an in-place ellipsis marks an outstanding request, and the Font Awesome check appears only after the selection is saved. Its 240ms clipped reveal uses `cubic-bezier(.16, 1, .3, 1)`; supporting opacity feedback lasts 120ms. Icon space is reserved in every card so state changes cannot shift its content.
+
+Processing receives one 600ms outline pulse at run start, then remains still. Stop/Resume labels acknowledge an actual state change with a 120ms opacity transition. Selected-idea counts acknowledge a changed value with a 500ms color transition to teal. No feedback effect loops or delays command execution; pressed controls keep their bounds.
+
+Reduced motion replaces the clipped check reveal with an 80ms opacity transition, removes the Processing pulse and label/count animations, and retains explicit state text, static cyan selection, and the confirmed check.
+
+## YAML indentation guides
+
+Startup snapshots and the native file editor use 1px Ruled Edge indentation guides inside leading whitespace. Guides follow the document's indentation spacing, with two-column tabs and shared 13px monospace / 24px row metrics. The editor's decorative guide layer tracks both scroll axes and resizing while the native textarea owns all text, selection, and caret behavior. Guides are hidden from assistive technology and never alter copied or saved YAML.
+
+## Provider status in Settings
+
+Settings places a compact provider list above the startup YAML. Plain divided rows show provider name, text status, check detail, transport, and local check time. Teal indicates working protocol connectivity; rose indicates failure; neutral text indicates unavailable or paused checks. Status never depends on color alone. Polling preserves YAML editor state and uses the configured interval; failed refreshes explicitly mark previous results outdated.

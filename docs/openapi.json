@@ -3242,6 +3242,34 @@
           }
         }
       }
+    },
+    "/api/v1/provider-status": {
+      "get": {
+        "operationId": "providerStatus",
+        "summary": "Read cached provider protocol connectivity; checks pause when workers are stopped",
+        "responses": {
+          "200": {
+            "description": "Provider status snapshot",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderStatuses"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3323,6 +3351,12 @@
           },
           "ideation": {
             "$ref": "#/components/schemas/IdeationSchedule"
+          },
+          "provider_status_check_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400,
+            "default": 30
           }
         }
       },
@@ -3687,6 +3721,65 @@
                 },
                 "record": {
                   "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ProviderStatuses": {
+        "type": "object",
+        "required": [
+          "providers",
+          "interval_seconds",
+          "stopped"
+        ],
+        "properties": {
+          "interval_seconds": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 86400
+          },
+          "stopped": {
+            "type": "boolean"
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "kind",
+                "status",
+                "detail"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "working",
+                    "failed",
+                    "unavailable",
+                    "paused",
+                    "unknown"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                },
+                "checked_at": {
+                  "type": "string",
+                  "format": "date-time"
                 }
               }
             }

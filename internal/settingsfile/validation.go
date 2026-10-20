@@ -15,6 +15,9 @@ func validateWorkers(s workflow.Settings) error {
 	if !capacity || !interval {
 		return errors.New("invalid worker capacity or reconciliation interval in settings.yaml")
 	}
+	if s.ProviderStatusCheckSeconds < 1 || s.ProviderStatusCheckSeconds > 86400 {
+		return errors.New("provider_status_check_seconds must be 1..86400 in settings.yaml")
+	}
 	return s.Ideation.Validate()
 }
 

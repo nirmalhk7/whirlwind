@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"slices"
 	"time"
 	ctxengine "whirlwind/internal/context"
 	"whirlwind/internal/model"
@@ -19,7 +20,7 @@ type agentRun struct {
 	input           provider.Input
 	providers       []model.Provider
 	index           ctxengine.Index
-	freshSession    bool
+	resumeSource    string
 	previousAttempt string
 	fallbackReason  string
 }
@@ -68,25 +69,24 @@ func (a *agentRun) route() (provider.Output, error) {
 }
 
 func (a *agentRun) routeAvailable() (provider.Output, error) {
-	for attempt := 0; attempt < len(a.providers); attempt++ {
-		chosen, err := provider.Route(a.providers, a.input.Role, a.preferences(), a.outcomes(a.ctx, a.input.Role, a.index.Category()))
+	remaining := slices.Clone(a.providers)
+	choices := []model.AgentChoice{}
+	preferences := a.preferences()
+	outcomes := a.outcomes(a.ctx, a.input.Role, a.index.Category())
+	for len(remaining) > 0 {
+		chosen, err := provider.Route(remaining, a.input.Role, preferences, outcomes)
 		if err != nil {
-			return provider.Output{}, err
+			break
 		}
-		execution, err := a.newAttempt(chosen)
-		if err != nil {
-			return provider.Output{}, err
-		}
-		output, err := execution.execute()
-		if execution.retry(err) {
-			continue
-		}
-		if execution.eventErr != nil {
-			return output, errors.Join(err, execution.eventErr)
-		}
-		return output, err
+		choices = append(choices, model.AgentChoice{Provider: chosen.ID, Model: a.input.Model, Thinking: a.input.Thinking})
+		remaining = slices.DeleteFunc(remaining, func(p model.Provider) bool { return p.ID == chosen.ID })
 	}
-	return provider.Output{}, errors.New("all capable providers exhausted")
+	for _, source := range remaining {
+		if slices.Contains(source.Capabilities, a.input.Role) {
+			choices = append(choices, model.AgentChoice{Provider: source.ID, Model: a.input.Model, Thinking: a.input.Thinking})
+		}
+	}
+	return a.routeChoices(choices)
 }
 func (a *agentRun) preferences() []string {
 	preferred := append([]string{}, a.project.Policy.Providers...)

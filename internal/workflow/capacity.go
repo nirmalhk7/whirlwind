@@ -8,10 +8,12 @@ import (
 )
 
 type Settings struct {
-	GlobalSlots           int              `json:"global_slots"`
-	ProjectSlots          int              `json:"project_slots"`
-	ReconciliationSeconds int              `json:"reconciliation_seconds"`
-	Ideation              IdeationSchedule `json:"ideation"`
+	Stopped                    bool             `json:"stopped"`
+	GlobalSlots                int              `json:"global_slots"`
+	ProjectSlots               int              `json:"project_slots"`
+	ReconciliationSeconds      int              `json:"reconciliation_seconds"`
+	ProviderStatusCheckSeconds int              `json:"provider_status_check_seconds"`
+	Ideation                   IdeationSchedule `json:"ideation"`
 }
 
 // settings loads global worker settings over the default four global slots, two project slots, and five-minute reconciliation interval.
@@ -28,7 +30,13 @@ func (e *Engine) acquire(ctx context.Context, p model.Project) error {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		settings := e.settings(ctx)
+		if settings.Stopped {
+			return ErrRunnersStopped
+		}
 		global := settings.GlobalSlots
 		project := settings.ProjectSlots
 		if p.Policy.GlobalSlots > 0 && p.Policy.GlobalSlots < global {

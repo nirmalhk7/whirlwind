@@ -62,8 +62,10 @@ func (s *Store) BindIssue(ctx context.Context, repo string, t model.Task, expect
 
 // SaveDirections stores the generated directions and marks their project/day schedule complete in one transaction.
 func (s *Store) SaveDirections(ctx context.Context, project, day string, directions []model.Direction) error {
+	groupID := ID()
 	return s.Transaction(ctx, func(tx *sql.Tx) error {
 		for _, d := range directions {
+			d.GroupID = groupID
 			if err := put(ctx, tx, "directions", d.ID, d, 0); err != nil {
 				return err
 			}

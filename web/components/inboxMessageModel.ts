@@ -1,4 +1,4 @@
-import type { Resource, Inbox, Permission, NativeQuestions } from "./controlTypes";
+import type { Resource, Inbox, Permission, NativeQuestions, Direction } from "./controlTypes";
 
 export type InboxMessage =
   | { type: "question"; entry: Resource<NativeQuestions> }
@@ -22,8 +22,34 @@ function represented(notification: Inbox, questions: Resource<NativeQuestions>[]
   }
 }
 
-function compareMessages(a: InboxMessage, b: InboxMessage) {
-  const aTime = Date.parse(a.entry.updated_at ?? "") || 0;
-  const bTime = Date.parse(b.entry.updated_at ?? "") || 0;
-  return bTime - aTime || a.entry.id.localeCompare(b.entry.id);
+export type InboxFeedEntry = InboxMessage | { type: "idea"; entry: Resource<Direction>; directions: Resource<Direction>[] };
+
+export function inboxFeed(messages: InboxMessage[], directions: Resource<Direction>[]): InboxFeedEntry[] {
+  const groups = new Map<string, Resource<Direction>[]>();
+  for (const direction of directions) {
+    const key = direction.data.group_id ?? direction.id;
+    const group = groups.get(key) ?? [];
+    group.push(direction);
+    groups.set(key, group);
+  }
+  const categories = ["expand", "optimize", "harden", "simplify"];
+  const ideas: InboxFeedEntry[] = [...groups.values()].map(group => {
+    const original = group.reduce((first, entry) => creationPosition(entry) < creationPosition(first) ? entry : first);
+    group.sort((a, b) => {
+      const rank = (category?: string) => { const index = categories.indexOf(category ?? ""); return index < 0 ? categories.length : index; };
+      return rank(a.data.category) - rank(b.data.category) || a.id.localeCompare(b.id);
+    });
+    return { type: "idea", entry: original, directions: group };
+  });
+  return [...messages, ...ideas].sort(compareMessages);
+}
+
+type OrderedEntry = { updated_at?: string; created_order?: number; id: string };
+
+function creationPosition(entry: OrderedEntry) {
+  return entry.created_order ?? (Date.parse(entry.updated_at ?? "") || 0);
+}
+
+function compareMessages(a: { entry: OrderedEntry }, b: { entry: OrderedEntry }) {
+  return creationPosition(b.entry) - creationPosition(a.entry) || a.entry.id.localeCompare(b.entry.id);
 }

@@ -7,34 +7,15 @@ import (
 )
 
 func (s *providerSession) runACP() error {
-	load, e := s.initializeACP()
+	session, e := s.openACPSession()
 	if e != nil {
 		return e
-	}
-	var session acpSession
-	if s.input.SessionID != "" && load {
-		session.ID = s.input.SessionID
-		s.replaying.Store(true)
-		e = s.rpc.Call(s.ctx, "session/load", map[string]any{"sessionId": session.ID, "cwd": s.input.CWD, "mcpServers": []any{}}, &session)
-		s.replaying.Store(false)
-		// Loading replays old assistant messages; Output contains only this prompt's reply.
-		s.mu.Lock()
-		s.output.Text = ""
-		s.mu.Unlock()
-	} else {
-		e = s.rpc.Call(s.ctx, "session/new", map[string]any{"cwd": s.input.CWD, "mcpServers": []any{}}, &session)
-	}
-	if e != nil {
-		return e
-	}
-	if session.ID == "" {
-		return errors.New("ACP returned empty session ID")
 	}
 	s.mu.Lock()
 	s.output.SessionID = session.ID
 	s.mu.Unlock()
 	if s.hooks.Event != nil {
-		s.hooks.Event("whirlwind/session", map[string]any{"session_id": session.ID, "resumed": s.input.SessionID != "" && load})
+		s.hooks.Event("whirlwind/session", map[string]any{"session_id": session.ID, "resumed": s.input.SessionID != ""})
 	}
 	if e = s.configureACP(&session); e != nil {
 		return e
@@ -119,4 +100,33 @@ func (s *providerSession) recordACPConfig(options []acpConfigOption, legacyModel
 	if s.hooks.Event != nil {
 		s.hooks.Event("whirlwind/config", metadata)
 	}
+}
+
+func (s *providerSession) openACPSession() (acpSession, error) {
+	var session acpSession
+	load, err := s.initializeACP()
+	if err != nil {
+		return session, err
+	}
+	if s.input.SessionID != "" && !load {
+		return session, errors.New("unsupported ACP session resume: loadSession is false")
+	}
+	if s.input.SessionID != "" {
+		session.ID = s.input.SessionID
+		s.replaying.Store(true)
+		err = s.rpc.Call(s.ctx, "session/load", map[string]any{"sessionId": session.ID, "cwd": s.input.CWD, "mcpServers": []any{}}, &session)
+		s.replaying.Store(false)
+		s.mu.Lock()
+		s.output.Text = ""
+		s.mu.Unlock()
+	} else {
+		err = s.rpc.Call(s.ctx, "session/new", map[string]any{"cwd": s.input.CWD, "mcpServers": []any{}}, &session)
+	}
+	if err != nil {
+		return session, err
+	}
+	if session.ID == "" {
+		return session, errors.New("ACP returned empty session ID")
+	}
+	return session, nil
 }

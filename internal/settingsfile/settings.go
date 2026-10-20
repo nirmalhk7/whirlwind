@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"time"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
@@ -33,11 +34,12 @@ type Document struct {
 	Agents    map[string][]model.AgentChoice `json:"agents"`
 }
 type Source struct {
-	mu    sync.Mutex
-	store *store.Store
-	path  string
-	raw   []byte
-	doc   Document
+	startup FileView
+	mu      sync.Mutex
+	store   *store.Store
+	path    string
+	raw     []byte
+	doc     Document
 }
 
 func project(p model.Provider) Provider {
@@ -72,6 +74,7 @@ func Attach(ctx context.Context, s *store.Store, path string) error {
 	if err = source.Refresh(ctx); err != nil {
 		return err
 	}
+	source.startup = FileView{Path: source.path, Content: string(source.raw), LoadedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	s.Source = source
 	return nil
 }

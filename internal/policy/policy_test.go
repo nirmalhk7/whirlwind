@@ -58,3 +58,14 @@ func TestPolicyRequiresChecksAndRiskRules(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestAllowedPathValidationUsesLocalPathSemantics(t *testing.T) {
+	p := model.Policy{Checks: []model.Check{{Name: "tests", Command: []string{"go", "test"}}}, AllowedPaths: []string{"foo..bar"}, RiskRules: []model.RiskRule{{Level: "high", Paths: []string{"src/**"}}}}
+	if err := Validate(p); err != nil {
+		t.Fatalf("valid local filename rejected: %v", err)
+	}
+	p.AllowedPaths = []string{"../outside"}
+	if err := Validate(p); err == nil {
+		t.Fatal("parent path accepted")
+	}
+}

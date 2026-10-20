@@ -131,7 +131,7 @@ func (r *RPC) Call(ctx context.Context, method string, params any, out any) erro
 	r.mu.Unlock()
 	defer func() { r.mu.Lock(); delete(r.pending, id); r.mu.Unlock() }()
 	if e := r.send(map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(id), "method": method, "params": params}); e != nil {
-		return e
+		return &TransportError{Cause: e}
 	}
 	select {
 	case m := <-ch:

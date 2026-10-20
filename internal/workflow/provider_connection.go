@@ -21,6 +21,8 @@ func (e *Engine) TestProviderConnection(ctx context.Context, p model.Provider, m
 }
 
 func (e *Engine) TestProviderChoice(ctx context.Context, p model.Provider, choice model.AgentChoice) (provider.Output, error) {
+	ctx, release := e.runnerContext(ctx)
+	defer release()
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	capacity := model.Project{ID: "provider-test:" + p.ID}

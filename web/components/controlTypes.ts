@@ -1,6 +1,6 @@
 import type { ControlView } from "./CommandShell";
 
-export type Resource<T> = { id: string; version: number; updated_at?: string; data: T };
+export type Resource<T> = { id: string; version: number; updated_at?: string; created_order?: number; data: T };
 export type Project = { id: string; name: string; repo: string; path: string; policy_hash?: string };
 export type Provider = {
   id: string;
@@ -14,6 +14,7 @@ export type Provider = {
   limitation?: string;
 };
 export type Direction = {
+  group_id?: string;
   id: string;
   project_id: string;
   category?: string;

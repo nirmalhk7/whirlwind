@@ -168,12 +168,12 @@ func unsafePath(path string) bool {
 	case policyYAML, policyYML, ".git", "..":
 		return true
 	}
-	return filepath.IsAbs(path) || strings.HasPrefix(path, ".git/") || strings.HasPrefix(path, "../")
+	return !filepath.IsLocal(path) || strings.HasPrefix(path, ".git/")
 }
 
 func validateAllowedPaths(paths []string) error {
 	for _, a := range paths {
-		if filepath.IsAbs(a) || strings.Contains(a, "..") {
+		if !filepath.IsLocal(a) {
 			return errors.New("allowed paths must stay inside repository")
 		}
 	}

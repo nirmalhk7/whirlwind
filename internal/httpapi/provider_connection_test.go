@@ -78,9 +78,9 @@ func runProviderConnectionScenario(t *testing.T, fail bool) {
 		t.Fatal(err)
 	}
 	operationID := queueConnectionTest(t, s)
-	record, result := pendingConnectionTest(t, s, ctx, operationID, p.ID)
+	_, result := pendingConnectionTest(t, s, ctx, operationID, p.ID)
 	close(release)
-	result = awaitConnectionTest(t, s, ctx, operationID, record, result)
+	result = awaitConnectionTest(t, s, ctx, operationID, result)
 	assertConnectionTestOutcome(t, result, fail)
 }
 
@@ -129,7 +129,7 @@ func pendingConnectionTest(t *testing.T, s *Server, ctx context.Context, operati
 	return record, result
 }
 
-func awaitConnectionTest(t *testing.T, s *Server, ctx context.Context, operationID string, record model.Record, result connectionTestResult) connectionTestResult {
+func awaitConnectionTest(t *testing.T, s *Server, ctx context.Context, operationID string, result connectionTestResult) connectionTestResult {
 	t.Helper()
 	for result.Stage == "running" {
 		select {
@@ -137,6 +137,7 @@ func awaitConnectionTest(t *testing.T, s *Server, ctx context.Context, operation
 			t.Fatal("test result never saved")
 		case <-time.After(10 * time.Millisecond):
 		}
+		var record model.Record
 		request := httptest.NewRequest("GET", "http://localhost/api/v1/operations/"+operationID, nil)
 		response := httptest.NewRecorder()
 		s.Handler().ServeHTTP(response, request)

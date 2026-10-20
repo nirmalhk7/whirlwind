@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -22,7 +23,7 @@ func testGit(t *testing.T, dir string, args ...string) {
 func TestIncrementalIndexUpdatesOnlyChangedEntries(t *testing.T) {
 	d := t.TempDir()
 	testGit(t, d, "init")
-	if err := os.WriteFile(filepath.Join(d, "a.go"), []byte("package a\nfunc Login() {}\n// TODO improve auth\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(d, "a.go"), []byte("package a\nfunc Login() {}\n// todo improve auth\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	testGit(t, d, "add", ".")
@@ -53,5 +54,16 @@ func TestIncrementalIndexUpdatesOnlyChangedEntries(t *testing.T) {
 func TestEmbeddingEvaluationRequiresCoverage(t *testing.T) {
 	if Benefit(0.5, 0.7, 1, 0.8) || !Benefit(0.5, 0.7, 1, 1) {
 		t.Fatal("embedding activation gate")
+	}
+}
+
+func TestActionMarkersIgnoreCase(t *testing.T) {
+	for _, line := range []string{"// todo improve auth", "// fixme handle timeout"} {
+		for _, variant := range []string{line, strings.ToUpper(line)} {
+			entry := sourceEntry("service.txt", []byte(variant))
+			if len(entry.TODOs) != 1 {
+				t.Errorf("action marker missed: %q", variant)
+			}
+		}
 	}
 }

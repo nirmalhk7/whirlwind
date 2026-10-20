@@ -134,7 +134,8 @@ func (i Index) Category() string {
 func sourceEntry(p string, b []byte) Entry {
 	entry := Entry{Path: p, Text: string(b), Symbols: []string{}, TODOs: []string{}}
 	for _, line := range strings.Split(string(b), "\n") {
-		if strings.Contains(line, "TODO") || strings.Contains(line, "FIXME") {
+		normalized := strings.ToLower(line)
+		if strings.Contains(normalized, "todo") || strings.Contains(normalized, "fixme") {
 			entry.TODOs = append(entry.TODOs, line)
 		}
 	}

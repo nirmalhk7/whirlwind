@@ -9,31 +9,47 @@ import (
 )
 
 func (a *agentRun) routeConfigured(config model.AgentConfig) (provider.Output, error) {
-	for _, choice := range config.Chain {
+	return a.routeChoices(config.Chain)
+}
+
+func (a *agentRun) routeChoices(choices []model.AgentChoice) (provider.Output, error) {
+	var failures []error
+	for _, choice := range choices {
 		if err := a.ctx.Err(); err != nil {
 			return provider.Output{}, err
 		}
 		source := a.configuredProvider(choice.Provider)
-		if _, err := provider.Route([]model.Provider{source}, a.input.Role, nil, nil); err != nil {
+		if err := a.configuredProviderError(source); err != nil {
+			failures = append(failures, fmt.Errorf("%s/%s: skipped (0 attempts): %w", choice.Provider, choice.Model, err))
+			a.fallbackReason = err.Error()
 			continue
 		}
-		a.input.Model = choice.Model
-		a.input.Thinking = choice.Thinking
-		a.input.SessionID = ""
-		execution, err := a.newAttempt(source)
-		if err != nil {
-			return provider.Output{}, err
+		output, advance, err := a.executeChoice(source, choice)
+		if !advance {
+			return output, err
 		}
-		output, err := execution.execute()
-		if execution.retry(err) {
-			continue
-		}
-		if execution.eventErr != nil {
-			return output, errors.Join(err, execution.eventErr)
-		}
-		return output, err
+		failures = append(failures, err)
+		a.fallbackReason = err.Error()
+		a.input.Prompt += "\nPrevious provider unavailable. Continue existing worktree from handoff; preserve completed work.\n" + jsonText(a.task.Handoff)
 	}
-	return provider.Output{}, fmt.Errorf("agent %s exhausted its configured provider/model fallback list", a.input.Role)
+	return provider.Output{}, errors.Join(append([]error{fmt.Errorf("agent %s exhausted its provider/model fallback list; inspect attempt evidence, correct provider setup if needed, then resume the task", a.input.Role)}, failures...)...)
+}
+
+func (a *agentRun) configuredProviderError(source model.Provider) error {
+	if _, err := provider.Route([]model.Provider{source}, a.input.Role, nil, nil); err != nil {
+		reason := err.Error()
+		if source.Quota == "exhausted" {
+			reason = "quota exhausted"
+			if source.ResetAt != "" {
+				reason += "; reset at " + source.ResetAt
+			}
+		}
+		if source.Limitation != "" {
+			reason += "; " + source.Limitation
+		}
+		return errors.New(reason)
+	}
+	return nil
 }
 
 func (a *agentRun) configuredProvider(id string) model.Provider {

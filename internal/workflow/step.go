@@ -21,6 +21,8 @@ type taskStep struct {
 
 // Step owns one task lease and delegates its transition to a focused stage handler.
 func (e *Engine) Step(ctx context.Context, id string) error {
+	ctx, release := e.runnerContext(ctx)
+	defer release()
 	lease, err := e.Store.Claim(ctx, "task:"+id, e.owner, time.Minute)
 	if err != nil {
 		return err

@@ -1,8 +1,13 @@
 import type { Dispatch, SetStateAction } from "react";
 import { api } from "./controlApi";
-import type { InboxMessage } from "./inboxMessageModel";
+import { inboxFeed, type InboxMessage } from "./inboxMessageModel";
+import { InboxTimestamp } from "./InboxTimestamp";
+import { InboxRemoveButton } from "./InboxRemoveButton";
+import { IdeaGroup, type DirectionChoice } from "./DirectionChoices";
+import type { Resource, Direction } from "./controlTypes";
 
 type Props = {
+ directions: Resource<Direction>[]; onSelect: (direction: DirectionChoice) => Promise<void>;
  messages: InboxMessage[]; loaded: boolean; error: string; busy: boolean;
  perform: (action: () => Promise<unknown>, message: string) => Promise<void>;
  setSelected: Dispatch<SetStateAction<string | null>>;
@@ -21,6 +26,7 @@ function QuestionMessage({ entry, busy, perform, nativeAnswers, setNativeAnswers
         "Answers sent to agent",
       );
     }}>
+    <InboxTimestamp value={entry.updated_at} />
     <h3>{entry.data.provider} needs your input</h3>
     {entry.data.questions.map((question) => (
       <label key={question.id}>
@@ -45,6 +51,7 @@ function QuestionMessage({ entry, busy, perform, nativeAnswers, setNativeAnswers
 function PermissionMessage({ entry: p, busy, perform }: Pick<Props, "busy" | "perform"> & { entry: Entry<"permission"> }) {
   return (
     <article className="action-card" key={`permission:${p.id}`}>
+      <InboxTimestamp value={p.updated_at} />
       <h3>{p.data.provider} requests permission</h3>
       <pre>{JSON.stringify(p.data.request, null, 2)}</pre>
       <div className="whirlwind-actions">
@@ -77,6 +84,12 @@ function PermissionMessage({ entry: p, busy, perform }: Pick<Props, "busy" | "pe
 function NotificationMessage({ entry: n, busy, perform, setSelected }: Pick<Props, "busy" | "perform" | "setSelected"> & { entry: Entry<"notification"> }) {
   return (
     <article className="action-card" key={`notification:${n.id}`}>
+      <div className="inbox-message-header">
+        <InboxRemoveButton label="Dismiss notification" disabled={busy} onClick={() => void perform(
+          () => api(`inbox/${encodeURIComponent(n.id)}`, "PATCH", {}, n.version), "Notification dismissed",
+        )} />
+        <InboxTimestamp value={n.updated_at} />
+      </div>
       <h3>{n.data.kind.replaceAll("_", " ")}</h3>
       <p>{n.data.message}</p>
       <div className="whirlwind-actions">
@@ -88,18 +101,6 @@ function NotificationMessage({ entry: n, busy, perform, setSelected }: Pick<Prop
             Open task
           </button>
         )}
-        <button
-          className="button"
-          disabled={busy}
-          onClick={() =>
-            void perform(
-              () => api(`inbox/${n.id}`, "PATCH", {}, n.version),
-              "Notification resolved",
-            )
-          }
-        >
-          Mark resolved
-        </button>
       </div>
     </article>
   );
@@ -112,10 +113,20 @@ function MessageCard({ message, ...props }: Props & { message: InboxMessage }) {
 }
 
 export function InboxMessages(props: Props) {
-  const { messages, loaded, error } = props;
-  return <section className="list" aria-labelledby="messages-heading">
-    <h2 id="messages-heading">Messages</h2>
-    {!messages.length && loaded && !error && <p className="muted">No messages waiting.</p>}
-    {messages.map((message) => <MessageCard key={`${message.type}:${message.entry.id}`} {...props} message={message} />)}
+  const { messages, directions, loaded, error } = props;
+  const entries = inboxFeed(messages, directions);
+  return <section className="list inbox-feed" aria-labelledby="messages-heading">
+    <h2 id="messages-heading">Messages and ideas</h2>
+    {!entries.length && loaded && !error && <p className="muted">No messages or ideas waiting.</p>}
+    <div className="inbox-feed-entries" role="list">
+      {entries.map(item => <div className="inbox-feed-entry" role="listitem" key={item.type === "idea" ? `idea:${item.entry.data.group_id ?? item.entry.id}` : `${item.type}:${item.entry.id}`}>
+        {item.type === "idea"
+          ? <IdeaGroup directions={item.directions} disabled={props.busy} onSelect={props.onSelect}
+              onDelete={() => props.perform(() => api(`directions/${encodeURIComponent(item.directions[0].id)}/group`, "DELETE", {
+                versions: Object.fromEntries(item.directions.map(direction => [direction.id, direction.version])),
+              }, item.directions[0].version), "Ideas deleted")} />
+          : <MessageCard {...props} message={item} />}
+      </div>)}
+    </div>
   </section>;
 }

@@ -51,7 +51,7 @@ func (b *Batch) put(ctx context.Context, s *Store, c Change) error {
 		return err
 	}
 	b.changes = append(b.changes, c)
-	b.records[c.Kind+":"+c.ID] = model.Record{ID: c.ID, Version: c.Expected + 1, Data: data, UpdatedAt: b.at}
+	b.records[c.Kind+":"+c.ID] = model.Record{ID: c.ID, Version: c.Expected + 1, Data: data, UpdatedAt: b.at, CreatedOrder: record.CreatedOrder}
 	return nil
 }
 

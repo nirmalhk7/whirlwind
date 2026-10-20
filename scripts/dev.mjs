@@ -12,10 +12,19 @@ if (!existsSync(next)) {
   process.exit(1);
 }
 
-const temporary = await mkdtemp(join(tmpdir(), "whirlwind-dev-"));
+const production = process.argv.includes("--production");
+const temporary = await mkdtemp(join(tmpdir(), production ? "whirlwind-prod-" : "whirlwind-dev-"));
 const binary = join(temporary, "whirlwind");
 const listen = process.env.WHIRLWIND_LISTEN || "127.0.0.1:9877";
 const port = process.env.WHIRLWIND_WEB_PORT || "9876";
+const frontendEnv = {
+  ...process.env,
+  WHIRLWIND_BACKEND_URL: process.env.WHIRLWIND_BACKEND_URL || `http://${listen}`,
+  ...(production ? {
+    NODE_ENV: "production",
+    WHIRLWIND_NEXT_DIST_DIR: process.env.WHIRLWIND_NEXT_DIST_DIR || ".next-production",
+  } : {}),
+};
 const jobs = [];
 let stopping = false;
 let status = 0;
@@ -57,13 +66,15 @@ process.on("SIGTERM", () => stop(0));
 try {
   const built = await launch("go", ["build", "-o", binary, "./cmd/whirlwind"], root);
   if (built !== 0) stop(built);
+  if (production && !stopping) {
+    console.log("Building production frontend...");
+    const builtFrontend = await launch(process.execPath, [next, "build"], join(root, "web"), frontendEnv);
+    if (builtFrontend !== 0) stop(builtFrontend);
+  }
   if (!stopping) {
     console.log(`Whirlwind backend: http://${listen}\nWhirlwind UI: http://127.0.0.1:${port}\nCtrl-C stops both.`);
     const backend = launch(binary, ["--listen", listen], root);
-    const frontend = launch(process.execPath, [next, "dev", "--hostname", "127.0.0.1", "--port", port], join(root, "web"), {
-      ...process.env,
-      WHIRLWIND_BACKEND_URL: process.env.WHIRLWIND_BACKEND_URL || `http://${listen}`,
-    });
+    const frontend = launch(process.execPath, [next, production ? "start" : "dev", "--hostname", "127.0.0.1", "--port", port], join(root, "web"), frontendEnv);
     stop(await Promise.race([backend, frontend]));
   }
   await Promise.all(jobs.map(({ done }) => done));

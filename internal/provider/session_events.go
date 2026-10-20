@@ -71,7 +71,9 @@ func (s *providerSession) turnCompleted(p map[string]any) {
 	status, _ := turn["status"].(string)
 	if status == "failed" && turn["error"] != nil {
 		b, _ := json.Marshal(turn["error"])
-		status += " " + string(b)
+		s.mu.Lock()
+		s.turnFailure = codexTurnFailure(b)
+		s.mu.Unlock()
 	}
 	select {
 	case s.completed <- status:

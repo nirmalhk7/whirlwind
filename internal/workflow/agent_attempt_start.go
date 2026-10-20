@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"fmt"
 	"time"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
@@ -12,7 +13,7 @@ func (a *agentRun) newAttempt(chosen model.Provider) (*agentAttempt, error) {
 		return nil, err
 	}
 	execution := &agentAttempt{agentRun: a, chosen: chosen, id: store.ID()}
-	execution.state = model.Attempt{AttemptID: execution.id, Task: a.task.ID, UnitID: a.input.UnitID, OperationID: a.input.OperationID, Purpose: a.input.Purpose, PreviousAttemptID: a.previousAttempt, Role: a.input.Role, Provider: chosen.ID, SessionID: a.input.SessionID, RequestedSessionID: a.input.SessionID, CWD: a.input.CWD, PlanVersion: a.task.PlanVersion, Finished: false, Status: "running", Owner: a.owner, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, PolicyHash: a.project.PolicyHash, Model: a.input.Model, ProjectID: a.project.ID, ProviderName: chosen.Name, Transport: provider.ExecutionProvider(chosen, a.input.Thinking).Kind, Thinking: a.input.Thinking, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	execution.state = model.Attempt{AttemptID: execution.id, Task: a.task.ID, UnitID: a.input.UnitID, OperationID: a.input.OperationID, Purpose: a.input.Purpose, PreviousAttemptID: a.previousAttempt, ResumedFromAttemptID: a.resumeSource, Role: a.input.Role, Provider: chosen.ID, SessionID: a.input.SessionID, RequestedSessionID: a.input.SessionID, CWD: a.input.CWD, PlanVersion: a.task.PlanVersion, Finished: false, Status: "running", Owner: a.owner, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, PolicyHash: a.project.PolicyHash, Model: a.input.Model, ProjectID: a.project.ID, ProviderName: chosen.Name, Transport: provider.ExecutionProvider(chosen, a.input.Thinking).Kind, Thinking: a.input.Thinking, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	if err := a.Store.Put(a.ctx, "sessions", execution.id, execution.state, 0); err != nil {
 		return nil, err
 	}
@@ -26,31 +27,15 @@ func (a *agentRun) newAttempt(chosen model.Provider) (*agentAttempt, error) {
 }
 
 func (a *agentRun) prepareAttemptResume(chosen model.Provider) error {
-	if a.input.SessionID == "" && a.task.Recoveries == 0 && !a.freshSession {
-		a.input.SessionID = a.resumeSession(a.ctx, a.task.ID, a.input.Role, chosen.ID, a.input.CWD, a.task.PlanVersion, a.input.Model, provider.ExecutionProvider(chosen, a.input.Thinking).Kind, thinkingKey(a.input.Thinking), a.input.Purpose)
+	saved, err := a.findResumeSession(a.ctx, a.task.ID, a.input.Role, chosen.ID, a.input.CWD, a.task.PlanVersion, a.input.Model, provider.ExecutionProvider(chosen, a.input.Thinking).Kind, thinkingKey(a.input.Thinking), a.input.Purpose, a.input.UnitID)
+	if err != nil {
+		return fmt.Errorf("%w: session lookup: %v", store.ErrPersistence, err)
 	}
-	if a.input.SessionID != "" && a.previousAttempt == "" {
-		records, err := a.Store.List(a.ctx, "sessions")
-		if err != nil {
-			return err
-		}
-		for _, record := range records {
-			state, err := store.Decode[model.Attempt](record)
-			if err != nil {
-				return err
-			}
-			if a.previousSessionMatches(state, chosen) {
-				a.previousAttempt = record.ID
-			}
-		}
+	a.resumeSource = saved.AttemptID
+	if saved.Session != "" {
+		a.input.SessionID = saved.Session
 	}
 	return nil
-}
-
-func (a *agentRun) previousSessionMatches(state model.Attempt, chosen model.Provider) bool {
-	sameSession := state.SessionID == a.input.SessionID && state.Task == a.task.ID && state.Role == a.input.Role
-	sameConfiguration := state.Provider == chosen.ID && state.CWD == a.input.CWD && state.PlanVersion == a.task.PlanVersion && state.Model == a.input.Model
-	return sameSession && sameConfiguration
 }
 
 func (a *agentAttempt) captureInput() error {
@@ -72,8 +57,9 @@ func (a *agentAttempt) captureInput() error {
 }
 
 func (a *agentAttempt) saveStarted() error {
-	if a.previousAttempt != "" && a.fallbackReason != "" {
+	if a.fallbackReason != "" {
 		a.event("whirlwind/fallback", map[string]string{"previous_attempt_id": a.previousAttempt, "reason": a.fallbackReason})
+		a.fallbackReason = ""
 	}
 	r, err := a.Store.Get(a.ctx, "sessions", a.id)
 	if err != nil {

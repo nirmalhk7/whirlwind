@@ -7,7 +7,7 @@ const baseURL = "http://127.0.0.1:3107";
 const backendURL = "http://127.0.0.1:8097";
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: ["go-workflow.spec.ts", "control-security.spec.ts"],
+  testMatch: ["go-workflow*.spec.ts", "control-security.spec.ts"],
   fullyParallel: false, retries: 0, reporter: "list",
   use: { baseURL, browserName: "chromium", launchOptions: process.env.WHIRLWIND_CHROMIUM_EXECUTABLE ? { executablePath: process.env.WHIRLWIND_CHROMIUM_EXECUTABLE } : undefined },
   webServer: [

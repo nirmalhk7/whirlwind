@@ -18,10 +18,10 @@ func TestResumeSessionMatchesSelectedModel(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := e.resumeSession(ctx, task.ID, "code", "fake", cwd, 1, "model-one"); got != "session-one" {
+	if got, err := e.resumeSession(ctx, task.ID, "code", "fake", cwd, 1, "model-one"); err != nil || got != "session-one" {
 		t.Fatalf("wrong model resumed: %s", got)
 	}
-	if got := e.resumeSession(ctx, task.ID, "code", "fake", cwd, 1, "unseen-model"); got != "" {
+	if got, err := e.resumeSession(ctx, task.ID, "code", "fake", cwd, 1, "unseen-model"); err != nil || got != "" {
 		t.Fatalf("new model reused session: %s", got)
 	}
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -43,7 +43,7 @@ if (!backend && process.env.FAIL_FRONTEND) {
 }
 const port = backend ? process.argv[process.argv.indexOf('--listen') + 1].split(':').at(-1) : process.argv[process.argv.indexOf('--port') + 1];
 const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-writeFileSync(process.env.WHIRLWIND_DATA_DIR + '/' + (backend ? 'backend' : 'frontend') + '.json', JSON.stringify({ pid: process.pid, child: child.pid }));
+writeFileSync(process.env.WHIRLWIND_DATA_DIR + '/' + (backend ? 'backend' : 'frontend') + '.json', JSON.stringify({ pid: process.pid, child: child.pid, args: process.argv.slice(2), mode: process.env.NODE_ENV, dist: process.env.WHIRLWIND_NEXT_DIST_DIR }));
 const app = http.createServer((req, res) => {
   if (!backend && process.env.FRONTEND_REDIRECT && req.url === '/') { res.statusCode = 307; res.setHeader('location', '/tasks'); res.end(); return; }
   if (req.url === '/api/v1/health') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status: 'ok' })); }
@@ -52,7 +52,17 @@ const app = http.createServer((req, res) => {
 });
 app.listen(Number(port), '127.0.0.1');
 `;
-  await writeFile(join(root, "web/node_modules/next/dist/bin/next"), server);
+  const build = `import { appendFileSync, existsSync } from 'node:fs';
+const command = process.argv[2];
+const artifact = process.env.WHIRLWIND_DATA_DIR + '/builds';
+if (command === 'build') {
+  if (process.env.FAIL_BUILD) process.exit(8);
+  appendFileSync(artifact, 'built\\n');
+  process.exit(0);
+}
+if (command === 'start' && !existsSync(artifact)) process.exit(9);
+`;
+  await writeFile(join(root, "web/node_modules/next/dist/bin/next"), build + server);
   await writeFile(join(root, "tools/go"), `#!${process.execPath}\nconst fs = require('node:fs');\nif (process.argv[2] === 'version') { console.log('go version go1.27.1'); }\nelse { fs.writeFileSync(process.argv[process.argv.indexOf('-o') + 1], ${JSON.stringify(`#!${process.execPath}\n${server}`)}, { mode: 0o755 }); }\n`);
   await chmod(join(root, "tools/go"), 0o755);
   const env = {
@@ -135,6 +145,33 @@ test("concurrent starts serialize and preserve one running instance", async (t) 
   const results = await Promise.all([run("start"), run("start")]);
   for (const result of results) assert.equal(result.code, 0, result.output);
   assert.equal((await run("status")).code, 0);
+});
+
+test("launcher builds production frontend before serving and rebuilds on restart", async (t) => {
+  const { run, data } = await fixture(t, { NODE_ENV: "development" });
+  let result = await run("start");
+  assert.equal(result.code, 0, result.output);
+  const frontend = JSON.parse(await readFile(join(data, "frontend.json"), "utf8"));
+  assert.equal(frontend.args[0], "start");
+  assert.equal(frontend.mode, "production");
+  assert.equal(frontend.dist, ".next-production");
+  assert.equal(await readFile(join(data, "builds"), "utf8"), "built\n");
+  result = await run("start");
+  assert.equal(result.code, 0, result.output);
+  assert.equal(await readFile(join(data, "builds"), "utf8"), "built\n");
+  result = await run("restart");
+  assert.equal(result.code, 0, result.output);
+  assert.equal(await readFile(join(data, "builds"), "utf8"), "built\nbuilt\n");
+});
+
+test("failed production build leaves no services running and reports logs", async (t) => {
+  const { run, data } = await fixture(t, { FAIL_BUILD: "1" });
+  const result = await run("start");
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /log/i);
+  await assert.rejects(access(join(data, "backend.json")), { code: "ENOENT" });
+  await assert.rejects(access(join(data, "frontend.json")), { code: "ENOENT" });
+  assert.equal((await run("status")).code, 1);
 });
 
 test("occupied ports fail without terminating unrelated listener", async (t) => {
