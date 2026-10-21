@@ -43,6 +43,8 @@ func (a *agentAttempt) saveEvent(kind string, data any) error {
 func (a *agentAttempt) saveStateEvent(ctx context.Context, kind string, b []byte) error {
 	var err error
 	switch kind {
+	case "whirlwind/context", "whirlwind/tool", "whirlwind/capability_warning", "whirlwind/recovery_uncertain":
+		err = a.observeRuntime(kind, b)
 	case "whirlwind/config":
 		err = a.applyConfigEvent(b)
 	case "whirlwind/session":

@@ -70,6 +70,7 @@ drivers = [
   "lint",
 ]
 mode = "comment"
+version = "2.15.0"
 
 [[plugin]]
 name = "osv-scanner"

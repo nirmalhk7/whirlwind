@@ -161,7 +161,9 @@ func TestPermissionSnapshotsExcludeProtocolSecrets(t *testing.T) {
 	}()
 	record := waitHookRecord(t, a, "permissions")
 	cancel()
-	<-done
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("permission cancellation lost: %v", err)
+	}
 	for _, secret := range []string{"private-env", "private-auth", "private-command"} {
 		if strings.Contains(string(record.Data), secret) {
 			t.Errorf("permission snapshot retained %s", secret)

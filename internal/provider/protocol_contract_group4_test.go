@@ -47,7 +47,11 @@ func (p *protocolPeer) fixtureSessionReply(f protocolFixture, params map[string]
 }
 
 func (p *protocolPeer) acpFixtureSessionReply(f protocolFixture, params map[string]any, id string) {
-	p.require(reflect.DeepEqual(params["mcpServers"], []any{}), "mcpServers must be an array")
+	if f.Scenario == "memory" {
+		p.requireMemoryServer(params["mcpServers"])
+	} else {
+		p.require(reflect.DeepEqual(params["mcpServers"], []any{}), "mcpServers must be an array")
+	}
 	p.replyACPFixtureMetadata(f, id)
 	if strings.HasPrefix(f.Scenario, "catalog-") {
 		for p.scanner.Scan() {

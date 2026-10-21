@@ -114,13 +114,13 @@ func (s *providerSession) openACPSession() (acpSession, error) {
 	if s.input.SessionID != "" {
 		session.ID = s.input.SessionID
 		s.replaying.Store(true)
-		err = s.rpc.Call(s.ctx, "session/load", map[string]any{"sessionId": session.ID, "cwd": s.input.CWD, "mcpServers": []any{}}, &session)
+		err = s.rpc.Call(s.ctx, "session/load", map[string]any{"sessionId": session.ID, "cwd": s.input.CWD, "mcpServers": s.memoryServers()}, &session)
 		s.replaying.Store(false)
 		s.mu.Lock()
 		s.output.Text = ""
 		s.mu.Unlock()
 	} else {
-		err = s.rpc.Call(s.ctx, "session/new", map[string]any{"cwd": s.input.CWD, "mcpServers": []any{}}, &session)
+		err = s.rpc.Call(s.ctx, "session/new", map[string]any{"cwd": s.input.CWD, "mcpServers": s.memoryServers()}, &session)
 	}
 	if err != nil {
 		return session, err

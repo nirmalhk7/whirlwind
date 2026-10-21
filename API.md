@@ -4,6 +4,8 @@ Go server owns `/api/v1`; Next.js forwards same-origin requests to loopback `WHI
 
 ## Contracts
 
+Project/role learning: `GET /api/v1/lessons?project_id=...` returns a cursor page (`items`, `next_after`), with optional `role`, `status`, `after`, and `limit` (1–500). `GET /api/v1/lessons/{id}` returns a lesson resource; `POST /api/v1/lessons/{id}/retire` requires `If-Match` and `Idempotency-Key`. See [learning contracts](docs/agent-learning.md#inspection-and-api). Attempt records add an optional `learning` snapshot containing recalled versions, new lesson IDs, feedback, warnings, bytes, and estimated tokens. Historical absent snapshots remain absent.
+
 JSON resources use `{id,version,data,updated_at}`. Lists return resource arrays. Versions start at 1. Mutations require `Idempotency-Key`; resource updates/actions additionally require `If-Match` containing current numeric version. Same key/request returns recorded response; reusing key for different input returns 409. Keys are server-global. Requests require JSON objects and are limited to 1 MiB. External writes reconcile their GitHub marker/branch before retrying; DB resource and event updates commit atomically. Mutation response receipts are stored after action completion, so clients must retain current resource versions when recovering interrupted mutations.
 
 Persisted resource envelopes also include `created_order`, an original insertion position shared across resource kinds. Inbox uses this value to keep messages and idea batches in creation order; changes to `updated_at` never move existing entries.
@@ -120,3 +122,15 @@ handling, restart reconciliation, and publication intent guarantees.
 `GET /provider-status` returns `{providers,interval_seconds,stopped}`. Each provider contains `id`, `name`, `kind`, `status` (`working`, `failed`, `unavailable`, `paused`, or `unknown`), `detail`, and `checked_at`. Metadata-only connection checks are bounded to ten seconds (including capacity waits), cached across tabs for `workers.provider_status_check_seconds` (default 30; valid 1–86400), and invalidated by configuration/stop changes. Checks send no model prompts. `workers.stopped: true` prevents provider process launches; the response marks installed providers paused. A successful check confirms protocol readiness, not an inference result.
 
 Root `settings.yaml` owns worker settings, provider definitions and ordered agent choices. Existing API shapes and numeric versions remain unchanged. UI POST/PATCH configuration mutations write YAML and cache state together; failed receipts restore the previous file. Valid external file edits refresh cache versions and emit normal events, so stale UI saves fail rather than overwrite those edits. Quota and availability observations remain runtime state and never rewrite YAML. Invalid YAML/schema/configuration returns an error instead of silently reverting to defaults. UI routes `/agents` and `/providers` redirect to `/settings#agents` and `/settings#providers`; API routes remain available.
+
+## Agent memory and recovery
+
+Session `learning` includes `searches` (`query`, `lessons`, `bytes`, `reason`), cumulative
+`search_calls`/`search_bytes`, and recalled match reasons. Optional `runtime` includes
+reported `context` (`used`, `size`, `source`), recovery counts, rotations, generation,
+checkpoint ID, recovery reason, and capability warnings. Missing occupancy is unknown.
+
+`POST /projects/{id}/lesson-search-evaluation` accepts `{fixtures:[{role,query,relevant:[]}]}`
+with project `If-Match` and `Idempotency-Key`. Requires explicit semantic lesson policy;
+returns recall/precision baseline and hybrid scores, exact coverage, configuration hash,
+and `enabled`. See [agent learning](docs/agent-learning.md) for gates and data limits.

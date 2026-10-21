@@ -59,6 +59,8 @@ func (rule routeRule) matches(q apiRequest) bool {
 }
 func (q apiRequest) dispatch() error {
 	rules := []routeRule{
+		{"GET", "lessons", "", false, q.lessons},
+		{"POST", "lessons", "retire", false, q.lessons},
 		{"GET", "sessions", "events", false, q.attemptEvents},
 
 		{"GET", "sessions", "evidence", false, q.linkedEvidence},
@@ -85,6 +87,7 @@ func (q apiRequest) dispatch() error {
 		{"POST", "projects", "ideation", false, q.ideate},
 		{"POST", "projects", "policy", false, q.confirmPolicy},
 		{"POST", "projects", "embedding-evaluation", false, q.evaluateEmbeddings},
+		{"POST", "projects", "lesson-search-evaluation", false, q.evaluateLessonSearch},
 		{"DELETE", "directions", "group", false, q.deleteDirectionGroup},
 		{"POST", "directions", "select", false, q.selectDirection},
 		{"POST", "directions", "deselect", false, q.deselectDirection},

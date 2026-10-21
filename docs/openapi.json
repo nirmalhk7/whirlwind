@@ -3270,6 +3270,369 @@
           }
         }
       }
+    },
+    "/api/v1/lessons": {
+      "get": {
+        "operationId": "lessonsList",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "ideate",
+                "plan",
+                "code",
+                "review"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tentative",
+                "corroborated",
+                "stale",
+                "retired"
+              ]
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "default": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "items",
+                    "next_after"
+                  ],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/LessonResource"
+                      }
+                    },
+                    "next_after": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/lessons/{id}": {
+      "get": {
+        "operationId": "lessonGet",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonResource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/lessons/{id}/retire": {
+      "post": {
+        "operationId": "lessonRetire",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LessonResource"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{id}/lesson-search-evaluation": {
+      "post": {
+        "operationId": "evaluateLessonSearch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fixtures"
+                ],
+                "properties": {
+                  "fixtures": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "role",
+                        "query",
+                        "relevant"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "ideate",
+                            "plan",
+                            "code",
+                            "review"
+                          ]
+                        },
+                        "query": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "relevant": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "baseline_recall": {
+                      "type": "number"
+                    },
+                    "recall": {
+                      "type": "number"
+                    },
+                    "baseline_precision": {
+                      "type": "number"
+                    },
+                    "precision": {
+                      "type": "number"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "exact_coverage": {
+                      "type": "boolean"
+                    },
+                    "configuration": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3782,6 +4145,293 @@
                   "format": "date-time"
                 }
               }
+            }
+          }
+        }
+      },
+      "Lesson": {
+        "type": "object",
+        "required": [
+          "id",
+          "project_id",
+          "role",
+          "trigger",
+          "mistake",
+          "correction",
+          "status",
+          "attempt_id",
+          "task_id",
+          "provider"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ideate",
+              "plan",
+              "code",
+              "review"
+            ]
+          },
+          "trigger": {
+            "type": "string"
+          },
+          "mistake": {
+            "type": "string"
+          },
+          "correction": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "tentative",
+              "corroborated",
+              "stale",
+              "retired"
+            ]
+          },
+          "attempt_id": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "error_signature": {
+            "type": "string"
+          },
+          "paths": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string"
+            }
+          },
+          "symbols": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_ids": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string"
+            }
+          },
+          "anchors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "LessonResource": {
+        "type": "object",
+        "required": [
+          "id",
+          "version",
+          "data",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "data": {
+            "$ref": "#/components/schemas/Lesson"
+          }
+        }
+      },
+      "LearningSnapshot": {
+        "type": "object",
+        "required": [
+          "recalled",
+          "bytes",
+          "estimated_tokens"
+        ],
+        "properties": {
+          "recalled": {
+            "type": "array",
+            "maxItems": 9,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "version",
+                "status"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "match": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "created_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "feedback": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2048
+          },
+          "estimated_tokens": {
+            "type": "integer",
+            "description": "Local bytes/4 estimate; not a provider token count"
+          },
+          "search_calls": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "search_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096
+          },
+          "searches": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string"
+                },
+                "lessons": {
+                  "type": "array",
+                  "maxItems": 9,
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "version",
+                      "status"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "match": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "bytes": {
+                  "type": "integer",
+                  "maximum": 2048
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "RuntimeSnapshot": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "required": [
+              "used",
+              "size",
+              "source"
+            ],
+            "properties": {
+              "used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          },
+          "recoveries": {
+            "type": "integer"
+          },
+          "rotations": {
+            "type": "integer"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "checkpoint_id": {
+            "type": "string"
+          },
+          "recovery_reason": {
+            "type": "string"
+          },
+          "uncertain": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }

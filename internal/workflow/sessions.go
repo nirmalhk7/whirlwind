@@ -65,19 +65,20 @@ func (r sessionRequirements) matchesScope(value, scope storedSession) bool {
 }
 
 type storedSession struct {
-	CreatedOrder int64                 `json:"-"`
-	AttemptID    string                `json:"attempt_id"`
-	UnitID       string                `json:"unit_id"`
-	Task         string                `json:"task"`
-	Role         string                `json:"role"`
-	Provider     string                `json:"provider"`
-	CWD          string                `json:"cwd"`
-	Version      int                   `json:"plan_version"`
-	Session      string                `json:"session_id"`
-	Model        string                `json:"model"`
-	Transport    string                `json:"transport"`
-	Purpose      string                `json:"purpose"`
-	Thinking     *model.ThinkingChoice `json:"thinking"`
+	Runtime      *model.RuntimeSnapshot `json:"runtime,omitempty"`
+	CreatedOrder int64                  `json:"-"`
+	AttemptID    string                 `json:"attempt_id"`
+	UnitID       string                 `json:"unit_id"`
+	Task         string                 `json:"task"`
+	Role         string                 `json:"role"`
+	Provider     string                 `json:"provider"`
+	CWD          string                 `json:"cwd"`
+	Version      int                    `json:"plan_version"`
+	Session      string                 `json:"session_id"`
+	Model        string                 `json:"model"`
+	Transport    string                 `json:"transport"`
+	Purpose      string                 `json:"purpose"`
+	Thinking     *model.ThinkingChoice  `json:"thinking"`
 }
 
 type sessionRequirements struct {

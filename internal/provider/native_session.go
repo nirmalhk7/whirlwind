@@ -10,7 +10,11 @@ import (
 
 func (s *providerSession) runCodex() error {
 	var e error
-	e = s.rpc.Call(s.ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "whirlwind", "version": "0.1.0"}}, nil)
+	initialization := map[string]any{"clientInfo": map[string]any{"name": "whirlwind", "version": "0.1.0"}}
+	if s.input.Memory != nil {
+		initialization["capabilities"] = map[string]bool{"experimentalApi": true}
+	}
+	e = s.rpc.Call(s.ctx, "initialize", initialization, nil)
 	if e != nil {
 		return e
 	}
@@ -28,6 +32,9 @@ func (s *providerSession) runCodex() error {
 	if s.input.ReadOnly {
 		params["sandbox"] = "read-only"
 	}
+	if s.input.Memory != nil && s.input.SessionID == "" {
+		params["dynamicTools"] = memoryToolDefinition()
+	}
 	method := "thread/start"
 	if s.input.SessionID != "" {
 		method = "thread/resume"
@@ -39,7 +46,7 @@ func (s *providerSession) runCodex() error {
 			ID string `json:"id"`
 		} `json:"thread"`
 	}
-	e = s.rpc.Call(s.ctx, method, params, &thread)
+	e = s.openNativeThread(method, params, &thread)
 	if e != nil {
 		return e
 	}
@@ -63,7 +70,7 @@ func (s *providerSession) runCodex() error {
 func (s *providerSession) runClaude() error {
 	var e error
 	var response Output
-	e = s.rpc.Call(s.ctx, "run", map[string]any{"cwd": s.input.CWD, "prompt": s.input.Prompt, "session_id": s.input.SessionID, "read_only": s.input.ReadOnly, "model": s.input.Model}, &response)
+	e = s.rpc.Call(s.ctx, "run", map[string]any{"cwd": s.input.CWD, "prompt": s.input.Prompt, "session_id": s.input.SessionID, "read_only": s.input.ReadOnly, "model": s.input.Model, "memory": s.input.Memory}, &response)
 	s.mu.Lock()
 	if e == nil {
 		s.output = response

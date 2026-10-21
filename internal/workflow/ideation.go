@@ -19,6 +19,9 @@ const ideationPrefix = "ideation:"
 func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) error {
 	ctx, release := e.runnerContext(ctx)
 	defer release()
+	if operationID(ctx) == "" {
+		ctx = WithOperation(ctx, p.ID+":"+day)
+	}
 	key := "generation:" + p.ID
 	lease, err := e.Store.Claim(ctx, key, e.owner, time.Minute)
 	if err != nil {
@@ -117,19 +120,15 @@ func (e *Engine) generateDirections(ctx context.Context, p model.Project, prompt
 		if rejected != nil {
 			input += "\nPrevious batch rejected: " + rejected.Error() + "\nGenerate a replacement batch of four substantively different ideas."
 		}
-		out, err := e.agent(ctx, p, model.Task{ID: ideationPrefix + p.ID, Issue: model.Issue{Title: "innovation"}}, provider.Input{Role: "ideate", CWD: scratch, Prompt: input, ReadOnly: true})
+		proposal, err := e.proposeDirections(ctx, p, scratch, input, previous)
 		if err != nil {
 			return nil, err
 		}
-		var directions []model.Direction
-		if err = provider.JSON(out.Text, &directions); err != nil {
-			rejected = err
+		if proposal.Rejected != nil {
+			rejected = proposal.Rejected
 			continue
 		}
-		if err = validateDirections(directions, previous); err != nil {
-			rejected = err
-			continue
-		}
+		directions := proposal.Directions
 		unique, reason, err := e.reviewDirectionNovelty(ctx, p, scratch, directions, previous)
 		if err != nil {
 			return nil, err
@@ -148,7 +147,7 @@ func (e *Engine) reviewDirectionNovelty(ctx context.Context, p model.Project, sc
 	if err != nil {
 		return false, "", err
 	}
-	out, err := e.agent(ctx, p, model.Task{ID: ideationPrefix + p.ID + ":novelty:" + store.ID(), Issue: model.Issue{Title: "idea novelty review"}}, provider.Input{Role: "ideate", CWD: scratch, Prompt: prompt, ReadOnly: true})
+	out, err := e.agent(ctx, p, model.Task{ID: ideationGenerationID(ctx, p.ID) + ":novelty", Issue: model.Issue{Title: "idea novelty review"}}, provider.Input{OutputContract: "novelty", Role: "ideate", CWD: scratch, Prompt: prompt, ReadOnly: true})
 	if err != nil {
 		return false, "", err
 	}

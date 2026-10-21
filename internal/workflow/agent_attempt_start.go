@@ -14,16 +14,41 @@ func (a *agentRun) newAttempt(chosen model.Provider) (*agentAttempt, error) {
 	}
 	execution := &agentAttempt{agentRun: a, chosen: chosen, id: store.ID()}
 	execution.state = model.Attempt{AttemptID: execution.id, Task: a.task.ID, UnitID: a.input.UnitID, OperationID: a.input.OperationID, Purpose: a.input.Purpose, PreviousAttemptID: a.previousAttempt, ResumedFromAttemptID: a.resumeSource, Role: a.input.Role, Provider: chosen.ID, SessionID: a.input.SessionID, RequestedSessionID: a.input.SessionID, CWD: a.input.CWD, PlanVersion: a.task.PlanVersion, Finished: false, Status: "running", Owner: a.owner, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, PolicyHash: a.project.PolicyHash, Model: a.input.Model, ProjectID: a.project.ID, ProviderName: chosen.Name, Transport: provider.ExecutionProvider(chosen, a.input.Thinking).Kind, Thinking: a.input.Thinking, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	if err := a.Store.Put(a.ctx, "sessions", execution.id, execution.state, 0); err != nil {
+	runtime, err := a.attemptRuntime()
+	if err != nil {
 		return nil, err
 	}
-	if err := execution.captureInput(); err != nil {
-		return nil, err
+	execution.state.Runtime = runtime
+	if a.learning != nil {
+		snapshot := *a.learning
+		execution.state.Learning = &snapshot
 	}
-	if err := execution.saveStarted(); err != nil {
+	if err := execution.persistStarted(); err != nil {
 		return nil, err
 	}
 	return execution, nil
+}
+
+func (a *agentRun) attemptRuntime() (*model.RuntimeSnapshot, error) {
+	state, _, err := a.loadRuntime()
+	if err != nil {
+		return nil, err
+	}
+	count, _, err := a.recoveryCount()
+	if err != nil {
+		return nil, err
+	}
+	return &model.RuntimeSnapshot{Generation: state.Generation, Rotations: state.Rotations, RecoveryReason: state.Reason, CheckpointID: state.CheckpointID, Recoveries: count}, nil
+}
+
+func (a *agentAttempt) persistStarted() error {
+	if err := a.Store.Put(a.ctx, "sessions", a.id, a.state, 0); err != nil {
+		return err
+	}
+	if err := a.captureInput(); err != nil {
+		return err
+	}
+	return a.saveStarted()
 }
 
 func (a *agentRun) prepareAttemptResume(chosen model.Provider) error {
@@ -31,8 +56,18 @@ func (a *agentRun) prepareAttemptResume(chosen model.Provider) error {
 	if err != nil {
 		return fmt.Errorf("%w: session lookup: %v", store.ErrPersistence, err)
 	}
-	a.resumeSource = saved.AttemptID
-	if saved.Session != "" {
+	if chosen.Kind == "codex" && saved.Runtime == nil && saved.Session != "" && a.learning != nil {
+		if err := a.rotateSession("Enable memory tools on historical session", false); err != nil {
+			return err
+		}
+	}
+	resume, err := a.prepareRuntimeResume(saved)
+	if err != nil {
+		return err
+	}
+	a.resumeSource = ""
+	if resume {
+		a.resumeSource = saved.AttemptID
 		a.input.SessionID = saved.Session
 	}
 	return nil
@@ -43,7 +78,7 @@ func (a *agentAttempt) captureInput() error {
 	if err != nil {
 		return err
 	}
-	snapshot, err := store.SafeJSON(model.AttemptInput{Handoff: a.task.Handoff, Policy: a.project.Policy, Provider: provider.ExecutionProvider(a.chosen, a.input.Thinking), ReadOnly: a.input.ReadOnly, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, Model: a.input.Model, Thinking: a.input.Thinking})
+	snapshot, err := store.SafeJSON(model.AttemptInput{Learning: a.state.Learning, Handoff: a.task.Handoff, Policy: a.project.Policy, Provider: provider.ExecutionProvider(a.chosen, a.input.Thinking), ReadOnly: a.input.ReadOnly, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, Model: a.input.Model, Thinking: a.input.Thinking})
 	if err != nil {
 		return err
 	}

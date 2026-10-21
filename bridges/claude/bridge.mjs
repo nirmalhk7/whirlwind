@@ -1,26 +1,10 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import readline from "node:readline";
-
-function optionalModel(model) {
-  return model ? { resolved_model: model } : {};
-}
+import { queryOptions } from "./bridge-options.mjs";
+import { optionalModel, attemptUsage, contextOccupancy } from "./bridge-telemetry.mjs";
 
 function errorFrame(id, error) {
   return { id, error: { code: -32000, message: String(error.message ?? error) } };
-}
-
-function queryOptions({ cwd, model, read_only, session_id }) {
-  const optional = [
-    ["model", model, model],
-    ["disallowedTools", ["Edit", "Write", "Bash", "NotebookEdit"], read_only],
-    ["resume", session_id, session_id],
-  ];
-  return { cwd, permissionMode: "default", ...Object.fromEntries(optional.filter(([, , enabled]) => enabled).map(([key, value]) => [key, value])) };
-}
-
-function attemptUsage(message, tokens, cost) {
-  const counts = Object.fromEntries(["input_tokens", "output_tokens", "cache_read_input_tokens"].map((key) => [key, message.usage[key] ?? null]));
-  return { input_tokens: counts.input_tokens, output_tokens: counts.output_tokens, cached_tokens: counts.cache_read_input_tokens, total_tokens: tokens, cost, scope: "attempt" };
 }
 
 const pending = new Map();
@@ -39,10 +23,12 @@ const permission = (tool, input, signal, method = "permission/request") => new P
   send({ id, method, params: params[method] });
 });
 let running = false;
+let activeQuery;
 readline.createInterface({ input: process.stdin }).on("line", async (line) => {
   let frame;
   try { frame = JSON.parse(line); } catch { process.exitCode = 1; return; }
   if (!frame.method) { pending.get(frame.id)?.(frame.result, frame.error); return; }
+  if (frame.method === "cancel") { await activeQuery?.interrupt(); return; }
   if (frame.method === "models" && !running) {
     running = true;
     let session;
@@ -62,11 +48,12 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
   if (frame.method !== "run" || running) { send({ id: frame.id, error: { code: -32601, message: "Unsupported or concurrent run" } }); return; }
   running = true;
   try {
-    const { cwd, prompt, session_id, read_only, model } = frame.params;
+    const { cwd, prompt, session_id, read_only, model, memory } = frame.params;
     const options = {
-      ...queryOptions({ cwd, model, read_only, session_id }),
+      ...queryOptions({ cwd, model, read_only, session_id, memory }),
       canUseTool: async (tool, input, { signal }) => {
         if (tool === "AskUserQuestion") { const questions = input.questions.map((q) => ({ id: q.question, text: q.question, options: (q.options ?? []).map((o) => o.label) })); const response = await permission(tool, { questions }, signal, "question/request"); return { behavior: "allow", updatedInput: { questions: input.questions, answers: response.answers } }; }
+        if (memory && tool === "mcp__whirlwind-memory__search_lessons") return { behavior: "allow", updatedInput: input };
         if (read_only) return ["Read", "Glob", "Grep"].includes(tool)
           ? { behavior: "allow", updatedInput: input }
           : { behavior: "deny", message: "Read-only role" };
@@ -74,12 +61,14 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
         return answer.allow ? { behavior: "allow", updatedInput: input } : { behavior: "deny", message: "Whirlwind permission denied" };
       },
     };
-    let text = "", sid = "", resolvedModel = "", cost = null, tokens = null, usage = null, succeeded = false, failure = "Claude did not complete successfully";
+    let text = "", sid = "", resolvedModel = "", cost = null, tokens = null, usage = null, context = null, lastUsage = null, succeeded = false, failure = "Claude did not complete successfully";
     async function* input() { yield { type: "user", message: { role: "user", content: prompt }, parent_tool_use_id: null, session_id: session_id ?? "" }; }
-    for await (const message of query({ prompt: input(), options })) {
+    activeQuery = query({ prompt: input(), options });
+    for await (const message of activeQuery) {
       sid = message.session_id ?? sid;
       if (message.type === "system" && message.subtype === "init" && typeof message.model === "string") resolvedModel = message.model;
       if (message.type === "assistant") {
+        lastUsage = message.message?.usage ?? lastUsage;
         if (["rate_limit", "billing_error"].includes(message.error)) failure = `Claude quota exhausted: ${message.error}`;
         text = message.message.content.filter((content) => content.type === "text").reduce((current, content) => current + content.text, text);
       }
@@ -90,11 +79,12 @@ readline.createInterface({ input: process.stdin }).on("line", async (line) => {
         cost = message.total_cost_usd ?? null;
         tokens = message.usage ? ["input_tokens", "output_tokens"].map((key) => message.usage[key] ?? 0).reduce((input, output) => input + output) : null;
         if(message.usage) usage = attemptUsage(message, tokens, cost);
+        context = contextOccupancy(lastUsage, message.modelUsage, resolvedModel);
       }
-      send({ method: "agent/event", params: { type: message.type, session_id: sid, ...optionalModel(resolvedModel), ...(["assistant", "user"].includes(message.type) ? {message:{role:message.message?.role,content:message.message?.content?.filter(content=>!["thinking","redacted_thinking"].includes(content.type))}} : {}), ...(message.type === "result" ? {subtype:message.subtype,stop_reason:message.stop_reason,usage,cost,errors:message.errors} : {}) } });
+      send({ method: "agent/event", params: { type: message.type, session_id: sid, ...optionalModel(resolvedModel), ...(["assistant", "user"].includes(message.type) ? {message:{role:message.message?.role,content:message.message?.content?.filter(content=>!["thinking","redacted_thinking"].includes(content.type))}} : {}), ...(message.type === "result" ? {subtype:message.subtype,stop_reason:message.stop_reason,usage,cost,context,errors:message.errors} : {}) } });
     }
     if (!succeeded) throw new Error(failure);
-    send({ id: frame.id, result: { text, session_id: sid, cost, tokens, usage, ...optionalModel(resolvedModel) } });
+    send({ id: frame.id, result: { text, session_id: sid, cost, tokens, usage, context, ...optionalModel(resolvedModel) } });
   } catch (error) { send(errorFrame(frame.id, error)); }
-  finally { running = false; }
+  finally { activeQuery?.close(); activeQuery = undefined; running = false; }
 });

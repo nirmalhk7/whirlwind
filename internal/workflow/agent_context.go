@@ -21,17 +21,26 @@ func (a *agentRun) prepare() error {
 	if err := a.loadProviders(); err != nil {
 		return err
 	}
+	if err := a.prepareRepositoryContext(); err != nil {
+		return err
+	}
+	a.prepareLearning()
+	return nil
+}
+
+func (a *agentRun) prepareRepositoryContext() error {
 	index, err := a.worktreeIndex()
 	if err != nil {
 		return err
 	}
 	a.index = index
-	if err = a.saveIndexSnapshot(); err != nil {
+	if err := a.saveIndexSnapshot(); err != nil {
 		return err
 	}
 	a.input.Prompt += "\nSelected repository context:\n" + a.index.Package(a.task.Issue.Title+" "+a.task.Issue.Body+" "+a.input.Prompt)
 	return a.embedContext()
 }
+
 func (a *agentRun) loadProviders() error {
 	records, err := a.Store.List(a.ctx, "providers")
 	if err != nil {
