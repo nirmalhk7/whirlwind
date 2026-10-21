@@ -87,6 +87,7 @@ func (q apiRequest) dispatch() error {
 		{"POST", "projects", "ideation", false, q.ideate},
 		{"POST", "projects", "policy", false, q.confirmPolicy},
 		{"POST", "projects", "embedding-evaluation", false, q.evaluateEmbeddings},
+		{"POST", "projects", "lesson-search-evaluation", false, q.evaluateLessonSearch},
 		{"DELETE", "directions", "group", false, q.deleteDirectionGroup},
 		{"POST", "directions", "select", false, q.selectDirection},
 		{"POST", "directions", "deselect", false, q.deselectDirection},

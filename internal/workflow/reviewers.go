@@ -14,7 +14,7 @@ import (
 
 func (step *taskStep) primaryReview(prompt string) (model.Review, error) {
 	var review model.Review
-	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Purpose: "primary", Role: "review", CWD: step.task.Worktree, Prompt: prompt, ReadOnly: true, SessionID: ""})
+	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{OutputContract: "review", Purpose: "primary", Role: "review", CWD: step.task.Worktree, Prompt: prompt, ReadOnly: true, SessionID: ""})
 	if err != nil {
 		return review, err
 	}
@@ -65,7 +65,7 @@ func (step *taskStep) specialistReview(prompt, perspective string) (model.Review
 	if err != nil {
 		return extra, err
 	}
-	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Purpose: perspective, Role: "review", CWD: step.task.Worktree, Prompt: specialized, ReadOnly: true, SessionID: ""})
+	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{OutputContract: "review", Purpose: perspective, Role: "review", CWD: step.task.Worktree, Prompt: specialized, ReadOnly: true, SessionID: ""})
 	if err != nil {
 		return extra, err
 	}

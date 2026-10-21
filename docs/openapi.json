@@ -3488,6 +3488,151 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{id}/lesson-search-evaluation": {
+      "post": {
+        "operationId": "evaluateLessonSearch",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fixtures"
+                ],
+                "properties": {
+                  "fixtures": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "role",
+                        "query",
+                        "relevant"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string",
+                          "enum": [
+                            "ideate",
+                            "plan",
+                            "code",
+                            "review"
+                          ]
+                        },
+                        "query": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 2048
+                        },
+                        "relevant": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "baseline_recall": {
+                      "type": "number"
+                    },
+                    "recall": {
+                      "type": "number"
+                    },
+                    "baseline_precision": {
+                      "type": "number"
+                    },
+                    "precision": {
+                      "type": "number"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "exact_coverage": {
+                      "type": "boolean"
+                    },
+                    "configuration": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -4133,7 +4278,7 @@
         "properties": {
           "recalled": {
             "type": "array",
-            "maxItems": 3,
+            "maxItems": 9,
             "items": {
               "type": "object",
               "required": [
@@ -4149,6 +4294,9 @@
                   "type": "integer"
                 },
                 "status": {
+                  "type": "string"
+                },
+                "match": {
                   "type": "string"
                 }
               }
@@ -4180,6 +4328,111 @@
           "estimated_tokens": {
             "type": "integer",
             "description": "Local bytes/4 estimate; not a provider token count"
+          },
+          "search_calls": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2
+          },
+          "search_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096
+          },
+          "searches": {
+            "type": "array",
+            "maxItems": 2,
+            "items": {
+              "type": "object",
+              "properties": {
+                "query": {
+                  "type": "string"
+                },
+                "lessons": {
+                  "type": "array",
+                  "maxItems": 9,
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "version",
+                      "status"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "version": {
+                        "type": "integer"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "match": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "bytes": {
+                  "type": "integer",
+                  "maximum": 2048
+                },
+                "reason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "RuntimeSnapshot": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "object",
+            "required": [
+              "used",
+              "size",
+              "source"
+            ],
+            "properties": {
+              "used": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "source": {
+                "type": "string"
+              }
+            }
+          },
+          "recoveries": {
+            "type": "integer"
+          },
+          "rotations": {
+            "type": "integer"
+          },
+          "generation": {
+            "type": "integer"
+          },
+          "checkpoint_id": {
+            "type": "string"
+          },
+          "recovery_reason": {
+            "type": "string"
+          },
+          "uncertain": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       }

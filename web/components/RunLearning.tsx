@@ -1,47 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "./controlApi";
+import { useState } from "react";
+import {RunMemorySearches} from "./RunMemorySearches";
+import { useRunLearning, type LessonRecord } from "./useRunLearning";
 
 export type LearningSnapshot = {
-  recalled: { id: string; version: number; status: string }[];
+  recalled: { id: string; version: number; status: string; match?: string }[];
+  search_calls?: number;
+  search_bytes?: number;
+  searches?: {query:string;bytes:number;reason:string;lessons:{id:string;version:number}[]}[];
   created_ids?: string[];
   feedback?: { lesson_id: string; verdict: string; reason: string }[];
   warnings?: string[];
   bytes: number;
   estimated_tokens: number;
 };
-type LessonRecord = { id: string; version: number; data: {
-  status: string; role: string; trigger: string; mistake: string; correction: string;
-  paths?: string[]; evidence_ids?: string[]; reason?: string;
-} };
-
 export function RunLearning({ learning }: { learning: LearningSnapshot }) {
-  const ids = [...new Set([...(learning.recalled ?? []).map(item => item.id), ...(learning.created_ids ?? [])])].slice(0, 5);
-  const key = ids.join(",");
-  const [lessons, setLessons] = useState<LessonRecord[]>([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    if (!key) { setLessons([]); return; }
-    const controller = new AbortController();
-    setLoading(true); setError("");
-    void Promise.all(key.split(",").map(async id => {
-      const response = await fetch(`/api/v1/lessons/${encodeURIComponent(id)}`, { signal: controller.signal });
-      if (!response.ok) throw new Error("Learning details unavailable. Refresh and retry.");
-      return response.json() as Promise<LessonRecord>;
-    })).then(records => { if (!controller.signal.aborted) setLessons(records); })
-      .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Learning details unavailable."); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, [key]);
-  async function retire(record: LessonRecord) {
-    const updated = await api<LessonRecord>(`lessons/${encodeURIComponent(record.id)}/retire`, "POST", {}, record.version);
-    setLessons(previous => previous.map(item => item.id === updated.id ? updated : item));
-  }
+  const ids = learningLessonIds(learning);
+  const { lessons, error, loading, retire } = useRunLearning(ids);
   return <section aria-label="Agent learning" className="run-learning">
     <h4>Learning</h4>
-    <p className="muted">Recalled memory: {learning.bytes} bytes · {learning.estimated_tokens} estimated tokens</p>
+    <p className="muted">Automatic memory: {learning.bytes} bytes · {learning.estimated_tokens} estimated tokens</p>
+    <RunMemorySearches searches={learning.searches} calls={learning.search_calls} bytes={learning.search_bytes} />
     {!ids.length && <p className="muted">No lessons recalled or recorded.</p>}
     {learning.warnings?.map((warning, index) => <p className="muted" key={index}>{warning}</p>)}
     {loading && <p role="status">Loading lessons…</p>}
@@ -51,8 +31,12 @@ export function RunLearning({ learning }: { learning: LearningSnapshot }) {
   </section>;
 }
 
+function learningLessonIds(learning: LearningSnapshot): string[] {
+  return [...new Set([...(learning.recalled ?? []).map(item => item.id), ...(learning.created_ids ?? [])])].slice(0, 9);
+}
+
 function Lesson({ record, recalled, learned, onRetire }: {
-  record: LessonRecord; recalled?: { version: number; status: string }; learned?: boolean;
+  record: LessonRecord; recalled?: { version: number; status: string;match?:string }; learned?: boolean;
   onRetire: (record: LessonRecord) => Promise<void>;
 }) {
   const [pending, setPending] = useState(false);
@@ -66,6 +50,7 @@ function Lesson({ record, recalled, learned, onRetire }: {
   const lesson = record.data;
   return <article className="run-lesson">
     <p className="muted">{recalled && <>Recalled v{recalled.version} · {recalled.status} · </>}{learned && <>Recorded this run · </>}Current: {lesson.status}</p>
+    {recalled?.match && <p className="muted">Selected: {recalled.match}</p>}
     <dl>
       <div><dt>When</dt><dd>{lesson.trigger}</dd></div>
       <div><dt>Avoid</dt><dd>{lesson.mistake}</dd></div>

@@ -52,7 +52,7 @@ func TestEvidenceMigrationPreservesHistoricalRecords(t *testing.T) {
 		t.Fatal("migration invented historical events", events, err)
 	}
 	var version int
-	if err = s.DB.QueryRow("SELECT max(version) FROM migrations").Scan(&version); err != nil || version != 7 {
+	if err = s.DB.QueryRow("SELECT max(version) FROM migrations").Scan(&version); err != nil || version != 9 {
 		t.Fatal(version, err)
 	}
 }

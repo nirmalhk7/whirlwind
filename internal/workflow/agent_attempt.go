@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
+	"whirlwind/internal/memorybridge"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -14,12 +16,15 @@ import (
 
 type agentAttempt struct {
 	*agentRun
-	chosen   model.Provider
-	id       string
-	state    model.Attempt
-	mu       sync.Mutex
-	eventErr error
-	cancel   context.CancelFunc
+	chosen       model.Provider
+	id           string
+	state        model.Attempt
+	mu           sync.Mutex
+	memoryMu     sync.Mutex
+	memoryClosed bool
+	tracker      runtimeTracker
+	eventErr     error
+	cancel       context.CancelFunc
 }
 
 func (a *agentAttempt) execute() (provider.Output, error) {
@@ -34,18 +39,40 @@ func (a *agentAttempt) execute() (provider.Output, error) {
 	a.cancel = cancel
 	a.mu.Unlock()
 	defer cancel()
-	hooks := provider.Hooks{Questions: a.questions, Event: a.event, Permission: a.permission}
+	hooks := provider.Hooks{SearchLessons: a.searchLessons, ShouldStop: a.shouldStop, Questions: a.questions, Event: a.event, Permission: a.permission}
 	input := a.input
 	input.Policy = a.project.Policy
+	if a.learning == nil {
+		hooks.SearchLessons = nil
+	}
+	if a.learning != nil {
+		endpoint, err := memorybridge.Start(ctx, a.searchLessons)
+		if err != nil {
+			return provider.Output{}, err
+		}
+		defer endpoint.Close()
+		executable, err := os.Executable()
+		if err != nil {
+			return provider.Output{}, err
+		}
+		input.Memory = &provider.MemoryConnection{URL: endpoint.URL, Token: endpoint.Token, Command: executable}
+	}
 	started := time.Now()
 	output, err := a.Adapter(provider.ExecutionProvider(a.chosen, input.Thinking)).Run(ctx, input, hooks)
+	a.memoryMu.Lock()
+	a.memoryClosed = true
+	a.memoryMu.Unlock()
 	if a.input.Purpose == "provider_test" && err == nil && strings.TrimSpace(output.Text) == "" {
 		err = errors.New("provider completed without a reply; check agent setup and retry")
 	}
+	err = a.recoveryOutcome(err)
 	output.AttemptID = a.id
 	a.mu.Lock()
 	err = errors.Join(err, a.eventErr)
 	a.mu.Unlock()
+	if err == nil {
+		err = validateAgentOutput(input, output.Text)
+	}
 	raw := output.Text
 	output.Text = a.finishLearning(context.WithoutCancel(ctx), raw, err)
 	evidenceOutput := output
@@ -94,6 +121,9 @@ func (a *agentAttempt) finish(output provider.Output, runErr error, started time
 		}
 	}
 	a.state.Usage = output.Usage
+	if output.Context != nil {
+		a.state.Runtime.Context = output.Context
+	}
 	tokens, cost := output.Tokens, output.Cost
 	if output.Usage != nil && output.Usage.Scope == "session" {
 		tokens = nil

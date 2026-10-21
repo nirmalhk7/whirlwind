@@ -9,6 +9,7 @@ import (
 
 	"whirlwind/internal/github"
 	"whirlwind/internal/httpapi"
+	"whirlwind/internal/memorybridge"
 	"whirlwind/internal/workflow"
 )
 
@@ -18,8 +19,16 @@ func main() {
 	}
 }
 
-// run owns the state directory and delegates setup and listener lifecycle to focused helpers.
+// run dispatches the memory helper before opening control-center state.
 func run() error {
+	if len(os.Args) > 1 && os.Args[1] == "memory-mcp" {
+		return memorybridge.Run(context.Background())
+	}
+	return runControlCenter()
+}
+
+// runControlCenter owns the state directory and listener lifecycle.
+func runControlCenter() error {
 	config, err := readConfig()
 	if err != nil {
 		return err

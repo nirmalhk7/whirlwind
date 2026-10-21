@@ -1,5 +1,6 @@
 "use client";
 
+import type {RuntimeSnapshot} from "./RunRuntime";
 import { RunEvidence } from "./RunEvidence";
 import type { LearningSnapshot } from "./RunLearning";
 import { compareRuns, runAvailability, runModel, runOutcome, runProvider, runThinking, runTitle, runTransport } from "./runHistoryPresentation";
@@ -9,6 +10,7 @@ export type RunRecord = {
   updated_at?: string;
   data: {
     learning?: LearningSnapshot;
+    runtime?: RuntimeSnapshot;
     attempt_id?: string; status?: string; purpose?: string; unit_id?: string; operation_id?: string; previous_attempt_id?: string; usage?: { scope:string; total_tokens?:number|null; input_tokens?:number|null; output_tokens?:number|null; cost?:number|null } | null;
     task: string; project_id?: string; role: string; provider: string; provider_name?: string;
     model?: string; resolved_model?: string; transport?: string;
@@ -32,7 +34,7 @@ function RunRow({ record: { id, updated_at, data: run }, projectName }: { record
     <div className="row"><h3>{runTitle(run)}</h3><span className="badge" data-availability={runAvailability(run)}>{runOutcome(run)}</span></div>
     <RunMetadata run={run} projectName={projectName} />
     {run.error && <p className="error">{run.error}</p>}
-    <RunEvidence id={id} captured={Boolean(run.attempt_id)} usage={run.usage} task={run.task} updatedAt={updated_at} learning={run.learning} />
+    <RunEvidence id={id} captured={Boolean(run.attempt_id)} usage={run.usage} task={run.task} updatedAt={updated_at} learning={run.learning} runtime={run.runtime} />
   </article>;
 }
 

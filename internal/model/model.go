@@ -18,10 +18,11 @@ type RiskRule struct {
 	Checks     []Check  `json:"checks" yaml:"checks"`
 }
 type Embeddings struct {
-	Endpoint string `json:"endpoint" yaml:"endpoint"`
-	Model    string `json:"model" yaml:"model"`
-	KeyEnv   string `json:"key_env" yaml:"key_env"`
-	Enabled  bool   `json:"enabled" yaml:"enabled"`
+	LessonsEnabled bool   `json:"lessons_enabled,omitempty" yaml:"lessons_enabled"`
+	Endpoint       string `json:"endpoint" yaml:"endpoint"`
+	Model          string `json:"model" yaml:"model"`
+	KeyEnv         string `json:"key_env" yaml:"key_env"`
+	Enabled        bool   `json:"enabled" yaml:"enabled"`
 }
 type Policy struct {
 	RunTimeoutSeconds int         `json:"run_timeout_seconds,omitempty" yaml:"run_timeout_seconds"`
@@ -174,6 +175,7 @@ type Event struct {
 	CreatedAt  string          `json:"created_at"`
 }
 type Record struct {
+	MatchReason  string          `json:"match_reason,omitempty"`
 	CreatedOrder int64           `json:"created_order,omitempty"`
 	ID           string          `json:"id"`
 	Version      int             `json:"version"`

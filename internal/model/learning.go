@@ -40,13 +40,24 @@ type LearningReport struct {
 }
 
 type LessonRef struct {
+	Match   string `json:"match,omitempty"`
 	ID      string `json:"id"`
 	Version int    `json:"version"`
 	Status  string `json:"status"`
 }
 
+type MemorySearch struct {
+	Query   string      `json:"query"`
+	Lessons []LessonRef `json:"lessons"`
+	Bytes   int         `json:"bytes"`
+	Reason  string      `json:"reason"`
+}
+
 // LearningSnapshot records exactly what this attempt saw and submitted.
 type LearningSnapshot struct {
+	Searches        []MemorySearch   `json:"searches,omitempty"`
+	SearchCalls     int              `json:"search_calls"`
+	SearchBytes     int              `json:"search_bytes"`
 	Recalled        []LessonRef      `json:"recalled"`
 	CreatedIDs      []string         `json:"created_ids,omitempty"`
 	Feedback        []LessonFeedback `json:"feedback,omitempty"`

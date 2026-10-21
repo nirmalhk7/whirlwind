@@ -28,6 +28,11 @@ func (p *protocolPeer) configureACPFixtureThinking(f protocolFixture) {
 }
 
 func (p *protocolPeer) codexFixtureSessionReply(f protocolFixture, params map[string]any, id string) {
+	p.rejectUnsupportedMemory(f)
+	if f.Scenario == "memory" {
+		tools, ok := params["dynamicTools"].([]any)
+		p.require(ok && len(tools) == 1, "dynamic memory tool missing")
+	}
 	sandbox := "workspace-write"
 	if f.ReadOnly {
 		sandbox = "read-only"
@@ -73,6 +78,9 @@ func (p *protocolPeer) stopFixturePrompt(f protocolFixture) bool {
 }
 
 func (p *protocolPeer) fixtureCallbacks(f protocolFixture, cwd string) {
+	if f.Scenario == "memory" && f.Kind == "codex" {
+		p.memoryCallback()
+	}
 	if f.Scenario == "allow" || f.Scenario == "deny" {
 		if f.Kind == "codex" {
 			p.callback("item/tool/requestUserInput", map[string]any{"threadId": testSessionID, "turnId": contractTurnID, "itemId": "question-one", "isBlocking": true, "questions": []any{map[string]any{"id": "db", "header": "Database", "question": "Which database?", "options": []any{map[string]any{"label": "SQLite", "description": "Local"}, map[string]any{"label": "PostgreSQL", "description": "Remote"}}}}}, map[string]any{"answers": map[string]any{"db": map[string]any{"answers": []string{"SQLite"}}}})

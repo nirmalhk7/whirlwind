@@ -164,7 +164,8 @@ func isBusy(e error) bool {
 		Code() int
 	}
 	var c code
-	return errors.As(e, &c) && (c.Code() == 5 || c.Code() == 6)
+	// Extended SQLite result codes retain the primary code in the low byte.
+	return errors.As(e, &c) && (c.Code()&0xff == 5 || c.Code()&0xff == 6)
 }
 
 // Events loads ordered events after a cursor, capped by the requested limit.

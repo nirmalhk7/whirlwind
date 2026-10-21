@@ -14,6 +14,7 @@ import (
 
 func TestLearningSurvivesRestartProviderChangeAndReonboarding(t *testing.T) {
 	e, task, cwd := testEngine(t)
+	task.Issue.Title = "policy"
 	ctx := context.Background()
 	p, _ := e.Project(ctx, task.ProjectID)
 	e.Adapter = func(model.Provider) provider.Adapter {
@@ -46,7 +47,11 @@ func TestLearningSurvivesRestartProviderChangeAndReonboarding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
+	defer func() {
+		if err := other.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	next := New(other, fakeGitHub{}, e.Root)
 	r, _ := other.Get(ctx, "providers", "fake")
 	v, _ := store.Decode[model.Provider](r)
@@ -79,12 +84,12 @@ func TestLearningSurvivesRestartProviderChangeAndReonboarding(t *testing.T) {
 func TestLearningConcurrentDuplicateReportsAreIdempotent(t *testing.T) {
 	e, task, cwd := testEngine(t)
 	ctx := context.Background()
-	hash, _ := learningFingerprint(cwd, ".whirlwind.yaml")
+	hash, _ := learningFingerprint(cwd, learningPolicyFixturePath)
 	a := model.Attempt{AttemptID: "concurrent", ProjectID: task.ProjectID, Task: task.ID, Role: "code"}
 	if err := e.Store.Put(ctx, "sessions", a.AttemptID, a, 0); err != nil {
 		t.Fatal(err)
 	}
-	report := model.LearningReport{Lessons: []model.Lesson{{Trigger: "policy", Mistake: "guessing", Correction: "Read policy", Paths: []string{".whirlwind.yaml"}, Anchors: map[string]string{".whirlwind.yaml": hash}}}}
+	report := model.LearningReport{Lessons: []model.Lesson{{Trigger: "policy", Mistake: "guessing", Correction: "Read policy", Paths: []string{learningPolicyFixturePath}, Anchors: map[string]string{learningPolicyFixturePath: hash}}}}
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)
 	for i := 0; i < 8; i++ {

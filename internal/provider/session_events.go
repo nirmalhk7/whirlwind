@@ -7,6 +7,7 @@ import (
 
 func (s *providerSession) sessionUpdate(p map[string]any) {
 	u, _ := p["update"].(map[string]any)
+	s.acpRuntime(u)
 	if u["sessionUpdate"] == "config_option_update" {
 		raw, _ := json.Marshal(u["configOptions"])
 		var options []acpConfigOption
@@ -37,6 +38,7 @@ func (s *providerSession) quotaUpdate(m Message) {
 }
 
 func (s *providerSession) tokenUsage(p map[string]any) {
+	s.nativeContext(p)
 	usage, ok := p["tokenUsage"].(map[string]any)
 	if !ok {
 		return
@@ -82,6 +84,7 @@ func (s *providerSession) turnCompleted(p map[string]any) {
 }
 
 func (s *providerSession) claudeEvent(p map[string]any) {
+	s.claudeRuntime(p)
 	sid, _ := p["session_id"].(string)
 	resolved, _ := p["resolved_model"].(string)
 	s.mu.Lock()

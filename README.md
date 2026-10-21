@@ -62,7 +62,7 @@ See [backend setup and project policy](docs/go-backend.md) and [HTTP API](API.md
 
 SQLite preserves tasks, fenced leases, questions, mutation receipts, ordered events, and commit-keyed context snapshots. Provider routing and recovery keep productive work moving; repeated failures pause for operator input.
 
-Each of the four roles also keeps project-specific experience: compact, evidence-linked lessons recalled only when relevant, capped at three lessons and 2 KiB per attempt. Memories survive provider changes and restarts; changed source invalidates old advice. Run inspection shows learning and lets you retire a lesson. See [agent learning](docs/agent-learning.md) for lifecycle, limits, API, and optional evaluation.
+Each of the four roles also keeps project-specific experience: compact, evidence-linked lessons recalled only when relevant, with ranked automatic recall capped at three lessons/2 KiB per operation plus two bounded on-demand searches. Memories survive provider changes and restarts; changed source invalidates old advice. Run inspection shows learning, context occupancy, recovery checkpoints, and lesson retirement. See [agent learning](docs/agent-learning.md) for lifecycle, limits, API, and optional evaluation.
 
 ## Configuration and naming
 

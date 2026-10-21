@@ -117,7 +117,7 @@ func (run *verificationRun) handoff(report verification.Report) error {
 	return nil
 }
 
-// progress compares diff fingerprints, triggers recovery after five unchanged failures, and pauses after three unsuccessful recoveries.
+// progress shares the durable restart allowance with in-turn tool recovery.
 func (e *Engine) progress(ctx context.Context, t *model.Task) error {
 	diff, err := github.Run(ctx, t.Worktree, "git", "diff", t.Base)
 	if err != nil {
@@ -131,18 +131,10 @@ func (e *Engine) progress(ctx context.Context, t *model.Task) error {
 		t.UnchangedFailures = 1
 		t.Fingerprint = fingerprint
 	}
-	if t.UnchangedFailures >= 5 {
-		t.UnchangedFailures = 0
-		t.Recoveries++
-		t.Handoff.NextAction = "recover with new context or another provider"
-		if t.Recoveries >= 3 {
-			t.ResumeStage = t.Stage
-			t.Stage = "paused"
-			t.Error = "Three unsuccessful stall recoveries; user decision required"
-			_ = e.Store.Notify(ctx, t.ID, "stall", t.Error)
-		}
+	if t.UnchangedFailures < 5 {
+		return nil
 	}
-	return nil
+	return e.recoverVerificationStall(ctx, t)
 }
 
 func checkedDiff(ctx context.Context, p model.Policy, t *model.Task) (string, string, error) {

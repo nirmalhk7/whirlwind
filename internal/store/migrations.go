@@ -15,6 +15,8 @@ func (s *Store) migrate() error {
 		{`CREATE INDEX IF NOT EXISTS artifacts_stream ON artifacts(attempt_id,stream_key)`},
 		{}, // Persist original idea batches and normalize their selected choice.
 		{`CREATE INDEX IF NOT EXISTS lessons_scope ON resources(json_extract(data,'$.project_id'),json_extract(data,'$.role'),json_extract(data,'$.status')) WHERE kind='lessons'`},
+		lessonSearchMigration(),
+		lessonIdentifierMigration(),
 	}
 	var current int
 	if err := s.DB.QueryRow("SELECT COALESCE(MAX(version),0) FROM migrations").Scan(&current); err != nil {

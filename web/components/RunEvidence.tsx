@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import {RunRuntime,type RuntimeSnapshot} from "./RunRuntime";
 import { RunLearning, type LearningSnapshot } from "./RunLearning";
 
 type Artifact = { id: string; kind: string; bytes: number; stored_bytes: number; truncated: boolean };
@@ -72,12 +73,13 @@ function useEvidence(id: string, open: boolean, captured: boolean, updatedAt?: s
   return { items, linked, more, loading, error, loadMore };
 }
 
-export function RunEvidence({ id, captured, usage, task, updatedAt, learning }: { id: string; captured: boolean; usage?: Usage | null; task: string; updatedAt?: string; learning?: LearningSnapshot }) {
+export function RunEvidence({ id, captured, usage, task, updatedAt, learning, runtime }: { id: string; captured: boolean; usage?: Usage | null; task: string; updatedAt?: string; learning?: LearningSnapshot; runtime?:RuntimeSnapshot }) {
   const [open, setOpen] = useState(false);
   const { items, linked, more, loading, error, loadMore } = useEvidence(id, open, captured, updatedAt);
   return <div className="run-evidence">
     <button className="button secondary" type="button" aria-expanded={open} onClick={() => setOpen(value => !value)}>{open ? "Hide evidence" : "Inspect run"}</button>
     {open && <section aria-label="Run evidence">
+      <RunRuntime runtime={runtime} />
       {usage && <UsageSummary usage={usage} />}
       {learning && <RunLearning learning={learning} />}
       {!captured && <p className="muted">Detailed evidence unavailable for historical run.</p>}

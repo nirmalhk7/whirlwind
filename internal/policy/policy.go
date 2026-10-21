@@ -22,13 +22,20 @@ func Validate(p model.Policy) error {
 	if len(p.Checks) == 0 || len(p.AllowedPaths) == 0 || len(p.RiskRules) == 0 {
 		return errors.New("policy requires checks, allowed_paths and risk_rules")
 	}
+	return validatePolicyRules(p)
+}
+
+func validatePolicyRules(p model.Policy) error {
 	if err := validateChecks(p.Checks); err != nil {
 		return err
 	}
 	if err := validateRiskRules(p.RiskRules); err != nil {
 		return err
 	}
-	return validateAllowedPaths(p.AllowedPaths)
+	if err := validateAllowedPaths(p.AllowedPaths); err != nil {
+		return err
+	}
+	return validateLessonEmbeddings(p.Embeddings)
 }
 
 const (

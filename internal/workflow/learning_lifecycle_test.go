@@ -13,16 +13,21 @@ import (
 	"whirlwind/internal/store"
 )
 
+const learningPolicyChange = "policy change"
+
+const learningSchemaMismatch = "schema mismatch"
+
 func TestLearningBoundsRecallAndInvalidatesChangedSources(t *testing.T) {
 	e, task, cwd := testEngine(t)
+	task.Issue.Title = learningPolicyChange
 	ctx := context.Background()
 	p, _ := e.Project(ctx, task.ProjectID)
-	hash, err := learningFingerprint(cwd, ".whirlwind.yaml")
+	hash, err := learningFingerprint(cwd, learningPolicyFixturePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 160; i++ {
-		l := model.Lesson{ID: fmt.Sprint(i), ProjectID: p.ID, Role: "code", Status: "tentative", Trigger: "policy change", Mistake: "guessing checks", Correction: strings.Repeat("Read policy. ", 30), Paths: []string{".whirlwind.yaml"}, Anchors: map[string]string{".whirlwind.yaml": hash}}
+		l := model.Lesson{ID: fmt.Sprint(i), ProjectID: p.ID, Role: "code", Status: "tentative", Trigger: learningPolicyChange, Mistake: "guessing checks", Correction: strings.Repeat("Read policy. ", 30), Paths: []string{learningPolicyFixturePath}, Anchors: map[string]string{learningPolicyFixturePath: hash}}
 		if err = e.Store.Put(ctx, "lessons", l.ID, l, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -34,7 +39,7 @@ func TestLearningBoundsRecallAndInvalidatesChangedSources(t *testing.T) {
 			return provider.Output{Text: "done"}, nil
 		})
 	}
-	out, err := e.agent(ctx, p, task, provider.Input{Role: "code", CWD: cwd, Prompt: "policy change"})
+	out, err := e.agent(ctx, p, task, provider.Input{Role: "code", CWD: cwd, Prompt: learningPolicyChange})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,10 +51,10 @@ func TestLearningBoundsRecallAndInvalidatesChangedSources(t *testing.T) {
 	if strings.Count(prompt, `"avoid":"guessing checks"`) > 3 {
 		t.Fatal("history leaked into prompt")
 	}
-	if err = os.WriteFile(filepath.Join(cwd, ".whirlwind.yaml"), []byte("changed policy\n"), 0600); err != nil {
+	if err = os.WriteFile(filepath.Join(cwd, learningPolicyFixturePath), []byte("changed policy\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = e.agent(ctx, p, task, provider.Input{Role: "code", CWD: cwd, Prompt: "policy change"})
+	_, err = e.agent(ctx, p, task, provider.Input{Role: "code", CWD: cwd, Prompt: learningPolicyChange})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +112,7 @@ func TestLearningRejectsInventedEvidenceAndEscapingPaths(t *testing.T) {
 
 func TestLearningEvidenceOnlyRecallAndFeedback(t *testing.T) {
 	e, task, cwd := testEngine(t)
+	task.Issue.Title = learningSchemaMismatch
 	ctx := context.Background()
 	p, _ := e.Project(ctx, task.ProjectID)
 	origin := model.Attempt{AttemptID: "origin", ProjectID: p.ID, Task: task.ID, Role: "code"}
@@ -117,7 +123,7 @@ func TestLearningEvidenceOnlyRecallAndFeedback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	l := model.Lesson{Trigger: "schema mismatch", Mistake: "editing generated output", Correction: "Edit the schema", EvidenceIDs: []string{evidence.ID}}
+	l := model.Lesson{Trigger: learningSchemaMismatch, Mistake: "editing generated output", Correction: "Edit the schema", EvidenceIDs: []string{evidence.ID}}
 	snapshot, err := e.Store.CommitLearning(ctx, origin, model.LearningReport{Lessons: []model.Lesson{l}})
 	if err != nil {
 		t.Fatal(err)
@@ -134,7 +140,7 @@ func TestLearningEvidenceOnlyRecallAndFeedback(t *testing.T) {
 		})
 	}
 	task.ID = "next-task"
-	if _, err = e.agent(ctx, p, task, provider.Input{Role: "code", CWD: cwd, Prompt: "schema mismatch"}); err != nil {
+	if _, err = e.agent(ctx, p, task, provider.Input{Role: "code", CWD: cwd, Prompt: learningSchemaMismatch}); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(prompt, "Edit the schema") {
@@ -171,13 +177,14 @@ func TestLearningEvidenceOnlyRecallAndFeedback(t *testing.T) {
 
 func TestLearningRecentSpecificLessonSurvivesLargeHistory(t *testing.T) {
 	e, task, cwd := testEngine(t)
+	task.Issue.Title = "policy " + learningPolicyFixturePath
 	ctx := context.Background()
 	p, _ := e.Project(ctx, task.ProjectID)
-	hash, _ := learningFingerprint(cwd, ".whirlwind.yaml")
+	hash, _ := learningFingerprint(cwd, learningPolicyFixturePath)
 	for i := 0; i < 140; i++ {
-		l := model.Lesson{ID: fmt.Sprint(i), ProjectID: p.ID, Role: "plan", Status: "tentative", Trigger: "policy", Mistake: "guessing", Correction: "Read general docs", Anchors: map[string]string{".whirlwind.yaml": hash}}
+		l := model.Lesson{ID: fmt.Sprint(i), ProjectID: p.ID, Role: "plan", Status: "tentative", Trigger: "policy", Mistake: "guessing", Correction: "Read general docs", Anchors: map[string]string{learningPolicyFixturePath: hash}}
 		if i == 139 {
-			l.Paths = []string{".whirlwind.yaml"}
+			l.Paths = []string{learningPolicyFixturePath}
 			l.Correction = "Specific policy correction"
 		}
 		if err := e.Store.Put(ctx, "lessons", l.ID, l, 0); err != nil {
@@ -220,6 +227,7 @@ func TestLearningProviderFailureDoesNotCreateLessons(t *testing.T) {
 
 func TestLearningFeedbackCanUseObservedSource(t *testing.T) {
 	e, task, cwd := testEngine(t)
+	task.Issue.Title = "policy"
 	ctx := context.Background()
 	p, _ := e.Project(ctx, task.ProjectID)
 	var id string

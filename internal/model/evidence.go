@@ -88,6 +88,7 @@ type Publication struct {
 
 // Attempt preserves additive session fields while distinguishing reported runtime metadata from configured input.
 type Attempt struct {
+	Runtime              *RuntimeSnapshot  `json:"runtime,omitempty"`
 	Learning             *LearningSnapshot `json:"learning,omitempty"`
 	AttemptID            string            `json:"attempt_id"`
 	Task                 string            `json:"task"`

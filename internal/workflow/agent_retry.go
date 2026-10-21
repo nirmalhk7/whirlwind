@@ -28,6 +28,17 @@ func (a *agentRun) executeChoice(source model.Provider, choice model.AgentChoice
 }
 
 func (a *agentRun) runChoiceAttempt(source model.Provider) (provider.Output, provider.FailureKind, *agentAttempt, error) {
+	output, kind, execution, err := a.retryRecovery(source)
+	var invalid *outputValidationError
+	if errors.As(err, &invalid) && a.input.OutputContract != "directions" && !a.outputRepairUsed {
+		a.outputRepairUsed = true
+		a.repairOutput(err)
+		return a.retryRecovery(source)
+	}
+	return output, kind, execution, err
+}
+
+func (a *agentRun) runSingleAttempt(source model.Provider) (provider.Output, provider.FailureKind, *agentAttempt, error) {
 	if err := a.ctx.Err(); err != nil {
 		return provider.Output{}, provider.FailureUnknown, nil, err
 	}

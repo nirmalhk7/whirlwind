@@ -19,7 +19,7 @@ func (step *taskStep) planning() (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Role: "plan", CWD: path, Prompt: prompt, ReadOnly: true, SessionID: ""})
+	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{OutputContract: "plan", ValidateResult: validatePlanOutput, Role: "plan", CWD: path, Prompt: prompt, ReadOnly: true, SessionID: ""})
 	if err != nil {
 		return true, err
 	}
@@ -87,4 +87,9 @@ func (step *taskStep) applyPlan(plan model.Plan) error {
 		}
 	}
 	return nil
+}
+
+func validatePlanOutput(text string) error {
+	_, err := decodePlan(text)
+	return err
 }

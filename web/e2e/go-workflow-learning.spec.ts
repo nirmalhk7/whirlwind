@@ -6,7 +6,7 @@ test("Run learning shows recalled advice and retires it with its current version
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/events") && path === "/api/v1/events") return route.fulfill({ contentType: "text/event-stream", body: ": heartbeat\n\n" });
     if (path === "/api/v1/overview") return route.fulfill({ json: { projects: [{ id: "p", data: { id: "p", name: "Demo" } }], providers: [], tasks: [], directions: [], inbox: [] } });
-    if (path === "/api/v1/sessions") return route.fulfill({ json: [{ id: "run", version: 1, data: { attempt_id: "run", task: "t", project_id: "p", role: "code", provider: "codex", finished: true, success: true, learning: { recalled: [{ id: "lesson", version: 1, status: "tentative" }], created_ids: [], bytes: 240, estimated_tokens: 60, warnings: ["An invalid observation was ignored"] } } }] });
+    if (path === "/api/v1/sessions") return route.fulfill({ json: [{ id: "run", version: 1, data: { attempt_id: "run", task: "t", project_id: "p", role: "code", provider: "codex", finished: true, success: true, runtime: { context: {used:85,size:100,source:"acp"}, recovery_reason:"Repeated failed action", checkpoint_id:"checkpoint", recoveries:1, rotations:0 }, learning: { recalled: [{ id: "lesson", version: 1, status: "tentative" }], created_ids: [], bytes: 240, estimated_tokens: 60, search_calls:1, search_bytes:320, searches:[{query:"schema drift",bytes:320,reason:"on-demand ranked search",lessons:[{id:"lesson",version:1,status:"tentative"}]}], warnings: ["An invalid observation was ignored"] } } }] });
     if (path === "/api/v1/lessons/lesson/retire") {
       expect(route.request().method()).toBe("POST");
       expect(route.request().headers()["if-match"]).toBe("2");
@@ -28,6 +28,12 @@ test("Run learning shows recalled advice and retires it with its current version
   await expect(learning).toContainText("60 estimated tokens");
   await expect(learning).toContainText("Recalled v1 · tentative");
   await expect(learning).toContainText("An invalid observation was ignored");
+  const runtime = page.getByRole("region", {name:"Agent runtime"});
+  await expect(runtime).toContainText("85%");
+  await expect(runtime).toContainText("Repeated failed action");
+  await expect(runtime).toContainText("1 recovery remaining");
+  await expect(learning).toContainText("1 of 2 searches");
+  await expect(learning).toContainText("schema drift");
   await learning.getByRole("button", { name: "Retire lesson", exact: true }).click();
   await expect(learning).toContainText("Current: retired");
   await expect(learning.getByRole("button", { name: "Retire lesson", exact: true })).toHaveCount(0);

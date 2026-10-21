@@ -14,16 +14,17 @@ import (
 
 type agentRun struct {
 	*Engine
-	ctx             context.Context
-	project         model.Project
-	task            model.Task
-	input           provider.Input
-	providers       []model.Provider
-	index           ctxengine.Index
-	learning        *model.LearningSnapshot
-	resumeSource    string
-	previousAttempt string
-	fallbackReason  string
+	ctx              context.Context
+	project          model.Project
+	task             model.Task
+	input            provider.Input
+	providers        []model.Provider
+	index            ctxengine.Index
+	learning         *model.LearningSnapshot
+	resumeSource     string
+	previousAttempt  string
+	fallbackReason   string
+	outputRepairUsed bool
 }
 
 // agent reserves capacity for a named request, prepares its context, and retries unavailable providers.

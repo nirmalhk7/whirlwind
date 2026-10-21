@@ -122,3 +122,15 @@ handling, restart reconciliation, and publication intent guarantees.
 `GET /provider-status` returns `{providers,interval_seconds,stopped}`. Each provider contains `id`, `name`, `kind`, `status` (`working`, `failed`, `unavailable`, `paused`, or `unknown`), `detail`, and `checked_at`. Metadata-only connection checks are bounded to ten seconds (including capacity waits), cached across tabs for `workers.provider_status_check_seconds` (default 30; valid 1–86400), and invalidated by configuration/stop changes. Checks send no model prompts. `workers.stopped: true` prevents provider process launches; the response marks installed providers paused. A successful check confirms protocol readiness, not an inference result.
 
 Root `settings.yaml` owns worker settings, provider definitions and ordered agent choices. Existing API shapes and numeric versions remain unchanged. UI POST/PATCH configuration mutations write YAML and cache state together; failed receipts restore the previous file. Valid external file edits refresh cache versions and emit normal events, so stale UI saves fail rather than overwrite those edits. Quota and availability observations remain runtime state and never rewrite YAML. Invalid YAML/schema/configuration returns an error instead of silently reverting to defaults. UI routes `/agents` and `/providers` redirect to `/settings#agents` and `/settings#providers`; API routes remain available.
+
+## Agent memory and recovery
+
+Session `learning` includes `searches` (`query`, `lessons`, `bytes`, `reason`), cumulative
+`search_calls`/`search_bytes`, and recalled match reasons. Optional `runtime` includes
+reported `context` (`used`, `size`, `source`), recovery counts, rotations, generation,
+checkpoint ID, recovery reason, and capability warnings. Missing occupancy is unknown.
+
+`POST /projects/{id}/lesson-search-evaluation` accepts `{fixtures:[{role,query,relevant:[]}]}`
+with project `If-Match` and `Idempotency-Key`. Requires explicit semantic lesson policy;
+returns recall/precision baseline and hybrid scores, exact coverage, configuration hash,
+and `enabled`. See [agent learning](docs/agent-learning.md) for gates and data limits.

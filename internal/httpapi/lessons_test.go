@@ -9,7 +9,8 @@ import (
 	"whirlwind/internal/model"
 )
 
-func TestLessonsListFiltersAndRetireReplays(t *testing.T) {
+func setupLessons(t *testing.T) *Server {
+	t.Helper()
 	s := setup(t)
 	ctx := context.Background()
 	for _, id := range []string{"p", "other"} {
@@ -22,6 +23,11 @@ func TestLessonsListFiltersAndRetireReplays(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	return s
+}
+
+func TestLessonsListFiltersAndRetireReplays(t *testing.T) {
+	s := setupLessons(t)
 	get := func(path string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, httptest.NewRequest("GET", "http://localhost/api/v1/"+path, nil))
@@ -38,8 +44,8 @@ func TestLessonsListFiltersAndRetireReplays(t *testing.T) {
 	}
 	retire := func(version, key string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "http://localhost/api/v1/lessons/one/retire", strings.NewReader(`{}`))
-		r.Header.Set("If-Match", version)
-		r.Header.Set("Idempotency-Key", key)
+		r.Header.Set(ifMatchHeader, version)
+		r.Header.Set(idempotencyKeyHeader, key)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		return w

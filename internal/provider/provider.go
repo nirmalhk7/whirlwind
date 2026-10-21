@@ -16,19 +16,23 @@ import (
 )
 
 type Input struct {
-	UnitID      string
-	OperationID string
-	Purpose     string
-	Model       string
-	Thinking    *model.ThinkingChoice
-	Role        string
-	CWD         string
-	Prompt      string
-	SessionID   string
-	Policy      model.Policy
-	ReadOnly    bool
+	OutputContract string
+	ValidateResult func(string) error
+	Memory         *MemoryConnection
+	UnitID         string
+	OperationID    string
+	Purpose        string
+	Model          string
+	Thinking       *model.ThinkingChoice
+	Role           string
+	CWD            string
+	Prompt         string
+	SessionID      string
+	Policy         model.Policy
+	ReadOnly       bool
 }
 type Output struct {
+	Context           *model.ContextUsage   `json:"context,omitempty"`
 	AttemptID         string                `json:"attempt_id,omitempty"`
 	Usage             *model.Usage          `json:"usage,omitempty"`
 	Text              string                `json:"text"`
@@ -45,9 +49,11 @@ type Permission struct {
 	Raw     json.RawMessage `json:"raw"`
 }
 type Hooks struct {
-	Questions  func(context.Context, []model.Question) (map[string]string, error)
-	Event      func(string, any)
-	Permission func(context.Context, Permission) (bool, error)
+	ShouldStop    func() bool
+	SearchLessons func(context.Context, string) (string, error)
+	Questions     func(context.Context, []model.Question) (map[string]string, error)
+	Event         func(string, any)
+	Permission    func(context.Context, Permission) (bool, error)
 }
 type Adapter interface {
 	// Run executes or resumes one agent prompt and exposes events, questions, and permissions through hooks.
@@ -109,6 +115,7 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 		return s.output, err
 	}
 	s.rpc = rpc
+	s.transport = p.Kind
 	defer rpc.Close()
 	switch p.Kind {
 	case "acp":
@@ -127,16 +134,20 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 }
 
 type providerSession struct {
-	ctx         context.Context
-	input       Input
-	hooks       Hooks
-	client      *Client
-	rpc         *RPC
-	mu          sync.Mutex
-	output      Output
-	completed   chan string
-	turnFailure error
-	replaying   atomic.Bool
+	transport     string
+	turnID        string
+	stopRequested atomic.Bool
+	tools         map[string]model.ToolActivity
+	ctx           context.Context
+	input         Input
+	hooks         Hooks
+	client        *Client
+	rpc           *RPC
+	mu            sync.Mutex
+	output        Output
+	completed     chan string
+	turnFailure   error
+	replaying     atomic.Bool
 }
 
 // JSON extracts the outer JSON object or array from agent text and unmarshals it into the supplied destination.
@@ -172,14 +183,17 @@ func (s *providerSession) handle(c context.Context, m Message) (any, error) {
 		if s.replaying.Load() {
 			kind = "whirlwind/replay"
 		}
-		s.hooks.Event(kind, map[string]any{"method": m.Method, "request_id": m.ID, "params": json.RawMessage(m.Params)})
+		s.hooks.Event(kind, map[string]any{"method": m.Method, "request_id": m.ID, "params": observedParams(m)})
 	}
 	if strings.HasPrefix(m.Method, "fs/") || strings.HasPrefix(m.Method, "terminal/") {
 		return s.client.Handle(c, m)
 	}
 	var p map[string]any
 	_ = json.Unmarshal(m.Params, &p)
+	s.nativeRuntime(m.Method, p)
 	switch m.Method {
+	case "item/tool/call":
+		return s.memoryToolCall(c, p)
 	case "item/tool/requestUserInput", "question/request",
 		"session/request_permission", "item/commandExecution/requestApproval",
 		"item/fileChange/requestApproval", "permission/request",
