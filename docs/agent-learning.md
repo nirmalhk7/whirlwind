@@ -1,0 +1,114 @@
+# Project and role learning
+
+Ideation, Planner, Coding, and Reviewer keep separate experience memories for each
+onboarded repository. Memories belong to Whirlwind's SQLite state, so changing an
+agent's provider or model does not discard them. Existing projects start empty.
+Unregistering a project preserves history and lessons; re-onboarding the same
+repository restores its project identity and memory.
+
+## Recording and recalling experience
+
+The shared prompt appends `prompts/agents/learning.md`. Each role returns its normal
+result inside `{result,learning:{lessons,feedback}}`. The workflow unwraps the result
+before the usual role validation. Legacy results remain accepted. Original provider
+output remains available as attempt evidence.
+
+Learning is optional: an agent records a short lesson after a meaningful correction,
+not after every tool call. No extra model call or agent is launched. Ideation stays
+read-only and performs no additional command execution for learning. Connectivity
+and model-discovery operations do not participate.
+
+Each lesson describes `trigger`, `mistake`, and `correction`, with optional relevant
+`paths`, `symbols`, `error_signature`, and `evidence_ids`. At most two lessons are
+accepted per report; each has at most 600 UTF-8 bytes of descriptive text and eight
+paths, symbols, or artifact references. The harness assigns project, role, producing
+attempt, and provider metadata. Source files must be accessible within the repository;
+escaping symlinks, traversal, `.git` files, nonregular files, and files larger than
+1 MiB are rejected. Source contents are fingerprinted rather than copied into lessons.
+Explicitly secret lessons/feedback and common credential-bearing text are rejected.
+Agents must never submit secrets; text-pattern screening is not a general secret detector.
+
+Before a normal attempt, lookup filters by project and role. SQL ranks path, symbol,
+and error matches before taking a bounded 128-candidate pool. Workflow ranking then
+prioritizes current-task observations, specificity, corroboration, and recency.
+Only three matching lessons can enter the memory block, with a hard 2 KiB UTF-8 cap.
+The inspector reports a local bytes/4 token estimate, not an exact provider token count.
+No-match attempts receive no recalled-memory block. The static learning instructions
+are additional input; native session history remains managed by the provider. The
+protocol explicitly replaces previous recalled blocks, including when this attempt
+recalls no lessons, so resumed sessions are instructed to disregard retired advice.
+
+## Correcting lessons
+
+New observations are `tentative` and can be recalled automatically as advisory
+guidance. Repeating the same lesson does not establish its correctness. Selecting
+another direction does not count as rejecting an idea, and a transient provider
+failure does not establish that an engineering approach is wrong.
+
+Normal role output can submit up to three feedback entries:
+
+```json
+{"lesson_id":"recalled-id","verdict":"supports","reason":"Confirmed the caller guarantee","paths":["src/caller.go"]}
+```
+
+Verdicts are `supports`, `contradicts`, or `supersedes`. Feedback applies only to a
+lesson recalled at its current version for the same project and role. The agent
+can cite source paths it observed or additional check artifacts. The harness captures
+source-path fingerprints as bounded evidence; artifact references must belong to
+the same project and current task and retain complete content. Original lesson
+artifacts, assistant replies, prompts, and lifecycle events cannot corroborate a
+lesson. Source-based corroboration represents another observed reading, not a proof
+of the model's causal explanation. All lessons remain advisory.
+
+Supporting feedback marks a lesson `corroborated`; contradiction or replacement
+retires it. Changed or missing source fingerprints mark it `stale` before recall.
+Fresh observations can refresh stale lessons. Retired lessons never revive through
+duplicate submissions. Evidence-only observations remain historical and tentative
+unless corroborated; their relevance is matched to the current task rather than
+inferred from a source fingerprint.
+
+Lesson changes, audit records, and per-attempt learning receipts commit together.
+Concurrent/replayed reports do not duplicate effects. Recall or report errors are
+visible as learning warnings without invalidating an otherwise valid role result.
+Required attempt/evidence persistence retains its normal failure behavior. Partial
+output from failed or interrupted provider calls does not create lessons.
+
+## Inspection and API
+
+Open **Run → Inspect run → Learning** to see the recalled IDs and versions, new
+lessons, feedback, warnings, and memory size. Lesson details show their current
+status separately from the status originally recalled. **Retire lesson** uses the
+current resource version and the normal idempotent mutation contract.
+
+- `GET /api/v1/lessons?project_id=...&role=code&status=tentative&after=0&limit=100`
+  returns `{items,next_after}`. Project is required; role/status are optional.
+  Pagination uses stable creation order; limits are 1–500.
+- `GET /api/v1/lessons/{id}` returns the versioned lesson resource.
+- `POST /api/v1/lessons/{id}/retire` requires `If-Match`, `Idempotency-Key`, and `{}`.
+  Stale versions return 409; identical requests replay the saved response.
+
+There is no public lesson-creation API or automatic sharing across roles/projects.
+The existing listener/origin protections apply. Lesson retirement is auditable;
+historical attempts retain their recalled versions.
+
+## Optional evaluation
+
+The ordinary tests use disposable repositories and fixture providers. An opt-in test
+performs paired authenticated role probes with an empty memory and a teaching turn:
+
+```sh
+WHIRLWIND_LEARNING_EVAL=1 go test ./internal/workflow -run '^TestLearningEvaluation$' -v -count=1
+```
+
+Default transport: native Codex. Optional variables:
+`WHIRLWIND_LEARNING_EVAL_KIND` (`codex`, `claude`, `acp`),
+`WHIRLWIND_LEARNING_EVAL_COMMAND` (JSON command array), and
+`WHIRLWIND_LEARNING_EVAL_MODEL`. The command must be installed and authenticated.
+The probes request no repository changes, command execution, or external publication.
+They consume model usage only when explicitly enabled.
+
+JSON log rows include role, acceptance, attempts, elapsed time, recalled bytes, and
+reported usage, including the teaching turn's overhead. Unknown or session-cumulative
+usage is never invented or summed as per-attempt usage. These controlled probes do
+not measure full software-delivery quality or establish token savings. Repeat with
+matched models/tasks and evaluate real accepted changes before claiming an advantage.

@@ -20,6 +20,7 @@ type agentRun struct {
 	input           provider.Input
 	providers       []model.Provider
 	index           ctxengine.Index
+	learning        *model.LearningSnapshot
 	resumeSource    string
 	previousAttempt string
 	fallbackReason  string

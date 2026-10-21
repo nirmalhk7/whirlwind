@@ -30,7 +30,11 @@ func (a *agentRun) prepare() error {
 		return err
 	}
 	a.input.Prompt += "\nSelected repository context:\n" + a.index.Package(a.task.Issue.Title+" "+a.task.Issue.Body+" "+a.input.Prompt)
-	return a.embedContext()
+	if err := a.embedContext(); err != nil {
+		return err
+	}
+	a.prepareLearning()
+	return nil
 }
 func (a *agentRun) loadProviders() error {
 	records, err := a.Store.List(a.ctx, "providers")

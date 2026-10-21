@@ -4,6 +4,8 @@ Go server owns `/api/v1`; Next.js forwards same-origin requests to loopback `WHI
 
 ## Contracts
 
+Project/role learning: `GET /api/v1/lessons?project_id=...` returns a cursor page (`items`, `next_after`), with optional `role`, `status`, `after`, and `limit` (1–500). `GET /api/v1/lessons/{id}` returns a lesson resource; `POST /api/v1/lessons/{id}/retire` requires `If-Match` and `Idempotency-Key`. See [learning contracts](docs/agent-learning.md#inspection-and-api). Attempt records add an optional `learning` snapshot containing recalled versions, new lesson IDs, feedback, warnings, bytes, and estimated tokens. Historical absent snapshots remain absent.
+
 JSON resources use `{id,version,data,updated_at}`. Lists return resource arrays. Versions start at 1. Mutations require `Idempotency-Key`; resource updates/actions additionally require `If-Match` containing current numeric version. Same key/request returns recorded response; reusing key for different input returns 409. Keys are server-global. Requests require JSON objects and are limited to 1 MiB. External writes reconcile their GitHub marker/branch before retrying; DB resource and event updates commit atomically. Mutation response receipts are stored after action completion, so clients must retain current resource versions when recovering interrupted mutations.
 
 Persisted resource envelopes also include `created_order`, an original insertion position shared across resource kinds. Inbox uses this value to keep messages and idea batches in creation order; changes to `updated_at` never move existing entries.

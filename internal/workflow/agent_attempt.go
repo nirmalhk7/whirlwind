@@ -46,7 +46,11 @@ func (a *agentAttempt) execute() (provider.Output, error) {
 	a.mu.Lock()
 	err = errors.Join(err, a.eventErr)
 	a.mu.Unlock()
-	if finishErr := a.finish(output, err, started); finishErr != nil {
+	raw := output.Text
+	output.Text = a.finishLearning(context.WithoutCancel(ctx), raw, err)
+	evidenceOutput := output
+	evidenceOutput.Text = raw
+	if finishErr := a.finish(evidenceOutput, err, started); finishErr != nil {
 		return output, errors.Join(err, fmt.Errorf("%w: %v", store.ErrPersistence, finishErr))
 	}
 	return output, err

@@ -14,6 +14,7 @@ func (a *agentRun) newAttempt(chosen model.Provider) (*agentAttempt, error) {
 	}
 	execution := &agentAttempt{agentRun: a, chosen: chosen, id: store.ID()}
 	execution.state = model.Attempt{AttemptID: execution.id, Task: a.task.ID, UnitID: a.input.UnitID, OperationID: a.input.OperationID, Purpose: a.input.Purpose, PreviousAttemptID: a.previousAttempt, ResumedFromAttemptID: a.resumeSource, Role: a.input.Role, Provider: chosen.ID, SessionID: a.input.SessionID, RequestedSessionID: a.input.SessionID, CWD: a.input.CWD, PlanVersion: a.task.PlanVersion, Finished: false, Status: "running", Owner: a.owner, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, PolicyHash: a.project.PolicyHash, Model: a.input.Model, ProjectID: a.project.ID, ProviderName: chosen.Name, Transport: provider.ExecutionProvider(chosen, a.input.Thinking).Kind, Thinking: a.input.Thinking, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	execution.state.Learning = a.learning
 	if err := a.Store.Put(a.ctx, "sessions", execution.id, execution.state, 0); err != nil {
 		return nil, err
 	}
@@ -43,7 +44,7 @@ func (a *agentAttempt) captureInput() error {
 	if err != nil {
 		return err
 	}
-	snapshot, err := store.SafeJSON(model.AttemptInput{Handoff: a.task.Handoff, Policy: a.project.Policy, Provider: provider.ExecutionProvider(a.chosen, a.input.Thinking), ReadOnly: a.input.ReadOnly, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, Model: a.input.Model, Thinking: a.input.Thinking})
+	snapshot, err := store.SafeJSON(model.AttemptInput{Learning: a.state.Learning, Handoff: a.task.Handoff, Policy: a.project.Policy, Provider: provider.ExecutionProvider(a.chosen, a.input.Thinking), ReadOnly: a.input.ReadOnly, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, Model: a.input.Model, Thinking: a.input.Thinking})
 	if err != nil {
 		return err
 	}

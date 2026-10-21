@@ -50,6 +50,8 @@ and is not counted as attempt usage; Claude reports attempt usage separately.
 
 ## Recovery and atomicity
 
+Project/role lessons and idempotent learning-report receipts use versioned resources, with an indexed project/role/status lookup added by schema migration seven. Lesson changes and audit events commit with their report receipt. Learning is optional and failures surface on attempt inspection; required attempt/evidence writes retain their failure behavior. Source fingerprints are checked before recall. Unregistering a project preserves its lessons. See [agent learning](agent-learning.md).
+
 Database-only HTTP mutations commit resource changes, audit records, ordered
 events, and replay receipts together. Asynchronous work starts only after its
 operation and `202` receipt commit. Onboarding and embedding evaluation journal
