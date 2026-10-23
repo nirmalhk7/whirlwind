@@ -52,7 +52,7 @@ See [backend setup and project policy](docs/go-backend.md) and [HTTP API](API.md
 
 ## Engineering loops
 
-- Generate four distinct directions from repository context, with descriptions capped at 35 words. Each batch displays Expand, Optimize, Harden, Simplify in four desktop columns. Select one idea per batch; clicking another pauses the previous choice, and clicking a cyan idea unselects it. The red X at the batch's top left deletes all four ideas while preserving paused task history. Longer historical ideas have expandable previews.
+- Generate a configurable evidence-backed shortlist, including zero ideas. Select an idea before planning. External ready-labeled issues enter the same candidate queue. Dismiss, defer, or reopen candidates; prior task history stays available.
 - Set automatic daily ideation time/timezone or disable it in Settings. Default: 10:00 America/Denver. Manual Run Ideation remains available.
 - Set advertised thinking levels per provider/model on Agents. Explicit settings use ACP; provider defaults retain native execution. Inspect actual attempts, models, thinking, and outcomes under Run.
 - Answer planner questions before implementation begins.
@@ -68,7 +68,7 @@ SQLite preserves tasks, fenced leases, questions, mutation receipts, ordered eve
 - State directory: `~/.local/share/whirlwind`, overridden by `WHIRLWIND_DATA_DIR` or `--data`.
 - Database: `whirlwind.db` within the state directory.
 - Project policy: `.whirlwind.yml` (execution policy generated and committed during onboarding with required Qlty configuration); existing `.whirlwind.yaml` also supported. Existing app-generated empty starters upgrade through Finish execution setup; custom policies remain operator-managed.
-- GitHub labels: `whirlwind:plan` and `whirlwind:work`.
+- GitHub labels: `whirlwind:ready` and `whirlwind:work`.
 - Optional webhook secret: `WHIRLWIND_WEBHOOK_SECRET`.
 
 Brand renaming changes configuration and persisted identifiers. For an existing installation, stop the service, back up state, move it to the new state location, and rename the database to `whirlwind.db`. Rename and commit project policies, update environment variables and GitHub labels, and review stored task branches, issue markers, and policy hashes before resuming. Existing state is not automatically migrated. A fresh state directory is the simplest starting point.
@@ -119,3 +119,11 @@ The red **Stop all runners** button sets `workers.stopped: true` in the configur
 Before routing a Codex provider with saved `quota: exhausted`, Whirlwind rechecks account quota through the native `account/rateLimits/read` RPC, including when model execution uses ACP for explicit thinking. This metadata-only check starts no inference turn and has a five-second timeout. Fresh availability clears stale exhaustion and reset information; failed or unknown reads retain the previous state. Refresh results are recorded in `quota_observations` with `source: routing_refresh`. Missing reset times therefore cannot permanently block a provider after quota becomes available again.
 
 The YAML has `version: 1`, `workers` (capacity, reconciliation and ideation schedule), `providers` (IDs, names, kinds, commands, capabilities and optional discovery commands/cost), and `agents` (role-to-ordered-choice arrays, with optional exact `thinking.config_id` and `thinking.value`). Omit an agent role to keep existing default routing. Invalid files show an error and stop new worker dispatch; running attempts retain their settings. `--settings` / `WHIRLWIND_SETTINGS_FILE` override the file location for isolated deployments or tests; repository development defaults to root `settings.yaml`.
+
+## Bounded local execution
+
+Configure task/discovery budgets and shared quota pools before unattended inference. Selection precedes planning; agents and checks use the shared local OS sandbox. Inbox carries durable milestones, blockers and usage uncertainty. See [local orchestration setup and guarantees](docs/local-orchestration.md) for configuration, recovery, reviewer checks and evaluation.
+
+## Workflow modes
+
+[Personal and Agentic workflows](docs/workflow-modes.md) share coding, verification, review, and a configurable Submitter. Set global `mode` in `settings.yaml` on disk, then restart; a mode change cancels incomplete tasks while preserving their work. Settings exposes integration inventory and restart status.

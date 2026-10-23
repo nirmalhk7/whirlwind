@@ -10,6 +10,13 @@ import (
 )
 
 func (step *taskStep) publishing() (bool, error) {
+	if err := step.ValidateLocalPlan(step.ctx, step.task); err != nil {
+		return true, err
+	}
+	if step.task.Submission == nil || step.task.Submission.Stage != "verified" {
+		step.task.Stage = "submitting"
+		return false, nil
+	}
 	if err := step.ensurePublishIssue(); err != nil {
 		return true, err
 	}
@@ -44,14 +51,18 @@ func (step *taskStep) pullRequestIntent() (model.Publication, error) {
 	if current.PolicyHash != step.project.PolicyHash {
 		return model.Publication{}, errors.New("project policy changed before publication")
 	}
-	return model.Publication{Evidence: &proof, Kind: "pr", Branch: step.task.Branch, Base: base, Head: step.task.ReviewedCommit, Title: step.task.Issue.Title, Body: step.prDescription()}, nil
+	return model.Publication{Evidence: &proof, Kind: "pr", Branch: step.task.Branch, Base: base, Head: step.task.ReviewedCommit, Title: step.task.Submission.Title, Body: step.submissionDescription()}, nil
 }
 
 func (step *taskStep) publishPullRequest(id string, intent model.Publication, version int) error {
 	url := intent.URL
 	if intent.Stage != "complete" {
 		var err error
-		url, err = step.GitHub.CreatePR(step.ctx, step.task.Worktree, step.project.Repo, intent.Branch, intent.Base, intent.Title, intent.Body)
+		if step.Agentic(step.ctx) {
+			url, err = step.publishIntegrationPR(intent)
+		} else {
+			url, err = step.GitHub.CreatePR(step.ctx, step.task.Worktree, step.project.Repo, intent.Branch, intent.Base, intent.Title, intent.Body)
+		}
 		if err != nil {
 			return step.publicationFailure(id, intent, version, err)
 		}
@@ -67,7 +78,7 @@ func (step *taskStep) publishPullRequest(id string, intent model.Publication, ve
 
 }
 func (step *taskStep) ensurePublishIssue() error {
-	if step.project.DefaultBranch == "" {
+	if step.Agentic(step.ctx) || step.project.DefaultBranch == "" {
 		return nil
 	}
 	latest, err := step.GitHub.Issue(step.ctx, step.project.Repo, step.task.Issue.Number)

@@ -82,7 +82,7 @@ func TestSignedWebhookDeduplicatesEligibleIssue(t *testing.T) {
 	if err := s.Store.Put(context.Background(), "projects", "p", model.Project{ID: "p", Repo: "o/r"}, 0); err != nil {
 		t.Fatal(err)
 	}
-	payload := map[string]any{"action": "labeled", "repository": map[string]any{"full_name": "o/r"}, "issue": map[string]any{"number": 4, "title": "work", "body": "do it", "state": "open", "updated_at": "now", "labels": []any{map[string]any{"name": "whirlwind:plan"}}}}
+	payload := map[string]any{"action": "labeled", "repository": map[string]any{"full_name": "o/r"}, "issue": map[string]any{"number": 4, "title": "work", "body": "do it", "state": "open", "updated_at": "now", "labels": []any{map[string]any{"name": "whirlwind:ready"}}}}
 	b, _ := json.Marshal(payload)
 	mac := hmac.New(sha256.New, []byte("secret"))
 	mac.Write(b)
@@ -156,6 +156,7 @@ func TestResumePreservesPendingPlannerQuestions(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
 	task := model.Task{ID: "q", Stage: "questions", Plan: &model.Plan{Questions: []model.Question{{ID: "q1", Text: "Which callback?"}}}}
+	task.Selection = &model.SelectionAuthorization{CandidateID: "q", SelectedAt: "2026-10-22T00:00:00Z"}
 	if err := s.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
 		t.Fatal(err)
 	}

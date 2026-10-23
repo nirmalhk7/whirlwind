@@ -19,7 +19,7 @@ func TestAgentConfigurationRequiresExplicitProviderModelAndVersion(t *testing.T)
 	get := httptest.NewRecorder()
 	s.Handler().ServeHTTP(get, httptest.NewRequest("GET", "http://localhost/api/v1/agents", nil))
 	var agents []model.Record
-	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &agents) != nil || len(agents) != 4 {
+	if get.Code != 200 || json.Unmarshal(get.Body.Bytes(), &agents) != nil || len(agents) != 5 {
 		t.Fatalf("agent roles missing: %d %s", get.Code, get.Body)
 	}
 	for _, tc := range []struct {

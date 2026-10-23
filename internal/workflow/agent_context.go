@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"slices"
 	ctxengine "whirlwind/internal/context"
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
@@ -10,6 +11,9 @@ import (
 
 func (a *agentRun) prepare() error {
 	a.task.Handoff.Version = 1
+	a.task.Handoff.CompletedWork = uniqueContextStrings(a.task.Handoff.CompletedWork)
+	a.task.Handoff.CompletedCriteria = uniqueContextStrings(a.task.Handoff.CompletedCriteria)
+	a.task.Handoff.FailingTests = uniqueContextStrings(a.task.Handoff.FailingTests)
 	a.task.Handoff.Worktree = a.input.CWD
 	if branch, err := github.Run(a.ctx, a.input.CWD, "git", "branch", "--show-current"); err == nil {
 		a.task.Handoff.Branch = branch
@@ -29,8 +33,24 @@ func (a *agentRun) prepare() error {
 	if err = a.saveIndexSnapshot(); err != nil {
 		return err
 	}
-	a.input.Prompt += "\nSelected repository context:\n" + a.index.Package(a.task.Issue.Title+" "+a.task.Issue.Body+" "+a.input.Prompt)
-	return a.embedContext()
+	extra, err := a.embeddingEntries()
+	if err != nil {
+		return err
+	}
+	pack, err := a.index.Pack(ctxengine.PackRequest{Required: a.input.Prompt, Query: a.task.Issue.Title + " " + a.task.Issue.Body, Role: a.input.Role, PolicyHash: a.project.PolicyHash, MaxInputTokens: a.project.Policy.ContextInputTokens, Additional: extra})
+	if err != nil {
+		return err
+	}
+	a.input.Prompt = pack.Prompt
+	key := a.task.ID + ":" + a.input.OperationID + ":" + pack.ID
+	if _, err = a.Store.Get(a.ctx, "context_packs", key); errors.Is(err, store.ErrNotFound) {
+		err = a.Store.Put(a.ctx, "context_packs", key, map[string]any{"task": a.task.ID, "operation_id": a.input.OperationID, "pack": pack}, 0)
+		if errors.Is(err, store.ErrConflict) {
+			return nil
+		}
+		return err
+	}
+	return err
 }
 func (a *agentRun) loadProviders() error {
 	records, err := a.Store.List(a.ctx, "providers")
@@ -73,17 +93,16 @@ func (a *agentRun) saveIndexSnapshot() error {
 	}
 	return err
 }
-func (a *agentRun) embedContext() error {
+func (a *agentRun) embeddingEntries() ([]ctxengine.Entry, error) {
 	config := a.project.Policy.Embeddings
 	if config == nil || !config.Enabled || !a.index.EmbeddingValidated {
-		return nil
+		return nil, nil
 	}
 	vectors, err := ctxengine.Embed(a.ctx, *config, []string{a.task.Issue.Title + " " + a.task.Issue.Body})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	a.input.Prompt += "\nEvaluated embedding retrieval:\n" + jsonText(a.index.VectorSearch(vectors[0], 5))
-	return nil
+	return a.index.VectorSearch(vectors[0], 5), nil
 }
 
 func (a *agentRun) answeredQuestions() error {
@@ -97,6 +116,7 @@ func (a *agentRun) answeredQuestions() error {
 		AttemptID string `json:"attempt_id,omitempty"`
 	}
 	prior := []answered{}
+	seen := map[string]bool{}
 	for _, record := range records {
 		set, err := store.Decode[model.QuestionSet](record)
 		if err != nil {
@@ -107,6 +127,11 @@ func (a *agentRun) answeredQuestions() error {
 		}
 		for _, q := range set.Questions {
 			if !q.Secret && set.Answers[q.ID] != "" {
+				key := q.Text + "\x00" + set.Answers[q.ID]
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
 				prior = append(prior, answered{q.Text, set.Answers[q.ID], set.AttemptID})
 			}
 		}
@@ -115,4 +140,14 @@ func (a *agentRun) answeredQuestions() error {
 		a.input.Prompt += "\nEarlier answered agent questions (retained clarification, not tool authorization):\n" + jsonText(prior)
 	}
 	return nil
+}
+
+func uniqueContextStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if !slices.Contains(out, value) {
+			out = append(out, value)
+		}
+	}
+	return out
 }

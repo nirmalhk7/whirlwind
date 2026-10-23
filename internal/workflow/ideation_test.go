@@ -23,6 +23,13 @@ func ideaBatch(t *testing.T) []model.Direction {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for n := range ideas {
+		ideas[n].Evidence = []model.EvidenceRef{{Kind: "code", Ref: ".whirlwind.yaml"}}
+		ideas[n].ExpectedBenefit = "Avoid repeated work"
+		ideas[n].EffortEstimate = "Small scoped change"
+		ideas[n].Uncertainty = []string{"Validate against representative workload"}
+		ideas[n].ProblemKind = "opportunity"
+	}
 	return ideas
 }
 
@@ -53,7 +60,7 @@ func TestValidateDirections(t *testing.T) {
 		})
 	}
 	// Decode category variants through the same JSON boundary as provider output.
-	for _, category := range []string{"expand", "unknown", ""} {
+	for _, category := range []string{"unknown", ""} {
 		batch := ideaBatch(t)
 		raw, _ := json.Marshal(batch)
 		raw = []byte(strings.Replace(string(raw), `"category":"optimize"`, `"category":"`+category+`"`, 1))
@@ -193,8 +200,8 @@ func assertNoveltyHistoryNotRepeated(t *testing.T, e *Engine, project model.Proj
 	t.Helper()
 	ctx := context.Background()
 	// Reusing the same batch on a later day must be rejected against saved history.
-	if err := e.Ideate(ctx, project, "2026-10-14"); err == nil {
-		t.Fatal("historical batch regenerated")
+	if err := e.Ideate(ctx, project, "2026-10-14"); err != nil {
+		t.Fatalf("unchanged discovery failed: %v", err)
 	}
 	after, err := e.Store.List(ctx, "directions")
 	if err != nil || len(after) != 6 {

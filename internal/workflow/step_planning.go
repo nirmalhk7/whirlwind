@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -27,6 +28,13 @@ func (step *taskStep) planning() (bool, error) {
 	plan, err := step.applyPlannerOutput(out.Text)
 	if err != nil {
 		return true, err
+	}
+	if step.Agentic(step.ctx) && step.task.Stage != "questions" {
+		step.task.Mode = model.AgenticMode
+		if err := step.WriteLocalPlan(step.ctx, step.project, &step.task); err != nil {
+			return true, err
+		}
+		return false, nil
 	}
 	step.task.Handoff.NextAction = "implement plan"
 	key := fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion)
@@ -56,7 +64,8 @@ func (step *taskStep) planningPrompt() (string, error) {
 	if step.task.Plan != nil {
 		data["Questions"] = jsonText(step.task.Plan.Questions)
 	}
-	return agents.Render("plan.md", data)
+	prompt, err := agents.Render("plan.md", data)
+	return prompt + "\nUser selection authorization:\n" + jsonText(step.task.Selection) + "\nDecide implementation details within selected objective and project policy. The ready issue body is authoritative: preserve its objective and requirements, normalize only for execution, and ask inbox questions for missing information. Ask only when needed. Mode: " + step.WorkflowConfiguration(step.ctx).ActiveMode + ". Agentic plans require local inbox approval; Personal plans become ready issues.", err
 }
 
 func decodePlan(text string) (model.Plan, error) {
@@ -66,6 +75,14 @@ func decodePlan(text string) (model.Plan, error) {
 	}
 	if plan.Objective == "" || len(plan.AcceptanceCriteria) == 0 {
 		return plan, errors.New("planner omitted objective or acceptance criteria")
+	}
+	if strings.TrimSpace(plan.What) == "" || strings.TrimSpace(plan.Why) == "" || strings.TrimSpace(plan.Benefit) == "" || len(plan.Where) == 0 {
+		return plan, errors.New("planner must explain what changes, why, product benefit, and affected implementation/test paths")
+	}
+	for _, path := range plan.Where {
+		if !safePlanDocumentPath(path) {
+			return plan, errors.New("planner returned unsafe implementation path")
+		}
 	}
 	if len(plan.Units) == 0 {
 		plan.Units = []model.Unit{{ID: "main", Objective: plan.Objective}}

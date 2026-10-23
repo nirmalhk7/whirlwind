@@ -55,21 +55,25 @@ test("planner answers and critical approval use current versions", async ({ page
     await expect(page.getByRole("link", { name: "Open pull request" })).toHaveAttribute("href", "https://github.com/o/r/pull/1");
 });
 test("trusted repository runs direction through verified PR with real backend", async ({ page, request }) => {
-    test.setTimeout(60000);
+    test.setTimeout(90000);
     const fixture: Fixture = JSON.parse(process.env.WHIRLWIND_E2E_FIXTURE!);
     const registered = await request.post("/api/v1/providers", {
         headers: { "Idempotency-Key": randomUUID() },
         data: { id: "fixture", name: "Fixture agent", kind: "acp", command: [fixture.agent], capabilities: ["ideate", "plan", "code", "review"] },
     });
     expect(registered.status()).toBe(201);
+    const settings=await (await request.get("/api/v1/settings")).json();
+    const allowance={max_attempts:100,max_runtime_seconds:3600,verification_attempts:4,verification_runtime_seconds:60};
+    const configured=await request.patch("/api/v1/settings",{headers:{"If-Match":String(settings.version),"Idempotency-Key":randomUUID()},data:{admission:{default_budget:allowance,discovery_budget:allowance,pools:{"*":{min_remaining_percent:0,max_age_seconds:60,max_concurrent:8}}}}});
+    expect(configured.status()).toBe(200);
     await page.goto("/projects");
     await page.getByLabel("Project name").fill("Fixture project");
     await page.getByLabel("Repository path").fill(fixture.repo);
     await page.getByRole("button", { name: "Register project" }).click();
-    await expect(page.getByRole("heading", { name: "Fixture project", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Fixture project", exact: true })).toBeVisible({timeout:20000});
     await page.goto("/inbox");
     await expect(page.getByRole("button", { name: /^Like idea:/ }).first()).toBeVisible({ timeout: 20000 });
-    await page.getByRole("button", { name: /^Like idea:/ }).first().click();
+    await page.getByRole("button", { name: "Select idea and start",exact:true }).first().click();
     await expect(page.getByRole("link", { name: "Open pull request" })).toHaveAttribute("href", "https://github.com/whirlwind-fixture/demo/pull/1", { timeout: 40000 });
     const response = await request.get("/api/v1/tasks");
     const tasks = await response.json();

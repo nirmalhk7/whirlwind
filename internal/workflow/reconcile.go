@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strings"
 	"time"
@@ -25,6 +26,10 @@ func (e *Engine) Reconcile(ctx context.Context) {
 	}
 }
 func (e *Engine) reconcileProject(ctx context.Context, p model.Project) {
+	if e.Agentic(ctx) {
+		e.reconcileAgenticProject(ctx, p)
+		return
+	}
 	issues, err := e.GitHub.Issues(ctx, p.Repo)
 	if err != nil {
 		_ = e.Store.Notify(ctx, "", "github", err.Error())
@@ -44,6 +49,9 @@ func (e *Engine) reconcileProject(ctx context.Context, p model.Project) {
 	}
 }
 func (e *Engine) reconcileTask(ctx context.Context, p model.Project, t model.Task, version int, seen map[int]bool) {
+	if t.Cancelled() {
+		return
+	}
 	if t.Issue.Number > 0 && !seen[t.Issue.Number] {
 		issue, err := e.GitHub.Issue(ctx, p.Repo, t.Issue.Number)
 		if err == nil && t.Stage != "pr_created" && t.Stage != "complete" {
@@ -55,6 +63,9 @@ func (e *Engine) reconcileTask(ctx context.Context, p model.Project, t model.Tas
 	}
 }
 func (e *Engine) reconcilePR(ctx context.Context, p model.Project, t model.Task, version int) {
+	if t.Cancelled() {
+		return
+	}
 	decision, err := e.GitHub.PRState(ctx, p.Repo, t.PR)
 	if err != nil || (decision != "MERGED" && decision != "CLOSED") {
 		return
@@ -67,6 +78,9 @@ func (e *Engine) reconcilePR(ctx context.Context, p model.Project, t model.Task,
 
 // Ingest cancels tasks affected by issue changes before delegating deduplication and replanning to SQLite storage.
 func (e *Engine) Ingest(ctx context.Context, p model.Project, i model.Issue) (model.Task, error) {
+	if e.Agentic(ctx) {
+		return model.Task{}, errors.New("ready issue intake is disabled in Agentic mode")
+	}
 	records, _ := e.Store.List(ctx, "tasks")
 	for _, record := range records {
 		task, _ := store.Decode[model.Task](record)

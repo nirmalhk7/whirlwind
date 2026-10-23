@@ -10,7 +10,7 @@ import (
 	"whirlwind/internal/model"
 )
 
-const testPlanLabel = "whirlwind:plan"
+const testPlanLabel = "whirlwind:ready"
 
 // openTest opens a temporary SQLite store and registers cleanup with the test runner.
 func openTest(t *testing.T) *Store {
@@ -52,7 +52,13 @@ func TestIssueDeduplicationAndReplan(t *testing.T) {
 		t.Fatalf("withdrawal: %+v %v", b, e)
 	}
 	events, e := s.Events(ctx, 0, 100)
-	if e != nil || len(events) != 4 {
+	taskEvents := 0
+	for _, event := range events {
+		if event.Kind == "tasks" {
+			taskEvents++
+		}
+	}
+	if e != nil || taskEvents != 3 {
 		t.Fatalf("events %d %v", len(events), e)
 	}
 }
@@ -199,6 +205,7 @@ func TestPlanIssueWebhookBindsExistingPlannerTask(t *testing.T) {
 	ctx := context.Background()
 	p := model.Project{ID: "p", Repo: "o/r"}
 	task := model.Task{ID: "direction-one", ProjectID: "p", PlanVersion: 1, Stage: "plan_ready", Plan: &model.Plan{Objective: "feature"}}
+	task.Selection = &model.SelectionAuthorization{CandidateID: "one", SelectedAt: "2026-10-22T00:00:00Z"}
 	if err := s.Put(ctx, "tasks", task.ID, task, 0); err != nil {
 		t.Fatal(err)
 	}

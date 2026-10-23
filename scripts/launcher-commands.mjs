@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { exists, readState, saveState } from "./launcher-config.mjs";
 import { checkPort, health, ownedProcesses, report, stop } from "./launcher-processes.mjs";
+import { requireSandbox } from './sandbox-prerequisites.mjs';
 
 const exec = promisify(execFile);
 const tokenKey = "WHIRLWIND_LAUNCHER_TOKEN";
@@ -17,7 +18,8 @@ async function prerequisites(config) {
   if (!/^module whirlwind\s*$/m.test(module)) throw new Error(`Not a Whirlwind checkout: ${config.root}`);
   if (!await exists(join(config.root, "scripts/dev.mjs"))) throw new Error("Missing scripts/dev.mjs.");
   if (!await exists(join(config.root, "web/node_modules/next/dist/bin/next"))) throw new Error("Install frontend dependencies first: npm ci --prefix web");
-  if (!versionAtLeast(process.versions.node, "20.9.0")) throw new Error("Node.js 20.9+ required.");
+  await requireSandbox(config.root);
+  if (!versionAtLeast(process.versions.node, "22.12.0")) throw new Error("Node.js 22.12+ required.");
   let version;
   try { version = (await exec("go", ["version"], { cwd: config.root, timeout: 15_000 })).stdout.trim(); }
   catch { throw new Error("Go unavailable. Install the Go version required by go.mod."); }
@@ -87,7 +89,7 @@ export async function doctor(config) {
     catch (error) { console.log(`${optional ? "WARN" : "FAIL"} ${name}: ${error.message}`); if (!optional) failures++; }
   };
   console.log(`Checkout: ${config.root}\nData: ${config.data}\nLogs: ${config.log}`);
-  await check("Node.js", async () => { if (!versionAtLeast(process.versions.node, "20.9.0")) throw new Error("Node.js 20.9+ required"); return process.version; });
+  await check("Node.js", async () => { if (!versionAtLeast(process.versions.node, "22.12.0")) throw new Error("Node.js 22.12+ required"); return process.version; });
   await check("Go / frontend dependencies", () => prerequisites(config));
   await check("Process inspection", async () => { await exec("ps", ["-p", String(process.pid), "-o", "pid="]); });
   await check("State directory", async () => {

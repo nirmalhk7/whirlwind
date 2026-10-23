@@ -121,7 +121,7 @@ func (g publicationProbe) CreateIssue(ctx context.Context, repo, title, body, ma
 	if len(records) != 1 {
 		g.t.Error("remote write preceded durable intent")
 	}
-	return model.Issue{Number: 2, Title: title, Body: body + "\n\n" + marker, State: "OPEN", Labels: []string{"whirlwind:plan"}}, nil
+	return model.Issue{Number: 2, Title: title, Body: body + "\n\n" + marker, State: "OPEN", Labels: []string{"whirlwind:ready"}}, nil
 }
 
 func TestVerificationEvidenceFailureBlocksProgress(t *testing.T) {

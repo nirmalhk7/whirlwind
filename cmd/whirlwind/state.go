@@ -40,14 +40,14 @@ func (c config) prepareRegistry() error {
 	return os.Setenv("WHIRLWIND_PROCESS_REGISTRY", registry)
 }
 func (c config) initialize(ctx context.Context, s *store.Store) error {
-	if err := s.RecoverInterrupted(ctx, "startup"); err != nil {
-		return err
-	}
 	bridge, err := filepath.Abs(c.bridge)
 	if err != nil {
 		return err
 	}
 	if err = c.initializeConfiguration(ctx, s, bridge); err != nil {
+		return err
+	}
+	if err := s.RecoverInterrupted(ctx, "startup"); err != nil {
 		return err
 	}
 	_ = s.Notify(ctx, "", "startup", "Whirlwind started; interrupted sessions require fresh lease before resumption")

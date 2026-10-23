@@ -91,7 +91,7 @@ function SettingsFileFeedback({ saved, error }: { saved: boolean; error: string 
 
 function SettingsFileDescription({ editing }: { editing: boolean }) {
   const text = editing
-    ? "Editing the current file at this path. Valid saves apply without restart. The startup snapshot stays unchanged."
+    ? "Editing the current file at this path. Worker, provider, and agent edits apply without restart. Mode changes require editing this file outside the UI and restarting Whirlwind. The startup snapshot stays unchanged."
     : "Exact file contents captured when this process started. Later file edits and saves do not change this snapshot.";
   return <p className="yaml-explanation" id="yaml-explanation">{text}</p>;
 }

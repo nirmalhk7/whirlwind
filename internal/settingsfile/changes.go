@@ -20,6 +20,10 @@ func (s *Source) configurationChanges(ctx context.Context, doc Document) ([]stor
 	if err := c.appendValue("settings", "global", doc.Workers); err != nil {
 		return nil, err
 	}
+	state := model.WorkflowConfig{ActiveMode: model.EffectiveMode(s.activeMode), ConfiguredMode: model.EffectiveMode(doc.Mode), RestartRequired: model.EffectiveMode(s.activeMode) != model.EffectiveMode(doc.Mode), Integrations: doc.Integrations}
+	if err := c.appendValue("workflow_config", "global", state); err != nil {
+		return nil, err
+	}
 	for _, p := range doc.Providers {
 		if err := c.provider(p); err != nil {
 			return nil, err
@@ -72,9 +76,10 @@ func (c *configurationChanges) provider(p Provider) error {
 		return err
 	}
 	value := managed(p, old)
-	if old.ID != "" && !reflect.DeepEqual(old.Command, p.Command) {
+	if old.ID != "" && (!reflect.DeepEqual(old.Command, p.Command) || old.QuotaPool != p.QuotaPool) {
 		value.Quota = "unknown"
 		value.ResetAt = ""
+		value.QuotaSnapshot = nil
 	}
 	return c.appendValue("providers", p.ID, value)
 }

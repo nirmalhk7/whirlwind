@@ -14,6 +14,9 @@ import (
 type reviewSnapshot struct{ Commit, Prompt string }
 
 func (step *taskStep) review() (bool, error) {
+	if err := step.requireTDDEvidence(step.ctx, step.task); err != nil {
+		return step.failedReviewVerification(err)
+	}
 	if err := step.verify(step.ctx, step.project, &step.task); err != nil {
 		return step.failedReviewVerification(err)
 	}
@@ -63,15 +66,53 @@ func (step *taskStep) reviewSnapshot() (reviewSnapshot, error) {
 	if err != nil {
 		return reviewSnapshot{}, err
 	}
-	diff, err := github.Run(step.ctx, step.task.Worktree, "git", "diff", step.task.Base+"...HEAD")
+	previous := step.latestReview(step.ctx, fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion))
+	base := step.task.Base + "...HEAD"
+	intro := ""
+	if prior := step.reusableReview(previous, commit); prior != nil {
+		base = prior.Head + ".." + commit
+		intro = fmt.Sprintf("Repair delta since review %s at %s. Prior review covers the unchanged source. Review changed code and its interactions against every acceptance criterion; resolve or retain every previous finding. Inspect source or the full base diff whenever needed.\n", prior.ReviewID, prior.Head)
+	}
+	diff, err := github.Run(step.ctx, step.task.Worktree, "git", "diff", base)
 	if err != nil {
 		return reviewSnapshot{}, err
 	}
-	prompt, err := agents.Render("review.md", map[string]string{"Plan": jsonText(step.task.Plan), "Previous": step.latestReview(step.ctx, fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion)), "Diff": diff})
+	evidence, err := step.reviewExecutionEvidence()
+	if err != nil {
+		return reviewSnapshot{}, err
+	}
+	prompt, err := agents.Render("review.md", map[string]string{"Plan": jsonText(step.task.Plan), "Previous": previous, "Diff": intro + diff, "Evidence": evidence, "Source": jsonText(step.task.Issue)})
 	if err != nil {
 		return reviewSnapshot{}, err
 	}
 	return reviewSnapshot{commit, prompt}, nil
+}
+
+func (step *taskStep) reusableReview(raw, head string) *model.Provenance {
+	var previous model.Review
+	if json.Unmarshal([]byte(raw), &previous) != nil || previous.Provenance == nil {
+		return nil
+	}
+	p := previous.Provenance
+	if p.Task != step.task.ID || p.PlanVersion != step.task.PlanVersion || p.Base != step.task.Base || p.PolicyHash != step.project.PolicyHash || p.Head == "" || p.Head == head || p.ReviewID == "" || p.VerificationID == "" {
+		return nil
+	}
+	record, err := step.Store.Get(step.ctx, "verification", p.VerificationID)
+	if err != nil {
+		return nil
+	}
+	var evidence struct {
+		Stage      string           `json:"stage"`
+		Risk       string           `json:"risk"`
+		Provenance model.Provenance `json:"provenance"`
+	}
+	if json.Unmarshal(record.Data, &evidence) != nil || evidence.Stage != "complete" || evidence.Risk != step.task.Risk || evidence.Provenance.Task != p.Task || evidence.Provenance.Head != p.Head || evidence.Provenance.Base != p.Base || evidence.Provenance.PlanVersion != p.PlanVersion || evidence.Provenance.PolicyHash != p.PolicyHash {
+		return nil
+	}
+	if _, err := github.Run(step.ctx, step.task.Worktree, "git", "merge-base", "--is-ancestor", p.Head, head); err != nil {
+		return nil
+	}
+	return p
 }
 func (step *taskStep) ensureReadOnly(before string) error {
 	after, err := github.Run(step.ctx, step.task.Worktree, "git", "rev-parse", "HEAD")
@@ -127,6 +168,12 @@ func (step *taskStep) saveReview(review model.Review) error {
 func (step *taskStep) applyReview(review model.Review) error {
 	if Accepted(review, step.task.ChecksPassed) {
 		step.task.Handoff.CompletedCriteria = append([]string{}, step.task.Plan.AcceptanceCriteria...)
+		if step.task.Submission == nil {
+			step.task.Stage = "submitting"
+			step.task.Handoff.NextAction = "organize accepted diff and prepare pull request"
+			return nil
+		}
+		step.task.Submission.Stage = "verified"
 		if step.task.Risk == "critical" && !step.task.Approved {
 			step.task.Stage = "approval"
 			step.notify("critical_approval", "Critical change verified and reviewed; approve PR publication")

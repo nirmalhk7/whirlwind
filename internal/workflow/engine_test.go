@@ -28,7 +28,7 @@ func (fakeGitHub) Sources(context.Context, string) (any, error) { return map[str
 
 // CreateIssue returns a fixed open, labeled issue to simulate plan publication.
 func (fakeGitHub) CreateIssue(context.Context, string, string, string, string) (model.Issue, error) {
-	return model.Issue{Number: 1, State: "OPEN", Labels: []string{"whirlwind:plan"}, UpdatedAt: "1"}, nil
+	return model.Issue{Number: 1, State: "OPEN", Labels: []string{"whirlwind:ready"}, UpdatedAt: "1"}, nil
 }
 
 // CreatePR returns a fixed PR URL without pushing or publishing remotely.
@@ -59,13 +59,16 @@ type fakeAgent struct{ score float64 }
 func (f fakeAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks) (provider.Output, error) {
 	switch in.Role {
 	case "plan":
-		b, _ := json.Marshal(model.Plan{Objective: "Add file", AcceptanceCriteria: []string{"file exists"}, Units: []model.Unit{{ID: "one", Objective: "add result.txt"}}})
+		b, _ := json.Marshal(model.Plan{Objective: "Add file", What: "Add result.txt", Why: "Result is missing", Benefit: "Result becomes available", Where: []string{resultFile}, AcceptanceCriteria: []string{"file exists"}, Units: []model.Unit{{ID: "one", Objective: "add result.txt"}}})
 		return provider.Output{Text: string(b), SessionID: "planner"}, nil
 	case "code":
 		if e := os.WriteFile(filepath.Join(in.CWD, resultFile), []byte("verified\n"), 0600); e != nil {
 			return provider.Output{}, e
 		}
 		return provider.Output{Text: "done", SessionID: "coder"}, nil
+	case "submit":
+		b, _ := json.Marshal(map[string]any{"title": "Improve result", "body": "Makes the result available. Validation passed.", "commits": []map[string]any{{"message": "feat: add verified result", "files": []string{resultFile}}}})
+		return provider.Output{Text: string(b), SessionID: "submitter"}, nil
 	case "review":
 		b, _ := json.Marshal(model.Review{Score: f.score, Findings: []model.Finding{}, Summary: "ok"})
 		return provider.Output{Text: string(b)}, nil
@@ -91,7 +94,7 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	run("init", "-b", "main")
 	run("config", "user.name", "Test")
 	run("config", "user.email", "test@example.com")
-	if err := os.WriteFile(filepath.Join(repo, ".whirlwind.yaml"), []byte("checks:\n  - name: test\n    command: [sh, -c, 'test -f result.txt']\nallowed_paths: ['**']\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\ncommands: []\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repo, ".whirlwind.yaml"), []byte("budget:\n  max_attempts: 100\n  max_runtime_seconds: 3600\n  verification_attempts: 4\n  verification_runtime_seconds: 60\nchecks:\n  - name: test\n    command: [sh, -c, 'test -f result.txt']\nallowed_paths: ['**']\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\ncommands: []\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	run("add", ".")
@@ -105,6 +108,11 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 		t.Fatal(e)
 	}
 	t.Cleanup(func() { _ = s.Close() })
+	settings := DefaultSettings()
+	settings.Admission = model.AdmissionSettings{DiscoveryBudget: &model.BudgetPolicy{MaxAttempts: 100, MaxRuntimeSeconds: 3600}, DefaultBudget: &model.BudgetPolicy{MaxAttempts: 100, MaxRuntimeSeconds: 3600, VerificationAttempts: 4, VerificationRuntimeSeconds: 60}, Pools: map[string]model.QuotaReserve{"*": {MinRemainingPercent: 0, MaxAgeSeconds: 60, MaxConcurrent: 8}}}
+	if err := s.Put(ctx, "settings", "global", settings, 0); err != nil {
+		t.Fatal(err)
+	}
 	project := model.Project{ID: "p", Repo: "o/r", Path: repo, Policy: p, PolicyHash: hash}
 	if err := s.Put(ctx, "projects", "p", project, 0); err != nil {
 		t.Fatal(err)
@@ -112,11 +120,24 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	if err := s.Put(ctx, "providers", "fake", model.Provider{ID: "fake", Kind: "acp", Available: true, Quota: "unknown", Capabilities: []string{"plan", "code", "review"}}, 0); err != nil {
 		t.Fatal(err)
 	}
-	task, e := s.IngestIssue(ctx, project, model.Issue{Number: 1, Title: "file", Body: "add file", State: "OPEN", Labels: []string{"whirlwind:plan"}})
+	task, e := s.IngestIssue(ctx, project, model.Issue{Number: 1, Title: "file", Body: "add file", State: "OPEN", Labels: []string{"whirlwind:ready"}})
 	if e != nil {
 		t.Fatal(e)
 	}
 	engine := New(s, fakeGitHub{}, root)
+	// Most workflow fixtures represent already selected work; intake gates have dedicated tests.
+	task.Selection = &model.SelectionAuthorization{CandidateID: "fixture-selection", CandidateVersion: 1, Objective: task.Issue.Title, PolicyHash: hash, SelectedAt: "2026-10-22T00:00:00Z"}
+	task.Stage = "planning"
+	record, _ := s.Get(ctx, "tasks", task.ID)
+	if err := s.Put(ctx, "tasks", task.ID, task, record.Version); err != nil {
+		t.Fatal(err)
+	}
+	candidates, _ := s.List(ctx, "directions")
+	for _, candidate := range candidates {
+		if err := s.RemoveDirection(ctx, candidate.ID, candidate.Version); err != nil {
+			t.Fatal(err)
+		}
+	}
 	engine.Adapter = func(model.Provider) provider.Adapter { return fakeAgent{9} }
 	return engine, task, repo
 }
@@ -127,7 +148,7 @@ func TestIssueToPRUsesWorktreeAndVerification(t *testing.T) {
 	engine, task, repo := testEngine(t)
 	s := engine.Store
 	var e error
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 7; i++ {
 		if e = engine.Step(ctx, task.ID); e != nil {
 			t.Fatal(e)
 		}
@@ -153,6 +174,7 @@ func TestSelectedDirectionPublishesPlanBeforeCoding(t *testing.T) {
 	ctx := context.Background()
 	e, original, _ := testEngine(t)
 	task := model.Task{ID: "selected", ProjectID: original.ProjectID, Stage: "planning", PlanVersion: 1, Issue: model.Issue{Title: "idea", Body: "add file"}}
+	task.Selection = original.Selection
 	if err := e.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
 		t.Fatal(err)
 	}

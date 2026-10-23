@@ -17,7 +17,7 @@ func (s *Store) LinkedEvidence(ctx context.Context, attempt string) ([]EvidenceR
 		return nil, err
 	}
 	rows, err := s.DB.QueryContext(ctx, `SELECT r.kind,r.id,r.version,r.data,r.updated_at FROM resources r
- WHERE r.kind IN ('verification','reviews','review_parts','checkpoints','questions','permissions','audit','quota_observations')
+ WHERE r.kind IN ('verification','reviews','review_parts','review_checks','checkpoints','questions','permissions','audit','quota_observations')
  AND (json_extract(r.data,'$.attempt_id')=? OR EXISTS(SELECT 1 FROM json_each(r.data,'$.provenance.attempt_ids') WHERE value=?)
  OR (r.kind='verification' AND EXISTS(SELECT 1 FROM resources assessment
  WHERE assessment.kind IN ('reviews','review_parts') AND json_extract(assessment.data,'$.provenance.verification_id')=r.id

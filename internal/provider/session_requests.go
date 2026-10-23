@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"whirlwind/internal/model"
 )
@@ -44,6 +46,9 @@ func (s *providerSession) claudeQuestions(c context.Context, m Message) (any, er
 
 func (s *providerSession) requestPermission(c context.Context, m Message, p map[string]any) (any, error) {
 	permission := parsePermission(m, p)
+	if s.nativeReadPermission(p) {
+		return permissionResponse(m.Method, p, true), nil
+	}
 	allowed := false
 	var e error
 	if s.hooks.Permission != nil {
@@ -73,32 +78,6 @@ func parsePermission(m Message, p map[string]any) Permission {
 	return permission
 }
 
-func permissionResponse(method string, p map[string]any, allowed bool) any {
-	switch method {
-	case "session/request_permission":
-		options, _ := p["options"].([]any)
-		want := "reject_once"
-		if allowed {
-			want = "allow_once"
-		}
-		for _, v := range options {
-			o, _ := v.(map[string]any)
-			if o["kind"] == want {
-				return map[string]any{"outcome": map[string]any{"outcome": "selected", "optionId": o["optionId"]}}
-			}
-		}
-		return map[string]any{"outcome": map[string]any{"outcome": "cancelled"}}
-	case "permission/request":
-		return map[string]any{"allow": allowed}
-	default:
-		decision := "decline"
-		if allowed {
-			decision = "accept"
-		}
-		return map[string]any{"decision": decision}
-	}
-}
-
 func permissionStrings(value any) []string {
 	values, _ := value.([]any)
 	var result []string
@@ -108,4 +87,100 @@ func permissionStrings(value any) []string {
 		}
 	}
 	return result
+}
+
+// mcpElicitation routes native authentication and flat forms through existing
+// operator hooks. Credentials remain in provider login, never persisted questions.
+func (s *providerSession) mcpElicitation(ctx context.Context, m Message, p map[string]any) (any, error) {
+	if ctx.Err() != nil {
+		return map[string]any{"action": "cancel"}, nil
+	}
+	if p["mode"] == "url" || p["url"] != nil {
+		return s.mcpURLElicitation(ctx, m, p)
+	}
+	if mode, _ := p["mode"].(string); mode != "" && mode != "form" {
+		return s.declineElicitation("Unsupported MCP elicitation mode"), nil
+	}
+	return s.mcpFormElicitation(ctx, p)
+}
+
+func (s *providerSession) mcpURLElicitation(ctx context.Context, m Message, p map[string]any) (any, error) {
+	allowed := false
+	var err error
+	if s.hooks.Permission != nil {
+		allowed, err = s.hooks.Permission(ctx, parsePermission(m, p))
+	}
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return map[string]any{"action": "cancel"}, nil
+	}
+	return permissionResponse(m.Method, p, allowed), err
+}
+
+func (s *providerSession) mcpFormElicitation(ctx context.Context, p map[string]any) (any, error) {
+	fields, questions, required, err := elicitationQuestions(p["requestedSchema"])
+	if err != nil {
+		return s.declineElicitation(err.Error()), nil
+	}
+	answers, err := elicitationAnswers(ctx, s.hooks, questions)
+	if errors.Is(err, context.Canceled) {
+		return map[string]any{"action": "cancel"}, nil
+	}
+	if err != nil {
+		return s.declineElicitation(err.Error()), nil
+	}
+	form := elicitationForm{fields: fields, questions: questions, required: required}
+	content, err := form.content(ctx, answers)
+	if err != nil {
+		return s.declineElicitation(err.Error()), nil
+	}
+	return map[string]any{"action": "accept", "content": content}, nil
+}
+
+func (s *providerSession) declineElicitation(reason string) map[string]any {
+	if s.hooks.Event != nil {
+		s.hooks.Event("elicitation_declined", map[string]string{"reason": reason})
+	}
+	return map[string]any{"action": "decline"}
+}
+
+func elicitationAnswers(ctx context.Context, hooks Hooks, questions []model.Question) (map[string]string, error) {
+	if hooks.Questions == nil {
+		return nil, errors.New("User question handler unavailable")
+	}
+	if err := validateQuestions(questions); err != nil {
+		return nil, err
+	}
+	answers, err := hooks.Questions(ctx, questions)
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return nil, context.Canceled
+	}
+	if err != nil {
+		return nil, errors.New("User question could not be answered")
+	}
+	return answers, nil
+}
+
+func (form elicitationForm) content(ctx context.Context, answers map[string]string) (map[string]any, error) {
+	answered := []model.Question{}
+	for _, question := range form.questions {
+		if form.required[question.ID] || strings.TrimSpace(answers[question.ID]) != "" {
+			answered = append(answered, question)
+		}
+	}
+	// Optional absent fields are excluded before normal native-answer validation.
+	if len(answered) > 0 {
+		hooks := Hooks{Questions: func(context.Context, []model.Question) (map[string]string, error) { return answers, nil }}
+		if _, err := AnswerQuestions(ctx, hooks, answered, "mcp"); err != nil {
+			return nil, err
+		}
+	}
+	content := map[string]any{}
+	for _, question := range answered {
+		value, err := elicitationValue(form.fields[question.ID], answers[question.ID])
+		if err != nil {
+			return nil, fmt.Errorf("Invalid answer for %s: %s", question.ID, err.Error())
+		}
+		content[question.ID] = value
+	}
+	return content, nil
 }

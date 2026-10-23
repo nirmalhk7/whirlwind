@@ -22,7 +22,9 @@ Control Host must be localhost/loopback; Origin, when present, must exactly matc
 | POST | `/projects` | `{name,path,webhook_url?}`; preflight installed/authenticated gh before writes; initialize missing Qlty/CodeGraph and validate Qlty; generate and commit executable `.whirlwind.yml` plus missing Qlty configuration when no policy exists; checks come from Qlty and committed repository scripts; exact app-generated empty starters upgrade; custom policies remain unchanged; setup or commit failure returns 422 |
 | DELETE | `/projects/{id}` | Unregister only; preserves repository files and task/run history; If-Match required; 200 `{id,deleted:true}`; 409 while tasks or ideation are active |
 | POST | `/projects/{id}/policy` | Upgrade an unchanged app-generated empty starter to committed execution policy, or confirm current custom committed policy; If-Match required |
-| POST | `/projects/{id}/ideation` | Queue manual ideation; 202 `{operation_id}` |
+| POST | `/projects/{id}/pause` | Persist `paused:true` and cancel this project's active agents, task steps, and queued ideation, including capacity/retry waits; block new execution and scheduled/manual ideation across restarts; current If-Match required; 200 updated project resource |
+| POST | `/projects/{id}/resume` | Persist `paused:false`; allow execution from saved checkpoints; individually paused tasks and global runner stop remain; current If-Match required; 200 updated project resource |
+| POST | `/projects/{id}/ideation` | Queue manual ideation; 202 `{operation_id}`; 409 `project_paused` while project activity is paused |
 | POST | `/projects/{id}/embedding-evaluation` | `{fixtures:[{query,relevant:string[],criteria:string[]}]}`; configured embedding endpoint required |
 | POST | `/providers` | `{id,name,kind:"acp",command:string[],capabilities:string[],cost?}`; 201 |
 | PATCH | `/providers/{id}` | Full provider object; immutable kind; If-Match required |
@@ -56,7 +58,7 @@ Read `/operations/{operation_id}` for connectivity results. Its `data` contains 
 
 Connectivity tests accept optional `{model:"exact-model-id",thinking:{config_id,value}}`. Explicit thinking runs native Codex/Claude sources through the same maintained ACP adapter used for discovery; default thinking preserves native transport. Model discovery operations contain `kind:"provider_models"`, `provider`, `stage`, `models:[{id,name}]`, optional `current`, and `error` on failure. Discovery accepts optional `{model}` and selects it before returning model-dependent `thinking_options:[{config_id,name,current,options:[{id,name}]}]`. It sends no inference prompt, times out after 30 seconds, and uses normal process capacity.
 
-Agents are logical roles; Providers are model sources. A configured agent uses only its saved provider/model pairs in exact order, overriding project provider ranking and outcome/cost preferences. Missing/unavailable, role-incompatible, or exhausted sources are skipped. Confirmed quota exhaustion or authentication failure advances to the next eligible pair; ordinary errors pause execution. Exhausting the list pauses the task (or fails an ideation operation) for operator recovery. Existing worktree/handoff is retained; switching sources starts a fresh session. Sessions and metrics record selected model; resumption also requires matching transport and thinking configuration. Provider quota is shared across its models and remains exhausted until known reset or manual setup recovery. Unconfigured roles retain existing project routing.
+Agents are logical roles; Providers are model sources. A configured agent uses only its saved provider/model pairs in exact order, overriding project provider ranking and outcome/cost preferences. Missing/unavailable, role-incompatible, or exhausted sources are skipped. Confirmed quota exhaustion or authentication failure advances to the next eligible pair; ordinary errors pause execution. Quota-blocked tasks enter durable waiting; authentication, policy and budget boundaries retain explicit setup or recovery reasons. Existing worktree/handoff is retained; switching sources starts a fresh session. Sessions and metrics record selected model; resumption also requires matching transport and thinking configuration. Explicit pool aliases share admission across provider configurations. Reset times trigger metadata rechecks rather than proving availability. Unconfigured roles retain existing project routing.
 
 Tasks expose `stage`, `plan_version`, issue snapshot, acceptance criteria, questions, units, worktree/branch, score, review passes, risk, approval, failing checks, and PR link. Stage values: `planning`, `questions`, `plan_ready`, `coding`, `repair`, `review`, `approval`, `publishing`, `paused`, `pr_created`, `complete`.
 
@@ -75,6 +77,10 @@ Generated directions include `category`: `expand`, `optimize`, `harden`, or `sim
 Empty project policies permit registration and ideation with an empty `policy_hash`. Task execution still requires a configured, committed policy confirmed through `/projects/{id}/policy`. Native providers accept optional `model_command:["executable", "argument", ...]` for ACP discovery; otherwise pinned official npm adapters are used.
 
 ## Thinking, Run history, and ideation schedules
+
+Automatic issue execution requires an open issue tagged `whirlwind:ready`; `whirlwind:plan` alone does not authorize coding. Selected ideas run the planner first, then publish a ready issue with the specification, acceptance checklist, scoped implementation units, verification requirements, and structured plan before coding begins. Existing task checkpoints and publication markers retain their identity.
+
+Newly generated execution policies run `qlty check --all --no-fix` and `qlty smells --all --include-tests --sarif` alongside repository scripts. Smell verification reads the SARIF results and blocks findings, invalid reports, or unsuccessful analysis even when the Qlty process exits zero. Existing custom project policies require an explicit update and confirmation to adopt these checks.
 
 Each primary/fallback choice can persist optional `thinking:{config_id,value}`. Values come from ACP `thought_level` selectors after model selection, never a hard-coded effort list. Execution and Test model validate advertised support and apply the exact config ID/value before prompting. Unsupported or unconfirmed settings fail rather than silently using another level. Changing settings does not alter an active attempt. Unconfigured/native-default choices keep their existing transport.
 
@@ -120,3 +126,32 @@ handling, restart reconciliation, and publication intent guarantees.
 `GET /provider-status` returns `{providers,interval_seconds,stopped}`. Each provider contains `id`, `name`, `kind`, `status` (`working`, `failed`, `unavailable`, `paused`, or `unknown`), `detail`, and `checked_at`. Metadata-only connection checks are bounded to ten seconds (including capacity waits), cached across tabs for `workers.provider_status_check_seconds` (default 30; valid 1–86400), and invalidated by configuration/stop changes. Checks send no model prompts. `workers.stopped: true` prevents provider process launches; the response marks installed providers paused. A successful check confirms protocol readiness, not an inference result.
 
 Root `settings.yaml` owns worker settings, provider definitions and ordered agent choices. Existing API shapes and numeric versions remain unchanged. UI POST/PATCH configuration mutations write YAML and cache state together; failed receipts restore the previous file. Valid external file edits refresh cache versions and emit normal events, so stale UI saves fail rather than overwrite those edits. Quota and availability observations remain runtime state and never rewrite YAML. Invalid YAML/schema/configuration returns an error instead of silently reverting to defaults. UI routes `/agents` and `/providers` redirect to `/settings#agents` and `/settings#providers`; API routes remain available.
+
+## Bounded orchestration additions
+
+All paths below use `/api/v1`. Mutations retain `Idempotency-Key` and current resource `If-Match`; stale versions return conflict.
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| GET | `/tasks/{id}/usage` | Whole-task reported usage, unknown coverage, active/uncertain reservations and ledger entries |
+| GET | `/tasks/{id}/budget` | Task override `budget` (nullable), resolved `effective_budget` (nullable), `budget_source` (`task`, `project_policy`, `default`, `unconfigured`), usage, enforcement limits and current task version |
+| PATCH | `/tasks/{id}/budget` | Replace allowance without resetting previous consumption |
+| POST | `/tasks/{id}/budget-reconcile` | Explicitly confirm interrupted child or legacy session termination; body `{attempt_id,confirmed_terminated:true,usage:null}` releases its concurrent slot while retaining unknown consumption reservations. Supplying attempt-scoped `usage` additionally requires observed `active_runtime_ms`; 200 updated task resource, 409 for unreconcilable reservation, 422 without termination confirmation |
+| POST | `/tasks/{id}/adopt` | Explicitly authorize a legacy task objective before further execution |
+| POST | `/tasks/{id}/outcome` | Append audited user feedback `{decision:"accepted"|"rejected"|"regression"|"reverted",reason?:string}`; 200 updated task version, execution stage unchanged; 422 invalid decision |
+| POST | `/directions/{id}/dismiss` | Suppress candidate until relevant evidence changes |
+| POST | `/directions/{id}/defer` | Retain candidate for later; explicitly reopen before selection |
+| POST | `/directions/{id}/reopen` | Make dismissed/deferred candidate available again |
+| GET | `/evaluation` | Read-only whole-run quality/usage report and route comparisons; no inference |
+
+`POST /projects/{id}/ideation` accepts optional `goal`, `constraints`, `priorities`, `max_candidates` (1–12; omitted/0 uses configured schedule maximum, default 4), and `fresh`. Nonempty brief fields or a positive maximum save the brief for later runs; `{}` retains it. `fresh:true` bypasses unchanged-input skip for this operation while keeping budget and deduplication checks. Empty useful output succeeds. Selection atomically binds candidate version, scope, policy and source fingerprint to one task. Deferred/dismissed candidates return 409 until reopened. `awaiting_selection` never dispatches a planner; ordinary resume cannot adopt a legacy task. `/tasks/{id}/adopt` requires confirmed project policy and an unselected unpublished task, otherwise 409.
+
+Task `wait` separates quota waiting from budget/setup/policy/manual boundaries. Native `quota_snapshot` retains windows, timestamps and explicit pool identity; missing values remain null/unknown. `workers.admission` configures default task and discovery budgets plus per-pool reserve/freshness. Finite attempt/runtime bounds are required; implementation also reserves verification capacity. Policy adds `sandbox`, `context_input_tokens`, `parallel_units`, `adaptive_routing`, and check output/reuse/freshness declarations.
+
+Inbox notifications include `current`, `next_action`, `completed`, `evidence_id`, `usage`, occurrence count and first/last timestamps. Reconnect does not create a second durable alert. Full setup and enforcement limits: [local orchestration](docs/local-orchestration.md).
+
+Generated directions include `rank`, `expected_benefit`, `effort_estimate`, `uncertainty`, and `problem_kind` (`observed_defect` or `opportunity`). An observed defect requires persisted failed-verification evidence. Source hypotheses and prospective improvements are opportunities and must state remaining uncertainty. These assessment fields may be absent on historical or imported issue candidates.
+
+`GET /provider-status` reports optional `quota_pool` and `quota_snapshot` separately from protocol connectivity. Quota snapshots retain the complete native response in `raw_metadata`; `applicability` remains `unknown`, including historical snapshots, because provider model/account applicability is not inferred. Routing remains conservative across reported windows. Its `quota_fresh` is boolean or null; null means native quota freshness is unknown. No token-to-subscription-percentage conversion is performed.
+
+Usage reports preserve missing historical runtime in `unknown_runtime_attempts`; admission blocks instead of treating it as zero. Entry `kind` distinguishes model attempts from synthetic `legacy` unknowns, deterministic `verification` checks, and `preflight` with no model turn. Reconciliation of legacy session IDs also requires confirmed termination; supplying usage requires attempt scope and observed `active_runtime_ms`.

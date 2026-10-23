@@ -11,6 +11,7 @@ import (
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/policy"
+	"whirlwind/internal/workflow"
 )
 
 type projectInput struct {
@@ -27,7 +28,13 @@ func (q apiRequest) createProject() error {
 	if input.Name == "" || !filepath.IsAbs(input.Path) {
 		return &apiError{422, "invalid_input", "Name and absolute repository path required"}
 	}
-	project, err := input.project(q.r.Context())
+	var project model.Project
+	var err error
+	if q.Engine.Agentic(q.r.Context()) {
+		project, err = q.agenticProject(input)
+	} else {
+		project, err = input.project(q.r.Context())
+	}
 	if err != nil {
 		return err
 	}
@@ -82,6 +89,12 @@ func checkedRepository(ctx context.Context, path string) (string, string, error)
 }
 
 func (q apiRequest) registerProjectWebhook(p model.Project) error {
+	if q.Engine.Agentic(q.r.Context()) {
+		if p.WebhookURL != "" {
+			return &apiError{422, "agentic_webhook_disabled", "Agentic mode uses integration context; GitHub ready-issue webhook is unavailable"}
+		}
+		return nil
+	}
 	if p.WebhookURL == "" {
 		return nil
 	}
@@ -93,4 +106,32 @@ func (q apiRequest) registerProjectWebhook(p model.Project) error {
 		return &apiError{422, "invalid_input", "Webhook URL must be HTTPS ending /webhooks/github"}
 	}
 	return q.Engine.GitHub.RegisterWebhook(q.r.Context(), p.Repo, p.WebhookURL, q.Secret)
+}
+
+func (q apiRequest) agenticProject(input projectInput) (model.Project, error) {
+	ctx := q.r.Context()
+	var p model.Project
+	path, err := repositoryRoot(ctx, input.Path)
+	if err != nil {
+		return p, err
+	}
+	remote, err := github.Run(ctx, path, "git", "remote", "get-url", "origin")
+	if err != nil {
+		return p, err
+	}
+	canonical, err := workflow.CanonicalRemote(remote)
+	if err != nil {
+		return p, err
+	}
+	if err = initializeProject(ctx, path); err != nil {
+		return p, err
+	}
+	rules, hash, err := policy.LoadForOnboarding(path)
+	if err != nil {
+		return p, err
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	p = model.Project{ID: hex.EncodeToString(sum[:8]), Name: input.Name, Path: path, Repo: canonical, RemoteURL: canonical, Policy: rules, PolicyHash: hash, WebhookURL: input.WebhookURL}
+	p.DefaultBranch, err = q.Engine.InspectIntegrationRepository(ctx, p)
+	return p, err
 }

@@ -12,8 +12,9 @@ type AgentChoice struct {
 }
 
 type AgentConfig struct {
-	Role  string        `json:"role"`
-	Chain []AgentChoice `json:"chain"`
+	InheritedFrom string        `json:"inherited_from,omitempty"`
+	Role          string        `json:"role"`
+	Chain         []AgentChoice `json:"chain"`
 }
 
-func AgentRoles() []string { return []string{"ideate", "plan", "code", "review"} }
+func AgentRoles() []string { return []string{"ideate", "plan", "code", "review", "submit"} }

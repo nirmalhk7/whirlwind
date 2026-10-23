@@ -15,7 +15,7 @@ func TestRenderContext(t *testing.T) {
 		want   []string
 		absent string
 	}{
-		{"ideate.md", map[string]string{"Index": literal, "Sources": "sources", "Previous": "previous"}, []string{"Repository index:\n" + literal, "GitHub sources:\nsources", "Previous suggestions:\nprevious"}, ""},
+		{"ideate.md", map[string]string{"Index": literal, "Sources": "sources", "Previous": "previous", "Brief": "brief", "Evidence": "evidence", "Diagnostics": "diagnostics", "MaxCandidates": "3"}, []string{"Changed repository index entries:\n" + literal, "Captured external sources:\nsources", "Relevant previous suggestions:\nprevious", "Available evidence references:\nevidence", "Generate zero to 3", "diagnostics"}, "<no value>"},
 		{"ideate_novelty.md", map[string]string{"Candidates": literal, "Previous": "previous"}, []string{"Candidate ideas:\n" + literal, "Previous suggestions:\nprevious"}, ""},
 		{"plan.md", map[string]string{"Title": literal, "Body": "body"}, []string{"Issue:\n" + literal + "\nbody"}, "Answered questions:"},
 		{"plan.md", map[string]string{"Title": "title", "Body": "body", "Questions": literal}, []string{"Answered questions: " + literal}, ""},

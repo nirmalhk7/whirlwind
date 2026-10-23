@@ -17,7 +17,10 @@ const ideationPrefix = "ideation:"
 
 // Ideate retains a generation lease while preparing, validating, and saving four directions.
 func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) error {
-	ctx, release := e.runnerContext(ctx)
+	ctx, release, err := e.projectRunnerContext(ctx, p.ID)
+	if err != nil {
+		return err
+	}
 	defer release()
 	key := "generation:" + p.ID
 	lease, err := e.Store.Claim(ctx, key, e.owner, time.Minute)
@@ -32,26 +35,41 @@ func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) error 
 		return err
 	}
 	e.renewLease(ctx, cancel, key, lease.Fence, nil)
-	prompt, previous, err := e.ideationPrompt(ctx, p)
+	prompt, previous, snapshot, unchanged, err := e.prepareDiscovery(ctx, p)
 	if err != nil {
 		return err
 	}
-	directions, err := e.generateDirections(ctx, p, prompt, previous)
+	if unchanged {
+		return e.Store.SaveDirections(ctx, p.ID, day, nil)
+	}
+	directions, err := e.generateDirections(ctx, p, prompt, previous, snapshot)
 	if err != nil {
 		return err
 	}
 	for n := range directions {
 		d := &directions[n]
+		d.Rank = n + 1
 		d.ID = store.ID()
 		d.ProjectID = p.ID
 		d.Day = day
 	}
-	return e.Store.SaveDirections(ctx, p.ID, day, directions)
+	if err = e.Store.SaveDirections(ctx, p.ID, day, directions); err != nil {
+		return err
+	}
+	if len(directions) > 0 {
+		if err = e.Store.Notify(ctx, "", "ideas_ready", fmt.Sprintf("%s: %d evidence-backed ideas await your selection", p.Name, len(directions))); err != nil {
+			return err
+		}
+	}
+	return e.saveDiscoverySnapshot(ctx, p.ID, snapshot)
 }
 
 // IdeateWhenAvailable queues a manual run behind active generation for this project.
 func (e *Engine) IdeateWhenAvailable(ctx context.Context, p model.Project, day string) error {
-	ctx, release := e.runnerContext(ctx)
+	ctx, release, err := e.projectRunnerContext(ctx, p.ID)
+	if err != nil {
+		return err
+	}
 	defer release()
 	for {
 		err := e.Ideate(ctx, p, day)
@@ -68,27 +86,6 @@ func (e *Engine) IdeateWhenAvailable(ctx context.Context, p model.Project, day s
 	}
 }
 
-func (e *Engine) ideationPrompt(ctx context.Context, p model.Project) (string, []model.Direction, error) {
-	index, err := e.index(ctx, p)
-	if err != nil {
-		return "", nil, err
-	}
-	sources, err := e.GitHub.Sources(ctx, p.Repo)
-	if err != nil {
-		return "", nil, err
-	}
-	_ = e.Store.Put(ctx, "source_cache", store.ID(), map[string]any{"project": p.ID, "sources": sources}, 0)
-	previous, err := e.previousDirections(ctx, p.ID)
-	if err != nil {
-		return "", nil, err
-	}
-	summary := []map[string]any{}
-	for _, file := range index.Files {
-		summary = append(summary, map[string]any{"path": file.Path, "symbols": file.Symbols, "todos": file.TODOs})
-	}
-	prompt, err := agents.Render("ideate.md", map[string]string{"Index": jsonText(summary), "Sources": jsonText(sources), "Previous": jsonText(previous)})
-	return prompt, previous, err
-}
 func (e *Engine) previousDirections(ctx context.Context, project string) ([]model.Direction, error) {
 	records, err := e.Store.List(ctx, "directions")
 	if err != nil {
@@ -106,18 +103,26 @@ func (e *Engine) previousDirections(ctx context.Context, project string) ([]mode
 	}
 	return previous, nil
 }
-func (e *Engine) generateDirections(ctx context.Context, p model.Project, prompt string, previous []model.Direction) ([]model.Direction, error) {
+func (e *Engine) generateDirections(ctx context.Context, p model.Project, prompt string, previous []model.Direction, snapshot discoverySnapshot) ([]model.Direction, error) {
 	scratch := filepath.Join(e.Root, "ideation", p.ID)
 	if err := os.MkdirAll(scratch, 0700); err != nil {
 		return nil, err
 	}
 	var rejected error
+	snapshotID := snapshot.Fingerprint
+	if snapshotID == "" {
+		snapshotID = model.Fingerprint([]byte(prompt))
+	}
+	budgetTaskID := ideationPrefix + p.ID + ":" + snapshotID[:12]
+	if operation := operationID(ctx); operation != "" {
+		budgetTaskID = ideationPrefix + p.ID + ":" + operation
+	}
 	for attempt := 0; attempt < 3; attempt++ {
 		input := prompt
 		if rejected != nil {
-			input += "\nPrevious batch rejected: " + rejected.Error() + "\nGenerate a replacement batch of four substantively different ideas."
+			input += "\nPrevious batch rejected: " + rejected.Error() + "\nReturn up to four useful evidence-backed candidates, or [] when none qualify."
 		}
-		out, err := e.agent(ctx, p, model.Task{ID: ideationPrefix + p.ID, Issue: model.Issue{Title: "innovation"}}, provider.Input{Role: "ideate", CWD: scratch, Prompt: input, ReadOnly: true})
+		out, err := e.agent(ctx, p, model.Task{ID: budgetTaskID, Issue: model.Issue{Title: "innovation"}}, provider.Input{Role: "ideate", Purpose: "generation", CWD: scratch, Prompt: input, ReadOnly: true})
 		if err != nil {
 			return nil, err
 		}
@@ -126,11 +131,19 @@ func (e *Engine) generateDirections(ctx context.Context, p model.Project, prompt
 			rejected = err
 			continue
 		}
-		if err = validateDirections(directions, previous); err != nil {
+		if err = validateCandidateEvidence(directions, snapshot); err != nil {
 			rejected = err
 			continue
 		}
-		unique, reason, err := e.reviewDirectionNovelty(ctx, p, scratch, directions, previous)
+		unchangedHistory := unchangedCandidateEvidence(previous, snapshot.Evidence)
+		if err = validateDirections(directions, unchangedHistory, snapshot.MaxCandidates); err != nil {
+			rejected = err
+			continue
+		}
+		if len(directions) == 0 || len(unchangedHistory) == 0 {
+			return directions, nil
+		}
+		unique, reason, err := e.reviewDirectionNovelty(ctx, p, scratch, directions, unchangedHistory, budgetTaskID)
 		if err != nil {
 			return nil, err
 		}
@@ -143,12 +156,12 @@ func (e *Engine) generateDirections(ctx context.Context, p model.Project, prompt
 }
 
 // reviewDirectionNovelty checks meaning as well as wording, including overlap across categories.
-func (e *Engine) reviewDirectionNovelty(ctx context.Context, p model.Project, scratch string, directions, previous []model.Direction) (bool, string, error) {
-	prompt, err := agents.Render("ideate_novelty.md", map[string]string{"Candidates": jsonText(directions), "Previous": jsonText(previous)})
+func (e *Engine) reviewDirectionNovelty(ctx context.Context, p model.Project, scratch string, directions, previous []model.Direction, budgetTaskID string) (bool, string, error) {
+	prompt, err := agents.Render("ideate_novelty.md", map[string]string{"Candidates": boundedSources(jsonText(directions)), "Previous": boundedSources(jsonText(previous))})
 	if err != nil {
 		return false, "", err
 	}
-	out, err := e.agent(ctx, p, model.Task{ID: ideationPrefix + p.ID + ":novelty:" + store.ID(), Issue: model.Issue{Title: "idea novelty review"}}, provider.Input{Role: "ideate", CWD: scratch, Prompt: prompt, ReadOnly: true})
+	out, err := e.agent(ctx, p, model.Task{ID: budgetTaskID, Issue: model.Issue{Title: "idea novelty review"}}, provider.Input{Role: "ideate", Purpose: "novelty:" + store.ID(), CWD: scratch, Prompt: prompt, ReadOnly: true})
 	if err != nil {
 		return false, "", err
 	}

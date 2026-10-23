@@ -18,6 +18,9 @@ func validateWorkers(s workflow.Settings) error {
 	if s.ProviderStatusCheckSeconds < 1 || s.ProviderStatusCheckSeconds > 86400 {
 		return errors.New("provider_status_check_seconds must be 1..86400 in settings.yaml")
 	}
+	if err := s.Admission.Validate(); err != nil {
+		return err
+	}
 	return s.Ideation.Validate()
 }
 
@@ -36,6 +39,45 @@ func validateProviders(values []Provider) (map[string]Provider, error) {
 		providers[p.ID] = p
 	}
 	return providers, nil
+}
+
+func validateIntegrations(settings model.IntegrationSettings, providers map[string]Provider) error {
+	validTarget := func(provider, ref string) error {
+		p, ok := providers[provider]
+		if !ok || p.Kind == "unavailable" {
+			return fmt.Errorf("integration references unconfigured provider %q", provider)
+		}
+		if strings.TrimSpace(ref) == "" || ref != strings.TrimSpace(ref) {
+			return errors.New("integration needs an exact native ref")
+		}
+		return nil
+	}
+	seen := map[[2]string]bool{}
+	for _, source := range settings.Sources {
+		if err := validTarget(source.Provider, source.Ref); err != nil {
+			return err
+		}
+		key := [2]string{source.Provider, source.Ref}
+		if seen[key] {
+			return errors.New("duplicate integration scope override")
+		}
+		seen[key] = true
+		for _, scope := range source.Scopes {
+			if strings.TrimSpace(scope) == "" {
+				return errors.New("integration scopes cannot be empty")
+			}
+		}
+	}
+	for repository, target := range settings.Publication {
+		canonical, err := workflow.CanonicalRemote(repository)
+		if err != nil || canonical != repository {
+			return fmt.Errorf("integration publication key must be canonical HTTPS repository URL: %q", repository)
+		}
+		if err := validTarget(target.Provider, target.Ref); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateProviderCommand(p Provider) error {
@@ -71,7 +113,7 @@ func validateChain(role string, chain []model.AgentChoice, providers map[string]
 
 func validateChoice(role string, choice model.AgentChoice, providers map[string]Provider, duplicate bool) error {
 	p, ok := providers[choice.Provider]
-	capable := ok && p.Kind != "unavailable" && slices.Contains(p.Capabilities, role)
+	capable := ok && p.Kind != "unavailable" && (slices.Contains(p.Capabilities, role) || role == "submit" && slices.Contains(p.Capabilities, "code"))
 	if !capable || strings.TrimSpace(choice.Model) == "" || duplicate {
 		return fmt.Errorf("invalid provider/model choice for %s", role)
 	}

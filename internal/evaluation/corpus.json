@@ -1,0 +1,90 @@
+{
+  "id": "whirlwind-local-v1",
+  "live_inference": false,
+  "cases": [
+    {
+      "id": "selected-bug-fix",
+      "fixtures": [
+        "TestReadyIssueWaitsForExplicitSelection",
+        "TestAcceptanceRequiresChecksAndNoBlockers"
+      ],
+      "invariant": "No planning before selection; completion needs accepted current evidence."
+    },
+    {
+      "id": "multi-file-delegation",
+      "fixtures": [
+        "TestDelegationSerializesUnknownAndOverlappingScopes",
+        "TestUnitFailureWaitsForSiblingCheckpoint",
+        "TestInterruptedIntegrationUsesDurableUnitCheckpoints"
+      ],
+      "invariant": "Nonoverlapping units share task allowance and retain checkpoints."
+    },
+    {
+      "id": "ambiguous-scope",
+      "fixtures": [
+        "TestAgentQuestionsWaitForAnswers",
+        "TestResumePreservesPendingPlannerQuestions",
+        "TestTaskTransitionNotificationCommitsWithTask"
+      ],
+      "invariant": "Scope decisions and meaningful state are durable and visible."
+    },
+    {
+      "id": "quota-exhaustion",
+      "fixtures": [
+        "TestQuotaReserveBlocksBeforeInferenceAndReleasesSlots",
+        "TestQuotaWaitSurvivesRestartAndHonorsManualPause"
+      ],
+      "invariant": "Protected quota blocks dispatch; metadata refresh wakes once."
+    },
+    {
+      "id": "provider-failure",
+      "fixtures": [
+        "TestRetryAdmissionCountsFailedAttempts",
+        "TestLongRetryDelayBecomesDurableWait"
+      ],
+      "invariant": "Failed routes consume allowance; retries respect bounded delays."
+    },
+    {
+      "id": "sandbox-denial",
+      "fixtures": [
+        "TestMissingSandboxNeverRunsTarget",
+        "TestACPTerminalCannotWriteOutsideSandbox",
+        "TestCheckOutputRejectsSourceAndSymlinkEscapes"
+      ],
+      "invariant": "No unrestricted fallback, host writes or mutable reviewer source."
+    },
+    {
+      "id": "review-repair",
+      "fixtures": [
+        "TestRepairReviewUsesDeltaOnlyWithMatchingPriorEvidence",
+        "TestReusableCheckUsesEvidenceButDirtySourceForcesExecution"
+      ],
+      "invariant": "Repairs preserve findings; changed validity inputs invalidate evidence reuse."
+    },
+    {
+      "id": "restart",
+      "fixtures": [
+        "TestRecoveryPreservesAnswersAndClosesOrphanedTransport",
+        "TestQuotaWaitSurvivesRestartAndHonorsManualPause"
+      ],
+      "invariant": "Restart retains evidence, uncertainty and stop state."
+    },
+    {
+      "id": "interrupted-publication",
+      "fixtures": [
+        "TestUncertainPublicationReconcilesFrozenIntent",
+        "TestPublicationRejectsChangedCommitPolicyAndPlan"
+      ],
+      "invariant": "Reconcile frozen publication before retry; stale evidence cannot publish."
+    },
+    {
+      "id": "accounting-and-quality",
+      "fixtures": [
+        "TestReportCountsFailuresAndUnknownsWithoutClaimingAcceptance",
+        "TestComparisonRequiresEquivalentQualityAndCompleteTelemetry",
+        "TestEvaluationKeepsHistoricalUsageUnknownAndDoesNotStartWork"
+      ],
+      "invariant": "Count complete task costs; missing telemetry and acceptance remain unknown."
+    }
+  ]
+}

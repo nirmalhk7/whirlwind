@@ -45,7 +45,8 @@ func (s *providerSession) tokenUsage(p map[string]any) {
 	if !ok {
 		return
 	}
-	value := &model.Usage{Scope: "session"}
+	raw, _ := json.Marshal(usage)
+	value := &model.Usage{Scope: "session", Source: "codex", Raw: raw, CachedInputSemantics: "included_in_input", Completeness: "partial"}
 	number := func(key string) *int64 {
 		if n, ok := total[key].(float64); ok {
 			v := int64(n)
@@ -57,6 +58,9 @@ func (s *providerSession) tokenUsage(p map[string]any) {
 	value.InputTokens = number("inputTokens")
 	value.OutputTokens = number("outputTokens")
 	value.CachedTokens = number("cachedInputTokens")
+	if value.TotalTokens != nil && value.InputTokens != nil && value.OutputTokens != nil {
+		value.Completeness = "reported_complete"
+	}
 	s.mu.Lock()
 	s.output.Usage = value
 	s.output.Tokens = nil

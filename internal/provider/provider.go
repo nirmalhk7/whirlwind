@@ -12,23 +12,40 @@ import (
 	"sync/atomic"
 	"time"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 )
 
 type Input struct {
-	UnitID      string
-	OperationID string
-	Purpose     string
-	Model       string
-	Thinking    *model.ThinkingChoice
-	Role        string
-	CWD         string
-	Prompt      string
-	SessionID   string
-	Policy      model.Policy
-	ReadOnly    bool
+	NativeIntegrations   bool
+	ProviderID           string
+	DiscoverConnected    bool
+	CatalogOnly          bool
+	RequiredIntegrations []model.IntegrationTarget
+	IntegrationScopes    []model.IntegrationSource
+	Execution            *execution.Profile
+	ExecutionProfile     string
+	UnitID               string
+	OperationID          string
+	Purpose              string
+	Model                string
+	Thinking             *model.ThinkingChoice
+	Role                 string
+	CWD                  string
+	Prompt               string
+	SessionID            string
+	Policy               model.Policy
+	ReadOnly             bool
+}
+type ToolEvidence struct {
+	Ref     string `json:"ref"`
+	Tool    string `json:"tool"`
+	CallID  string `json:"call_id"`
+	Success bool   `json:"success"`
 }
 type Output struct {
+	ToolCalls         []ToolEvidence        `json:"tool_calls,omitempty"`
+	Integrations      []model.Integration   `json:"integrations,omitempty"`
 	AttemptID         string                `json:"attempt_id,omitempty"`
 	Usage             *model.Usage          `json:"usage,omitempty"`
 	Text              string                `json:"text"`
@@ -45,6 +62,7 @@ type Permission struct {
 	Raw     json.RawMessage `json:"raw"`
 }
 type Hooks struct {
+	RunCheck   func(context.Context, string) (CheckResult, error)
 	Questions  func(context.Context, []model.Question) (map[string]string, error)
 	Event      func(string, any)
 	Permission func(context.Context, Permission) (bool, error)
@@ -53,11 +71,25 @@ type Adapter interface {
 	// Run executes or resumes one agent prompt and exposes events, questions, and permissions through hooks.
 	Run(context.Context, Input, Hooks) (Output, error)
 }
+type CheckResult struct {
+	Phase            string `json:"phase,omitempty"`
+	BaselineAccepted bool   `json:"baseline_accepted,omitempty"`
+	ExecutionProfile string `json:"execution_profile"`
+	CheckID          string `json:"check_id"`
+	Head             string `json:"head"`
+	Snapshot         string `json:"snapshot"`
+	Passed           bool   `json:"passed"`
+	ExitCode         *int   `json:"exit_code"`
+	Output           string `json:"output"`
+	OutputArtifact   string `json:"output_artifact,omitempty"`
+	Truncated        bool   `json:"truncated"`
+	DurationMS       int64  `json:"duration_ms"`
+}
 type ProcessAdapter struct{ Provider model.Provider }
 
 // Defaults describes built-in provider commands and capabilities, including the explicitly unavailable Antigravity entry.
 func Defaults(bridge string) []model.Provider {
-	return []model.Provider{{ID: "codex", Name: "Codex", Kind: "codex", Command: []string{"codex", "app-server", "--listen", "stdio://"}, Capabilities: []string{"ideate", "plan", "code", "review", "resume", "permissions", "quota"}, Quota: "unknown"}, {ID: "cursor", Name: "Cursor", Kind: "acp", Command: []string{"agent", "acp"}, Capabilities: []string{"ideate", "plan", "code", "review", "resume", "permissions"}, Quota: "unknown"}, {ID: "claude", Name: "Claude", Kind: "claude", Command: []string{"node", bridge}, Capabilities: []string{"ideate", "plan", "code", "review", "resume", "permissions"}, Quota: "unknown"}, {ID: "antigravity", Name: "Antigravity", Kind: "unavailable", Capabilities: []string{}, Quota: "unknown", Limitation: "Consumer-plan third-party application wrapping unsupported; supported integration required."}}
+	return []model.Provider{{ID: "codex", Name: "Codex", Kind: "codex", Command: []string{"codex", "app-server", "--listen", "stdio://"}, Capabilities: []string{"ideate", "plan", "code", "review", "submit", "resume", "permissions", "quota"}, Quota: "unknown"}, {ID: "cursor", Name: "Cursor", Kind: "acp", Command: []string{"agent", "acp"}, Capabilities: []string{"ideate", "plan", "code", "review", "submit", "resume", "permissions"}, Quota: "unknown"}, {ID: "claude", Name: "Claude", Kind: "claude", Command: []string{"node", bridge}, Capabilities: []string{"ideate", "plan", "code", "review", "submit", "resume", "permissions"}, Quota: "unknown"}, {ID: "antigravity", Name: "Antigravity", Kind: "unavailable", Capabilities: []string{}, Quota: "unknown", Limitation: "Consumer-plan third-party application wrapping unsupported; supported integration required."}}
 }
 
 // Available checks that a supported provider command executable exists; it does not prove authentication or quota.
@@ -101,10 +133,44 @@ func Route(ps []model.Provider, role string, preferred []string, outcomes map[st
 
 // Run drives a Codex, ACP, or Claude-bridge session over stdio, handling streamed output, tool permissions, user questions, and cancellation.
 func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, error) {
+	if in.NativeIntegrations {
+		a.Provider.NativeIntegrations = true
+	}
+	in.ProviderID = a.Provider.ID
 	p := ExecutionProvider(a.Provider, in.Thinking)
 	s := &providerSession{ctx: ctx, input: in, hooks: h, client: NewClient(in, h), completed: make(chan string, 1), output: Output{SessionID: in.SessionID}}
 	defer s.client.Close()
-	rpc, err := Start(ctx, p.Command, in.CWD, s.handle, h.Event)
+	profile, err := s.client.executionProfile()
+	if err != nil {
+		return s.output, err
+	}
+	if in.Execution == nil {
+		profile, err = execution.ForProvider(in.CWD, in.ReadOnly, "", in.Policy.Sandbox, p.Command)
+		if err != nil {
+			return s.output, err
+		}
+		profile.AllowedPaths = append([]string{}, in.Policy.AllowedPaths...)
+	}
+	if in.NativeIntegrations {
+		if err := ProvisionNativeIntegrations(&profile, a.Provider); err != nil {
+			return s.output, err
+		}
+		if p.Kind == "acp" {
+			if err := s.prepareCursorIntegrations(p, profile); err != nil {
+				return s.output, err
+			}
+		}
+	}
+	s.input.CWD = profile.CWD
+	s.client.input.CWD = profile.CWD
+	if p.Kind == "acp" || p.Kind == "claude" {
+		cleanup, e := s.prepareCheckMCP(ctx, &profile)
+		if e != nil {
+			return s.output, e
+		}
+		defer cleanup()
+	}
+	rpc, err := StartWithProfile(ctx, p.Command, profile, s.handle, h.Event)
 	if err != nil {
 		return s.output, err
 	}
@@ -127,16 +193,20 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, err
 }
 
 type providerSession struct {
-	ctx         context.Context
-	input       Input
-	hooks       Hooks
-	client      *Client
-	rpc         *RPC
-	mu          sync.Mutex
-	output      Output
-	completed   chan string
-	turnFailure error
-	replaying   atomic.Bool
+	checkServers   []any
+	nativeServers  []any
+	nativeCalls    map[string]nativeCall
+	nativePolicies map[string]string
+	ctx            context.Context
+	input          Input
+	hooks          Hooks
+	client         *Client
+	rpc            *RPC
+	mu             sync.Mutex
+	output         Output
+	completed      chan string
+	turnFailure    error
+	replaying      atomic.Bool
 }
 
 // JSON extracts the outer JSON object or array from agent text and unmarshals it into the supplied destination.
@@ -167,6 +237,7 @@ func providerReady(p model.Provider) bool {
 }
 
 func (s *providerSession) handle(c context.Context, m Message) (any, error) {
+	s.captureIntegrationTool(m)
 	if s.hooks.Event != nil {
 		kind := m.Method
 		if s.replaying.Load() {
@@ -180,7 +251,11 @@ func (s *providerSession) handle(c context.Context, m Message) (any, error) {
 	var p map[string]any
 	_ = json.Unmarshal(m.Params, &p)
 	switch m.Method {
-	case "item/tool/requestUserInput", "question/request",
+	case "whirlwind/run_check":
+		return s.runCheckTool(c, m.Params)
+	case "item/tool/call":
+		return s.dynamicCheck(c, m.Params)
+	case "mcpServer/elicitation/request", "item/permissions/requestApproval", "item/tool/requestUserInput", "question/request",
 		"session/request_permission", "item/commandExecution/requestApproval",
 		"item/fileChange/requestApproval", "permission/request",
 		"cursor/ask_question", "cursor/create_plan":
@@ -206,6 +281,8 @@ func (s *providerSession) handle(c context.Context, m Message) (any, error) {
 
 func (s *providerSession) handleRequest(ctx context.Context, m Message, params map[string]any) (any, error) {
 	switch m.Method {
+	case "mcpServer/elicitation/request":
+		return s.mcpElicitation(ctx, m, params)
 	case "item/tool/requestUserInput":
 		return s.codexQuestions(ctx, m)
 	case "question/request":

@@ -15,6 +15,15 @@ type permissionDecision struct {
 }
 
 func (a *agentAttempt) permission(ctx context.Context, perm provider.Permission) (bool, error) {
+	if a.input.NativeIntegrations && perm.Tool == "mcpServer/elicitation/request" {
+		var request struct {
+			Mode string `json:"mode"`
+			URL  string `json:"url"`
+		}
+		if json.Unmarshal(perm.Raw, &request) == nil && request.Mode == "url" && request.URL != "" {
+			return a.requestPermission(ctx, perm)
+		}
+	}
 	if a.input.ReadOnly {
 		return false, a.persistenceError(a.Store.Audit(ctx, model.Audit{Task: a.task.ID, AttemptID: a.id, Source: "policy", Action: "permission_deny", Target: perm.Tool, Version: a.task.PlanVersion, Reason: "read-only role"}))
 	}

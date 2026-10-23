@@ -18,7 +18,7 @@ import (
 	"whirlwind/internal/workflow"
 )
 
-const onboardingReply = `[{"category":"expand","title":"Add completion alerts","description":"Notify external tools when work finishes"},{"category":"optimize","title":"Cache file indexes","description":"Reuse unchanged repository scans"},{"category":"harden","title":"Bound cancellation","description":"Terminate abandoned worker processes"},{"category":"simplify","title":"Unify provider setup","description":"Remove duplicate registration paths"}]`
+const onboardingReply = `[{"category":"expand","title":"Add completion alerts","description":"Notify external tools when work finishes","expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"optimize","title":"Cache file indexes","description":"Reuse unchanged repository scans","expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"harden","title":"Bound cancellation","description":"Terminate abandoned worker processes","expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"simplify","title":"Unify provider setup","description":"Remove duplicate registration paths","expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]}]`
 
 const (
 	onboardingPolicyYAML    = ".whirlwind.yaml"
@@ -127,6 +127,19 @@ esac
 		t.Fatal(err)
 	}
 	if err := initializeSettings(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	record, err := s.Get(ctx, "settings", "global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings := workflow.DefaultSettings()
+	if err = json.Unmarshal(record.Data, &settings); err != nil {
+		t.Fatal(err)
+	}
+	allowance := &model.BudgetPolicy{MaxAttempts: 100, MaxRuntimeSeconds: 3600, VerificationAttempts: 4, VerificationRuntimeSeconds: 60}
+	settings.Admission = model.AdmissionSettings{DefaultBudget: allowance, DiscoveryBudget: allowance, Pools: map[string]model.QuotaReserve{"*": {MinRemainingPercent: 0, MaxAgeSeconds: 60, MaxConcurrent: 8}}}
+	if err = s.Put(ctx, "settings", "global", settings, record.Version); err != nil {
 		t.Fatal(err)
 	}
 	server := httpapi.New(s, workflow.New(s, github.CLI{}, filepath.Join(root, "work")), "fixture-secret")

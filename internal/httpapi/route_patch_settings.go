@@ -43,8 +43,20 @@ func (q apiRequest) loadSettingsVersion(n int, v *workflow.Settings) error {
 
 // applySettingsPatch merges the request over current defaults and validates the result.
 func (q apiRequest) applySettingsPatch(v *workflow.Settings) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(q.body, &fields); err != nil {
+		return err
+	}
+	for _, name := range []string{"mode", "active_mode", "configured_mode", "restart_required"} {
+		if _, ok := fields[name]; ok {
+			return &apiError{422, "mode_requires_restart", "Edit mode in settings.yaml on disk and restart Whirlwind"}
+		}
+	}
 	if err := json.Unmarshal(q.body, v); err != nil {
 		return err
+	}
+	if err := v.Admission.Validate(); err != nil {
+		return &apiError{422, "invalid_input", err.Error()}
 	}
 	if err := v.Ideation.Validate(); err != nil {
 		return &apiError{422, "invalid_input", err.Error()}

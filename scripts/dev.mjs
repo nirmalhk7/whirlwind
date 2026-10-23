@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireSandbox } from './sandbox-prerequisites.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const next = join(root, "web/node_modules/next/dist/bin/next");
@@ -11,6 +12,7 @@ if (!existsSync(next)) {
   console.error("Install frontend dependencies first: npm ci --prefix web");
   process.exit(1);
 }
+await requireSandbox(root);
 
 const production = process.argv.includes("--production");
 const temporary = await mkdtemp(join(tmpdir(), production ? "whirlwind-prod-" : "whirlwind-dev-"));

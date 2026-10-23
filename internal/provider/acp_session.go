@@ -17,6 +17,9 @@ func (s *providerSession) runACP() error {
 	if s.hooks.Event != nil {
 		s.hooks.Event("whirlwind/session", map[string]any{"session_id": session.ID, "resumed": s.input.SessionID != ""})
 	}
+	if s.input.CatalogOnly {
+		return nil
+	}
 	if e = s.configureACP(&session); e != nil {
 		return e
 	}
@@ -53,6 +56,10 @@ func (s *providerSession) initializeACP() (bool, error) {
 		Version      int `json:"protocolVersion"`
 		Capabilities struct {
 			Load bool `json:"loadSession"`
+			MCP  struct {
+				HTTP bool `json:"http"`
+				SSE  bool `json:"sse"`
+			} `json:"mcpCapabilities"`
 		} `json:"agentCapabilities"`
 	}
 	e := s.rpc.Call(s.ctx, "initialize", map[string]any{"protocolVersion": 1, "clientCapabilities": map[string]any{"fs": map[string]bool{"readTextFile": true, "writeTextFile": !s.input.ReadOnly}, "terminal": !s.input.ReadOnly}, "clientInfo": map[string]any{"name": "whirlwind", "version": "0.1.0"}}, &init)
@@ -61,6 +68,14 @@ func (s *providerSession) initializeACP() (bool, error) {
 	}
 	if init.Version != 1 {
 		return false, fmt.Errorf("unsupported ACP protocol version: %d", init.Version)
+	}
+	for _, raw := range s.nativeServers {
+		if server, ok := raw.(map[string]any); ok {
+			kind, _ := server["type"].(string)
+			if kind == "http" && !init.Capabilities.MCP.HTTP || kind == "sse" && !init.Capabilities.MCP.SSE {
+				return false, fmt.Errorf("Cursor ACP does not expose required %s MCP transport; reconnect through supported local MCP configuration", kind)
+			}
+		}
 	}
 	return init.Capabilities.Load, nil
 }
@@ -114,13 +129,13 @@ func (s *providerSession) openACPSession() (acpSession, error) {
 	if s.input.SessionID != "" {
 		session.ID = s.input.SessionID
 		s.replaying.Store(true)
-		err = s.rpc.Call(s.ctx, "session/load", map[string]any{"sessionId": session.ID, "cwd": s.input.CWD, "mcpServers": []any{}}, &session)
+		err = s.rpc.Call(s.ctx, "session/load", map[string]any{"sessionId": session.ID, "cwd": s.input.CWD, "mcpServers": s.mcpServers()}, &session)
 		s.replaying.Store(false)
 		s.mu.Lock()
 		s.output.Text = ""
 		s.mu.Unlock()
 	} else {
-		err = s.rpc.Call(s.ctx, "session/new", map[string]any{"cwd": s.input.CWD, "mcpServers": []any{}}, &session)
+		err = s.rpc.Call(s.ctx, "session/new", map[string]any{"cwd": s.input.CWD, "mcpServers": s.mcpServers()}, &session)
 	}
 	if err != nil {
 		return session, err
@@ -129,4 +144,11 @@ func (s *providerSession) openACPSession() (acpSession, error) {
 		return session, errors.New("ACP returned empty session ID")
 	}
 	return session, nil
+}
+
+func (s *providerSession) mcpServers() []any {
+	if s.checkServers == nil && s.nativeServers == nil {
+		return []any{}
+	}
+	return append(append([]any{}, s.nativeServers...), s.checkServers...)
 }

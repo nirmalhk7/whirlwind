@@ -21,7 +21,29 @@ type taskStep struct {
 
 // Step owns one task lease and delegates its transition to a focused stage handler.
 func (e *Engine) Step(ctx context.Context, id string) error {
-	ctx, release := e.runnerContext(ctx)
+	record, err := e.Store.Get(ctx, "tasks", id)
+	if err != nil {
+		return err
+	}
+	task, err := store.Decode[model.Task](record)
+	if err != nil {
+		return err
+	}
+	if task.Cancelled() {
+		return nil
+	}
+	if selected, err := e.requireSelection(ctx, task, record); !selected || err != nil {
+		return err
+	}
+	if task.Stage != "planning" && task.Stage != "plan_ready" && task.Stage != "questions" && task.Stage != "plan_approval" {
+		if err := e.ValidateLocalPlan(ctx, task); err != nil {
+			return err
+		}
+	}
+	ctx, release, err := e.projectRunnerContext(ctx, task.ProjectID)
+	if err != nil {
+		return err
+	}
 	defer release()
 	lease, err := e.Store.Claim(ctx, "task:"+id, e.owner, time.Minute)
 	if err != nil {
@@ -79,10 +101,16 @@ func (step *taskStep) run() error {
 		"review":     step.review,
 		"repair":     step.repair,
 		"publishing": step.publishing,
+		"submitting": step.submitting,
 	}
 	handler, ok := handlers[step.task.Stage]
 	if !ok {
 		return nil
+	}
+	if step.Agentic(step.ctx) && (step.task.Stage == "coding" || step.task.Stage == "repair") {
+		if err := step.PreflightPublication(step.ctx, step.project, step.task); err != nil {
+			return err
+		}
 	}
 	finished, err := handler()
 	if finished || err != nil {

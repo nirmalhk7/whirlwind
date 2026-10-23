@@ -9,24 +9,23 @@ import (
 	"whirlwind/prompts/agents"
 )
 
-func validateDirections(directions, previous []model.Direction) error {
-	if len(directions) != 4 {
-		return errors.New("ideation must produce four directions")
+func validateDirections(directions, previous []model.Direction, maximum ...int) error {
+	limit := 4
+	if len(maximum) > 0 && maximum[0] > 0 {
+		limit = maximum[0]
+	}
+	if len(directions) > limit {
+		return fmt.Errorf("ideation must produce at most %d directions", limit)
 	}
 	titles, descriptions := map[string]bool{}, map[string]bool{}
 	for _, direction := range previous {
 		titles[directionKey(direction.Title)] = true
 		descriptions[directionKey(direction.Description)] = true
 	}
-	categories := map[string]bool{}
 	for _, direction := range directions {
 		if err := validateDirectionContent(direction); err != nil {
 			return err
 		}
-		if categories[direction.Category] {
-			return errors.New("ideation must produce one idea per category: expand, optimize, harden, simplify")
-		}
-		categories[direction.Category] = true
 		title, description := directionKey(direction.Title), directionKey(direction.Description)
 		if title == "" || description == "" || titles[title] || descriptions[description] {
 			return errors.New("duplicate or incomplete direction; retry ideation")

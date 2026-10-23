@@ -22,7 +22,7 @@ const (
 	limitFlag   = "--limit"
 	repoFlag    = "--repo"
 	stateFlag   = "--state"
-	planLabel   = "whirlwind:plan"
+	readyLabel  = "whirlwind:ready"
 	issueFields = "number,title,body,updatedAt,state,url,labels"
 )
 
@@ -41,7 +41,7 @@ func ValidSignature(secret, sig string, body []byte) bool {
 }
 
 type Client interface {
-	// Issues returns open whirlwind:plan issues for reconciliation.
+	// Issues returns open whirlwind:ready issues for reconciliation.
 	Issues(context.Context, string) ([]model.Issue, error)
 	// Issue returns the current state and content of one repository issue.
 	Issue(context.Context, string, int) (model.Issue, error)
@@ -130,9 +130,9 @@ func parseIssues(text string) ([]model.Issue, error) {
 	return issues, nil
 }
 
-// Issues loads up to 1,000 open whirlwind:plan issues for reconciliation.
+// Issues loads up to 1,000 open whirlwind:ready issues for reconciliation.
 func (c CLI) Issues(ctx context.Context, repo string) ([]model.Issue, error) {
-	b, e := gh(ctx, "issue", "list", repoFlag, repo, stateFlag, "open", labelFlag, planLabel, limitFlag, "1000", jsonFlag, issueFields)
+	b, e := gh(ctx, "issue", "list", repoFlag, repo, stateFlag, "open", labelFlag, readyLabel, limitFlag, "1000", jsonFlag, issueFields)
 	if e != nil {
 		return nil, e
 	}
@@ -172,7 +172,7 @@ func (c CLI) CreateIssue(ctx context.Context, repo, title, body, marker string) 
 	if e != nil || found {
 		return issue, e
 	}
-	if e = ensureLabel(ctx, repo, planLabel); e != nil {
+	if e = ensureLabel(ctx, repo, readyLabel); e != nil {
 		return model.Issue{}, e
 	}
 	filename, cleanup, e := publicationBodyFile("whirlwind-issue-*.md", body+"\n\n"+marker)
@@ -180,7 +180,7 @@ func (c CLI) CreateIssue(ctx context.Context, repo, title, body, marker string) 
 		return model.Issue{}, e
 	}
 	defer cleanup()
-	url, e := gh(ctx, "issue", "create", repoFlag, repo, "--title", title, "--body-file", filename, labelFlag, planLabel)
+	url, e := gh(ctx, "issue", "create", repoFlag, repo, "--title", title, "--body-file", filename, labelFlag, readyLabel)
 	if e != nil {
 		return model.Issue{}, e
 	}

@@ -51,7 +51,7 @@ func (q apiRequest) pauseRunners() error {
 			return err
 		}
 		switch task.Stage {
-		case "paused", "complete", "pr_created":
+		case "awaiting_selection", "paused", "complete", "pr_created":
 			continue
 		}
 		task.ResumeStage = task.Stage

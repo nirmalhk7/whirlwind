@@ -92,6 +92,11 @@ function NotificationMessage({ entry: n, busy, perform, setSelected }: Pick<Prop
       </div>
       <h3>{n.data.kind.replaceAll("_", " ")}</h3>
       <p>{n.data.message}</p>
+      {n.data.current && <p className="muted">Current: {n.data.current.replaceAll("_", " ")}</p>}
+      {!!n.data.completed?.length && <ul>{n.data.completed.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}</ul>}
+      {n.data.next_action && <p><strong>Next:</strong> {n.data.next_action}</p>}
+      {n.data.usage&&<p className="muted">{n.data.usage.attempts} attempts · {n.data.usage.total_tokens} reported tokens · {(n.data.usage.elapsed_ms/1000).toFixed(1)} active seconds{n.data.usage.unknown_token_attempts>0?` · Token usage unknown for ${n.data.usage.unknown_token_attempts} attempts`:""}{n.data.usage.unknown_cost_attempts>0?` · Cost unknown for ${n.data.usage.unknown_cost_attempts} attempts`:""}</p>}
+      {(n.data.occurrences ?? 0) > 1 && <p className="muted">Repeated {n.data.occurrences} times; grouped to reduce noise.</p>}
       <div className="whirlwind-actions">
         {n.data.task_id && (
           <button

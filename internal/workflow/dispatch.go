@@ -26,7 +26,7 @@ func (e *Engine) dispatch(ctx context.Context) {
 }
 func runnableStage(stage string) bool {
 	switch stage {
-	case "paused", "questions", "approval", "pr_created", "complete":
+	case "plan_approval", "cancelled", "awaiting_selection", "paused", "questions", "approval", "pr_created", "complete":
 		return false
 	}
 	return true
@@ -49,6 +49,9 @@ func (e *Engine) dispatchTask(ctx context.Context, task model.Task, counts map[s
 		return
 	}
 	project, _ := store.Decode[model.Project](record)
+	if project.Paused {
+		return
+	}
 	limit := project.Policy.ProjectSlots
 	if limit <= 0 {
 		limit = e.settings(ctx).ProjectSlots
@@ -75,5 +78,5 @@ func stepFailed(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
-	return !errors.Is(err, store.ErrLeased) && !errors.Is(err, store.ErrConflict)
+	return !errors.Is(err, store.ErrLeased) && !errors.Is(err, store.ErrConflict) && !errors.Is(err, ErrProjectPaused)
 }

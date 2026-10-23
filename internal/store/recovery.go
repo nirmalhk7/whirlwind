@@ -12,7 +12,7 @@ import (
 func (s *Store) RecoverInterrupted(ctx context.Context, owner string) error {
 	changes := []Change{}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	for _, kind := range []string{"sessions", "operations", "verification", "publications", "mutations", "questions", "permissions"} {
+	for _, kind := range []string{"sessions", "operations", "verification", "publications", "mutations", "questions", "permissions", "budget_reservations"} {
 		records, err := s.List(ctx, kind)
 		if err != nil {
 			return err
@@ -44,6 +44,11 @@ func interruptedRecord(kind string, record model.Record, owner, now string) (*Ch
 func interruptValue(kind string, value map[string]any, now string) bool {
 	var changed bool
 	switch kind {
+	case "budget_reservations":
+		if value["status"] == "active" {
+			value["status"] = "uncertain"
+			changed = true
+		}
 	case "sessions":
 		changed = interruptSession(value, now)
 	case "operations", "verification", "mutations":

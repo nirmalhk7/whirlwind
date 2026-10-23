@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
@@ -27,7 +28,10 @@ func (e *Engine) Daily(ctx context.Context) {
 		return
 	}
 	for _, r := range projects {
-		p, _ := store.Decode[model.Project](r)
+		p, err := store.Decode[model.Project](r)
+		if err != nil || p.Paused {
+			continue
+		}
 		if err := e.runDailyProject(ctx, p, day); err != nil {
 			continue
 		}
@@ -46,6 +50,9 @@ func (e *Engine) runDailyProject(ctx context.Context, p model.Project, day strin
 	}
 	defer func() { _ = e.Store.Release(context.Background(), ideationPrefix+key, e.owner, lease.Fence) }()
 	if err := e.Ideate(ctx, p, day); err != nil {
+		if errors.Is(err, ErrProjectPaused) || errors.Is(err, context.Canceled) {
+			return nil
+		}
 		previous, _ := e.Store.Get(ctx, "schedules", key)
 		_ = e.Store.Put(ctx, "schedules", key, map[string]any{"day": day, "project": p.ID, "stage": "failed", "retry_at": time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339), "error": err.Error()}, previous.Version)
 		_ = e.Store.Notify(ctx, "", "ideation", p.Name+": "+err.Error())

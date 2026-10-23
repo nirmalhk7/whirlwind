@@ -47,6 +47,7 @@ func TestFailureCreatesOneRecoveryNotice(t *testing.T) {
 	e.fail(ctx, task.ID, errors.New("chain exhausted"))
 	e.fail(ctx, task.ID, errors.New("second failure"))
 	notices, err := e.Store.List(ctx, "inbox")
+	notices = recoveryNotifications(notices)
 	if err != nil || len(notices) != 1 {
 		t.Fatalf("notices=%d error=%v", len(notices), err)
 	}
@@ -56,7 +57,7 @@ func TestResumeIgnoresNewerEmptySession(t *testing.T) {
 	e, task, cwd := testEngine(t)
 	ctx := context.Background()
 	for _, session := range []string{"usable", ""} {
-		value := model.Attempt{Task: task.ID, Role: "code", Provider: "fake", CWD: cwd, PlanVersion: 1, SessionID: session}
+		value := model.Attempt{ElapsedMS: fixtureRuntime(0), Task: task.ID, Role: "code", Provider: "fake", CWD: cwd, PlanVersion: 1, SessionID: session}
 		if err := e.Store.Put(ctx, "sessions", store.ID(), value, 0); err != nil {
 			t.Fatal(err)
 		}

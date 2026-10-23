@@ -124,12 +124,14 @@ func TestChainExhaustionHasOneAtomicRecoverySummary(t *testing.T) {
 		t.Fatalf("missing cause: %v", err)
 	}
 	before, _ := h.engine.Store.List(context.Background(), "inbox")
+	before = recoveryNotifications(before)
 	if len(before) != 0 {
 		t.Fatal("intermediate notification")
 	}
 	h.engine.fail(context.Background(), h.task.ID, err)
 	h.engine.fail(context.Background(), h.task.ID, err)
 	notices, _ := h.engine.Store.List(context.Background(), "inbox")
+	notices = recoveryNotifications(notices)
 	if len(notices) != 1 {
 		t.Fatalf("notices=%d", len(notices))
 	}

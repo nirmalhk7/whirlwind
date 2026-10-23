@@ -12,6 +12,9 @@ func (e *Engine) finishCode(ctx context.Context, p model.Project, t *model.Task)
 	t.Handoff.Worktree = t.Worktree
 	t.Handoff.Branch = t.Branch
 	t.Handoff.NextAction = "verify full implementation"
+	if err := e.requireTDDEvidence(ctx, *t); err != nil {
+		return err
+	}
 	if err := e.verify(ctx, p, t); err != nil {
 		if errors.Is(err, store.ErrPersistence) {
 			return err

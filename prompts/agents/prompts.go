@@ -9,7 +9,7 @@ import (
 	"text/template"
 )
 
-//go:embed ideate.md ideate_novelty.md plan.md code.md review.md
+//go:embed ideate.md ideate_novelty.md plan.md code.md review.md submit.md
 var files embed.FS
 
 var templates = template.Must(template.New("agents").ParseFS(files, "*.md"))

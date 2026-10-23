@@ -61,7 +61,7 @@ func validOnboardingPrompt(kind string, m provider.Message, emit func(any)) bool
 	var prompt []struct{ Text string }
 	_ = json.Unmarshal(m.Params, &params)
 	_ = json.Unmarshal(params[key], &prompt)
-	if len(prompt) != 1 || (!strings.Contains(prompt[0].Text, "Generate exactly four") && !strings.Contains(prompt[0].Text, "Candidate ideas:")) || !strings.Contains(prompt[0].Text, "Versioned handoff:") {
+	if len(prompt) != 1 || (!strings.Contains(prompt[0].Text, "Generate zero to") && !strings.Contains(prompt[0].Text, "Candidate ideas:")) || !strings.Contains(prompt[0].Text, "Versioned handoff:") {
 		emit(map[string]any{"id": m.ID, "error": map[string]any{"code": -32602, "message": "workflow prompt missing"}})
 		return false
 	}

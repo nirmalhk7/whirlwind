@@ -66,7 +66,7 @@ func TestUncertainPublicationReconcilesFrozenIntent(t *testing.T) {
 	ctx := context.Background()
 	remote := &uncertainPublication{fakeGitHub: fakeGitHub{}}
 	e.GitHub = remote
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 6; i++ {
 		if err := e.Step(ctx, task.ID); err != nil {
 			t.Fatal(err)
 		}

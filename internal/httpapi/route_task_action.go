@@ -14,8 +14,11 @@ func (q apiRequest) taskAction() error {
 	if err != nil {
 		return err
 	}
+	if t.Cancelled() {
+		return &apiError{409, "task_cancelled", "Cancelled tasks cannot resume; start new work explicitly"}
+	}
 	handlers := map[string]func(*model.Task) error{
-		"pause": q.pauseTask, "resume": q.resumeTask, "answers": q.answersTask, "approve": q.approveTask,
+		"pause": q.pauseTask, "resume": q.resumeTask, "adopt": q.adoptTask, "answers": q.answersTask, "approve": q.approveTask,
 	}
 	handler, ok := handlers[q.action]
 	if !ok {
@@ -46,6 +49,9 @@ func (q apiRequest) pauseTask(t *model.Task) error {
 }
 
 func (q apiRequest) resumeTask(t *model.Task) error {
+	if !t.HasSelection() {
+		return &apiError{409, "selection_required", "Select the candidate or explicitly adopt this task before resuming"}
+	}
 	if t.Stage != "paused" {
 		return &apiError{409, "invalid_stage", "Only paused tasks resume"}
 	}
@@ -66,6 +72,27 @@ func (q apiRequest) resumeTask(t *model.Task) error {
 	t.EligibilityOverride = !t.Issue.Eligible()
 	t.UnchangedFailures = 0
 	t.Recoveries = 0
+	return nil
+}
+
+func (q apiRequest) adoptTask(t *model.Task) error {
+	if t.HasSelection() || t.PR != "" || t.Stage == "complete" {
+		return &apiError{409, "invalid_stage", "Only unselected unpublished tasks can be adopted"}
+	}
+	project, err := q.Engine.Project(q.r.Context(), t.ProjectID)
+	if err != nil {
+		return err
+	}
+	if project.PolicyHash == "" {
+		return &apiError{409, "policy_required", "Confirm project policy before adopting legacy work"}
+	}
+	t.Selection = &model.SelectionAuthorization{CandidateID: "adopt-" + t.ID, CandidateVersion: 1, Objective: t.Issue.Title, Scope: []string{t.Issue.Title}, PolicyHash: project.PolicyHash, SourceFingerprint: model.IssueFingerprint(t.Issue), SelectedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	t.Stage = t.ResumeStage
+	if t.Stage == "" || t.Stage == "paused" || t.Stage == "awaiting_selection" {
+		t.Stage = resumedImplementationStage(t)
+	}
+	t.ResumeStage = ""
+	t.Error = ""
 	return nil
 }
 

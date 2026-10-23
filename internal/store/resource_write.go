@@ -22,7 +22,20 @@ func put(ctx context.Context, tx *sql.Tx, kind, id string, v any, expected int) 
 	if err != nil {
 		return err
 	}
-	return writeResource(ctx, tx, Change{kind, id, v, expected}, b)
+	var before []byte
+	if kind == "tasks" {
+		err = tx.QueryRowContext(ctx, "SELECT data FROM resources WHERE kind='tasks' AND id=?", id).Scan(&before)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+	if err = writeResource(ctx, tx, Change{kind, id, v, expected}, b); err != nil {
+		return err
+	}
+	if kind == "tasks" {
+		return notifyTaskTransition(ctx, tx, before, b)
+	}
+	return nil
 }
 
 func writeResource(ctx context.Context, tx *sql.Tx, change Change, data []byte) error {

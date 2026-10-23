@@ -8,12 +8,13 @@ import (
 )
 
 type Settings struct {
-	Stopped                    bool             `json:"stopped"`
-	GlobalSlots                int              `json:"global_slots"`
-	ProjectSlots               int              `json:"project_slots"`
-	ReconciliationSeconds      int              `json:"reconciliation_seconds"`
-	ProviderStatusCheckSeconds int              `json:"provider_status_check_seconds"`
-	Ideation                   IdeationSchedule `json:"ideation"`
+	Admission                  model.AdmissionSettings `json:"admission,omitempty"`
+	Stopped                    bool                    `json:"stopped"`
+	GlobalSlots                int                     `json:"global_slots"`
+	ProjectSlots               int                     `json:"project_slots"`
+	ReconciliationSeconds      int                     `json:"reconciliation_seconds"`
+	ProviderStatusCheckSeconds int                     `json:"provider_status_check_seconds"`
+	Ideation                   IdeationSchedule        `json:"ideation"`
 }
 
 // settings loads global worker settings over the default four global slots, two project slots, and five-minute reconciliation interval.

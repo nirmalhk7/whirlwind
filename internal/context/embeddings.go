@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"whirlwind/internal/model"
 )
@@ -180,7 +181,12 @@ func (i Index) Package(query string) string {
 		}
 	}
 	for n := range entries {
-		entries[n].Text = entries[n].Text[:min(len(entries[n].Text), 12000)]
+		entries[n].Vector = nil
+		text := entries[n].Text[:min(len(entries[n].Text), 12000)]
+		for !utf8.ValidString(text) && len(text) > 0 {
+			text = text[:len(text)-1]
+		}
+		entries[n].Text = text
 	}
 	for {
 		b, _ := json.Marshal(map[string]any{"index_version": i.Version, "commit": i.Commit, "files": entries})

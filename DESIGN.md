@@ -332,3 +332,7 @@ Startup snapshots and the native file editor use 1px Ruled Edge indentation guid
 ## Provider status in Settings
 
 Settings places a compact provider list above the startup YAML. Plain divided rows show provider name, text status, check detail, transport, and local check time. Teal indicates working protocol connectivity; rose indicates failure; neutral text indicates unavailable or paused checks. Status never depends on color alone. Polling preserves YAML editor state and uses the configured interval; failed refreshes explicitly mark previous results outdated.
+
+## Project activity controls
+
+Each project row offers Pause activity or Resume activity beside its policy and removal controls. Paused projects show a neutral Activity paused badge alongside their policy readiness. Pause cancels that project's active agents and blocks task execution and ideation until resumed; saved checkpoints and individual task pauses remain. Controls use the existing button, disabled, focus, and toast patterns. State changes appear after the versioned request succeeds and survive refresh. Global runner stop remains independent.

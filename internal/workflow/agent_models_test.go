@@ -61,10 +61,18 @@ func TestResumeAttemptMatchesTransportAndThinking(t *testing.T) {
 	source := model.Provider{ID: "native", Kind: "codex"}
 	_ = e.Store.Put(ctx, "providers", source.ID, source, 0)
 	for _, item := range []struct{ transport, value, session string }{{"acp", "high", "acp-high"}, {"acp", "low", "acp-low"}, {"codex", "", "native-default"}} {
-		state := map[string]any{"task": task.ID, "role": "code", "provider": source.ID, "cwd": cwd, "plan_version": task.PlanVersion, "model": "m", "session_id": item.session, "transport": item.transport}
+		state := map[string]any{"elapsed_ms": 0, "task": task.ID, "role": "code", "provider": source.ID, "cwd": cwd, "plan_version": task.PlanVersion, "model": "m", "session_id": item.session, "transport": item.transport}
 		if item.value != "" {
 			state["thinking"] = map[string]string{"config_id": "effort", "value": item.value}
 		}
+		profileRun := &agentRun{Engine: e, ctx: ctx, project: project, task: task, input: provider.Input{Role: "code", CWD: cwd, Model: "m"}}
+		if item.value != "" {
+			profileRun.input.Thinking = &model.ThinkingChoice{ConfigID: "effort", Value: item.value}
+		}
+		if err := profileRun.prepareExecutionProfile(source); err != nil {
+			t.Fatal(err)
+		}
+		state["execution_profile"] = profileRun.input.ExecutionProfile
 		_ = e.Store.Put(ctx, "sessions", store.ID(), state, 0)
 	}
 	a := &agentRun{Engine: e, ctx: ctx, project: project, task: task, input: provider.Input{Role: "code", CWD: cwd, Model: "m", Thinking: &model.ThinkingChoice{ConfigID: "effort", Value: "high"}}}

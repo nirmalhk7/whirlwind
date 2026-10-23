@@ -10,6 +10,7 @@ import (
 
 func (step *taskStep) repair() (bool, error) {
 	var err error
+	step.task.Submission = nil
 	step.task.Approved = false
 	step.task.Approval = nil
 	prompt, err := agents.Render("repair", map[string]string{"Plan": jsonText(step.task.Plan), "Findings": step.latestReview(step.ctx, fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion)), "Handoff": jsonText(step.task.Handoff)})

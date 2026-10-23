@@ -3,8 +3,10 @@ package settingsfile
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
+	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
 
@@ -66,9 +68,37 @@ func (s *Source) prepareSave(ctx context.Context, content, expected string) (Doc
 	if expected == "" || revision(previous) != expected {
 		return Document{}, nil, nil, store.ErrConflict
 	}
+	prior, priorErr := decode(previous)
+	priorMode := s.activeMode
+	if priorErr == nil {
+		priorMode = prior.Mode
+	}
+	if model.EffectiveMode(priorMode) != model.EffectiveMode(doc.Mode) {
+		return Document{}, nil, nil, errors.New("mode is editable only on disk; restart Whirlwind to activate it")
+	}
 	changes, err := s.configurationChanges(store.Unstaged(store.WithoutSettingsSource(ctx)), doc)
 	if err != nil {
 		return Document{}, nil, nil, err
 	}
 	return doc, previous, changes, nil
+}
+
+func (s *Source) ValidateModeEdit(content string) error {
+	doc, err := decode([]byte(content))
+	if err != nil {
+		return err
+	}
+	file, err := s.File()
+	if err != nil {
+		return err
+	}
+	prior, parseErr := decode([]byte(file.Content))
+	mode := s.activeMode
+	if parseErr == nil {
+		mode = prior.Mode
+	}
+	if model.EffectiveMode(mode) != model.EffectiveMode(doc.Mode) {
+		return errors.New("mode is editable only on disk; restart Whirlwind to activate it")
+	}
+	return nil
 }

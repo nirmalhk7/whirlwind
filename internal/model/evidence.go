@@ -25,12 +25,17 @@ type AttemptEvent struct {
 	CreatedAt string          `json:"created_at"`
 }
 type Usage struct {
-	InputTokens  *int64   `json:"input_tokens"`
-	OutputTokens *int64   `json:"output_tokens"`
-	CachedTokens *int64   `json:"cached_tokens"`
-	TotalTokens  *int64   `json:"total_tokens"`
-	Cost         *float64 `json:"cost"`
-	Scope        string   `json:"scope"`
+	Raw                  json.RawMessage `json:"raw,omitempty"`
+	Source               string          `json:"source,omitempty"`
+	Completeness         string          `json:"completeness,omitempty"`
+	CachedInputSemantics string          `json:"cached_input_semantics,omitempty"`
+	CacheWriteTokens     *int64          `json:"cache_write_tokens,omitempty"`
+	InputTokens          *int64          `json:"input_tokens"`
+	OutputTokens         *int64          `json:"output_tokens"`
+	CachedTokens         *int64          `json:"cached_tokens"`
+	TotalTokens          *int64          `json:"total_tokens"`
+	Cost                 *float64        `json:"cost"`
+	Scope                string          `json:"scope"`
 }
 type Operation struct {
 	Kind        string `json:"kind"`
@@ -88,6 +93,7 @@ type Publication struct {
 
 // Attempt preserves additive session fields while distinguishing reported runtime metadata from configured input.
 type Attempt struct {
+	ExecutionProfile     string          `json:"execution_profile,omitempty"`
 	AttemptID            string          `json:"attempt_id"`
 	Task                 string          `json:"task"`
 	ProjectID            string          `json:"project_id"`
@@ -127,6 +133,7 @@ type Attempt struct {
 	Usage                *Usage          `json:"usage,omitempty"`
 }
 type AttemptInput struct {
+	ExecutionProfile    string          `json:"execution_profile,omitempty"`
 	Handoff             Handoff         `json:"handoff"`
 	Policy              Policy          `json:"policy"`
 	Provider            Provider        `json:"provider"`

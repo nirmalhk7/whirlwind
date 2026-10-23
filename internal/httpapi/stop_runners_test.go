@@ -152,6 +152,7 @@ func TestResumeAllRunnersPersistsFlagAndRestoresOnlyGloballyStoppedTasks(t *test
 	for _, task := range []model.Task{
 		{ID: "active", Stage: "coding"}, {ID: "question", Stage: "questions"}, {ID: "manual", Stage: "paused", ResumeStage: "review", Error: "Paused by user"}, {ID: "done", Stage: "complete"},
 	} {
+		task.Selection = &model.SelectionAuthorization{CandidateID: task.ID, SelectedAt: "2026-10-22T00:00:00Z"}
 		if err := s.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
 			t.Fatal(err)
 		}

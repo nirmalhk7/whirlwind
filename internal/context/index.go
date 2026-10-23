@@ -17,15 +17,22 @@ import (
 	"strings"
 )
 
+type ActionMarker struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Tag  string `json:"tag"`
+	Text string `json:"text"`
+}
 type Entry struct {
-	Package      string    `json:"package,omitempty"`
-	Dependencies []string  `json:"dependencies,omitempty"`
-	Tests        []string  `json:"tests,omitempty"`
-	Path         string    `json:"path"`
-	Text         string    `json:"text"`
-	Symbols      []string  `json:"symbols"`
-	TODOs        []string  `json:"todos"`
-	Vector       []float64 `json:"vector,omitempty"`
+	ActionMarkers []ActionMarker `json:"action_markers,omitempty"`
+	Package       string         `json:"package,omitempty"`
+	Dependencies  []string       `json:"dependencies,omitempty"`
+	Tests         []string       `json:"tests,omitempty"`
+	Path          string         `json:"path"`
+	Text          string         `json:"text"`
+	Symbols       []string       `json:"symbols"`
+	TODOs         []string       `json:"todos"`
+	Vector        []float64      `json:"vector,omitempty"`
 }
 type Index struct {
 	Commit             string           `json:"commit"`
@@ -133,10 +140,15 @@ func (i Index) Category() string {
 
 func sourceEntry(p string, b []byte) Entry {
 	entry := Entry{Path: p, Text: string(b), Symbols: []string{}, TODOs: []string{}}
-	for _, line := range strings.Split(string(b), "\n") {
+	for n, line := range strings.Split(string(b), "\n") {
 		normalized := strings.ToLower(line)
 		if strings.Contains(normalized, "todo") || strings.Contains(normalized, "fixme") {
 			entry.TODOs = append(entry.TODOs, line)
+			tag := "TODO"
+			if strings.Contains(normalized, "fixme") {
+				tag = "FIXME"
+			}
+			entry.ActionMarkers = append(entry.ActionMarkers, ActionMarker{Path: p, Line: n + 1, Tag: tag, Text: line})
 		}
 	}
 	if filepath.Ext(p) == ".go" {

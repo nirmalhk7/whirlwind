@@ -37,6 +37,9 @@ func (s *Server) mutationJournalVersion(ctx context.Context, id, fingerprint str
 	if value["fingerprint"] != fingerprint {
 		return 0, store.ErrConflict
 	}
+	if value["stage"] == "cancelled" {
+		return 0, store.ErrConflict
+	}
 	return old.Version, nil
 }
 

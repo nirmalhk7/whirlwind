@@ -37,7 +37,7 @@ export function ProviderSettings({providers, busy, perform}: Props) {
         name: f.get("name"),
         kind: "acp",
         command,
-        capabilities: ["ideate", "plan", "code", "review", "permissions"],
+        capabilities: ["ideate", "plan", "code", "review", "submit", "permissions"],
       });
     }, "ACP provider registered");
   };

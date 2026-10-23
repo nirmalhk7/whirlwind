@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 )
 
@@ -34,6 +35,8 @@ func redactObject(v map[string]any) {
 	for k, x := range v {
 		if secretField(strings.ToLower(k), secret || marked) {
 			v[k] = "[redacted]"
+		} else if text, ok := x.(string); ok {
+			v[k] = RedactText(text)
 		} else {
 			redact(x)
 		}
@@ -75,6 +78,7 @@ func redactArguments(v []any) {
 	for i, x := range v {
 		if flag, ok := x.(string); ok {
 			redactArgument(v, i, strings.ToLower(flag))
+			v[i] = RedactText(v[i].(string))
 		}
 		redact(x)
 	}
@@ -89,4 +93,13 @@ func redactArgument(v []any, i int, key string) {
 			v[i+1] = "[redacted]"
 		}
 	}
+}
+
+var bearerSecret = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+`)
+var assignedSecret = regexp.MustCompile(`(?i)(access_token|refresh_token|api_key|client_secret|password|auth_token)([=:]\s*)[^\s&"']+`)
+
+// RedactText removes credential literals from otherwise useful provider diagnostics.
+func RedactText(text string) string {
+	text = bearerSecret.ReplaceAllString(text, "Bearer [redacted]")
+	return assignedSecret.ReplaceAllString(text, "${1}${2}[redacted]")
 }

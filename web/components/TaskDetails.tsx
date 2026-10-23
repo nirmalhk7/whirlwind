@@ -1,6 +1,9 @@
 import type { Dispatch, SetStateAction } from "react";
 import { api } from "./controlApi";
 import { stages, type Resource, type Task, type Review } from "./controlTypes";
+import { PlanReview } from "./PlanReview";
+import { TaskBudget } from "./TaskBudget";
+import { TaskFeedback } from "./TaskFeedback";
 
 type Props = {
  selectedIdeas: number;
@@ -29,6 +32,10 @@ export function TaskDetails({task, selectedIdeas, answers, setAnswers, busy, per
             </p>
             <p><span className="command-count-value" key={selectedIdeas}>{selectedIdeas}</span> {selectedIdeas === 1 ? "idea" : "ideas"} selected for plan generation</p>
             {task.data.error && <p className="error">{task.data.error}</p>}
+            {task.data.selection&&<p className="muted">Selected objective: {task.data.selection.objective}. Agents proceed within this scope and project policy.</p>}
+            {(task.data.plan_document || task.data.stage === "plan_approval") && <PlanReview id={task.id} version={task.version} stage={task.data.stage} busy={busy} perform={perform} />}
+            <TaskBudget id={task.id} version={task.version} busy={busy} perform={perform}/>
+            <TaskFeedback id={task.id} version={task.version} busy={busy} perform={perform}/>
             {task.data.plan && (
               <>
                 <h3>Acceptance criteria</h3>
@@ -91,6 +98,9 @@ export function TaskDetails({task, selectedIdeas, answers, setAnswers, busy, per
               </form>
             )}
             <div className="whirlwind-actions">
+              {!task.data.selection&&!["complete","pr_created","cancelled"].includes(task.data.stage)&&<button className="button primary" disabled={busy} onClick={()=>void perform(
+                ()=>api(`tasks/${task.id}/adopt`,"POST",{},task.version),"Task objective adopted; execution authorized within project policy",
+              )}>Adopt task objective</button>}
               {task.data.stage === "approval" && (
                 <button
                   className="button primary"
@@ -131,7 +141,7 @@ export function TaskDetails({task, selectedIdeas, answers, setAnswers, busy, per
                   Resume task
                 </button>
               ) : (
-                !["pr_created", "complete"].includes(task.data.stage) && (
+                !["pr_created", "complete", "cancelled"].includes(task.data.stage) && (
                   <button
                     className="button"
                     disabled={busy}
@@ -153,7 +163,7 @@ export function TaskDetails({task, selectedIdeas, answers, setAnswers, busy, per
                 )
               )}
               {task.data.pr &&
-                /^https:\/\/github\.com\//.test(task.data.pr) && (
+                /^https:\/\/[^/]+\//.test(task.data.pr) && (
                   <a
                     className="button primary"
                     href={task.data.pr}

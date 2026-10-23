@@ -199,8 +199,12 @@ func (s *Store) Delivery(ctx context.Context, id string) (bool, error) {
 
 // Notify stores an unresolved Inbox notification and emits its resource event.
 func (s *Store) Notify(ctx context.Context, task, kind, message string) error {
-	n := model.Notification{ID: ID(), TaskID: task, Kind: kind, Message: message}
-	return s.Put(ctx, "inbox", n.ID, n, 0)
+	if staged(ctx) != nil {
+		return s.stageNotification(ctx, model.Notification{TaskID: task, Kind: kind, Message: message})
+	}
+	return s.Transaction(ctx, func(tx *sql.Tx) error {
+		return notifyTransaction(ctx, tx, model.Notification{TaskID: task, Kind: kind, Message: message})
+	})
 }
 
 // Idempotent returns a saved mutation response, or ErrConflict when a key is reused with different request content.

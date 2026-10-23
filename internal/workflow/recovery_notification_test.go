@@ -20,6 +20,7 @@ func TestConcurrentFailuresCreateSingleNotice(t *testing.T) {
 	}
 	group.Wait()
 	records, err := e.Store.List(context.Background(), "inbox")
+	records = recoveryNotifications(records)
 	if err != nil || len(records) != 1 {
 		t.Fatalf("notices=%d error=%v", len(records), err)
 	}
@@ -65,7 +66,19 @@ func TestDispatchExhaustionPausesTaskAndNotifiesInbox(t *testing.T) {
 		t.Fatalf("task did not pause at failed stage: %+v %v", task, err)
 	}
 	notices, err := h.engine.Store.List(ctx, "inbox")
+	notices = recoveryNotifications(notices)
 	if err != nil || len(notices) != 1 || calls != 3 {
 		t.Fatalf("attempts=%d notices=%d error=%v", calls, len(notices), err)
 	}
+}
+
+func recoveryNotifications(records []model.Record) []model.Record {
+	var result []model.Record
+	for _, record := range records {
+		notice, _ := store.Decode[model.Notification](record)
+		if notice.Kind == "recovery" || notice.Kind == "task_paused" || notice.Kind == "task_waiting_quota" {
+			result = append(result, record)
+		}
+	}
+	return result
 }

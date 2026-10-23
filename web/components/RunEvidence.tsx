@@ -104,7 +104,7 @@ function TimelineEvent({ event }: { event: Event }) {
 
 function LinkedEvidence({ linked }: { linked: Linked[] }) {
   return <div aria-label="Linked checks and decisions"><h4>Checks, reviews, and decisions</h4>
-    {linked.map(item => <details key={`${item.kind}:${item.record.id}`}><summary>{({verification:"Checks",reviews:"Review",review_parts:"Review assessment",checkpoints:"Checkpoint",permissions:"Permission",questions:"Questions",audit:"Decision",quota_observations:"Quota"} as Record<string,string>)[item.kind] ?? item.kind} · {item.record.id}</summary><pre className="run-content">{JSON.stringify(item.record.data,null,2)}</pre></details>)}
+    {linked.map(item => <details key={`${item.kind}:${item.record.id}`}><summary>{({verification:"Checks",reviews:"Review",review_parts:"Review assessment",review_checks:"Reviewer check",checkpoints:"Checkpoint",permissions:"Permission",questions:"Questions",audit:"Decision",quota_observations:"Quota"} as Record<string,string>)[item.kind] ?? item.kind} · {item.record.id}</summary><pre className="run-content">{JSON.stringify(item.record.data,null,2)}</pre></details>)}
     {linked.length === 100 && <p className="muted">Showing latest 100 linked records.</p>}
   </div>;
 }

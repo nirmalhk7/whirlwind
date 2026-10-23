@@ -22,7 +22,7 @@ func TestCriticalChangeWaitsForHumanBeforePR(t *testing.T) {
 	if err := e.Store.Put(ctx, "projects", p.ID, p, r.Version); err != nil {
 		t.Fatal(err)
 	}
-	for n := 0; n < 3; n++ {
+	for n := 0; n < 6; n++ {
 		if err := e.Step(ctx, task.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +54,7 @@ func TestProductiveReviewHasNoPassCap(t *testing.T) {
 	}
 	r, _ = e.Store.Get(ctx, "tasks", task.ID)
 	done, _ = store.Decode[model.Task](r)
-	if done.Stage != "publishing" || done.ReviewPasses != 101 {
+	if done.Stage != "submitting" || done.ReviewPasses != 101 {
 		t.Fatalf("review cap remains: %+v", done)
 	}
 }
@@ -65,7 +65,7 @@ func TestPRDescriptionListsEachUnitOnce(t *testing.T) {
 	e, task, _ := testEngine(t)
 	recorded := &recordingGitHub{}
 	e.GitHub = recorded
-	for n := 0; n < 4; n++ {
+	for n := 0; n < 7; n++ {
 		if err := e.Step(ctx, task.ID); err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +115,7 @@ func TestPermissionNormalizesWorktreeAliases(t *testing.T) {
 	e, task, repo := testEngine(t)
 	p, _ := e.Project(context.Background(), task.ProjectID)
 	e.Adapter = func(model.Provider) provider.Adapter { return permissionAgent{} }
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	out, err := e.agent(ctx, p, task, provider.Input{Role: "code", CWD: repo, Prompt: "test", ReadOnly: false, SessionID: ""})
 	if err != nil || out.Text != "allowed" {

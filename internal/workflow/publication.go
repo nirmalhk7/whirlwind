@@ -51,6 +51,9 @@ func matchPublicationIntent(record model.Record, requested model.Publication) (m
 	if previous.Fingerprint != requested.Fingerprint {
 		return previous, errors.New("publication request changed; inspect earlier remote intent before retry")
 	}
+	if previous.Stage == "cancelled" {
+		return previous, errors.New("cancelled publication cannot be retried; start new work explicitly")
+	}
 	return previous, nil
 }
 

@@ -9,7 +9,7 @@ import (
 func TestUnrelatedDeletedProviderDoesNotBlockResume(t *testing.T) {
 	h := newRetryHarness(t)
 	ctx := context.Background()
-	unrelated := model.Attempt{Task: "unrelated", Provider: "deleted", SessionID: "old"}
+	unrelated := model.Attempt{ElapsedMS: fixtureRuntime(0), Task: "unrelated", Provider: "deleted", SessionID: "old"}
 	if err := h.engine.Store.Put(ctx, "sessions", "unrelated", unrelated, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -21,7 +21,7 @@ func TestUnrelatedDeletedProviderDoesNotBlockResume(t *testing.T) {
 func TestResumeUsesCreationOrderInsteadOfLastUpdate(t *testing.T) {
 	h := newRetryHarness(t)
 	ctx := context.Background()
-	state := model.Attempt{Task: h.task.ID, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, SessionID: "older"}
+	state := model.Attempt{ElapsedMS: fixtureRuntime(0), Task: h.task.ID, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, SessionID: "older"}
 	if err := h.engine.Store.Put(ctx, "sessions", "older", state, 0); err != nil {
 		t.Fatal(err)
 	}

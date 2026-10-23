@@ -45,6 +45,9 @@ func (q apiRequest) saveSettingsFile(source *settingsfile.Source) error {
 	if input.Revision == "" {
 		return &apiError{428, "precondition_required", "File revision required; reopen the file before saving"}
 	}
+	if err := source.ValidateModeEdit(input.Content); err != nil {
+		return &apiError{422, "mode_requires_disk_edit", err.Error()}
+	}
 	if err := settingsfile.ValidateFile(input.Content); err != nil {
 		return err
 	}

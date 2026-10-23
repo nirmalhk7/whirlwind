@@ -9,7 +9,12 @@ import (
 )
 
 func (q apiRequest) resource() error {
-	kinds := map[string]bool{"quota_observations": true, "review_parts": true, "audit": true, "publications": true, "mutations": true, "projects": true, "providers": true, "directions": true, "tasks": true, "plans": true, "reviews": true, "findings": true, "permissions": true, "questions": true, "inbox": true, "metrics": true, "outcomes": true, "sessions": true, "checkpoints": true, "units": true, "indexes": true, "index_history": true, "verification": true, "operations": true}
+	if q.kind == "workflow_config" {
+		if err := q.Store.RefreshSettings(q.r.Context()); err != nil {
+			return err
+		}
+	}
+	kinds := map[string]bool{"workflow_config": true, "integrations": true, "tdd_checks": true, "review_checks": true, "quota_observations": true, "review_parts": true, "audit": true, "publications": true, "mutations": true, "projects": true, "providers": true, "directions": true, "tasks": true, "plans": true, "reviews": true, "findings": true, "permissions": true, "questions": true, "inbox": true, "metrics": true, "outcomes": true, "sessions": true, "checkpoints": true, "units": true, "indexes": true, "index_history": true, "verification": true, "operations": true}
 	if !kinds[q.kind] || q.action != "" {
 		return &apiError{404, "route_not_found", "Unsupported route"}
 	}

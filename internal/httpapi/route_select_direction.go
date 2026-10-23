@@ -2,6 +2,9 @@ package httpapi
 
 import (
 	"errors"
+	"net/url"
+	"strings"
+	"time"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -17,12 +20,41 @@ func (q apiRequest) selectDirection() error {
 }
 
 func (q apiRequest) processDirectionSelection(d model.Direction, record model.Record) error {
+	if d.Status == "dismissed" || d.Status == "deferred" {
+		return &apiError{409, "candidate_inactive", "Reopen this candidate before selection"}
+	}
 	taskID := "direction-" + d.ID
-	task := model.Task{ID: taskID, ProjectID: d.ProjectID, Issue: model.Issue{Title: d.Title, Body: d.Description}, PlanVersion: 1, Stage: "planning", Handoff: model.Handoff{Version: 1, NextAction: "plan selected direction"}}
+	if d.TaskID != "" {
+		taskID = d.TaskID
+	}
+	if r, err := q.Store.Get(q.r.Context(), "tasks", taskID); err == nil {
+		if t, err := store.Decode[model.Task](r); err == nil && t.Cancelled() {
+			taskID = "direction-" + d.ID + "-" + store.ID()
+		}
+	}
+	task := model.Task{Mode: q.Engine.WorkflowConfiguration(q.r.Context()).ActiveMode, ID: taskID, ProjectID: d.ProjectID, Issue: model.Issue{Title: d.Title, Body: d.Description}, PlanVersion: 1, Stage: "planning", Handoff: model.Handoff{Version: 1, NextAction: "plan selected direction"}}
+	for _, evidence := range d.Evidence {
+		if evidence.Kind != "integration" {
+			continue
+		}
+		host := ""
+		if u, err := url.Parse(evidence.URL); err == nil {
+			host = u.Hostname()
+		}
+		task.Sources = append(task.Sources, model.SourceRef{Provider: evidence.Provider, Host: host, Connection: evidence.Connection, Repository: d.ProjectID, ID: strings.TrimPrefix(evidence.Ref, evidence.Connection+":"), URL: evidence.URL, Revision: evidence.Revision})
+	}
+	if d.SourceIssue != nil {
+		task.Issue = *d.SourceIssue
+	}
 	project, err := q.Engine.Project(q.r.Context(), d.ProjectID)
 	if err != nil {
 		return err
 	}
+	scope := d.Scope
+	if len(scope) == 0 {
+		scope = []string{d.Description}
+	}
+	task.Selection = &model.SelectionAuthorization{CandidateID: d.ID, CandidateVersion: record.Version, Objective: d.Title, Scope: scope, PolicyHash: project.PolicyHash, SourceFingerprint: d.Fingerprint, SelectedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	if project.PolicyHash == "" {
 		task.Stage = "paused"
 		task.ResumeStage = "planning"
@@ -36,6 +68,8 @@ func (q apiRequest) processDirectionSelection(d model.Direction, record model.Re
 		return err
 	}
 	d.Selected = true
+	d.Status = "selected"
+	d.TaskID = taskID
 	if err := q.Store.Put(q.r.Context(), "directions", q.id, d, record.Version); err != nil {
 		return err
 	}
@@ -57,7 +91,23 @@ func (q apiRequest) saveSelectedDirectionTask(task model.Task) error {
 		if err != nil {
 			return err
 		}
+		if current.Stage == "awaiting_selection" {
+			current.Selection = task.Selection
+			current.Stage = "planning"
+			if current.ResumeStage != "" && current.ResumeStage != "awaiting_selection" && current.ResumeStage != "paused" {
+				current.Stage = current.ResumeStage
+			}
+			current.ResumeStage = ""
+			current.Error = ""
+			if task.Stage == "paused" {
+				current.Stage = task.Stage
+				current.ResumeStage = task.ResumeStage
+				current.Error = task.Error
+			}
+			return q.Store.Put(q.r.Context(), "tasks", taskID, current, existing.Version)
+		}
 		if current.Stage == "paused" && current.Error == directionUnselectedReason {
+			current.Selection = task.Selection
 			current.Stage = current.ResumeStage
 			current.ResumeStage = ""
 			current.Error = ""
@@ -84,14 +134,22 @@ func (q apiRequest) saveDeselectedDirection(d model.Direction, record model.Reco
 		return store.ErrConflict
 	}
 	d.Selected = false
+	d.Status = "proposed"
 	if err := q.Store.Put(q.r.Context(), "directions", q.id, d, record.Version); err != nil {
 		return err
 	}
-	if err := q.pauseDirectionTask("direction-" + d.ID); err != nil {
+	if err := q.pauseDirectionTask(directionTask(d)); err != nil {
 		return err
 	}
 	reply(q.w, 200, d)
 	return nil
+}
+
+func directionTask(d model.Direction) string {
+	if d.TaskID != "" {
+		return d.TaskID
+	}
+	return "direction-" + d.ID
 }
 
 func (q apiRequest) pauseDirectionTask(id string) error {
@@ -103,7 +161,7 @@ func (q apiRequest) pauseDirectionTask(id string) error {
 	if err != nil {
 		return err
 	}
-	if task.Stage == "complete" || task.Stage == "pr_created" || (task.Stage == "paused" && task.Error != globalStopReason) {
+	if task.Cancelled() || task.Stage == "complete" || task.Stage == "pr_created" || (task.Stage == "paused" && task.Error != globalStopReason) {
 		return nil
 	}
 	if task.Stage != "paused" {

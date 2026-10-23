@@ -16,11 +16,17 @@ import (
 )
 
 // verify reserves capacity, checks diff scope, runs baseline and risk-specific checks, and stores diagnostics in the task handoff.
-func (e *Engine) verify(ctx context.Context, p model.Project, t *model.Task) error {
+func (e *Engine) verify(ctx context.Context, p model.Project, t *model.Task) (resultErr error) {
 	if err := e.acquire(ctx, p); err != nil {
 		return err
 	}
 	defer e.release(p.ID)
+	checkCtx, finishBudget, budgetErr := e.verificationBudget(ctx, p, *t)
+	if budgetErr != nil {
+		return budgetErr
+	}
+	ctx = checkCtx
+	defer func() { resultErr = errors.Join(resultErr, finishBudget()) }()
 	run, err := e.startVerification(ctx, p, t)
 	if err != nil {
 		return err
@@ -50,15 +56,32 @@ func (run *verificationRun) checkDiff(p model.Policy, files, patch string) error
 	risk, checks := verification.Select(p, strings.Split(files, "\n"), patch)
 	run.task.Risk = risk
 	run.value["risk"] = risk
+	checks = structuredChecks(checks)
+	baseline, err := run.engine.qualityBaseline(run.ctx, model.Project{ID: run.task.ProjectID, Path: run.task.Worktree, Policy: p, PolicyHash: evidenceDigest(p)}, *run.task, checks)
+	if err != nil {
+		return err
+	}
+	run.value["baseline"] = baseline
 	checks = append(checks, model.Check{Name: "diff", Command: []string{"git", "diff", "--check", run.task.Base + "...HEAD"}}, model.Check{Name: "tracked-files-clean", Command: []string{"git", "diff", "--exit-code"}}, model.Check{Name: "index-clean", Command: []string{"git", "diff", "--cached", "--exit-code"}})
 	stored := verification.Report{Passed: false, Results: []verification.Result{}}
-	report, observeErr := verification.RunObserved(run.ctx, run.task.Worktree, checks, func(result verification.Result) error {
-		return run.captureResult(&stored, result)
-	})
+	report, observeErr := run.runChecks(p, checks, nil)
+	if observeErr == nil {
+		report = verification.CompareBaseline(baseline, report)
+	}
+	for _, result := range report.Results {
+		if err := run.captureResult(&stored, result); err != nil {
+			return err
+		}
+	}
 	return run.finish(stored, report, observeErr)
 }
 
 func (run *verificationRun) captureResult(stored *verification.Report, result verification.Result) error {
+	if result.ReusedFrom != "" && result.OutputArtifact != "" {
+		stored.Results = append(stored.Results, result)
+		run.value["report"] = *stored
+		return run.save()
+	}
 	artifact, err := run.engine.Store.CaptureResource(context.WithoutCancel(run.ctx), run.owner, "check:"+result.Name, "text/plain", []byte(result.Output), store.CaptureOptions{Limit: store.MessagePayloadLimit})
 	if err != nil {
 		return fmt.Errorf(verificationPersistenceError, store.ErrPersistence, err)
@@ -117,7 +140,7 @@ func (run *verificationRun) handoff(report verification.Report) error {
 	return nil
 }
 
-// progress compares diff fingerprints, triggers recovery after five unchanged failures, and pauses after three unsuccessful recoveries.
+// progress measures check/blocker/criteria outcomes; patch churn alone never resets recovery.
 func (e *Engine) progress(ctx context.Context, t *model.Task) error {
 	diff, err := github.Run(ctx, t.Worktree, "git", "diff", t.Base)
 	if err != nil {
@@ -125,11 +148,16 @@ func (e *Engine) progress(ctx context.Context, t *model.Task) error {
 	}
 	sum := sha256.Sum256([]byte(diff))
 	fingerprint := hex.EncodeToString(sum[:])
-	if fingerprint == t.Fingerprint {
-		t.UnchangedFailures++
+	t.Fingerprint = fingerprint
+	improved, err := e.measuredProgress(ctx, t)
+	if err != nil {
+		return err
+	}
+	if improved {
+		t.UnchangedFailures = 0
+		t.Recoveries = 0
 	} else {
-		t.UnchangedFailures = 1
-		t.Fingerprint = fingerprint
+		t.UnchangedFailures++
 	}
 	if t.UnchangedFailures >= 5 {
 		t.UnchangedFailures = 0

@@ -61,6 +61,9 @@ func (s *Server) readSignedWebhook(w http.ResponseWriter, r *http.Request) ([]by
 	return body, delivery, nil
 }
 func (s *Server) receiveWebhook(w http.ResponseWriter, r *http.Request) (map[string]bool, error) {
+	if s.Engine.Agentic(r.Context()) {
+		return map[string]bool{"ignored": true}, nil
+	}
 	body, delivery, err := s.readSignedWebhook(w, r)
 	if err != nil {
 		return nil, err

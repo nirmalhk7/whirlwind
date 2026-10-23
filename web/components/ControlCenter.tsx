@@ -13,6 +13,7 @@ import { useProviderStatus } from "./useProviderStatus";
 import { ProjectRegistration, useProjectRegistration } from "./ProjectRegistration";
 import { useControlActions } from "./useControlActions";
 import { api } from "./controlApi";
+import { BrowserNotifications } from "./BrowserNotifications";
 
 import type { View } from "./controlTypes";
 export function ControlCenter({ view = "inbox" }: { view?: View }) {
@@ -36,9 +37,10 @@ export function ControlCenter({ view = "inbox" }: { view?: View }) {
         () => api(workersStopped ? "runners/resume" : "runners/stop", "POST"),
         workersStopped ? "Runners resumed; workers.stopped saved as false" : "Runners stopped; workers.stopped saved as true",
       )}
-      activeTasks={inventory.tasks.filter((entry) => !["complete", "pr_created", "paused"].includes(entry.data.stage)).length}
+      activeTasks={inventory.tasks.filter((entry) => !["complete", "pr_created", "paused", "cancelled", "plan_approval"].includes(entry.data.stage)).length}
       availableProviders={providerStatus.snapshot && !providerStatus.error ? providerStatus.snapshot.providers.filter(provider => provider.status === "working").length : null}
       decisions={messages.length}>
+        <BrowserNotifications items={inventory.inbox} loaded={loaded&&!error} visible={view==="inbox"||view==="settings"}/>
         {error && (
           <div role="alert" className="error">
             <p>{error}</p>

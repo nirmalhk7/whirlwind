@@ -53,7 +53,20 @@ func (q apiRequest) agentResponse() (any, error) {
 func (q apiRequest) agentRecord(role string) (model.Record, error) {
 	record, err := q.Store.Get(q.r.Context(), "agents", role)
 	if errors.Is(err, store.ErrNotFound) {
-		data, _ := json.Marshal(model.AgentConfig{Role: role, Chain: []model.AgentChoice{}})
+		config := model.AgentConfig{Role: role, Chain: []model.AgentChoice{}}
+		if role == "submit" {
+			config.InheritedFrom = "code"
+			if coding, readErr := q.Store.Get(q.r.Context(), "agents", "code"); readErr == nil {
+				configured, decodeErr := store.Decode[model.AgentConfig](coding)
+				if decodeErr != nil {
+					return model.Record{}, decodeErr
+				}
+				config.Chain = configured.Chain
+			} else if !errors.Is(readErr, store.ErrNotFound) {
+				return model.Record{}, readErr
+			}
+		}
+		data, _ := json.Marshal(config)
 		return model.Record{ID: role, Data: data}, nil
 	}
 	return record, err
@@ -72,6 +85,7 @@ func (q apiRequest) saveAgent() error {
 		return err
 	}
 	config.Role = q.id
+	config.InheritedFrom = ""
 	if err := q.validateAgentChain(&config); err != nil {
 		return err
 	}
@@ -115,7 +129,11 @@ func (q apiRequest) validateAgentProvider(id string) error {
 	if err != nil {
 		return err
 	}
-	if p.Kind == "unavailable" || !slices.Contains(p.Capabilities, q.id) {
+	supported := slices.Contains(p.Capabilities, q.id)
+	if q.id == "submit" {
+		supported = supported || slices.Contains(p.Capabilities, "code")
+	}
+	if p.Kind == "unavailable" || !supported {
 		return &apiError{422, "invalid_input", "Provider does not support this agent role"}
 	}
 	return nil

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"golang.org/x/sync/errgroup"
 	"path/filepath"
+	ctxengine "whirlwind/internal/context"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -26,9 +27,9 @@ func (e *Engine) code(ctx context.Context, p model.Project, t *model.Task) error
 		if limit <= 0 {
 			limit = e.settings(ctx).ProjectSlots
 		}
-		if len(ready) > limit {
-			ready = ready[:limit]
-		}
+		// Parallel agents need an explicit per-attempt runtime cap so one cannot
+		// reserve the entire remaining task allowance ahead of its siblings.
+		ready = selectUnitBatch(t.Plan.Units, ready, limit, p.Policy.ParallelUnits && p.Policy.RunTimeoutSeconds > 0)
 		if err := e.runUnits(ctx, p, t, ready); err != nil {
 			return err
 		}
@@ -111,11 +112,24 @@ func dependenciesComplete(dependencies []string, completed map[string]bool) bool
 	return true
 }
 func (e *Engine) runUnits(ctx context.Context, p model.Project, t *model.Task, ready []int) error {
-	plan := jsonText(t.Plan)
 	snapshot := *t
 	snapshot.Plan = nil
 	var units errgroup.Group
 	for _, n := range ready {
+		plan := jsonText(planForUnit(*t.Plan, n))
+		key := unitKey(t.ID, t.PlanVersion, t.Plan.Units[n].ID)
+		if _, err := e.Store.Get(ctx, "delegations", key); errors.Is(err, store.ErrNotFound) {
+			allowance := p.Policy.ContextInputTokens
+			if allowance <= 0 {
+				allowance = ctxengine.DefaultInputAllowance
+			}
+			decision := map[string]any{"task": t.ID, "unit": t.Plan.Units[n].ID, "objective": t.Plan.Units[n].Objective, "dependencies": t.Plan.Units[n].Dependencies, "scope": t.Plan.Units[n].AllowedPaths, "parallel": len(ready) > 1, "reason": "dependency-ready scope isolated; every attempt requires budget admission", "estimated_overhead": map[string]any{"input_allowance": allowance, "additional_batch_input_allowance": allowance * (len(ready) - 1), "method": "utf8_bytes_upper_estimate", "provider_added_context": "unknown"}, "reservation_scope": t.ID}
+			if err = e.Store.Put(ctx, "delegations", key, decision, 0); err != nil && !errors.Is(err, store.ErrConflict) {
+				return err
+			}
+		} else if err != nil {
+			return err
+		}
 		units.Go(func() error { return e.codeUnit(ctx, p, snapshot, &t.Plan.Units[n], plan) })
 	}
 	return units.Wait()

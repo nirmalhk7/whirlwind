@@ -1,69 +1,68 @@
 package provider
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 )
 
 func (s *providerSession) runCodex() error {
-	var e error
-	e = s.rpc.Call(s.ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "whirlwind", "version": "0.1.0"}}, nil)
-	if e != nil {
-		return e
+	if s.input.NativeIntegrations {
+		s.output.SessionID = ""
 	}
-	_ = s.rpc.Notify("initialized", map[string]any{})
-	quotaCtx, quotaCancel := context.WithTimeout(s.ctx, 5*time.Second)
-	var quota json.RawMessage
-	if s.rpc.Call(quotaCtx, "account/rateLimits/read", map[string]any{}, &quota) == nil && s.hooks.Event != nil {
-		s.hooks.Event("whirlwind/quota", quota)
+	if err := s.initializeCodex(); err != nil {
+		return err
 	}
-	quotaCancel()
-	params := map[string]any{"cwd": s.input.CWD, "approvalPolicy": "untrusted", "approvalsReviewer": "user", "sandbox": "workspace-write"}
-	if s.input.Model != "" {
-		params["model"] = s.input.Model
+	thread, params, err := s.openCodexThread()
+	if err != nil {
+		return err
 	}
-	if s.input.ReadOnly {
-		params["sandbox"] = "read-only"
+	inputs, catalogOnly, err := s.prepareCodexIntegrations(&thread, params)
+	if err != nil || catalogOnly {
+		return err
 	}
-	method := "thread/start"
-	if s.input.SessionID != "" {
-		method = "thread/resume"
-		params["threadId"] = s.input.SessionID
+	s.recordCodexSession(thread)
+	return s.startCodexTurn(inputs)
+}
+
+func (s *providerSession) startCodexTurn(inputs []any) error {
+	turn, err := s.codexTurnParams(inputs)
+	if err != nil {
+		return err
 	}
-	var thread struct {
-		Model  string `json:"model"`
-		Thread struct {
-			ID string `json:"id"`
-		} `json:"thread"`
-	}
-	e = s.rpc.Call(s.ctx, method, params, &thread)
-	if e != nil {
-		return e
-	}
-	if thread.Thread.ID == "" {
-		return errors.New("codex returned empty thread ID")
-	}
-	s.mu.Lock()
-	s.output.SessionID = thread.Thread.ID
-	s.output.ResolvedModel = thread.Model
-	s.mu.Unlock()
-	if s.hooks.Event != nil {
-		s.hooks.Event("whirlwind/session", map[string]any{"session_id": s.output.SessionID, "resumed": s.input.SessionID != ""})
-	}
-	e = s.rpc.Call(s.ctx, "turn/start", map[string]any{"threadId": s.output.SessionID, "input": []any{map[string]any{"type": "text", "text": s.input.Prompt}}}, nil)
-	if e != nil {
-		return e
+	if err = s.rpc.Call(s.ctx, "turn/start", turn, nil); err != nil {
+		return err
 	}
 	return s.waitCodexTurn()
+}
+
+func (s *providerSession) codexTurnParams(inputs []any) (map[string]any, error) {
+	turn := map[string]any{"threadId": s.output.SessionID, "input": inputs}
+	if s.input.NativeIntegrations && s.input.Thinking != nil {
+		if s.input.Thinking.ConfigID != "reasoning_effort" {
+			return nil, errors.New("native Codex integrations require reasoning_effort thinking option")
+		}
+		turn["effort"] = s.input.Thinking.Value
+	}
+	return turn, nil
 }
 
 func (s *providerSession) runClaude() error {
 	var e error
 	var response Output
-	e = s.rpc.Call(s.ctx, "run", map[string]any{"cwd": s.input.CWD, "prompt": s.input.Prompt, "session_id": s.input.SessionID, "read_only": s.input.ReadOnly, "model": s.input.Model}, &response)
+	params := map[string]any{"cwd": s.input.CWD, "prompt": s.input.Prompt, "session_id": s.input.SessionID, "read_only": s.input.ReadOnly, "model": s.input.Model}
+	params["native_integrations"] = s.input.NativeIntegrations
+	params["provider_id"] = s.input.ProviderID
+	params["discover_connected"] = s.input.DiscoverConnected
+	params["catalog_only"] = s.input.CatalogOnly
+	params["required_integrations"] = s.input.RequiredIntegrations
+	if s.input.NativeIntegrations && s.input.Thinking != nil {
+		params["effort"] = s.input.Thinking.Value
+	}
+	if len(s.checkServers) > 0 {
+		server := s.checkServers[0].(map[string]any)
+		params["check_mcp"] = map[string]any{"command": server["command"], "args": server["args"]}
+	}
+	e = s.rpc.Call(s.ctx, "run", params, &response)
 	s.mu.Lock()
 	if e == nil {
 		s.output = response

@@ -18,7 +18,10 @@ import (
 
 // generatedExecutionPolicy uses configured Qlty and declared project scripts, never placeholder checks.
 func generatedExecutionPolicy(ctx context.Context, path string) (string, error) {
-	checks := []model.Check{{Name: "qlty", Command: []string{"qlty", "check", "--no-fix", "--no-upgrade-check"}}}
+	checks := []model.Check{
+		{Name: "qlty", Command: []string{"qlty", "check", "--all", "--no-fix", "--no-upgrade-check", "--sarif"}},
+		{Name: "qlty-smells", Command: []string{"qlty", "smells", "--all", "--include-tests", "--sarif", "--no-upgrade-check"}},
+	}
 	scriptChecks, err := generatedScriptChecks(ctx, path)
 	if err != nil {
 		return "", err
@@ -121,7 +124,7 @@ func generatedGoChecks(ctx context.Context, path string) ([]model.Check, error) 
 			return nil, errors.New("commit go.mod before execution setup; uncommitted module preserved")
 		}
 		for _, name := range []string{"test", "vet", "build"} {
-			checks = append(checks, model.Check{Name: "go-" + name, Command: []string{"go", name, "./..."}})
+			checks = append(checks, model.Check{Name: "go-" + name, Command: generatedGoCommand(name)})
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
@@ -160,4 +163,11 @@ func allowedGeneratedRootFile(name string) bool {
 		return false
 	}
 	return !strings.HasSuffix(name, ".pem") && !strings.HasSuffix(name, ".key")
+}
+
+func generatedGoCommand(name string) []string {
+	if name == "test" {
+		return []string{"go", "test", "-json", "./..."}
+	}
+	return []string{"go", name, "./..."}
 }

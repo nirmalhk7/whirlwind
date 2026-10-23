@@ -16,6 +16,9 @@ import (
 
 // Validate rejects missing baseline checks, malformed risk rules, negative run budgets, and allowed paths outside the repository.
 func Validate(p model.Policy) error {
+	if p.ContextInputTokens < 0 {
+		return errors.New("context_input_tokens must be nonnegative")
+	}
 	if p.RunTimeoutSeconds < 0 {
 		return errors.New("run_timeout_seconds must be nonnegative")
 	}
@@ -130,6 +133,9 @@ func AllowedPath(p model.Policy, path string) bool {
 func validateChecks(checks []model.Check) error {
 	names := map[string]bool{}
 	for _, c := range checks {
+		if c.FreshnessSeconds < 0 || (c.Reusable && c.FreshnessSeconds == 0) {
+			return errors.New("reusable checks require positive freshness_seconds")
+		}
 		if c.Name == "" || len(c.Command) == 0 || names[c.Name] {
 			return errors.New("checks need unique names and command arrays")
 		}
@@ -156,6 +162,9 @@ func validateRiskRule(r model.RiskRule) error {
 		return errors.New("risk selector required")
 	}
 	for _, c := range r.Checks {
+		if c.FreshnessSeconds < 0 || (c.Reusable && c.FreshnessSeconds == 0) {
+			return errors.New("reusable risk checks require positive freshness_seconds")
+		}
 		if c.Name == "" || len(c.Command) == 0 {
 			return errors.New("risk check command required")
 		}

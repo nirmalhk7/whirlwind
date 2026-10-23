@@ -30,9 +30,14 @@ func TestIdeationHistoryFailures(t *testing.T) {
 
 func TestValidateDirectionCount(t *testing.T) {
 	batch := ideaBatch(t)
-	for _, ideas := range [][]model.Direction{nil, batch[:3], append(batch, batch[0])} {
+	for _, ideas := range [][]model.Direction{append(batch, batch[0])} {
 		if err := validateDirections(ideas, nil); err == nil {
 			t.Fatalf("accepted %d ideas", len(ideas))
+		}
+	}
+	for _, ideas := range [][]model.Direction{nil, batch[:1], batch[:3]} {
+		if err := validateDirections(ideas, nil); err != nil {
+			t.Fatalf("valid bounded candidates: %v", err)
 		}
 	}
 }

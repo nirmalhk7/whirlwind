@@ -13,6 +13,7 @@ import (
 )
 
 func (step *taskStep) primaryReview(prompt string) (model.Review, error) {
+	prompt += step.reviewCheckInstructions()
 	var review model.Review
 	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Purpose: "primary", Role: "review", CWD: step.task.Worktree, Prompt: prompt, ReadOnly: true, SessionID: ""})
 	if err != nil {
@@ -60,6 +61,7 @@ func (step *taskStep) supplementReview(prompt string, review *model.Review) erro
 	return nil
 }
 func (step *taskStep) specialistReview(prompt, perspective string) (model.Review, error) {
+	prompt += step.reviewCheckInstructions()
 	var extra model.Review
 	specialized, err := agents.Render("specialist", map[string]string{"Prompt": prompt, "Perspective": perspective})
 	if err != nil {
@@ -83,6 +85,22 @@ func (step *taskStep) specialistReview(prompt, perspective string) (model.Review
 		}
 	}
 	return extra, step.saveReviewPart(extra, perspective, out.AttemptID)
+}
+
+func (step *taskStep) reviewCheckInstructions() string {
+	checks := append([]model.Check{}, step.project.Policy.Checks...)
+	for _, rule := range step.project.Policy.RiskRules {
+		checks = append(checks, rule.Checks...)
+	}
+	ids := []string{}
+	seen := map[string]bool{}
+	for _, check := range checks {
+		if !seen[check.Name] {
+			ids = append(ids, check.Name)
+			seen[check.Name] = true
+		}
+	}
+	return "\nThe callable run_check tool (whirlwind_checks MCP on ACP/Claude) accepts only {\"check_id\":\"exact ID\"}. It runs committed checks in a disposable snapshot of the reviewed HEAD; source stays read-only. Use it when existing check evidence is insufficient; do not request arbitrary commands or source mutations. Committed check IDs: " + jsonText(ids)
 }
 
 func (step *taskStep) saveReviewPart(review model.Review, perspective, attempt string) error {

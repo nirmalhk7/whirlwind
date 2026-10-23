@@ -13,7 +13,7 @@ import (
 func TestFailedResumeKeepsSavedSession(t *testing.T) {
 	h := newRetryHarness(t, model.AgentChoice{Provider: "fake", Model: "m"})
 	h.task.Recoveries = 2
-	saved := model.Attempt{Task: h.task.ID, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, Model: "m", Transport: "acp", SessionID: "saved"}
+	saved := model.Attempt{ElapsedMS: fixtureRuntime(0), ExecutionProfile: h.executionProfile(t), Task: h.task.ID, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, Model: "m", Transport: "acp", SessionID: "saved"}
 	if err := h.engine.Store.Put(context.Background(), "sessions", "original", saved, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestUnitSessionDoesNotCrossScope(t *testing.T) {
 	h := newRetryHarness(t)
 	ctx := context.Background()
 	for _, unit := range []string{"wanted", "other"} {
-		saved := model.Attempt{Task: h.task.ID, UnitID: unit, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, Transport: "acp", SessionID: unit}
+		saved := model.Attempt{ElapsedMS: fixtureRuntime(0), ExecutionProfile: h.executionProfile(t), Task: h.task.ID, UnitID: unit, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, Transport: "acp", SessionID: unit}
 		if err := h.engine.Store.Put(ctx, "sessions", store.ID(), saved, 0); err != nil {
 			t.Fatal(err)
 		}

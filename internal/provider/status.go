@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 )
 
@@ -16,7 +17,12 @@ func CheckConnection(ctx context.Context, p model.Provider, cwd string) (string,
 	if p.Kind != "acp" && p.Kind != "claude" {
 		return "", fmt.Errorf("unsupported provider kind: %s", p.Kind)
 	}
-	rpc, err := Start(ctx, p.Command, cwd, nil)
+	profile, err := execution.ForProvider(cwd, true, "", p.Sandbox, p.Command)
+	if err != nil {
+		return "", err
+	}
+	cwd = profile.CWD
+	rpc, err := StartWithProfile(ctx, p.Command, profile, nil)
 	if err != nil {
 		return "", err
 	}

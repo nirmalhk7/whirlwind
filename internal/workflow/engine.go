@@ -16,10 +16,12 @@ type Engine struct {
 	Store            *store.Store
 	GitHub           github.Client
 	Root             string
+	PlansRoot        string
 	Adapter          func(model.Provider) provider.Adapter
 	owner            string
 	mu               sync.Mutex
 	runners          map[string]context.CancelFunc
+	projectRunners   map[string]projectRunner
 	running          map[string]context.CancelFunc
 	active           map[string]int
 	gitMu            sync.Mutex
@@ -72,6 +74,8 @@ func (e *Engine) runCycle(ctx context.Context, lastSettingsError string, nextRec
 		e.StopAll()
 		return "", nextReconcile
 	}
+	e.refreshLocalApprovals(ctx)
+	e.refreshQuotaWaits(ctx)
 	e.dispatch(ctx)
 	if !time.Now().Before(nextReconcile) {
 		e.background.Go(func() { e.Reconcile(ctx) })
@@ -104,12 +108,28 @@ func (e *Engine) pauseFailure(ctx context.Context, id string, failure error) err
 		return err
 	}
 	task, err := store.Decode[model.Task](r)
-	if err != nil || task.Stage == "paused" {
+	if err != nil || task.Stage == "paused" || task.Stage == "plan_approval" || task.Cancelled() {
 		return err
 	}
-	task.ResumeStage, task.Stage, task.Error = task.Stage, "paused", failure.Error()
-	notice := model.Notification{ID: store.ID(), TaskID: id, Kind: "recovery", Message: failure.Error()}
-	return e.Store.Write(ctx, []store.Change{{Kind: "tasks", ID: id, Value: task, Expected: r.Version}, {Kind: "inbox", ID: notice.ID, Value: notice}}, nil)
+
+	var wait *AdmissionWait
+	if errors.As(failure, &wait) {
+		if task.Stage == "waiting_quota" {
+			return nil
+		}
+		task.Wait = &model.TaskWait{Kind: wait.Kind, Reason: wait.Reason, Provider: wait.Provider, Pool: wait.Pool, Role: wait.Role, ResumeStage: task.Stage, NextCheckAt: wait.NextCheck.UTC().Format(time.RFC3339Nano), PlanVersion: task.PlanVersion}
+		if project, err := e.Project(ctx, task.ProjectID); err == nil {
+			task.Wait.PolicyHash = project.PolicyHash
+		}
+		task.ResumeStage, task.Stage, task.Error = task.Stage, "waiting_quota", failure.Error()
+		if wait.Kind == "setup" || wait.Kind == "policy" || wait.Kind == "authentication" {
+			task.Stage = "paused"
+		}
+	} else {
+		task.ResumeStage, task.Stage, task.Error = task.Stage, "paused", failure.Error()
+	}
+	// Store.Put commits the structured transition notification in the same transaction.
+	return e.Store.Put(ctx, "tasks", id, task, r.Version)
 }
 
 // Project loads and decodes the registered project used by a task.

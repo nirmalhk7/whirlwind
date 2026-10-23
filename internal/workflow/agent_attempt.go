@@ -14,12 +14,14 @@ import (
 
 type agentAttempt struct {
 	*agentRun
-	chosen   model.Provider
-	id       string
-	state    model.Attempt
-	mu       sync.Mutex
-	eventErr error
-	cancel   context.CancelFunc
+	chosen      model.Provider
+	id          string
+	state       model.Attempt
+	mu          sync.Mutex
+	checkMu     sync.Mutex
+	eventErr    error
+	cancel      context.CancelFunc
+	budgetClock *runtimeBudget
 }
 
 func (a *agentAttempt) execute() (provider.Output, error) {
@@ -29,16 +31,43 @@ func (a *agentAttempt) execute() (provider.Output, error) {
 	if priorErr != nil {
 		return provider.Output{}, priorErr
 	}
-	ctx, cancel := context.WithCancel(a.ctx)
+	ctx, cancel, budgetErr := a.activeBudgetContext(a.ctx)
+	if budgetErr != nil {
+		return provider.Output{}, budgetErr
+	}
 	a.mu.Lock()
 	a.cancel = cancel
 	a.mu.Unlock()
 	defer cancel()
 	hooks := provider.Hooks{Questions: a.questions, Event: a.event, Permission: a.permission}
+	hooks.RunCheck = a.runCheck
+	if a.budgetClock != nil {
+		hooks.Questions = func(ctx context.Context, questions []model.Question) (map[string]string, error) {
+			resume := a.budgetClock.pause()
+			defer resume()
+			return a.questions(ctx, questions)
+		}
+		hooks.Permission = func(ctx context.Context, permission provider.Permission) (bool, error) {
+			resume := a.budgetClock.pause()
+			defer resume()
+			return a.permission(ctx, permission)
+		}
+	}
 	input := a.input
+	if input.DiscoverConnected {
+		input.Prompt += "\nScope overrides for this provider only (unlisted connected sources remain discoverable):\n" + jsonText(input.IntegrationScopes)
+	}
+	if input.Purpose == "provider_test" {
+		hooks.Permission = nil
+		hooks.Questions = nil
+		hooks.RunCheck = nil
+	}
 	input.Policy = a.project.Policy
 	started := time.Now()
 	output, err := a.Adapter(provider.ExecutionProvider(a.chosen, input.Thinking)).Run(ctx, input, hooks)
+	if a.budgetClock != nil && a.budgetClock.exhausted() && a.ctx.Err() == nil {
+		err = fmt.Errorf("%w: active runtime ceiling reached", store.ErrBudgetExceeded)
+	}
 	if a.input.Purpose == "provider_test" && err == nil && strings.TrimSpace(output.Text) == "" {
 		err = errors.New("provider completed without a reply; check agent setup and retry")
 	}
@@ -73,6 +102,11 @@ func (a *agentAttempt) finish(output provider.Output, runErr error, started time
 	a.state.Summary = string(store.Prefix([]byte(output.Text), 4096))
 	a.state.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	elapsed := time.Since(started).Milliseconds()
+	activeElapsed := elapsed
+	if a.budgetClock != nil {
+		a.budgetClock.stop()
+		activeElapsed = a.budgetClock.elapsed().Milliseconds()
+	}
 	a.state.ElapsedMS = &elapsed
 	success := runErr == nil
 	a.state.Success = &success
@@ -89,6 +123,9 @@ func (a *agentAttempt) finish(output provider.Output, runErr error, started time
 			a.state.Status = "cancelled"
 		}
 	}
+	if output.Usage == nil {
+		output.Usage = a.state.Usage
+	}
 	a.state.Usage = output.Usage
 	tokens, cost := output.Tokens, output.Cost
 	if output.Usage != nil && output.Usage.Scope == "session" {
@@ -96,5 +133,12 @@ func (a *agentAttempt) finish(output provider.Output, runErr error, started time
 		cost = nil
 	}
 	metric := map[string]any{"attempt_id": a.id, "project_id": a.project.ID, "task": a.task.ID, "unit_id": a.input.UnitID, "operation_id": a.input.OperationID, "role": a.input.Role, "provider": a.chosen.ID, "model": a.input.Model, "resolved_model": output.ResolvedModel, "tokens": tokens, "cost": cost, "usage": output.Usage, "elapsed_ms": time.Since(started).Milliseconds(), "success": runErr == nil, "review_attempts": a.task.ReviewPasses, "category": a.index.Category(), "risk": a.task.Risk}
-	return a.Store.Write(ctx, []store.Change{{Kind: "sessions", ID: a.id, Value: a.state, Expected: record.Version}, {Kind: "metrics", ID: a.id, Value: metric}}, nil)
+	entry := model.UsageEntry{Transport: a.state.Transport, ExecutionProfile: a.state.ExecutionProfile, PlanVersion: a.task.PlanVersion, AttemptID: a.id, TaskID: a.task.ID, ProjectID: a.project.ID, OperationID: a.input.OperationID, Provider: a.chosen.ID, Model: output.ResolvedModel, Role: a.input.Role, SessionID: output.SessionID, Resumed: a.state.RequestedSessionID != "", Usage: output.Usage, ElapsedMS: activeElapsed}
+	if entry.Model == "" {
+		entry.Model = a.input.Model
+	}
+	if entry.Usage == nil && (output.Tokens != nil || output.Cost != nil) {
+		entry.Usage = &model.Usage{Scope: "attempt", TotalTokens: output.Tokens, Cost: output.Cost}
+	}
+	return a.Store.CompleteUsage(ctx, entry, []store.Change{{Kind: "sessions", ID: a.id, Value: a.state, Expected: record.Version}, {Kind: "metrics", ID: a.id, Value: metric}})
 }

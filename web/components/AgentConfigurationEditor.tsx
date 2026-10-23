@@ -9,11 +9,11 @@ type ThinkingOption = { config_id: string; name: string; current: string; option
 export const catalogKey = (provider: string, model = "") => JSON.stringify([provider, model]);
 const thinkingValue = (thinking?: Thinking) => thinking ? JSON.stringify({ config_id: thinking.config_id, value: thinking.value }) : "";
 const testKey = (role: string, choice: Choice) => JSON.stringify([role, choice.provider, choice.model, thinkingValue(choice.thinking)]);
-export type Config = { role: string; chain: Choice[] };
+export type Config = { role: string; chain: Choice[]; inherited_from?: string };
 type Model = { id: string; name: string };
 export type Operation = { stage: "running" | "complete" | "failed"; models?: Model[]; thinking_options?: ThinkingOption[]; text?: string; error?: string; elapsed_ms?: number };
 export type Catalog = { loading: boolean; models: Model[]; thinkingOptions: ThinkingOption[]; error?: string };
-const names: Record<string, string> = { ideate: "Ideation Agent", plan: "Planner Agent", code: "Coding Agent", review: "Reviewer Agent" };
+const names: Record<string, string> = { ideate: "Ideation Agent", plan: "Planner Agent", code: "Coding Agent", review: "Reviewer Agent", submit: "Submitter Agent" };
 
 type EditorProps = {
   record: Resource<Config>; sources: Resource<Source>[]; catalogs: Record<string, Catalog>; tests: Record<string, Operation>;
@@ -189,11 +189,12 @@ function AgentChoice(props: ChoiceProps) {
 export function AgentEditor(props: EditorProps) {
   const { record, sources, catalogs } = props;
   const state = useAgentEditor(props);
-  const providers = sources.filter((item) => item.data.kind !== "unavailable" && item.data.capabilities?.includes(record.id));
+  const providers = sources.filter((item) => item.data.kind !== "unavailable" && (item.data.capabilities?.includes(record.id) || record.id === "submit" && item.data.capabilities?.includes("code")));
   const configured = record.version > 0;
   const saveDisabled = !providers.length || state.chain.some((choice) => invalidThinking(choice, catalogs[catalogKey(choice.provider, choice.model.trim())]));
   return <form className="agent-config whirlwind-form" onSubmit={state.save} aria-label={names[record.id]}>
     <div className="row"><h3>{names[record.id]}</h3><span className="badge" data-availability={configured ? "available" : "unavailable"}>{configured ? "Configured" : "Not configured"}</span></div>
+    {record.data.inherited_from === "code" && <p className="muted">Inherits Coding Agent choices until you save a separate Submitter configuration.</p>}
     {record.version === 0 && <p className="muted">Existing project routing stays active until you save this agent.</p>}
     {!providers.length && <p className="error">No providers support this role. Add or update a source in Providers.</p>}
     <fieldset disabled={state.busy}>

@@ -1,7 +1,7 @@
 import type { RunRecord } from "./RunHistory";
 
 type Run = RunRecord["data"];
-const roles: Record<string, string> = { ideate: "Ideation Agent", plan: "Planner Agent", code: "Coding Agent", review: "Reviewer Agent" };
+const roles: Record<string, string> = { ideate: "Ideation Agent", plan: "Planner Agent", code: "Coding Agent", review: "Reviewer Agent", submit: "Submitter Agent" };
 const statusOutcomes = new Map([["interrupted", "Interrupted"], ["cancelled", "Cancelled"]]);
 const timeValue = (value?: string) => value ? Date.parse(value) || 0 : 0;
 

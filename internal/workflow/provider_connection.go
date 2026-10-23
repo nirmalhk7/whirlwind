@@ -9,6 +9,7 @@ import (
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
+	"whirlwind/internal/store"
 )
 
 // TestProviderConnection sends one harmless prompt using the configured provider and normal capacity limits.
@@ -37,17 +38,17 @@ func (e *Engine) TestProviderChoice(ctx context.Context, p model.Provider, choic
 	defer func() { _ = os.RemoveAll(workspace) }()
 	input := provider.Input{Model: choice.Model, Thinking: choice.Thinking, Role: "plan", Purpose: "provider_test", CWD: workspace, ReadOnly: true, Prompt: "Reply with exactly Hello World. Do not use tools or inspect or modify files."}
 	var out provider.Output
-	if id := operationID(ctx); id != "" {
-		input.OperationID = id
-		run := &agentRun{Engine: e, ctx: ctx, project: model.Project{}, task: model.Task{ID: "operation:" + id}, input: input}
-		attempt, attemptErr := run.newAttempt(p)
-		if attemptErr != nil {
-			return out, attemptErr
-		}
-		out, err = attempt.execute()
-	} else {
-		out, err = e.Adapter(provider.ExecutionProvider(p, choice.Thinking)).Run(ctx, input, provider.Hooks{})
+	id := operationID(ctx)
+	if id == "" {
+		id = store.ID()
 	}
+	input.OperationID = id
+	run := &agentRun{Engine: e, ctx: ctx, project: model.Project{}, task: model.Task{ID: "operation:" + id}, input: input}
+	attempt, attemptErr := run.newAttempt(p)
+	if attemptErr != nil {
+		return out, attemptErr
+	}
+	out, err = attempt.execute()
 
 	if err == nil && strings.TrimSpace(out.Text) == "" {
 		err = errors.New("provider completed without a reply; check agent setup and retry")

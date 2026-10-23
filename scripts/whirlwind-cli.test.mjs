@@ -31,7 +31,10 @@ async function fixture(t, extraEnv = {}, timeout = 30000) {
   await mkdir(join(root, "tools"));
   await mkdir(join(root, "elsewhere"));
   await mkdir(join(root, "web/node_modules/next/dist/bin"), { recursive: true });
+  await mkdir(join(root,"bridges/sandbox/node_modules/@anthropic-ai/sandbox-runtime"),{recursive:true});
+  await writeFile(join(root,"bridges/sandbox/node_modules/@anthropic-ai/sandbox-runtime/package.json"),JSON.stringify({version:"0.0.81"}));
   await copyFile(join(repo, "scripts/dev.mjs"), join(root, "scripts/dev.mjs"));
+  await copyFile(join(repo,"scripts/sandbox-prerequisites.mjs"),join(root,"scripts/sandbox-prerequisites.mjs"));
   await writeFile(join(root, "go.mod"), "module whirlwind\n\ngo 1.26.9\n");
   const server = `import http from 'node:http';
 import { spawn } from 'node:child_process';
@@ -94,6 +97,15 @@ function alive(pid) {
   try { process.kill(pid, 0); return true; }
   catch (error) { if (error.code === "ESRCH") return false; throw error; }
 }
+
+test('start refuses missing required sandbox runtime before launching services',async t=>{
+ const f=await fixture(t);
+ await rm(join(f.root,'bridges/sandbox/node_modules'),{recursive:true,force:true});
+ const result=await f.run('start');
+ assert.notEqual(result.code,0);
+ assert.match(result.output,/npm ci --prefix bridges\/sandbox/);
+ await assert.rejects(access(join(f.data,'backend.json')));
+});
 
 async function waitGone(pid) {
   for (let i = 0; i < 100; i++) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 )
 
@@ -87,7 +88,7 @@ func ACPCommand(p model.Provider) []string {
 }
 
 func ExecutionProvider(p model.Provider, thinking *model.ThinkingChoice) model.Provider {
-	if thinking != nil && (p.Kind == "codex" || p.Kind == "claude") {
+	if !p.NativeIntegrations && thinking != nil && (p.Kind == "codex" || p.Kind == "claude") {
 		p.Command = ACPCommand(p)
 		p.Kind = "acp"
 	}
@@ -105,9 +106,14 @@ func Models(ctx context.Context, p model.Provider, cwd string, selectedModels ..
 	if len(selectedModels) > 0 {
 		selectedModel = selectedModels[0]
 	}
-	s := &providerSession{ctx: ctx, input: Input{CWD: cwd, ReadOnly: true, Model: selectedModel}, client: NewClient(Input{CWD: cwd, ReadOnly: true}, Hooks{})}
+	profile, err := execution.ForProvider(cwd, true, "", p.Sandbox, command)
+	if err != nil {
+		return catalog, err
+	}
+	cwd = profile.CWD
+	s := &providerSession{ctx: ctx, input: Input{CWD: cwd, ReadOnly: true, Model: selectedModel}, client: NewClient(Input{CWD: cwd, ReadOnly: true, Execution: &profile}, Hooks{})}
 	defer s.client.Close()
-	rpc, err := Start(ctx, command, cwd, s.handle)
+	rpc, err := StartWithProfile(ctx, command, profile, s.handle)
 	if err != nil {
 		return catalog, err
 	}

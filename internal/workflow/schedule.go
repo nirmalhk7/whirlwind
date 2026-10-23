@@ -8,9 +8,10 @@ import (
 )
 
 type IdeationSchedule struct {
-	Enabled  bool   `json:"enabled"`
-	Time     string `json:"time"`
-	Timezone string `json:"timezone"`
+	MaxCandidates int    `json:"max_candidates,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	Time          string `json:"time"`
+	Timezone      string `json:"timezone"`
 }
 
 func DefaultSettings() Settings {
@@ -18,6 +19,9 @@ func DefaultSettings() Settings {
 }
 
 func (s IdeationSchedule) Validate() error {
+	if s.MaxCandidates < 0 || s.MaxCandidates > 12 {
+		return fmt.Errorf("max_candidates must be between 1 and 12 when configured")
+	}
 	if _, err := time.Parse("15:04", s.Time); err != nil {
 		return fmt.Errorf("ideation time must be HH:MM")
 	}

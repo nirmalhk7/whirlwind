@@ -56,11 +56,16 @@ func TestStopAllCancelsTaskAndProviderRunnersAndAllowsNewWork(t *testing.T) {
 func TestStoppedFlagBlocksRunnersUntilCleared(t *testing.T) {
 	e, task, _ := testEngine(t)
 	ctx := context.Background()
+	initial, _ := e.Store.Get(ctx, "tasks", task.ID)
 	settings := DefaultSettings()
 	settings.Stopped = true
 	record, err := e.Store.Get(ctx, "settings", "global")
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		t.Fatal(err)
+	}
+	if err == nil {
+		settings, _ = store.Decode[Settings](record)
+		settings.Stopped = true
 	}
 	if err := e.Store.Put(ctx, "settings", "global", settings, record.Version); err != nil {
 		t.Fatal(err)
@@ -92,7 +97,7 @@ func TestStoppedFlagBlocksRunnersUntilCleared(t *testing.T) {
 	e.dispatch(ctx)
 	e.background.Wait()
 	current, _ := e.Store.Get(ctx, "tasks", task.ID)
-	if current.Version != 1 {
+	if current.Version != initial.Version {
 		t.Fatalf("stopped dispatch advanced task: %+v", current)
 	}
 	record, _ = e.Store.Get(ctx, "settings", "global")
@@ -114,7 +119,7 @@ func TestStoppedFlagNeverSpawnsAgentProcess(t *testing.T) {
 	t.Setenv("WHIRLWIND_PROCESS_REGISTRY", filepath.Join(root, "processes"))
 	marker := filepath.Join(root, "agent-starts.log")
 	script := filepath.Join(root, "probe-agent.sh")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'started\\n' >> \"$1\"\nexit 73\n"), 0700); err != nil {
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'started\\n' >> \"$HOME/agent-starts.log\"\nexit 73\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	p := model.Provider{ID: "probe", Name: "Probe", Kind: "acp", Command: []string{"sh", script, marker}, Capabilities: []string{"ideate", "plan", "code", "review"}, Available: true, Quota: "unknown"}
@@ -139,6 +144,12 @@ func setRunnerStopped(t *testing.T, e *Engine, stopped bool) {
 		t.Fatal(err)
 	}
 	settings := DefaultSettings()
+	if err == nil {
+		settings, err = store.Decode[Settings](record)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	settings.Stopped = stopped
 	if err := e.Store.Put(ctx, "settings", "global", settings, record.Version); err != nil {
 		t.Fatal(err)
@@ -187,7 +198,8 @@ func assertSchedulerDoesNotStartAgent(t *testing.T, e *Engine, ctx context.Conte
 	runCtx, cancel := context.WithTimeout(ctx, 6500*time.Millisecond)
 	defer cancel()
 	e.Run(runCtx)
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+	markers, _ := filepath.Glob(filepath.Join(e.Root, "sandbox", "*", "home", "agent-starts.log"))
+	if _, err := os.Stat(marker); !os.IsNotExist(err) || len(markers) > 0 {
 		t.Fatalf("agent process launched while stopped: %v", err)
 	}
 	sessions, err := e.Store.List(ctx, "sessions")
@@ -198,8 +210,13 @@ func assertSchedulerDoesNotStartAgent(t *testing.T, e *Engine, ctx context.Conte
 	setRunnerStopped(t, e, false)
 	controlCtx, controlCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer controlCancel()
-	_, _ = e.TestProviderConnection(controlCtx, p)
-	starts, err := os.ReadFile(marker)
+	_, controlErr := e.TestProviderConnection(controlCtx, p)
+	t.Logf("positive control provider outcome: %v", controlErr)
+	markers, _ = filepath.Glob(filepath.Join(e.Root, "sandbox", "*", "home", "agent-starts.log"))
+	if len(markers) != 1 {
+		t.Fatalf("positive control runtime markers: %v", markers)
+	}
+	starts, err := os.ReadFile(markers[0])
 	if err != nil || string(starts) != "started\n" {
 		t.Fatalf("positive control did not launch exactly one real child: %q %v", starts, err)
 	}

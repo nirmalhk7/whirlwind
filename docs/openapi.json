@@ -1653,6 +1653,19 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Project activity is paused. Resume the project before requesting ideation."
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdeationRequest"
+              }
+            }
           }
         }
       }
@@ -1765,8 +1778,12 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Candidate is deferred/dismissed or resource version is stale. Reopen inactive candidates before selection."
           }
-        }
+        },
+        "description": "Atomically authorize the current candidate revision and bind one task. Replayed deliveries never start planning before this action."
       }
     },
     "/api/v1/tasks/{id}/pause": {
@@ -3270,6 +3287,868 @@
           }
         }
       }
+    },
+    "/api/v1/projects/{id}/pause": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "post__api_v1_projects_id_pause",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Persist project paused=true and cancel its active task and ideation operations, including capacity waits and retries. Block new project agent work across restarts. Preserve task checkpoints and manual pauses; other projects and global runner settings are unchanged."
+      }
+    },
+    "/api/v1/projects/{id}/resume": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "post__api_v1_projects_id_resume",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "description": "Persist project paused=false and allow task execution and ideation from saved checkpoints. Does not clear global runner stop or individually paused tasks."
+      }
+    },
+    "/api/v1/directions/{id}/dismiss": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "directionDismiss",
+        "description": "Mark candidate dismissed; unchanged evidence is suppressed. If selected, its active task pauses.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/directions/{id}/defer": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "directionDefer",
+        "description": "Mark candidate deferred; it cannot be selected until explicitly reopened. If selected, its active task pauses.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/directions/{id}/reopen": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "directionReopen",
+        "description": "Return candidate to proposed status without starting planning; explicit selection remains required.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/tasks/{id}/adopt": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "adoptLegacyTask",
+        "description": "Explicitly authorize the current objective of an unselected, unpublished task under a confirmed project policy. No request fields are required. Ordinary resume never grants this authorization.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Task is already selected/published, or confirmed project policy is missing."
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/tasks/{id}/budget": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "taskBudget",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskBudget"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateTaskBudget",
+        "description": "Replace allowance; retain all previous consumption. Requires current task version.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BudgetPolicy"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}/usage": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "taskUsage",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageReport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evaluation": {
+      "get": {
+        "operationId": "evaluationReport",
+        "description": "Read durable task and operation usage/outcomes without inference. PR creation, merge and demonstrated verification remain distinct.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationReport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}/budget-reconcile": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "reconcileTaskBudget",
+        "description": "Record explicit operator confirmation that an interrupted child has terminated. Version-fenced and idempotent; unknown accounting remains reserved.",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BudgetReconciliation"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated versioned task resource",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale task version, reservation belongs to another task, reservation is not uncertain, or supplied reconciliation measurements are invalid."
+          },
+          "422": {
+            "description": "Explicit confirmed_terminated:true is required."
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}/outcome": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "recordTaskOutcome",
+        "description": "Append an audited human quality observation independently of task execution, verification and PR state. Returns updated task resource/version.",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskOutcomeRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task resource with incremented version; stage unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid decision."
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workflow_config/{id}": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "workflowConfiguration",
+        "description": "Read active/configured mode and pending restart. Only id global is used; no write API exists.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}/plan-document": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "localPlanDocument",
+        "description": "Read current editable Markdown and normalized plan. Files are never executed.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalPlanDocument"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{id}/plan-review": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "reviewLocalPlan",
+        "description": "Approve exact displayed hash/version/policy, request revision, or reject. Stale documents return 409.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Resource"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalPlanReview"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{id}/integrations": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "integrationInventory",
+        "description": "Read cached native integration status without inference or authentication side effects.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationInventory"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "refreshIntegrationInventory",
+        "description": "Explicit metadata-only native connection test. Setup failures appear as actionable errors; credentials are redacted.",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntegrationInventory"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -3357,6 +4236,9 @@
             "minimum": 1,
             "maximum": 86400,
             "default": 30
+          },
+          "admission": {
+            "$ref": "#/components/schemas/AdmissionSettings"
           }
         }
       },
@@ -3431,6 +4313,12 @@
               "number",
               "null"
             ]
+          },
+          "quota_pool": {
+            "type": "string"
+          },
+          "quota_snapshot": {
+            "$ref": "#/components/schemas/QuotaSnapshot"
           }
         }
       },
@@ -3567,6 +4455,12 @@
             "type": "string",
             "description": "Explicit IANA timezone",
             "default": "America/Denver"
+          },
+          "max_candidates": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 12,
+            "description": "Optional shortlist limit. 0/omitted uses 4."
           }
         }
       },
@@ -3704,6 +4598,24 @@
               "number",
               "null"
             ]
+          },
+          "raw": {
+            "description": "Retained native provider usage payload; shape depends on provider."
+          },
+          "source": {
+            "type": "string"
+          },
+          "completeness": {
+            "type": "string"
+          },
+          "cached_input_semantics": {
+            "type": "string"
+          },
+          "cache_write_tokens": {
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         }
       },
@@ -3752,7 +4664,8 @@
                 "name",
                 "kind",
                 "status",
-                "detail"
+                "detail",
+                "quota_fresh"
               ],
               "properties": {
                 "id": {
@@ -3780,9 +4693,989 @@
                 "checked_at": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "quota_pool": {
+                  "type": "string",
+                  "description": "Explicit shared quota alias, or resolved provider pool identity."
+                },
+                "quota_snapshot": {
+                  "$ref": "#/components/schemas/QuotaSnapshot"
+                },
+                "quota_fresh": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Null when no native quota observation is available; connectivity alone does not prove quota."
                 }
               }
             }
+          }
+        }
+      },
+      "BudgetPolicy": {
+        "type": "object",
+        "properties": {
+          "max_attempts": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_runtime_seconds": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attempt_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "verification_attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "verification_runtime_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_cost": {
+            "type": "number",
+            "minimum": 0
+          },
+          "attempt_cost": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "max_attempts",
+          "max_runtime_seconds"
+        ],
+        "description": "Finite attempt and active-runtime ceilings are required. Verification reserves must be below their respective ceilings; positive reserves are required before coder admission. Optional token/cost ceilings require explicit per-attempt reservations."
+      },
+      "QuotaWindow": {
+        "type": "object",
+        "properties": {
+          "limit_id": {
+            "type": "string"
+          },
+          "window": {
+            "type": "string"
+          },
+          "used_percent": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "resets_at": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "window_duration_mins": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "QuotaSnapshot": {
+        "type": "object",
+        "properties": {
+          "raw_metadata": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "Uninterpreted native quota response, including provider metadata and extensions. Null for historical observations without retained metadata."
+          },
+          "applicability": {
+            "type": "string",
+            "enum": [
+              "unknown"
+            ],
+            "description": "Model/account applicability remains unverified. Native metadata is preserved without inferring a provider applicability schema; routing stays conservative."
+          },
+          "pool": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuotaWindow"
+            }
+          }
+        }
+      },
+      "QuotaReserve": {
+        "type": "object",
+        "properties": {
+          "min_remaining_percent": {
+            "type": "number"
+          },
+          "max_age_seconds": {
+            "type": "integer"
+          },
+          "max_concurrent": {
+            "type": "integer"
+          }
+        }
+      },
+      "AdmissionSettings": {
+        "type": "object",
+        "properties": {
+          "default_budget": {
+            "$ref": "#/components/schemas/BudgetPolicy"
+          },
+          "discovery_budget": {
+            "$ref": "#/components/schemas/BudgetPolicy"
+          },
+          "pools": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/QuotaReserve"
+            }
+          }
+        }
+      },
+      "EvidenceRef": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "ref": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      },
+      "SelectionAuthorization": {
+        "type": "object",
+        "properties": {
+          "candidate_id": {
+            "type": "string"
+          },
+          "candidate_version": {
+            "type": "integer"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "policy_hash": {
+            "type": "string"
+          },
+          "source_fingerprint": {
+            "type": "string"
+          },
+          "selected_at": {
+            "type": "string"
+          }
+        }
+      },
+      "Direction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "proposed",
+              "selected",
+              "dismissed",
+              "deferred"
+            ],
+            "description": "May be absent on historical candidates."
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRef"
+            }
+          },
+          "scope": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "fingerprint": {
+            "type": "string"
+          },
+          "rank": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "group_id": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "day": {
+            "type": "string"
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "source_issue": {
+            "type": "object"
+          },
+          "expected_benefit": {
+            "type": "string",
+            "description": "Expected concrete outcome; required on newly generated candidates, optional historically."
+          },
+          "uncertainty": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Assumptions or remaining validation; nonempty for generated opportunities."
+          },
+          "effort_estimate": {
+            "type": "string",
+            "description": "Rough scoped effort with reason; required on generated candidates."
+          },
+          "problem_kind": {
+            "type": "string",
+            "enum": [
+              "observed_defect",
+              "opportunity"
+            ],
+            "description": "Generated observed defects require persisted verification-failure evidence. Source-only hypotheses and prospective improvements are opportunities."
+          }
+        }
+      },
+      "TaskWait": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "pool": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "resume_stage": {
+            "type": "string"
+          },
+          "next_check_at": {
+            "type": "string"
+          },
+          "policy_hash": {
+            "type": "string"
+          },
+          "plan_version": {
+            "type": "integer"
+          }
+        }
+      },
+      "Task": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/SelectionAuthorization"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetPolicy"
+          },
+          "wait": {
+            "$ref": "#/components/schemas/TaskWait"
+          },
+          "resume_stage": {
+            "type": "string"
+          },
+          "verification_id": {
+            "type": "string"
+          },
+          "review_id": {
+            "type": "string"
+          }
+        }
+      },
+      "SandboxPolicy": {
+        "type": "object",
+        "properties": {
+          "read_roots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowed_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "environment": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Policy": {
+        "type": "object",
+        "properties": {
+          "sandbox": {
+            "$ref": "#/components/schemas/SandboxPolicy"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/BudgetPolicy"
+          },
+          "context_input_tokens": {
+            "type": "integer"
+          },
+          "parallel_units": {
+            "type": "boolean"
+          },
+          "adaptive_routing": {
+            "type": "boolean"
+          },
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            }
+          }
+        }
+      },
+      "Check": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "timeout_seconds": {
+            "type": "integer"
+          },
+          "output_paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reusable": {
+            "type": "boolean"
+          },
+          "freshness_seconds": {
+            "type": "integer"
+          }
+        }
+      },
+      "UsageEntry": {
+        "type": "object",
+        "properties": {
+          "attempt_id": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "project_id": {
+            "type": "string"
+          },
+          "operation_id": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "resumed": {
+            "type": "boolean"
+          },
+          "reported_usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopedUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attempt_usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopedUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "elapsed_ms": {
+            "type": "integer"
+          },
+          "recorded_at": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "Native attempt, synthetic legacy unknown entry, deterministic verification, or preflight that made no model turn. Verification and preflight are not AI inference spend."
+          },
+          "transport": {
+            "type": "string"
+          },
+          "execution_profile": {
+            "type": "string"
+          },
+          "plan_version": {
+            "type": "integer"
+          }
+        }
+      },
+      "UsageReport": {
+        "type": "object",
+        "properties": {
+          "attempts": {
+            "type": "integer"
+          },
+          "total_tokens": {
+            "type": "integer"
+          },
+          "input_tokens": {
+            "type": "integer"
+          },
+          "output_tokens": {
+            "type": "integer"
+          },
+          "cached_tokens": {
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "type": "integer"
+          },
+          "elapsed_ms": {
+            "type": "integer"
+          },
+          "unknown_token_attempts": {
+            "type": "integer"
+          },
+          "unknown_cost_attempts": {
+            "type": "integer"
+          },
+          "active_attempts": {
+            "type": "integer"
+          },
+          "uncertain_attempts": {
+            "type": "integer"
+          },
+          "reserved_tokens": {
+            "type": "integer"
+          },
+          "reserved_runtime_seconds": {
+            "type": "integer"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "cost": {
+            "type": "number"
+          },
+          "reserved_cost": {
+            "type": "number"
+          },
+          "entries": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/UsageEntry"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Full entries on task usage routes; null in compact notification summaries."
+          },
+          "verification_runs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active_verification_runs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uncertain_reservations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BudgetReservation"
+            }
+          },
+          "unknown_runtime_attempts": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Historical attempts with missing runtime. Admission blocks instead of counting these as zero."
+          }
+        }
+      },
+      "TaskBudget": {
+        "type": "object",
+        "properties": {
+          "budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BudgetPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageReport"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "enforcement": {
+            "type": "string"
+          },
+          "effective_budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BudgetPolicy"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "budget_source": {
+            "type": "string",
+            "enum": [
+              "task",
+              "project_policy",
+              "default",
+              "unconfigured"
+            ]
+          }
+        },
+        "required": [
+          "budget",
+          "effective_budget",
+          "budget_source",
+          "usage",
+          "version",
+          "enforcement"
+        ]
+      },
+      "Notification": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "current": {
+            "type": "string"
+          },
+          "next_action": {
+            "type": "string"
+          },
+          "completed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_id": {
+            "type": "string"
+          },
+          "occurrences": {
+            "type": "integer"
+          },
+          "first_at": {
+            "type": "string"
+          },
+          "last_at": {
+            "type": "string"
+          },
+          "resolved": {
+            "type": "boolean"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/UsageReport"
+          }
+        }
+      },
+      "IdeationRequest": {
+        "type": "object",
+        "properties": {
+          "goal": {
+            "type": "string",
+            "description": "Saved user goal, at most 4000 UTF-8 bytes."
+          },
+          "constraints": {
+            "type": "string",
+            "description": "Saved constraints, at most 8000 UTF-8 bytes."
+          },
+          "priorities": {
+            "type": "string",
+            "description": "Saved priorities, at most 4000 UTF-8 bytes."
+          },
+          "max_candidates": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 12,
+            "description": "1\u201312 sets the saved shortlist bound; omitted or 0 uses the configured schedule maximum, default 4."
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "For this manual operation only, bypass unchanged-input generation skip. Existing deduplication and budget checks still apply."
+          }
+        }
+      },
+      "EvaluationReport": {
+        "type": "object",
+        "properties": {
+          "tasks": {
+            "type": "integer"
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "verified_tasks": {
+            "type": "integer"
+          },
+          "created_prs": {
+            "type": "integer"
+          },
+          "merged_prs": {
+            "type": "integer"
+          },
+          "reported_tokens": {
+            "type": "integer"
+          },
+          "unknown_token_attempts": {
+            "type": "integer"
+          },
+          "route_comparisons": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "recommendation": {
+            "type": "string"
+          }
+        }
+      },
+      "BudgetReservation": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "attempt_id": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "pool": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "settled_at": {
+            "type": "string"
+          },
+          "tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "runtime_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pool_concurrency": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "cost": {
+            "type": "number",
+            "minimum": 0
+          }
+        }
+      },
+      "BudgetReconciliation": {
+        "type": "object",
+        "required": [
+          "attempt_id",
+          "confirmed_terminated"
+        ],
+        "properties": {
+          "attempt_id": {
+            "type": "string"
+          },
+          "confirmed_terminated": {
+            "type": "boolean",
+            "const": true
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopedUsage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "active_runtime_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Required when usage is supplied; operator-observed active runtime, not inferred zero."
+          }
+        },
+        "description": "Only uncertain or uncertain_released reservations, or existing legacy session IDs with unknown accounting, may be reconciled. Null/omitted usage releases the concurrent runner slot and retains unknown token/cost/runtime reservations. Supplied usage must have scope attempt and requires observed active_runtime_ms."
+      },
+      "TaskOutcomeRequest": {
+        "type": "object",
+        "required": [
+          "decision"
+        ],
+        "properties": {
+          "decision": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected",
+              "regression",
+              "reverted"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkflowConfiguration": {
+        "type": "object",
+        "required": [
+          "active_mode",
+          "configured_mode",
+          "restart_required"
+        ],
+        "properties": {
+          "active_mode": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "agentic"
+            ]
+          },
+          "configured_mode": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "agentic"
+            ]
+          },
+          "restart_required": {
+            "type": "boolean"
+          },
+          "integrations": {
+            "type": "object"
+          }
+        },
+        "description": "Read-only startup mode; edit mode on disk and restart. Other settings reload live."
+      },
+      "LocalPlanDocument": {
+        "type": "object",
+        "required": [
+          "path",
+          "hash",
+          "content",
+          "plan"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "approved_hash": {
+            "type": "string"
+          },
+          "plan": {
+            "type": "object"
+          }
+        }
+      },
+      "LocalPlanReview": {
+        "type": "object",
+        "required": [
+          "action",
+          "hash"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "approve",
+              "revise",
+              "reject"
+            ]
+          },
+          "hash": {
+            "type": "string"
+          },
+          "feedback": {
+            "type": "string",
+            "maxLength": 8000
+          }
+        }
+      },
+      "IntegrationInventory": {
+        "type": "object",
+        "required": [
+          "provider",
+          "integrations"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "integrations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string"
+                },
+                "ref": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "error": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "callable": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "error": {
+            "type": "string"
+          },
+          "checked_at": {
+            "type": "string"
           }
         }
       }

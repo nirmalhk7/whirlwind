@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 )
@@ -41,3 +42,15 @@ func newRetryHarness(t *testing.T, chain ...model.AgentChoice) retryHarness {
 func (h retryHarness) run(ctx context.Context) (provider.Output, error) {
 	return h.engine.agent(ctx, h.project, h.task, provider.Input{Role: "code", CWD: h.cwd, Prompt: "finish"})
 }
+
+func (h retryHarness) executionProfile(t *testing.T) string {
+	t.Helper()
+	profile, err := execution.ForProvider(h.cwd, false, h.project.PolicyHash, h.project.Policy.Sandbox, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.AllowedPaths = append([]string{}, h.project.Policy.AllowedPaths...)
+	return profile.Digest()
+}
+
+func fixtureRuntime(ms int64) *int64 { return &ms }

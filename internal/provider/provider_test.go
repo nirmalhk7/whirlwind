@@ -51,7 +51,11 @@ func TestNativeProtocolsStreamBeforeCompletion(t *testing.T) {
 			a := ProcessAdapter{Provider: model.Provider{Kind: kind, Command: []string{exe, "-test.run=TestHelperProvider", "--", kind}}}
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			out, e := a.Run(ctx, Input{CWD: t.TempDir(), Prompt: "test", ReadOnly: true}, Hooks{})
+			out, e := a.Run(ctx, Input{CWD: t.TempDir(), Prompt: "test", ReadOnly: true}, Hooks{Event: func(kind string, value any) {
+				if kind == "whirlwind/stderr" {
+					t.Logf("provider diagnostics: %v", value)
+				}
+			}})
 			if e != nil || out.Text != "first second" || out.SessionID != testSessionID {
 				t.Fatalf(valueErrorFormat, out, e)
 			}

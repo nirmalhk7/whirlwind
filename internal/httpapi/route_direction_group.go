@@ -38,11 +38,14 @@ func (q apiRequest) unselectGroupPeers(direction model.Direction) error {
 			return err
 		}
 		if d.Selected {
-			if err = q.pauseDirectionTask("direction-" + record.ID); err != nil {
+			if err = q.pauseDirectionTask(directionTask(d)); err != nil {
 				return err
 			}
 		}
 		d.Selected = false
+		if d.Status == "selected" {
+			d.Status = "proposed"
+		}
 		// Touch every peer, including unselected ones: competing selections from
 		// the same group must conflict instead of committing two selected ideas.
 		if err = q.Store.Put(q.r.Context(), "directions", record.ID, d, record.Version); err != nil {

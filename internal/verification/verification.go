@@ -11,24 +11,27 @@ import (
 	"strings"
 	"time"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/policy"
 	"whirlwind/internal/process"
 )
 
 type Result struct {
-	Command        []string `json:"command"`
-	TimeoutSeconds int      `json:"timeout_seconds"`
-	StartedAt      string   `json:"started_at"`
-	FinishedAt     string   `json:"finished_at"`
-	ExitCode       *int     `json:"exit_code"`
-	Truncated      bool     `json:"truncated"`
-	OutputArtifact string   `json:"output_artifact,omitempty"`
-	Name           string   `json:"name"`
-	Passed         bool     `json:"passed"`
-	Output         string   `json:"output"`
-	Error          string   `json:"error,omitempty"`
-	DurationMS     int64    `json:"duration_ms"`
+	ExecutionProfile string   `json:"execution_profile,omitempty"`
+	ReusedFrom       string   `json:"reused_from,omitempty"`
+	Command          []string `json:"command"`
+	TimeoutSeconds   int      `json:"timeout_seconds"`
+	StartedAt        string   `json:"started_at"`
+	FinishedAt       string   `json:"finished_at"`
+	ExitCode         *int     `json:"exit_code"`
+	Truncated        bool     `json:"truncated"`
+	OutputArtifact   string   `json:"output_artifact,omitempty"`
+	Name             string   `json:"name"`
+	Passed           bool     `json:"passed"`
+	Output           string   `json:"output"`
+	Error            string   `json:"error,omitempty"`
+	DurationMS       int64    `json:"duration_ms"`
 }
 type Report struct {
 	Passed  bool     `json:"passed"`
@@ -57,9 +60,18 @@ func Run(ctx context.Context, cwd string, checks []model.Check) Report {
 }
 
 func RunObserved(ctx context.Context, cwd string, checks []model.Check, observe func(Result) error) (Report, error) {
+	profile, err := execution.ForPolicy(cwd, false, "", nil)
+	if err != nil {
+		return Report{Passed: false}, err
+	}
+	return RunObservedWithProfile(ctx, cwd, checks, profile, observe)
+}
+
+// RunObservedWithProfile uses the same enforced sandbox as providers for every committed check.
+func RunObservedWithProfile(ctx context.Context, cwd string, checks []model.Check, profile execution.Profile, observe func(Result) error) (Report, error) {
 	out := Report{Passed: len(checks) > 0, Results: []Result{}}
 	for _, c := range checks {
-		r := runCheck(ctx, cwd, c)
+		r := runCheckProfile(ctx, cwd, c, profile)
 		if !r.Passed {
 			out.Passed = false
 		}
@@ -80,7 +92,23 @@ func RunObserved(ctx context.Context, cwd string, checks []model.Check, observe 
 
 // runCheck captures one bounded check result before observers or cancellation are considered.
 func runCheck(ctx context.Context, cwd string, c model.Check) Result {
+	profile, err := execution.ForPolicy(cwd, false, "", nil)
+	if err != nil {
+		return Result{Name: c.Name, Command: c.Command, Error: err.Error()}
+	}
+	return runCheckProfile(ctx, cwd, c, profile)
+}
+
+func runCheckProfile(ctx context.Context, cwd string, c model.Check, profile execution.Profile) Result {
 	r := Result{Name: c.Name, Command: c.Command}
+	var profileErr error
+	profile, profileErr = execution.ForCheck(profile, c.OutputPaths)
+	if profileErr == nil {
+		profile, profileErr = execution.ForCommand(profile, c.Command)
+	}
+	if profileErr == nil {
+		r.ExecutionProfile = profile.Digest()
+	}
 	r.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	start := time.Now()
 	timeout := time.Duration(c.TimeoutSeconds) * time.Second
@@ -91,14 +119,19 @@ func runCheck(ctx context.Context, cwd string, c model.Check) Result {
 	run, cancel := context.WithTimeout(ctx, timeout)
 	var b capped
 	var e error
-	if len(c.Command) == 0 {
+	if profileErr != nil {
+		e = profileErr
+	} else if len(c.Command) == 0 {
 		e = fmt.Errorf("missing command")
 	} else {
-		cmd := process.Command(run, c.Command[0], c.Command[1:]...)
-		cmd.Dir = cwd
-		cmd.Stdout = &b
-		cmd.Stderr = &b
-		e = process.Run(cmd)
+		var cmd *exec.Cmd
+		cmd, e = execution.Command(run, c.Command, profile)
+		if e == nil {
+			cmd.Dir = cwd
+			cmd.Stdout = &b
+			cmd.Stderr = &b
+			e = process.Run(cmd)
+		}
 	}
 	cancel()
 	r.Passed = e == nil
@@ -119,6 +152,12 @@ func runCheck(ctx context.Context, cwd string, c model.Check) Result {
 		r.Error = e.Error()
 	}
 	r.DurationMS = time.Since(start).Milliseconds()
+	if r.Passed && len(c.Command) > 1 && filepath.Base(c.Command[0]) == "qlty" && c.Command[1] == "smells" {
+		if err := qltySmellsError(r.Output); err != nil {
+			r.Passed = false
+			r.Error = err.Error()
+		}
+	}
 	return r
 }
 

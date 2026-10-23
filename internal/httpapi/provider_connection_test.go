@@ -12,6 +12,7 @@ import (
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
+	"whirlwind/internal/workflow"
 )
 
 type connectivityAdapter struct {
@@ -70,6 +71,11 @@ func runProviderConnectionScenario(t *testing.T, fail bool) {
 	s := setup(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	settings := workflow.DefaultSettings()
+	settings.Admission = model.AdmissionSettings{DefaultBudget: &model.BudgetPolicy{MaxAttempts: 3, MaxRuntimeSeconds: 60}, Pools: map[string]model.QuotaReserve{"chosen": {MaxAgeSeconds: 60}}}
+	if err := s.Store.Put(ctx, "settings", "global", settings, 0); err != nil {
+		t.Fatal(err)
+	}
 	s.Context = ctx
 	release := make(chan struct{})
 	s.Engine.Adapter = func(model.Provider) provider.Adapter { return connectivityAdapter{release, fail} }

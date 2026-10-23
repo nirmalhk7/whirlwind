@@ -1,7 +1,7 @@
 import type { ControlView } from "./CommandShell";
 
 export type Resource<T> = { id: string; version: number; updated_at?: string; created_order?: number; data: T };
-export type Project = { id: string; name: string; repo: string; path: string; policy_hash?: string };
+export type Project = { id: string; name: string; repo: string; path: string; policy_hash?: string; paused?: boolean };
 export type Provider = {
   id: string;
   name: string;
@@ -14,6 +14,15 @@ export type Provider = {
   limitation?: string;
 };
 export type Direction = {
+	expected_benefit?:string;
+	uncertainty?:string[];
+	effort_estimate?:string;
+	problem_kind?:string;
+	rank?:number;
+	status?: string;
+	task_id?: string;
+	scope?: string[];
+	evidence?: {kind:string;ref:string;revision?:string;summary?:string}[];
   group_id?: string;
   id: string;
   project_id: string;
@@ -24,6 +33,9 @@ export type Direction = {
   selected: boolean;
 };
 export type Task = {
+ mode?: "personal" | "agentic";
+ plan_document?: {path:string;hash:string;approved_hash?:string};
+	selection?:{candidate_id:string;objective:string;scope:string[];policy_hash:string;selected_at:string};
   id: string;
   project_id: string;
   issue: { title: string; body: string };
@@ -54,6 +66,14 @@ export type Review = {
   }[];
 };
 export type Inbox = {
+	usage?:{attempts:number;total_tokens:number;unknown_token_attempts:number;unknown_cost_attempts:number;elapsed_ms:number;cost:number};
+	occurrences?: number;
+	first_at?: string;
+	last_at?: string;
+	current?: string;
+	next_action?: string;
+	completed?: string[];
+	evidence_id?: string;
   id: string;
   task_id?: string;
   kind: string;
@@ -89,8 +109,12 @@ export const empty: Inventory = {
   inbox: [],
 };
 export const stages: Record<string, string> = {
+	awaiting_selection: "Awaiting selection",
   planning: "Planning",
   plan_ready: "Publishing plan",
+  plan_approval: "Review local plan",
+  submitting: "Preparing commits and PR",
+  cancelled: "Cancelled",
   questions: "Awaiting answers",
   coding: "Coding",
   repair: "Repairing",

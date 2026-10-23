@@ -6,13 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"unicode/utf8"
 
+	"whirlwind/internal/execution"
+	"whirlwind/internal/model"
+	"whirlwind/internal/policy"
 	"whirlwind/internal/process"
 	"whirlwind/internal/store"
 )
@@ -117,7 +119,15 @@ func (c *Client) readFile(ctx context.Context, m Message, p clientParams) (any, 
 	if e != nil {
 		return nil, e
 	}
-	f, e := os.Open(path)
+	root, e := filepath.EvalSymlinks(c.input.CWD)
+	if e != nil {
+		return nil, e
+	}
+	relative, e := filepath.Rel(root, path)
+	if e != nil {
+		return nil, e
+	}
+	f, e := openACPFile(root, relative, false)
 	if e != nil {
 		return nil, e
 	}
@@ -145,16 +155,26 @@ func (c *Client) writeFile(ctx context.Context, m Message, p clientParams) (any,
 	if e != nil {
 		return nil, e
 	}
+	root, err := filepath.EvalSymlinks(c.input.CWD)
+	if err != nil {
+		return nil, err
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil || !policy.AllowedPath(c.input.Policy, relative) {
+		return nil, errors.New("ACP write outside committed scope")
+	}
 	if len(p.Content) > 1024*1024 {
 		return nil, errors.New("file content exceeds 1 MiB")
 	}
 	if e = c.allow(ctx, Permission{Tool: m.Method, Paths: []string{path}, Raw: m.Params}); e != nil {
 		return nil, e
 	}
-	if e = os.MkdirAll(filepath.Dir(path), 0700); e != nil {
+	f, e := openACPFile(root, relative, true)
+	if e != nil {
 		return nil, e
 	}
-	e = os.WriteFile(path, []byte(p.Content), 0600)
+	defer func() { _ = f.Close() }()
+	_, e = f.WriteString(p.Content)
 	return map[string]any{}, e
 
 }
@@ -189,9 +209,19 @@ func (c *Client) createTerminal(ctx context.Context, m Message, p clientParams) 
 		return nil, err
 	}
 	run, cancel := context.WithCancel(ctx)
-	cmd := process.Command(run, p.Command, p.Args...)
+	profile, e := c.executionProfile()
+	if e != nil {
+		cancel()
+		return nil, e
+	}
+	profile.CWD = cwd
+	cmd, e := execution.Command(run, append([]string{p.Command}, p.Args...), profile)
+	if e != nil {
+		cancel()
+		return nil, e
+	}
 	cmd.Dir = cwd
-	if err := p.applyEnvironment(cmd); err != nil {
+	if err := p.applyEnvironment(cmd, c.input.Policy.Sandbox); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -232,9 +262,13 @@ func (c *Client) authorizeTerminal(ctx context.Context, m Message, p clientParam
 	return cwd, err
 }
 
-func (p clientParams) applyEnvironment(cmd *exec.Cmd) error {
+func (p clientParams) applyEnvironment(cmd *exec.Cmd, policies ...*model.SandboxPolicy) error {
+	var policy *model.SandboxPolicy
+	if len(policies) > 0 {
+		policy = policies[0]
+	}
 	for _, env := range p.Env {
-		if strings.HasPrefix(env.Name, "WHIRLWIND_PROCESS_") {
+		if !execution.EnvironmentOverrideAllowed(env.Name, policy) {
 			return errors.New("reserved process environment")
 		}
 		cmd.Env = append(cmd.Env, env.Name+"="+env.Value)

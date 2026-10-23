@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+	"whirlwind/internal/execution"
 )
 
 // ReadQuota reads account metadata through the native command, even when inference uses ACP.
@@ -17,22 +18,34 @@ func (a ProcessAdapter) ReadQuota(ctx context.Context, cwd string) (string, stri
 }
 
 func (a ProcessAdapter) readCodexQuota(ctx context.Context, cwd string) (string, string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	rpc, err := Start(ctx, a.Provider.Command, cwd, nil)
+	data, err := a.readCodexQuotaData(ctx, cwd)
 	if err != nil {
 		return "unknown", "", err
 	}
+	return Quota(data)
+}
+
+func (a ProcessAdapter) readCodexQuotaData(ctx context.Context, cwd string) (json.RawMessage, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	profile, err := execution.ForProvider(cwd, true, "", a.Provider.Sandbox, a.Provider.Command)
+	if err != nil {
+		return nil, err
+	}
+	rpc, err := StartWithProfile(ctx, a.Provider.Command, profile, nil)
+	if err != nil {
+		return nil, err
+	}
 	defer rpc.Close()
 	if err = rpc.Call(ctx, "initialize", map[string]any{"clientInfo": map[string]any{"name": "whirlwind", "version": "0.1.0"}}, nil); err != nil {
-		return "unknown", "", err
+		return nil, err
 	}
 	if err = rpc.Notify("initialized", map[string]any{}); err != nil {
-		return "unknown", "", err
+		return nil, err
 	}
 	var data json.RawMessage
 	if err = rpc.Call(ctx, "account/rateLimits/read", map[string]any{}, &data); err != nil {
-		return "unknown", "", err
+		return nil, err
 	}
-	return Quota(data)
+	return data, nil
 }

@@ -8,9 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/process"
 )
 
@@ -49,6 +51,21 @@ func Start(ctx context.Context, command []string, cwd string, handler Handler, o
 	ctx, cancel := context.WithCancel(ctx)
 	cmd := process.Command(ctx, command[0], command[1:]...)
 	cmd.Dir = cwd
+	return startCommand(ctx, cancel, cmd, handler, observers...)
+}
+
+// StartWithProfile is the enforced provider/terminal execution entry point.
+func StartWithProfile(ctx context.Context, command []string, profile execution.Profile, handler Handler, observers ...func(string, any)) (*RPC, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	cmd, err := execution.Command(ctx, command, profile)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return startCommand(ctx, cancel, cmd, handler, observers...)
+}
+
+func startCommand(ctx context.Context, cancel context.CancelFunc, cmd *exec.Cmd, handler Handler, observers ...func(string, any)) (*RPC, error) {
 	pipes, e := rpcPipes(cmd)
 	if e != nil {
 		cancel()
@@ -150,10 +167,21 @@ func (r *RPC) Close() { r.once.Do(func() { r.cancel(); _ = r.input.Close(); <-r.
 func (r *RPC) readStderr(reader io.Reader) {
 	defer r.diagnostics.Done()
 	var seen, stored int64
+	var diagnosticTail string
 	buffer := make([]byte, 32*1024)
 	for {
 		n, err := reader.Read(buffer)
 		if n > 0 {
+			diagnosticTail += string(buffer[:n])
+			if start := strings.Index(diagnosticTail, "Sandbox setup/execution failed:"); start >= 0 {
+				message := strings.SplitN(diagnosticTail[start:], "\n", 2)[0]
+				r.mu.Lock()
+				r.err = fmt.Errorf("%w: %s", execution.ErrSandbox, message)
+				r.mu.Unlock()
+			}
+			if len(diagnosticTail) > 4096 {
+				diagnosticTail = diagnosticTail[len(diagnosticTail)-4096:]
+			}
 			seen += int64(n)
 			retain := min(n, max(0, 1024*1024-int(stored)))
 			if retain > 0 && r.observe != nil {

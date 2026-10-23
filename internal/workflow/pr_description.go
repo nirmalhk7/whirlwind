@@ -10,7 +10,11 @@ import (
 
 func (step *taskStep) prDescription() string {
 	var description strings.Builder
-	fmt.Fprintf(&description, "%s\n\nCloses #%d\n\n## Implementation\n", step.task.Plan.Objective, step.task.Issue.Number)
+	fmt.Fprintf(&description, "%s\n\n", step.task.Plan.Objective)
+	if step.task.Mode != model.AgenticMode && step.task.Issue.Number > 0 {
+		fmt.Fprintf(&description, "Closes #%d\n\n", step.task.Issue.Number)
+	}
+	description.WriteString("## Implementation\n")
 	for _, unit := range step.task.Plan.Units {
 		fmt.Fprintf(&description, "- %s\n", unit.Objective)
 	}
@@ -32,11 +36,32 @@ func (step *taskStep) prDescription() string {
 		}
 	}
 	for _, check := range verified.Results {
-		fmt.Fprintf(&description, "- %s: passed\n", check.Name)
+		fmt.Fprintf(&description, "- %s: passed", check.Name)
+		if check.Error != "" {
+			fmt.Fprintf(&description, " (%s)", check.Error)
+		}
+		description.WriteString("\n")
 	}
 	var review model.Review
 	_ = json.Unmarshal([]byte(step.latestReview(step.ctx, fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion))), &review)
 	fmt.Fprintf(&description, "\nReview score: %.1f/10; no unresolved blocking findings.\n\n%s\n\n<!-- whirlwind-task:%s -->", step.task.Score, review.Summary, step.task.ID)
 	return description.String()
 
+}
+
+func (step *taskStep) submissionDescription() string {
+	s := step.task.Submission
+	body := s.Body + "\n\n"
+	if step.task.Mode != model.AgenticMode && step.task.Issue.Number > 0 {
+		body += fmt.Sprintf("Closes #%d\n\n", step.task.Issue.Number)
+	}
+	for _, ref := range step.task.Sources {
+		if ref.URL != "" {
+			body += "Related: " + ref.URL + "\n"
+		}
+	}
+	if step.task.PlanDocument != nil {
+		body += "Plan: " + step.task.ID + fmt.Sprintf(" v%d", step.task.PlanVersion) + "\n"
+	}
+	return body + "\n" + step.prDescription()
 }

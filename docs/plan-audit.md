@@ -55,13 +55,13 @@ Antigravity is intentionally unavailable, as PLAN.md requires.
 | Master plan with acceptance criteria and optional user questions | `step.planning`, `decodePlan`, `applyPlan`; planner question forms and browser answer/version test |
 | Keep small plans one unit; persist dependency graph for larger plans | Planner contract/prompt, default main unit, `ValidateUnits`, durable plans/tasks/units; invalid graph tests |
 | Run units only after dependencies finish | `readyUnits`, `dependenciesComplete`, `code`, durable unit stages; parallel integration test |
-| Publish ready plan as whirlwind:plan issue before Worker Loop | `step.planReady`, `github.CreateIssue`, `store.BindIssue`; selected-direction publication and uncertain-write retry tests |
+| Publish ready plan as whirlwind:ready issue before Worker Loop | `step.planReady`, `github.CreateIssue`, `store.BindIssue`; selected-direction publication and uncertain-write retry tests |
 
 ## Worker execution, verification, and review
 
 | Requirement | Implementation / evidence |
 | --- | --- |
-| Start from signed issue webhooks; require whirlwind:plan label | `webhook.go`, `Issue.Eligible`, `Engine.Ingest`; signed webhook deduplication test |
+| Start from signed issue webhooks; require whirlwind:ready label | `webhook.go`, `Issue.Eligible`, `Engine.Ingest`; signed webhook deduplication test |
 | Periodic reconciliation instead of 30-second polling | `Engine.Reconcile`, five-minute default settings; same issue identity as webhook ingestion |
 | Issue edits cancel/replan; closure or label withdrawal pauses with artifacts retained | `affectedByIssue`, `updateIssueTask`, `invalidateIssueTask`, `withdrawIssueTask`; old webhook, replan, eligibility restoration tests |
 | Coding Agent receives issue plan in isolated branch/worktree | Planning and unit prompts, `prepareWorkspace`, `unitRun.prepareWorktree`; real Git workflow tests |

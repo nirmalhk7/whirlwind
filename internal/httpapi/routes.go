@@ -59,6 +59,16 @@ func (rule routeRule) matches(q apiRequest) bool {
 }
 func (q apiRequest) dispatch() error {
 	rules := []routeRule{
+		{"GET", "tasks", "plan-document", false, q.localPlanDocument},
+		{"POST", "tasks", "plan-review", false, q.reviewLocalPlan},
+		{"GET", "providers", "integrations", false, q.integrationInventory},
+		{"POST", "providers", "integrations", false, q.integrationInventory},
+		{"POST", "tasks", "budget-reconcile", false, q.reconcileTaskBudget},
+		{"GET", "evaluation", "", true, q.evaluationReport},
+		{"POST", "tasks", "outcome", false, q.taskOutcome},
+		{"GET", "tasks", "budget", false, q.taskBudget},
+		{"PATCH", "tasks", "budget", false, q.taskBudget},
+		{"GET", "tasks", "usage", false, q.taskUsage},
 		{"GET", "sessions", "events", false, q.attemptEvents},
 
 		{"GET", "sessions", "evidence", false, q.linkedEvidence},
@@ -76,6 +86,8 @@ func (q apiRequest) dispatch() error {
 		{"PATCH", "settings", "", false, q.settingsFile},
 		{"POST", "projects", "*", true, q.createProject},
 		{"DELETE", "projects", "", false, q.deleteProject},
+		{"POST", "projects", "pause", false, q.projectActivity},
+		{"POST", "projects", "resume", false, q.projectActivity},
 		{"POST", "providers", "*", true, q.createProvider},
 		{"POST", "providers", "test", false, q.testProvider},
 		{"POST", "providers", "models", false, q.providerModels},
@@ -88,6 +100,9 @@ func (q apiRequest) dispatch() error {
 		{"DELETE", "directions", "group", false, q.deleteDirectionGroup},
 		{"POST", "directions", "select", false, q.selectDirection},
 		{"POST", "directions", "deselect", false, q.deselectDirection},
+		{"POST", "directions", "dismiss", false, q.candidateLifecycle},
+		{"POST", "directions", "defer", false, q.candidateLifecycle},
+		{"POST", "directions", "reopen", false, q.candidateLifecycle},
 		{"POST", "tasks", "+", false, q.taskAction},
 		{"POST", "questions", "answers", false, q.answerQuestions},
 		{"POST", "permissions", "decisions", false, q.decidePermission},

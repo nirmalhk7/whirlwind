@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 	"whirlwind/internal/model"
@@ -17,7 +18,12 @@ func (a *agentAttempt) event(kind string, data any) {
 		return
 	}
 	if err := a.saveEvent(kind, data); err != nil {
-		a.eventErr = fmt.Errorf("%w: %v", store.ErrPersistence, err)
+		var wait *AdmissionWait
+		if errors.Is(err, store.ErrBudgetExceeded) || errors.As(err, &wait) {
+			a.eventErr = err
+		} else {
+			a.eventErr = fmt.Errorf("%w: %v", store.ErrPersistence, err)
+		}
 	}
 	if a.eventErr != nil && a.cancel != nil {
 		a.cancel()
@@ -35,7 +41,13 @@ func (a *agentAttempt) saveEvent(kind string, data any) error {
 		return err
 	}
 	if kind == "whirlwind/quota" {
-		return a.quotaEvent(ctx, data)
+		if err := a.quotaEvent(ctx, data); err != nil {
+			return err
+		}
+		return a.checkLiveQuota(ctx, data)
+	}
+	if err := a.checkUsageEvent(ctx, kind, b); err != nil {
+		return err
 	}
 	return a.saveStateEvent(ctx, kind, b)
 }

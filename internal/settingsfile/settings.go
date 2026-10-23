@@ -19,34 +19,41 @@ import (
 )
 
 type Provider struct {
-	ID           string   `json:"id"`
-	Name         string   `json:"name"`
-	Kind         string   `json:"kind"`
-	Command      []string `json:"command"`
-	ModelCommand []string `json:"model_command,omitempty"`
-	Capabilities []string `json:"capabilities"`
-	Cost         *float64 `json:"cost,omitempty"`
+	Sandbox      *model.SandboxPolicy `json:"sandbox,omitempty"`
+	QuotaPool    string               `json:"quota_pool,omitempty"`
+	ID           string               `json:"id"`
+	Name         string               `json:"name"`
+	Kind         string               `json:"kind"`
+	Command      []string             `json:"command"`
+	ModelCommand []string             `json:"model_command,omitempty"`
+	Capabilities []string             `json:"capabilities"`
+	Cost         *float64             `json:"cost,omitempty"`
 }
 type Document struct {
-	Version   int                            `json:"version"`
-	Workers   workflow.Settings              `json:"workers"`
-	Providers []Provider                     `json:"providers"`
-	Agents    map[string][]model.AgentChoice `json:"agents"`
+	Mode         string                         `json:"mode,omitempty"`
+	Integrations model.IntegrationSettings      `json:"integrations,omitempty"`
+	Version      int                            `json:"version"`
+	Workers      workflow.Settings              `json:"workers"`
+	Providers    []Provider                     `json:"providers"`
+	Agents       map[string][]model.AgentChoice `json:"agents"`
 }
 type Source struct {
-	startup FileView
-	mu      sync.Mutex
-	store   *store.Store
-	path    string
-	raw     []byte
-	doc     Document
+	activeMode string
+	startup    FileView
+	mu         sync.Mutex
+	store      *store.Store
+	path       string
+	raw        []byte
+	doc        Document
 }
 
 func project(p model.Provider) Provider {
-	return Provider{p.ID, p.Name, p.Kind, p.Command, p.ModelCommand, p.Capabilities, p.Cost}
+	return Provider{ID: p.ID, Name: p.Name, Kind: p.Kind, Command: p.Command, ModelCommand: p.ModelCommand, Capabilities: p.Capabilities, Cost: p.Cost, QuotaPool: p.QuotaPool, Sandbox: p.Sandbox}
 }
 func managed(p Provider, previous model.Provider) model.Provider {
 	previous.ID = p.ID
+	previous.QuotaPool = p.QuotaPool
+	previous.Sandbox = p.Sandbox
 	previous.Name = p.Name
 	previous.Kind = p.Kind
 	previous.Command = p.Command
@@ -71,6 +78,18 @@ func Attach(ctx context.Context, s *store.Store, path string) error {
 	if err = source.ensureFile(ctx); err != nil {
 		return err
 	}
+	raw, readErr := os.ReadFile(source.path)
+	if readErr != nil {
+		return readErr
+	}
+	initial, decodeErr := decode(raw)
+	if decodeErr != nil {
+		return decodeErr
+	}
+	source.activeMode = model.EffectiveMode(initial.Mode)
+	if err = s.ActivateMode(ctx, source.activeMode); err != nil {
+		return err
+	}
 	if err = source.Refresh(ctx); err != nil {
 		return err
 	}
@@ -79,6 +98,12 @@ func Attach(ctx context.Context, s *store.Store, path string) error {
 	return nil
 }
 func validate(doc Document) error {
+	if err := model.ValidateMode(doc.Mode); err != nil {
+		return err
+	}
+	if doc.Integrations.Discovery != "" && doc.Integrations.Discovery != "connected" {
+		return errors.New("integrations.discovery must be connected")
+	}
 	if doc.Version != 1 {
 		return errors.New("settings.yaml version must be 1")
 	}
@@ -87,6 +112,9 @@ func validate(doc Document) error {
 	}
 	providers, err := validateProviders(doc.Providers)
 	if err != nil {
+		return err
+	}
+	if err := validateIntegrations(doc.Integrations, providers); err != nil {
 		return err
 	}
 	for role, chain := range doc.Agents {

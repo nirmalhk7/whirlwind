@@ -12,12 +12,15 @@ import (
 )
 
 type ProviderStatus struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Kind      string `json:"kind"`
-	Status    string `json:"status"`
-	Detail    string `json:"detail"`
-	CheckedAt string `json:"checked_at,omitempty"`
+	QuotaPool     string               `json:"quota_pool,omitempty"`
+	QuotaSnapshot *model.QuotaSnapshot `json:"quota_snapshot,omitempty"`
+	QuotaFresh    *bool                `json:"quota_fresh"`
+	ID            string               `json:"id"`
+	Name          string               `json:"name"`
+	Kind          string               `json:"kind"`
+	Status        string               `json:"status"`
+	Detail        string               `json:"detail"`
+	CheckedAt     string               `json:"checked_at,omitempty"`
 }
 type ProviderStatuses struct {
 	Providers       []ProviderStatus `json:"providers"`
@@ -103,7 +106,22 @@ func (e *Engine) publishProviderStatuses(ctx context.Context, stopped bool, key 
 }
 
 func (e *Engine) checkProviderStatus(parent context.Context, p model.Provider, stopped bool) ProviderStatus {
-	status := ProviderStatus{ID: p.ID, Name: p.Name, Kind: p.Kind, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	status := ProviderStatus{QuotaPool: providerPool(p), QuotaSnapshot: p.QuotaSnapshot, ID: p.ID, Name: p.Name, Kind: p.Kind, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if record, err := e.Store.Get(parent, "quota_snapshots", status.QuotaPool); err == nil {
+		snapshot, decodeErr := store.Decode[model.QuotaSnapshot](record)
+		if decodeErr == nil && (status.QuotaSnapshot == nil || snapshot.ObservedAt > status.QuotaSnapshot.ObservedAt) {
+			status.QuotaSnapshot = &snapshot
+		}
+	}
+	reserve, configured := e.settings(parent).Admission.Pools[status.QuotaPool]
+	if !configured {
+		reserve, configured = e.settings(parent).Admission.Pools["*"]
+	}
+	if configured && status.QuotaSnapshot != nil {
+		observed, err := time.Parse(time.RFC3339Nano, status.QuotaSnapshot.ObservedAt)
+		fresh := err == nil && time.Since(observed) >= 0 && time.Since(observed) <= time.Duration(reserve.MaxAgeSeconds)*time.Second
+		status.QuotaFresh = &fresh
+	}
 	if !provider.Available(p) {
 		status.Status = "unavailable"
 		status.Detail = "Configured command executable not found."
