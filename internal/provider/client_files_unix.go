@@ -18,31 +18,45 @@ func openACPFile(root, relative string, write bool) (*os.File, error) {
 	if !filepath.IsLocal(relative) || relative == "." {
 		return nil, errors.New("ACP file requires a local regular path")
 	}
-	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	parts := strings.Split(filepath.Clean(relative), string(filepath.Separator))
+	fd, err := openACPParent(root, parts[:len(parts)-1], write)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = unix.Close(fd) }()
-	parts := strings.Split(filepath.Clean(relative), string(filepath.Separator))
-	for _, part := range parts[:len(parts)-1] {
+	return openACPLeaf(root, relative, parts[len(parts)-1], fd, write)
+}
+
+func openACPParent(root string, parts []string, write bool) (int, error) {
+	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return -1, err
+	}
+	for _, part := range parts {
 		next, err := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if write && errors.Is(err, unix.ENOENT) {
 			if err = unix.Mkdirat(fd, part, 0700); err != nil && !errors.Is(err, unix.EEXIST) {
-				return nil, err
+				_ = unix.Close(fd)
+				return -1, err
 			}
 			next, err = unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		}
 		if err != nil {
-			return nil, err
+			_ = unix.Close(fd)
+			return -1, err
 		}
 		_ = unix.Close(fd)
 		fd = next
 	}
+	return fd, nil
+}
+
+func openACPLeaf(root, relative, leaf string, fd int, write bool) (*os.File, error) {
 	flags := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
 	if write {
 		flags = unix.O_WRONLY | unix.O_CREAT | unix.O_NOFOLLOW | unix.O_CLOEXEC | unix.O_NONBLOCK
 	}
-	fileFD, err := unix.Openat(fd, parts[len(parts)-1], flags, 0600)
+	fileFD, err := unix.Openat(fd, leaf, flags, 0600)
 	if err != nil {
 		return nil, err
 	}

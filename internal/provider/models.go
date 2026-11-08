@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"errors"
 
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
@@ -75,32 +75,44 @@ func (s acpSession) modelCatalog() (ModelCatalog, string) {
 // ACPCommand uses the same maintained adapter for discovery and explicit thinking execution.
 func ACPCommand(p model.Provider) []string {
 	if p.Kind == "acp" {
+		if len(p.Command) == 0 && p.ACPProfile != "" {
+			if profile, ok := ACPProfileByID(p.ACPProfile); ok {
+				return profile.Command
+			}
+		}
 		return p.Command
 	}
-	if len(p.ModelCommand) > 0 {
-		return p.ModelCommand
-	}
-	adapter := "@agentclientprotocol/codex-acp@2.2.2"
-	if p.Kind == "claude" {
-		adapter = "@agentclientprotocol/claude-agent-acp@0.90.0"
-	}
-	return []string{"npx", "--yes", adapter}
+	return nil
 }
 
 func ExecutionProvider(p model.Provider, thinking *model.ThinkingChoice) model.Provider {
-	if !p.NativeIntegrations && thinking != nil && (p.Kind == "codex" || p.Kind == "claude") {
-		p.Command = ACPCommand(p)
-		p.Kind = "acp"
+	_ = thinking
+	resolved, err := ResolveExecutionProvider(p)
+	if err != nil {
+		p.Command = nil
+		p.ModelCommand = nil
+		return p
 	}
-	return p
+	return resolved
 }
 
 // Models asks the installed source for model IDs without running an inference turn.
-func Models(ctx context.Context, p model.Provider, cwd string, selectedModels ...string) (ModelCatalog, error) {
-	catalog := ModelCatalog{Models: []ModelInfo{}}
-	if p.Kind != "codex" && p.Kind != "claude" && p.Kind != "acp" {
-		return catalog, fmt.Errorf("unsupported model source: %s", p.Kind)
+func Models(ctx context.Context, p model.Provider, cwd string, selectedModels ...string) (result ModelCatalog, err error) {
+	supervisorDir, err := defaultStandaloneSupervisorDir()
+	if err != nil {
+		return ModelCatalog{Models: []ModelInfo{}}, err
 	}
+	return ModelsWithSupervisorDir(ctx, p, cwd, supervisorDir, selectedModels...)
+}
+
+// ModelsWithSupervisorDir performs metadata discovery with a durable standalone runtime locator.
+func ModelsWithSupervisorDir(ctx context.Context, p model.Provider, cwd, supervisorDir string, selectedModels ...string) (result ModelCatalog, err error) {
+	catalog := ModelCatalog{Models: []ModelInfo{}}
+	resolved, resolveErr := ResolveExecutionProvider(p)
+	if resolveErr != nil {
+		return catalog, resolveErr
+	}
+	p = resolved
 	command := ACPCommand(p)
 	selectedModel := ""
 	if len(selectedModels) > 0 {
@@ -110,16 +122,37 @@ func Models(ctx context.Context, p model.Provider, cwd string, selectedModels ..
 	if err != nil {
 		return catalog, err
 	}
-	cwd = profile.CWD
-	s := &providerSession{ctx: ctx, input: Input{CWD: cwd, ReadOnly: true, Model: selectedModel}, client: NewClient(Input{CWD: cwd, ReadOnly: true, Execution: &profile}, Hooks{})}
-	defer s.client.Close()
-	rpc, err := StartWithProfile(ctx, command, profile, s.handle)
+	profile, err = pinStandaloneProfile(ctx, profile, supervisorDir)
 	if err != nil {
 		return catalog, err
 	}
+	standalone := profile.StandaloneRuntime
+	transferred := false
+	defer func() {
+		if standalone && !transferred {
+			err = errors.Join(err, completeStandaloneProfile(profile))
+		}
+	}()
+	cwd = profile.CWD
+	input := Input{ProviderID: p.ID, ACPProfile: p.ACPProfile, CWD: cwd, ReadOnly: true, Model: selectedModel, Execution: &profile}
+	s := &providerSession{ctx: ctx, input: input, client: NewClient(input, Hooks{})}
+	defer func() { err = errors.Join(err, s.client.Close()) }()
+	cleanup, err := s.prepareProviderIntegrations(p, p, &profile)
+	if err != nil {
+		return catalog, err
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	rpc, err := StartWithProfile(ctx, command, profile, s.handle)
+	if err != nil {
+		return catalog, actionableACPError(p, err)
+	}
+	transferred = true
 	s.rpc = rpc
-	defer rpc.Close()
-	return s.discoverModelCatalog(cwd)
+	defer func() { err = errors.Join(err, rpc.Close()) }()
+	catalog, err = s.discoverModelCatalog(cwd)
+	return catalog, authenticationACPError(p, err)
 }
 
 func (s *providerSession) discoverModelCatalog(cwd string) (ModelCatalog, error) {

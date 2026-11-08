@@ -47,21 +47,32 @@ func (q apiRequest) applySettingsPatch(v *workflow.Settings) error {
 	if err := json.Unmarshal(q.body, &fields); err != nil {
 		return err
 	}
+	if err := rejectModePatch(fields); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(q.body, v); err != nil {
+		return err
+	}
+	return validateSettingsPatch(*v)
+}
+
+func rejectModePatch(fields map[string]json.RawMessage) error {
 	for _, name := range []string{"mode", "active_mode", "configured_mode", "restart_required"} {
 		if _, ok := fields[name]; ok {
 			return &apiError{422, "mode_requires_restart", "Edit mode in settings.yaml on disk and restart Whirlwind"}
 		}
 	}
-	if err := json.Unmarshal(q.body, v); err != nil {
-		return err
-	}
+	return nil
+}
+
+func validateSettingsPatch(v workflow.Settings) error {
 	if err := v.Admission.Validate(); err != nil {
 		return &apiError{422, "invalid_input", err.Error()}
 	}
 	if err := v.Ideation.Validate(); err != nil {
 		return &apiError{422, "invalid_input", err.Error()}
 	}
-	if !settingsValid(*v) {
+	if !settingsValid(v) {
 		return &apiError{422, "invalid_input", "slots must be 1..32; reconciliation_seconds 30..86400; provider_status_check_seconds 1..86400"}
 	}
 	return nil

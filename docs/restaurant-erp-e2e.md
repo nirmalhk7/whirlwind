@@ -1,5 +1,10 @@
 # Restaurant ERP end-to-end test report
 
+> Historical report from the former browser-interface implementation. The
+> frontend and its browser test suite have since been removed. Results below
+> describe the tested snapshot only; they are not current product verification
+> or instructions for running Whirlwind today.
+
 Date: October 14, 2026 (America/Denver).
 
 **Result: scenario testing completed; production readiness not established.** Two controlled workflows reached `complete` through the real Go server and Next.js UI. GitHub was simulated throughout. Real repository checks exposed setup failures described below.
@@ -97,6 +102,6 @@ After preserving the real generated-policy failures, the disposable copy receive
 
 Generated screenshots, logs, scanner reports, and test binaries were removed during repository cleanup. This document preserves the observed results; it is not a fresh verification of later commits.
 
-Run the verification commands above for the current implementation. The browser suite creates disposable repositories and simulates external agents and GitHub. Repeating the restaurant-specific experiment requires a disposable snapshot, real Qlty/CodeGraph, and isolated settings/state with simulated GitHub writes. Do not register an unfinished original checkout merely to reproduce this report.
+The verification commands and browser scenarios above applied to the historical snapshot only. Repeating the restaurant-specific experiment requires restoring that historical frontend/test harness in a disposable checkout, along with a disposable target snapshot, real Qlty/CodeGraph, and isolated settings/state with simulated GitHub writes. Do not register an unfinished original checkout merely to reproduce this report.
 
 The temporary investigative harness and machine-specific state are excluded from version control. No production defects were fixed as part of report cleanup.

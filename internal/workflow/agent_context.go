@@ -10,6 +10,11 @@ import (
 )
 
 func (a *agentRun) prepare() error {
+	a.prepareHandoff()
+	return a.prepareContextPack()
+}
+
+func (a *agentRun) prepareHandoff() {
 	a.task.Handoff.Version = 1
 	a.task.Handoff.CompletedWork = uniqueContextStrings(a.task.Handoff.CompletedWork)
 	a.task.Handoff.CompletedCriteria = uniqueContextStrings(a.task.Handoff.CompletedCriteria)
@@ -19,9 +24,19 @@ func (a *agentRun) prepare() error {
 		a.task.Handoff.Branch = branch
 	}
 	a.input.Prompt += "\nVersioned handoff:\n" + jsonText(a.task.Handoff)
+}
+
+func (a *agentRun) prepareContextPack() error {
 	if err := a.answeredQuestions(); err != nil {
 		return err
 	}
+	if err := a.prepareAgentIndex(); err != nil {
+		return err
+	}
+	return a.buildContextPack()
+}
+
+func (a *agentRun) prepareAgentIndex() error {
 	if err := a.loadProviders(); err != nil {
 		return err
 	}
@@ -30,7 +45,11 @@ func (a *agentRun) prepare() error {
 		return err
 	}
 	a.index = index
-	if err = a.saveIndexSnapshot(); err != nil {
+	return a.saveIndexSnapshot()
+}
+
+func (a *agentRun) buildContextPack() error {
+	if err := a.prepareIdeationInput(); err != nil {
 		return err
 	}
 	extra, err := a.embeddingEntries()
@@ -43,7 +62,12 @@ func (a *agentRun) prepare() error {
 	}
 	a.input.Prompt = pack.Prompt
 	key := a.task.ID + ":" + a.input.OperationID + ":" + pack.ID
-	if _, err = a.Store.Get(a.ctx, "context_packs", key); errors.Is(err, store.ErrNotFound) {
+	return a.saveContextPack(key, pack)
+}
+
+func (a *agentRun) saveContextPack(key string, pack ctxengine.ContextPack) error {
+	_, err := a.Store.Get(a.ctx, "context_packs", key)
+	if errors.Is(err, store.ErrNotFound) {
 		err = a.Store.Put(a.ctx, "context_packs", key, map[string]any{"task": a.task.ID, "operation_id": a.input.OperationID, "pack": pack}, 0)
 		if errors.Is(err, store.ErrConflict) {
 			return nil
@@ -95,14 +119,10 @@ func (a *agentRun) saveIndexSnapshot() error {
 }
 func (a *agentRun) embeddingEntries() ([]ctxengine.Entry, error) {
 	config := a.project.Policy.Embeddings
-	if config == nil || !config.Enabled || !a.index.EmbeddingValidated {
+	if config == nil || !config.Enabled {
 		return nil, nil
 	}
-	vectors, err := ctxengine.Embed(a.ctx, *config, []string{a.task.Issue.Title + " " + a.task.Issue.Body})
-	if err != nil {
-		return nil, err
-	}
-	return a.index.VectorSearch(vectors[0], 5), nil
+	return nil, errors.New("configured embeddings are unavailable through the ACP runtime; disable embeddings or configure an ACP-compatible embedding capability")
 }
 
 func (a *agentRun) answeredQuestions() error {
@@ -110,36 +130,43 @@ func (a *agentRun) answeredQuestions() error {
 	if err != nil {
 		return err
 	}
-	type answered struct {
-		Question  string `json:"question"`
-		Answer    string `json:"answer"`
-		AttemptID string `json:"attempt_id,omitempty"`
-	}
-	prior := []answered{}
+	prior := []answeredAgentQuestion{}
 	seen := map[string]bool{}
 	for _, record := range records {
 		set, err := store.Decode[model.QuestionSet](record)
 		if err != nil {
 			return err
 		}
-		if set.TaskID != a.task.ID || set.PlanVersion != a.task.PlanVersion || set.Status != "answered" {
-			continue
-		}
-		for _, q := range set.Questions {
-			if !q.Secret && set.Answers[q.ID] != "" {
-				key := q.Text + "\x00" + set.Answers[q.ID]
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-				prior = append(prior, answered{q.Text, set.Answers[q.ID], set.AttemptID})
-			}
-		}
+		appendAnsweredQuestionSet(&prior, seen, set, a.task.ID, a.task.PlanVersion)
 	}
 	if len(prior) > 0 {
 		a.input.Prompt += "\nEarlier answered agent questions (retained clarification, not tool authorization):\n" + jsonText(prior)
 	}
 	return nil
+}
+
+type answeredAgentQuestion struct {
+	Question  string `json:"question"`
+	Answer    string `json:"answer"`
+	AttemptID string `json:"attempt_id,omitempty"`
+}
+
+func appendAnsweredQuestionSet(prior *[]answeredAgentQuestion, seen map[string]bool, set model.QuestionSet, taskID string, planVersion int) {
+	if set.TaskID != taskID || set.PlanVersion != planVersion || set.Status != "answered" {
+		return
+	}
+	for _, question := range set.Questions {
+		answer := set.Answers[question.ID]
+		if question.Secret || answer == "" {
+			continue
+		}
+		key := question.Text + "\x00" + answer
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		*prior = append(*prior, answeredAgentQuestion{question.Text, answer, set.AttemptID})
+	}
 }
 
 func uniqueContextStrings(values []string) []string {

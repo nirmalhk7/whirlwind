@@ -12,6 +12,12 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	integrationSessionUpdate = "session/update"
+	integrationCodeHostName  = "Code host"
+	integrationCodeHostID    = "code-host"
+)
+
 func TestCodexCatalogRequiresInstalledCallableState(t *testing.T) {
 	apps := json.RawMessage(`{"data":[{"id":"jenkins","name":"Jenkins","isEnabled":true,"isAccessible":true}]}`)
 	installed := json.RawMessage(`{"apps":[{"id":"jenkins","enabled":true,"callable":false}]}`)
@@ -34,17 +40,17 @@ func nativeUpdate(method, body string) Message {
 
 func TestNativeACPEvidenceJoinsInitialMetadataAndSuccessfulTerminalResult(t *testing.T) {
 	s := &providerSession{input: Input{NativeIntegrations: true}, output: Output{Integrations: nativeTestInventory()}}
-	s.captureIntegrationTool(nativeUpdate("session/update", `{"update":{"sessionUpdate":"tool_call","toolCallId":"one","name":"mcp__ci__read_build","status":"pending"}}`))
+	s.captureIntegrationTool(nativeUpdate(integrationSessionUpdate, `{"update":{"sessionUpdate":"tool_call","toolCallId":"one","name":"mcp__ci__read_build","status":"pending"}}`))
 	if !s.nativeReadPermission(map[string]any{"toolCall": map[string]any{"toolCallId": "one"}}) {
 		t.Fatal("pending annotated read denied")
 	}
-	s.captureIntegrationTool(nativeUpdate("session/update", `{"update":{"sessionUpdate":"tool_call_update","toolCallId":"one","status":"completed","rawOutput":{"content":[{"type":"text","text":"ok"}],"isError":false}}}`))
+	s.captureIntegrationTool(nativeUpdate(integrationSessionUpdate, `{"update":{"sessionUpdate":"tool_call_update","toolCallId":"one","status":"completed","rawOutput":{"content":[{"type":"text","text":"ok"}],"isError":false}}}`))
 	want := []ToolEvidence{{Ref: "mcp://ci", Tool: "read_build", CallID: "one", Success: true}}
 	if !reflect.DeepEqual(s.output.ToolCalls, want) {
 		t.Fatalf("missing joined native evidence: %+v", s.output.ToolCalls)
 	}
 	// Replayed terminal updates must not produce a second publication witness.
-	s.captureIntegrationTool(nativeUpdate("session/update", `{"update":{"sessionUpdate":"tool_call_update","toolCallId":"one","status":"completed"}}`))
+	s.captureIntegrationTool(nativeUpdate(integrationSessionUpdate, `{"update":{"sessionUpdate":"tool_call_update","toolCallId":"one","status":"completed"}}`))
 	if len(s.output.ToolCalls) != 1 {
 		t.Fatal("duplicate completion accepted")
 	}
@@ -57,15 +63,15 @@ func TestNativeEvidenceRejectsToolFailuresAndAmbiguousNames(t *testing.T) {
 		`{"update":{"sessionUpdate":"tool_call_update","toolCallId":"one","status":"completed","error":{"message":"failed"}}}`,
 	} {
 		s := &providerSession{input: Input{NativeIntegrations: true}, output: Output{Integrations: nativeTestInventory()}}
-		s.captureIntegrationTool(nativeUpdate("session/update", `{"update":{"sessionUpdate":"tool_call","toolCallId":"one","name":"mcp__ci__read_build","status":"pending"}}`))
-		s.captureIntegrationTool(nativeUpdate("session/update", raw))
+		s.captureIntegrationTool(nativeUpdate(integrationSessionUpdate, `{"update":{"sessionUpdate":"tool_call","toolCallId":"one","name":"mcp__ci__read_build","status":"pending"}}`))
+		s.captureIntegrationTool(nativeUpdate(integrationSessionUpdate, raw))
 		if len(s.output.ToolCalls) != 1 || s.output.ToolCalls[0].Success {
 			t.Fatalf("failure witness lost or became success: %+v", s.output.ToolCalls)
 		}
 	}
 	s := &providerSession{input: Input{NativeIntegrations: true}, output: Output{Integrations: append(nativeTestInventory(), model.Integration{Ref: "mcp://other", Kind: "mcp", Name: "other", Enabled: true, Callable: true, Tools: []model.IntegrationTool{{Name: "read_build", ReadOnly: true}}})}}
-	s.captureIntegrationTool(nativeUpdate("session/update", `{"update":{"sessionUpdate":"tool_call","toolCallId":"ambiguous","name":"read_build","status":"pending"}}`))
-	s.captureIntegrationTool(nativeUpdate("session/update", `{"update":{"sessionUpdate":"tool_call_update","toolCallId":"ambiguous","status":"completed"}}`))
+	s.captureIntegrationTool(nativeUpdate(integrationSessionUpdate, `{"update":{"sessionUpdate":"tool_call","toolCallId":"ambiguous","name":"read_build","status":"pending"}}`))
+	s.captureIntegrationTool(nativeUpdate(integrationSessionUpdate, `{"update":{"sessionUpdate":"tool_call_update","toolCallId":"ambiguous","status":"completed"}}`))
 	if len(s.output.ToolCalls) != 0 || s.nativeReadPermission(map[string]any{"toolCall": map[string]any{"toolCallId": "ambiguous"}}) {
 		t.Fatal("ambiguous native name authorized")
 	}
@@ -88,7 +94,7 @@ func TestNativeReadPermissionRequiresExactCallableReadAnnotation(t *testing.T) {
 }
 
 func TestNativePolicyRestrictsReadOnlyToolsAndPromptsForWrites(t *testing.T) {
-	catalog := append(nativeTestInventory(), model.Integration{Ref: "app://code-host", Name: "Code host", Kind: "app", Enabled: true, Callable: true, Tools: []model.IntegrationTool{{Name: "repos/list", ReadOnly: true}, {Name: "pulls/create"}}})
+	catalog := append(nativeTestInventory(), model.Integration{Ref: "app://code-host", Name: integrationCodeHostName, Kind: "app", Enabled: true, Callable: true, Tools: []model.IntegrationTool{{Name: "repos/list", ReadOnly: true}, {Name: "pulls/create"}}})
 	s := &providerSession{input: Input{ReadOnly: true}}
 	policy := s.nativeIntegrationPolicy(catalog)
 	if !reflect.DeepEqual(policy["mcp_servers.ci.enabled_tools"], []string{"read_build"}) {
@@ -118,13 +124,17 @@ func TestCodexNativeDiscoveryReadsAppToolMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rpc.Close()
+	t.Cleanup(func() {
+		if err := rpc.Close(); err != nil {
+			t.Errorf("close native catalog client: %v", err)
+		}
+	})
 	s := &providerSession{ctx: ctx, rpc: rpc, input: Input{ProviderID: "codex"}}
 	catalog, err := s.discoverCodexIntegrations("thread-native")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(catalog) != 1 || catalog[0].Name != "Code host" || len(catalog[0].Tools) != 2 || !catalog[0].Tools[0].ReadOnly || catalog[0].Tools[1].ReadOnly {
+	if len(catalog) != 1 || catalog[0].Name != integrationCodeHostName || len(catalog[0].Tools) != 2 || !catalog[0].Tools[0].ReadOnly || catalog[0].Tools[1].ReadOnly {
 		t.Fatalf("missing app summaries: %+v", catalog)
 	}
 }
@@ -140,16 +150,16 @@ func TestNativeCatalogRPCFixture(t *testing.T) {
 		var result any
 		switch frame.Method {
 		case "app/list":
-			result = map[string]any{"data": []any{map[string]any{"id": "code-host", "name": "Code host"}}}
+			result = map[string]any{"data": []any{map[string]any{"id": integrationCodeHostID, "name": integrationCodeHostName}}}
 		case "app/installed":
-			result = map[string]any{"apps": []any{map[string]any{"id": "code-host", "enabled": true, "callable": true}}}
+			result = map[string]any{"apps": []any{map[string]any{"id": integrationCodeHostID, "enabled": true, "callable": true}}}
 		case "app/read":
 			var params map[string]any
 			_ = json.Unmarshal(frame.Params, &params)
 			if params["threadId"] != "thread-native" || params["includeTools"] != true {
 				os.Exit(9)
 			}
-			result = map[string]any{"apps": []any{map[string]any{"id": "code-host", "name": "Code host", "toolSummaries": []any{map[string]any{"name": "repos/list", "description": "List repos", "isEnabled": true, "isReadOnly": true}, map[string]any{"name": "pulls/create", "description": "Create PR", "isEnabled": true, "isReadOnly": false}}}}, "missingAppIds": []any{}}
+			result = map[string]any{"apps": []any{map[string]any{"id": integrationCodeHostID, "name": integrationCodeHostName, "toolSummaries": []any{map[string]any{"name": "repos/list", "description": "List repos", "isEnabled": true, "isReadOnly": true}, map[string]any{"name": "pulls/create", "description": "Create PR", "isEnabled": true, "isReadOnly": false}}}}, "missingAppIds": []any{}}
 		case "mcpServerStatus/list":
 			result = map[string]any{"data": []any{}}
 		default:

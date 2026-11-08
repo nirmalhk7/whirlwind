@@ -67,7 +67,7 @@ func TestDispatchExhaustionPausesTaskAndNotifiesInbox(t *testing.T) {
 	}
 	notices, err := h.engine.Store.List(ctx, "inbox")
 	notices = recoveryNotifications(notices)
-	if err != nil || len(notices) != 1 || calls != 3 {
+	if err != nil || len(notices) != 1 || calls != 4 {
 		t.Fatalf("attempts=%d notices=%d error=%v", calls, len(notices), err)
 	}
 }

@@ -58,7 +58,7 @@ func TestResumeAttemptMatchesTransportAndThinking(t *testing.T) {
 	e, task, cwd := testEngine(t)
 	ctx := context.Background()
 	project, _ := e.Project(ctx, task.ProjectID)
-	source := model.Provider{ID: "native", Kind: "codex"}
+	source := model.Provider{ID: "native", Kind: "acp"}
 	_ = e.Store.Put(ctx, "providers", source.ID, source, 0)
 	for _, item := range []struct{ transport, value, session string }{{"acp", "high", "acp-high"}, {"acp", "low", "acp-low"}, {"codex", "", "native-default"}} {
 		state := map[string]any{"elapsed_ms": 0, "task": task.ID, "role": "code", "provider": source.ID, "cwd": cwd, "plan_version": task.PlanVersion, "model": "m", "session_id": item.session, "transport": item.transport}

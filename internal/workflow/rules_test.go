@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -11,17 +12,38 @@ import (
 func TestAcceptanceRequiresChecksAndNoBlockers(t *testing.T) {
 	for _, c := range []struct {
 		score    float64
+		adheres  bool
 		checks   bool
 		blocking bool
 		want     bool
-	}{{9, true, false, true}, {8.9, true, false, false}, {10, false, false, false}, {10, true, true, false}} {
-		r := model.Review{Score: c.score}
+	}{{9, true, true, false, true}, {8.9, false, true, false, false}, {10, true, false, false, false}, {10, true, true, true, false}} {
+		report := &model.Adherence{Score: 80, Passed: 4, Total: 5}
+		if c.adheres {
+			report = &model.Adherence{Score: 81, Passed: 81, Total: 100, Accepted: true}
+		}
+		r := model.Review{Score: c.score, Adherence: report}
 		if c.blocking {
 			r.Findings = []model.Finding{{Blocking: true}}
 		}
 		if Accepted(r, c.checks) != c.want {
 			t.Fatalf("acceptance %+v", c)
 		}
+	}
+}
+
+func TestAcceptanceUsesComputedAdherencePercentage(t *testing.T) {
+	var review model.Review
+	if err := json.Unmarshal([]byte(`{"score":10,"adherence":{"score":80,"passed":4,"total":5,"accepted":true}}`), &review); err != nil {
+		t.Fatal(err)
+	}
+	if Accepted(review, true) {
+		t.Fatal("exactly 80 percent of frozen requirements passed")
+	}
+	if err := json.Unmarshal([]byte(`{"score":0,"adherence":{"score":81,"passed":81,"total":100,"accepted":true}}`), &review); err != nil {
+		t.Fatal(err)
+	}
+	if !Accepted(review, true) {
+		t.Fatal("computed adherence above 80 percent should pass despite the model's numeric score")
 	}
 }
 

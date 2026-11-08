@@ -44,7 +44,7 @@ func (step *taskStep) prDescription() string {
 	}
 	var review model.Review
 	_ = json.Unmarshal([]byte(step.latestReview(step.ctx, fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion))), &review)
-	fmt.Fprintf(&description, "\nReview score: %.1f/10; no unresolved blocking findings.\n\n%s\n\n<!-- whirlwind-task:%s -->", step.task.Score, review.Summary, step.task.ID)
+	fmt.Fprintf(&description, "\nApproved requirement adherence: %.1f%%; no unresolved blocking findings.\n\n%s\n\n<!-- whirlwind-task:%s -->", step.task.Score, review.Summary, step.task.ID)
 	return description.String()
 
 }

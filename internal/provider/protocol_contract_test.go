@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"whirlwind/internal/model"
+	"whirlwind/internal/testutil/openshell"
 )
 
 const contractPrompt = "deliver café 👋\nsecond line"
@@ -34,15 +36,18 @@ const (
 )
 
 type protocolFixture struct {
-	Kind     string
-	Scenario string
-	Resume   bool
-	ReadOnly bool
-	Model    string
+	Kind       string
+	ACPProfile string
+	Scenario   string
+	Resume     bool
+	ReadOnly   bool
+	Model      string
+	Chunks     []string
+	Auth       *protocolAuthExpectation
 }
 
 func TestExplicitModelSelection(t *testing.T) {
-	for _, tc := range []struct{ kind, scenario string }{{"codex", "model"}, {"acp", contractModelConfig}, {"acp", contractModelLegacy}, {"acp", "model-unsupported"}} {
+	for _, tc := range []struct{ kind, scenario string }{{"acp", contractModelConfig}, {"acp", contractModelLegacy}, {"acp", "model-unsupported"}} {
 		t.Run(tc.kind+"/"+tc.scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -107,7 +112,11 @@ func TestModelCatalogUsesProviderMetadataWithoutPrompt(t *testing.T) {
 		t.Run(tc.kind+"/"+tc.scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			adapter := contractAdapter(t, protocolFixture{Kind: "acp", Scenario: tc.scenario, ReadOnly: true})
+			fixture := protocolFixture{Kind: "acp", Scenario: tc.scenario, ReadOnly: true}
+			if tc.kind != "acp" {
+				fixture.Auth = catalogAuthExpectation(tc.kind)
+			}
+			adapter := contractAdapter(t, fixture)
 			if tc.kind != "acp" {
 				adapter.Provider.ModelCommand = adapter.Provider.Command
 				adapter.Provider.Command = []string{"must-not-use-native-model-discovery"}
@@ -123,6 +132,10 @@ func TestModelCatalogUsesProviderMetadataWithoutPrompt(t *testing.T) {
 
 func contractAdapter(t *testing.T, fixture protocolFixture) ProcessAdapter {
 	t.Helper()
+	installProtocolOpenShell(t)
+	if fixture.ACPProfile != "" && fixture.Auth == nil {
+		fixture.Auth = catalogAuthExpectation(fixture.ACPProfile)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -131,12 +144,36 @@ func contractAdapter(t *testing.T, fixture protocolFixture) ProcessAdapter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ProcessAdapter{Provider: model.Provider{Kind: fixture.Kind, Command: []string{exe, "-test.run=^TestProtocolContractHelper$", "--", string(encoded)}}}
+	return ProcessAdapter{Provider: model.Provider{Kind: "acp", ACPProfile: fixture.ACPProfile, Command: []string{exe, "-test.run=^TestProtocolContractHelper$", "--", string(encoded)}}}
+}
+
+func installProtocolOpenShell(t *testing.T) *openshell.Fixture {
+	t.Helper()
+	fixture := openshell.Install(t)
+	fixture.EnableCommandExecution()
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
+	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "provider-protocol-test-image")
+	home := filepath.Join(fixture.Directory, "synthetic-home")
+	if err := os.Mkdir(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	for _, path := range []string{".codex/auth.json", ".claude/.credentials.json", protocolCursorCredentialPath} {
+		file := filepath.Join(home, path)
+		if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, []byte("synthetic test credential"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture.ProjectSyntheticNativeFiles(t, home)
+	return fixture
 }
 
 // Rejecting/reordering outgoing messages or losing streamed chunks breaks this test.
 func TestProtocolMessageContracts(t *testing.T) {
-	for _, kind := range []string{"acp", "codex"} {
+	for _, kind := range []string{"acp"} {
 		for _, resume := range []bool{false, true} {
 			for _, readOnly := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/resume=%t/readOnly=%t", kind, resume, readOnly), func(t *testing.T) {

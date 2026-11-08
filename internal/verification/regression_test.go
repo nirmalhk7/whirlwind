@@ -6,6 +6,8 @@ import (
 	"testing"
 )
 
+const complexityFinding = "Too complex"
+
 func regressionResult(name, output string, exit int) Result {
 	return Result{Name: name, Command: []string{"go", "test", "-json", "./..."}, Output: output, ExitCode: &exit, Passed: exit == 0}
 }
@@ -29,32 +31,94 @@ func regressionQuality(output string, exit int) Result {
 }
 
 func TestCompareBaselineSARIFDistinguishesDebtFromRegressions(t *testing.T) {
-	base := regressionQuality(regressionSARIF("complexity", "warning", "stable", "Too complex", 10, 12), 1)
+	base := regressionQuality(regressionSARIF("complexity", "warning", "stable", complexityFinding, 10, 12), 1)
 	for _, tc := range []struct {
 		name string
 		head Result
 		want bool
 	}{
-		{"unchanged debt moved", regressionQuality(regressionSARIF("complexity", "warning", "stable", "Too complex", 99, 12), 1), true},
-		{"new finding", regressionQuality(regressionSARIF("complexity", "warning", "new", "Too complex", 10, 12), 1), false},
-		{"severity worsened", regressionQuality(regressionSARIF("complexity", "error", "stable", "Too complex", 10, 12), 1), false},
-		{"metric worsened", regressionQuality(regressionSARIF("complexity", "warning", "stable", "Too complex", 10, 13), 1), false},
-		{"metric improved", regressionQuality(regressionSARIF("complexity", "warning", "stable", "Too complex", 10, 11), 1), true},
+		{"unchanged debt moved", regressionQuality(regressionSARIF("complexity", "warning", "stable", complexityFinding, 99, 12), 1), true},
+		{"new finding", regressionQuality(regressionSARIF("complexity", "warning", "new", complexityFinding, 10, 12), 1), false},
+		{"severity worsened", regressionQuality(regressionSARIF("complexity", "error", "stable", complexityFinding, 10, 12), 1), false},
+		{"metric worsened", regressionQuality(regressionSARIF("complexity", "warning", "stable", complexityFinding, 10, 13), 1), false},
+		{"metric improved", regressionQuality(regressionSARIF("complexity", "warning", "stable", complexityFinding, 10, 11), 1), true},
 		{"malformed passed report", regressionQuality("garbage", 0), false},
 		{"incomplete report", regressionQuality(`{"version":"2.1.0","runs":[{}]}`, 0), false},
 		{"analysis failed", regressionQuality(`{"version":"2.1.0","runs":[{"results":[],"invocations":[{"executionSuccessful":false}]}]}`, 0), false},
 		{"clean head", regressionQuality(`{"version":"2.1.0","runs":[{"results":[]}]}`, 0), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			report := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{tc.head}})
-			if report.Passed != tc.want || report.Results[0].Passed != tc.want {
-				t.Fatalf("passed=%v result=%+v want=%v", report.Passed, report.Results[0], tc.want)
-			}
-			if tc.want && *tc.head.ExitCode != 0 && !strings.Contains(report.Results[0].Output, "baseline_comparison") {
-				t.Fatal("preexisting debt lost comparison metadata")
-			}
-			if tc.head.Output != report.Results[0].Output && !strings.Contains(report.Results[0].Output, tc.head.Output) {
-				t.Fatal("raw evidence lost")
+			assertBaselineComparisonCase(t, base, tc.head, tc.want)
+		})
+	}
+}
+
+func TestCompareBaselineAcceptsUnchangedQltySmellsExitZeroAdvisory(t *testing.T) {
+	output := regressionSARIF("complexity", "warning", "stable", complexityFinding, 10, 12)
+	base := regressionQltySmells(output, 0)
+	head := regressionQltySmells(output, 0)
+	compared := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{head}})
+	if !compared.Passed || !AcceptedQltyBaselineAdvisory(compared.Results[0]) {
+		t.Fatalf("unchanged Qlty smells were not marked as baseline advisory: %+v", compared)
+	}
+	if err := ValidateQltyResult(compared.Results[0]); err != nil {
+		t.Fatalf("validated exit-zero baseline advisory rejected: %v", err)
+	}
+}
+
+func regressionQltySmells(output string, exit int) Result {
+	r := regressionResult("qlty-smells", output, exit)
+	r.Command = []string{"qlty", "smells", "--all", "--sarif"}
+	r.Passed = false
+	r.Error = "qlty reported 1 code smells; repair findings before review"
+	return r
+}
+
+func assertBaselineComparisonCase(t *testing.T, base, head Result, want bool) {
+	t.Helper()
+	report := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{head}})
+	if report.Passed != want || report.Results[0].Passed != want {
+		t.Fatalf("passed=%v result=%+v want=%v", report.Passed, report.Results[0], want)
+	}
+	wantAdvisory := want && *head.ExitCode != 0
+	if got := AcceptedQltyBaselineAdvisory(report.Results[0]); got != wantAdvisory {
+		t.Fatalf("accepted Qlty advisory=%v want=%v", got, wantAdvisory)
+	}
+	if wantAdvisory && !strings.Contains(report.Results[0].Output, "baseline_comparison") {
+		t.Fatal("preexisting debt lost comparison metadata")
+	}
+	if wantAdvisory {
+		if err := ValidateQltyResult(report.Results[0]); err != nil {
+			t.Fatalf("validated baseline advisory rejected: %v", err)
+		}
+	}
+	if head.Output != report.Results[0].Output && !strings.Contains(report.Results[0].Output, head.Output) {
+		t.Fatal("raw evidence lost")
+	}
+}
+
+func TestValidateQltyResultRequiresRawCompleteSarif(t *testing.T) {
+	valid := regressionQuality(`{"version":"2.1.0","runs":[{"results":[]}]}`, 0)
+	if err := ValidateQltyResult(valid); err != nil {
+		t.Fatalf("valid clean Qlty SARIF rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Result)
+	}{
+		{"malformed report", func(result *Result) { result.Output = "not SARIF" }},
+		{"finding despite success", func(result *Result) {
+			result.Output = regressionSARIF("complexity", "warning", "stable", complexityFinding, 3, 12)
+		}},
+		{"truncated report", func(result *Result) { result.Truncated = true }},
+		{"missing exit status", func(result *Result) { result.ExitCode = nil }},
+		{"failed process marked passed", func(result *Result) { code := 1; result.ExitCode, result.Passed = &code, true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := valid
+			tc.mutate(&result)
+			if err := ValidateQltyResult(result); err == nil {
+				t.Fatal("invalid or incomplete Qlty evidence accepted")
 			}
 		})
 	}
@@ -62,7 +126,7 @@ func TestCompareBaselineSARIFDistinguishesDebtFromRegressions(t *testing.T) {
 
 func TestCompareBaselineSARIFWithoutFingerprintsIgnoresMovedLine(t *testing.T) {
 	base := regressionQuality(regressionSARIF("complexity", "warning", "", "Too   complex", 10, 12), 1)
-	head := regressionQuality(regressionSARIF("complexity", "warning", "", "Too complex", 80, 12), 1)
+	head := regressionQuality(regressionSARIF("complexity", "warning", "", complexityFinding, 80, 12), 1)
 	report := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{head}})
 	if !report.Passed {
 		t.Fatalf("moved finding blocked: %+v", report)
@@ -70,7 +134,7 @@ func TestCompareBaselineSARIFWithoutFingerprintsIgnoresMovedLine(t *testing.T) {
 }
 
 func TestCompareBaselineDoesNotHideAdditionalIdenticalFinding(t *testing.T) {
-	output := regressionSARIF("complexity", "warning", "same", "Too complex", 1, 12)
+	output := regressionSARIF("complexity", "warning", "same", complexityFinding, 1, 12)
 	var sarif map[string]any
 	_ = json.Unmarshal([]byte(output), &sarif)
 	run := sarif["runs"].([]any)[0].(map[string]any)
@@ -93,11 +157,11 @@ func TestCompareBaselineStructuredTestFailures(t *testing.T) {
 		name, base, head string
 		want             bool
 	}{
-		{"same go failure", old, old, true},
+		{"same go failure remains blocking", old, old, false},
 		{"new go failure", old, newer, false},
 		{"unfinished go run", old, `{"Action":"run","Package":"example","Test":"TestOld"}`, false},
 		{"go package failed without test", old, `{"Action":"fail","Package":"example"}`, false},
-		{"same junit failure", junit, junit, true},
+		{"same junit failure remains blocking", junit, junit, false},
 		{"new junit failure", junit, strings.ReplaceAll(junit, `name="old"`, `name="new"`), false},
 		{"incomplete junit", junit, `<testsuite failures="1"></testsuite>`, false},
 		{"opaque errors", "FAIL", "FAIL", false},
@@ -115,7 +179,7 @@ func TestCompareBaselineStructuredTestFailures(t *testing.T) {
 }
 
 func TestCompareBaselineRejectsInfrastructureAndMissingChecks(t *testing.T) {
-	output := regressionSARIF("complexity", "warning", "stable", "Too complex", 10, 12)
+	output := regressionSARIF("complexity", "warning", "stable", complexityFinding, 10, 12)
 	base := regressionQuality(output, 1)
 	for _, tc := range []struct {
 		name   string
@@ -163,10 +227,10 @@ func TestCompareBaselineSARIFMatchesDuplicateIdentitiesRegardlessOfOrder(t *test
 		output, _ := json.Marshal(a)
 		return string(output)
 	}
-	severe := regressionSARIF("complexity", "error", "same", "Too complex", 10, 12)
-	ordinary := regressionSARIF("complexity", "warning", "same", "Too complex", 20, 13)
+	severe := regressionSARIF("complexity", "error", "same", complexityFinding, 10, 12)
+	ordinary := regressionSARIF("complexity", "warning", "same", complexityFinding, 20, 13)
 	base := regressionQuality(combine(severe, ordinary), 1)
-	improved := regressionSARIF("complexity", "warning", "same", "Too complex", 20, 12)
+	improved := regressionSARIF("complexity", "warning", "same", complexityFinding, 20, 12)
 	head := regressionQuality(combine(improved, severe), 1)
 	if result := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{head}}); !result.Passed {
 		t.Fatalf("equivalent findings reordered: %+v", result)

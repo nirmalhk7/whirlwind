@@ -8,7 +8,7 @@ Autonomous software engineering, in continuous motion.
 
 Whirlwind is an open-source, agent-agnostic engineering harness that turns goals into verified software through autonomous execution loops. Bring your agents. Whirlwind handles the engineering process.
 
-Codex, Claude, Cursor, and other ACP agents do the work. Whirlwind coordinates planning, implementation, testing, review, and delivery; preserves durable state; verifies results; and decides what happens next. Human questions, permissions, and critical publication decisions stay visible in Inbox.
+Codex, Claude, Cursor, and other ACP agents do the work. Whirlwind coordinates planning, implementation, testing, review, and delivery; preserves durable state; verifies results; and decides what happens next. Human questions, permissions, approvals, and local delivery evidence stay visible in the terminal dashboard.
 
 **Agent-agnostic · ACP-native · Durable execution · Evidence-driven**
 
@@ -16,51 +16,51 @@ Whirlwind's identity rests on velocity, control, and correctness: maximize verif
 
 ## Run locally
 
-Requirements: Go version specified in `go.mod` or newer, Node.js 20.9+/npm, Git, and authenticated GitHub CLI. Install and authenticate your preferred agents separately.
+Requirements: Go version specified in `go.mod` or newer, Git, and a local NVIDIA OpenShell gateway configured before agent execution. The terminal dashboard and supervisor can open without OpenShell; model work fails closed until the gateway and compatible Linux agent image are ready. Node.js 20.9+ is required by the launcher and OpenShell bridge.
 
 ```sh
 go mod download
-npm ci --prefix web
-make dev
+./bin/whirlwind start
+./bin/whirlwind dashboard
 ```
 
-Open `http://127.0.0.1:9876`. The combined launcher runs Go on `127.0.0.1:9877` and wires the Next.js proxy automatically. Ctrl-C stops both processes; either process exiting stops the other. Occupied ports fail startup.
-
-Override ports with `make dev WHIRLWIND_LISTEN=127.0.0.1:8091 WHIRLWIND_WEB_PORT=3001`. `make run` and `make web` start services separately. `WHIRLWIND_BACKEND_URL` overrides the UI proxy. Install the optional Claude SDK bridge with `npm ci --prefix bridges/claude`.
-
-### CLI from any directory
-
-Add this checkout's `bin` directory to your `PATH`, or symlink `bin/whirlwind` into a directory already on `PATH`. The executable resolves its checkout even through a symlink; no installation or shell alias required. Keep the checkout in place.
+`start` builds and starts the durable local supervisor. `dashboard` opens the Go/tview terminal interface and reconnects to saved supervisor state. The supervisor owns approvals, execution, deadlines, recovery counters, and local command/event IPC; closing the TUI leaves it running. You can open another dashboard later without replaying decisions.
 
 ```sh
-whirlwind start
-whirlwind status
-whirlwind restart
-whirlwind stop
-whirlwind doctor
+./bin/whirlwind status
+./bin/whirlwind restart
+./bin/whirlwind stop
+./bin/whirlwind doctor
 ```
 
-`start` rebuilds the Go backend and compiles the UI with `next build`, then launches the backend and `next start` in the background. The production UI has no development compiler or file watchers; Node.js remains required for the Next.js API proxy and server routes. Production builds use `web/.next-production` by default, separate from `make dev` output. Use `make dev` for hot reload. Startup allows up to five minutes for builds and returns after both HTTP services are healthy. Repeated `start` keeps an already healthy instance. `restart` rebuilds and restarts both services; `stop` is safe to repeat and also cleans up orphaned children. Startup failure stops the services it launched. Closing the terminal leaves them running; either service exiting stops the other.
+The launcher resolves its checkout from the executable, so its absolute path or a symlink also works outside the checkout. Set `WHIRLWIND_ROOT` to select a checkout and `WHIRLWIND_DATA_DIR` to select a state directory; the default remains `~/.local/share/whirlwind/whirlwind.db`, preserving existing records and in-flight work. `WHIRLWIND_SETTINGS_FILE` selects the authoritative YAML configuration. Keep the checkout in place while the supervisor runs.
 
-`status` shows health, URLs, checkout, and logs. It exits with status 1 when stopped or unhealthy. `doctor` checks Node.js, the Go version from `go.mod`, frontend dependencies, writable state, process inspection, and ports or running service health. Missing Git/GitHub authentication produces warnings; failed startup prerequisites produce exit status 1. Commands accept no additional arguments; use `--help` for usage.
+If a legacy browser/HTTP instance still owns the data directory, `start` stops with an ownership message. Run `./bin/whirlwind stop` to stop only its registered processes, then start the supervisor. Whirlwind never kills an unrelated process or silently replaces the running instance. `make run` runs the local supervisor in the foreground; `make dev` opens the TUI.
 
-State and combined logs live in `$WHIRLWIND_DATA_DIR/launcher` (default `~/.local/share/whirlwind/launcher`); `whirlwind.log` appends across restarts. `status` and `stop` use the saved instance addresses, so port overrides need only be supplied when starting. Select the same `WHIRLWIND_DATA_DIR` for all commands targeting an isolated instance. Only launcher-owned processes are stopped; stop an existing `make dev` session with Ctrl-C before switching to the CLI on the same ports.
+Add absolute local Git repository paths to `projects` in `settings.yaml` to onboard them for normal workflows:
 
-`WHIRLWIND_LISTEN` and `WHIRLWIND_WEB_PORT` override backend and UI ports. The CLI wires the UI proxy to its backend automatically. `WHIRLWIND_SETTINGS_FILE` overrides settings; `WHIRLWIND_ROOT` selects a different checkout. Relative data/settings paths resolve against the checkout. macOS and Linux supported.
+```yaml
+projects:
+  - /absolute/path/to/repository
+```
 
-See [backend setup and project policy](docs/go-backend.md) and [HTTP API](API.md) for configuration, agent registration, webhook ingress, and execution requirements.
+Valid repositories appear in Projects with green `OK`; invalid paths remain visible with red `ERR` and details in Inbox. Refresh preserves existing project choices and runtime state. Agents lists every configured role's ordered model choices, reasoning effort, and provider connection status: green `up`, red `down`, or a truthful `paused`/`unverified` state when no current check is available. Connection checks follow `workers.provider_status_check_seconds` and pause while runners are stopped.
+
+The Go/tview TUI displays saved plans, questions, permission requests, attempts, review and verification evidence, and local completion data. Inbox occupies the right pane; focus it and press `a` to choose a direction for approval or `h` for direction history. Direction approval and plan approval are separate. Decisions carry expected record versions and idempotency keys over a user-private Unix socket; the supervisor rechecks them before saving. Whirlwind has no browser frontend or UI server.
+
+See [local supervisor and terminal setup](docs/local-supervisor.md), [OpenShell setup](docs/openshell-setup.md), [project policy](docs/go-backend.md), and the [HTTP API contract](API.md) for integration and webhook interfaces.
 
 ## Engineering loops
 
-- Generate a configurable evidence-backed shortlist, including zero ideas. Select an idea before planning. External ready-labeled issues enter the same candidate queue. Dismiss, defer, or reopen candidates; prior task history stays available.
-- Set automatic daily ideation time/timezone or disable it in Settings. Default: 10:00 America/Denver. Manual Run Ideation remains available.
-- Set advertised thinking levels per provider/model on Agents. Explicit settings use ACP; provider defaults retain native execution. Inspect actual attempts, models, thinking, and outcomes under Run.
-- Answer planner questions before implementation begins.
-- Build units in isolated worktrees, respecting dependencies and committed `.whirlwind.yml` or `.whirlwind.yaml` policy.
-- Run required checks and review evidence before publication. Review requires a score of at least 9/10 and no unresolved blocking findings.
-- Publish a pull request after acceptance and required approval. The user merges it.
+- Onboard a local Git repository without replacing its files or existing state. Each ideation run handles one project and proposes Expand, Optimize, Harden, and Simplify directions, backed by current evidence and checked against durable proposal history. An exhausted novelty budget produces an incomplete result rather than fabricated directions.
+- Select and approve a direction, then review and separately approve its detailed plan. Plans live at `~/.whirlwind/plans/<Repo Name>_<Timestamp>.md`. Approval freezes the requirements and version; later specification changes require another approval.
+- Configure independent ordered ACP agent/model/thinking queues for Ideation, Planner, Coding, Reviewer, and Finalizer in YAML. Bundled Claude, Codex, and Cursor profiles still require compatible installed, authenticated runtimes. Unsupported selections produce errors rather than silent substitutions.
+- Every agent runs inside NVIDIA OpenShell in its own Git worktree. Trusted annotations in `prompts/agents/*.md` select already authorized connections; inserted issue or repository text cannot grant access. General public web access does not authorize additional integrations.
+- Coding and review repeat until the unrounded requirement score is strictly greater than 80% and every mandatory gate passes. Exactly 80% fails. Gates include the frozen plan checks, configured tests and build, and no new Qlty findings. Existing Qlty debt stays visible; failed repository tests cannot be grandfathered into acceptance.
+- Questions and permissions pause the affected plan. Ordinary answers preserve recovery history; an answer that changes scope returns through planning and human approval. Each active agent attempt has a fixed five-minute deadline; human waiting time is outside that attempt.
+- Finalization preserves the exact reviewed snapshot on the plan's local delivery branch. The dashboard shows its commit, diff, review score, unmet requirements, and verification evidence. Agents cannot push, open PRs, or merge; the human decides whether to publish.
 
-SQLite preserves tasks, fenced leases, questions, mutation receipts, ordered events, and commit-keyed context snapshots. Provider routing and recovery keep productive work moving; repeated failures pause for operator input.
+SQLite retains execution records, fenced ownership, pending decisions, mutation receipts, ordered events, and proposal history. Recoverable failures use persisted restart budgets and the same role's fallback queue. Unknown legacy runtime ownership remains paused until it can be verified safely.
 
 ## Configuration and naming
 
@@ -71,7 +71,7 @@ SQLite preserves tasks, fenced leases, questions, mutation receipts, ordered eve
 - GitHub labels: `whirlwind:ready` and `whirlwind:work`.
 - Optional webhook secret: `WHIRLWIND_WEBHOOK_SECRET`.
 
-Brand renaming changes configuration and persisted identifiers. For an existing installation, stop the service, back up state, move it to the new state location, and rename the database to `whirlwind.db`. Rename and commit project policies, update environment variables and GitHub labels, and review stored task branches, issue markers, and policy hashes before resuming. Existing state is not automatically migrated. A fresh state directory is the simplest starting point.
+Whirlwind creates one current SQLite schema directly, without schema versions or upgrade migrations. Reopening a current database preserves its records. Databases from older development layouts are unsupported; stop the supervisor and archive the old state before starting fresh. See [local supervisor setup](docs/local-supervisor.md).
 
 ## Visual identity
 
@@ -87,43 +87,33 @@ Brand renaming changes configuration and persisted identifiers. For an existing 
 ## Verify
 
 ```sh
-node --test scripts/whirlwind-cli.test.mjs
-go test -race ./...
+node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs
+go test -race ./... -skip '^TestACPTerminalCannotWriteOutsideSandbox$'
 go vet ./...
-cd web
-npm run build
-npm run test:e2e
+go build ./cmd/whirlwind ./cmd/whirlwind-dashboard
+qlty smells --all
+qlty check --all
 ```
 
-Browser tests start real Go and Next.js servers and use local fixture agents and GitHub commands. No live pull requests are created by the suite. See the [restaurant end-to-end report](docs/restaurant-erp-e2e.md) for historical scenario coverage, simulated boundaries, and unresolved findings.
+The Go command above runs the controlled-fixture suite. Complete acceptance also requires the real OpenShell commands in [OpenShell setup](docs/openshell-setup.md), including the separately selected terminal filesystem-boundary test. Run those with the disposable gateway environment; do not export its gateway selection into controlled-fixture runs. Excluding or skipping a physical test does not establish isolation.
 
 ## Repository
 
-- `cmd/whirlwind/`: local server entry point.
-- `internal/`: scheduling, providers, storage, GitHub integration, policy, context, verification, and HTTP API.
-- `web/`: Next.js control center and browser tests.
-- `bridges/claude/`: optional Claude SDK bridge.
-- `docs/`: backend setup and OpenAPI contract.
+- `cmd/whirlwind/`: durable local supervisor and command entry point.
+- `cmd/whirlwind-dashboard/` and `internal/dashboard/`: Go/tview terminal interface.
+- `internal/control/`: named command/event protocol over a private Unix socket.
+- `internal/`: orchestration, ACP providers, persistence, Git, policy, and verification.
+- `bridges/openshell/`: guest launch, controlled egress, and scoped MCP transport.
+- `prompts/agents/`: trusted base prompts and connection annotations.
 
-Whirlwind runs trusted local agent processes. Configure project policy and review agent permission requests for repositories you authorize it to edit. Keep the control listener on loopback; expose only the dedicated, signed webhook listener through your own HTTPS ingress.
+## Settings and recovery
 
+`settings.yaml` remains the authoritative YAML file; `--settings` or `WHIRLWIND_SETTINGS_FILE` selects another path. The configuration contains workers, ACP providers, and independent ordered role queues. Explicitly configure each required role; an absent queue cannot borrow a different role's choices. Invalid settings block new dispatch while running attempts retain their recorded configuration.
 
-### Settings configuration
+A role choice selects its ACP provider, model, and supported thinking configuration. Effective settings and configuration version are recorded for each attempt. Missing installation, authentication, or compatible capabilities produce actionable errors. Metadata-only account/quota checks do not authorize native model inference.
 
-Settings also lists live provider connectivity and the latest check time. Inbox's **working providers** count uses these same checks; follow its link to `/settings#providers` to identify each working provider and read failure reasons. Pending or failed status refreshes show an unknown count rather than installed-command availability. Checks refresh every 30 seconds while Inbox or Settings is open; set `workers.provider_status_check_seconds` (1–86400) in `settings.yaml` to change the interval. Checks share cached results across tabs and use native protocol metadata without sending inference prompts or installing adapters. Codex checks account/quota metadata, ACP checks session creation, and Claude checks the bridge's model catalog. These checks establish protocol readiness, not successful model inference. While `workers.stopped: true`, connection checks pause and launch no provider processes.
+Worker stop/resume settings, pending questions, approvals, deadlines, and restart counters persist outside the terminal session. Closing the dashboard leaves the supervisor running. Normal restart preserves an active attempt's original deadline. Replacements must reconcile old processes, sandboxes, and interrupted tool actions before obtaining write ownership; stale results are rejected.
 
-The red **Stop all runners** button sets `workers.stopped: true` in the configured YAML file, cancels current runners, and pauses unfinished tasks. New task, ideation, and provider runners stay blocked across restarts. While stopped, the button becomes **Resume all runners**. It saves `workers.stopped: false` and restores tasks paused by global Stop to their saved stages. Individually paused tasks stay paused. The button is red only while workers are enabled.
+A recoverable failure allows the initial launch plus three restarts of the same configured choice, with default backoff of 1, 2, and 4 seconds. Exhaustion advances through that role's queue. Exhausting the queue saves state and pauses for human retry or configuration repair. Review corrections have no fixed iteration cap.
 
-`/settings` shows the exact YAML bytes captured when this process started, including comments and formatting, together with its absolute source path and load time. This startup snapshot never changes during the process lifetime. **Edit file** opens the current contents at that same path; **Save file** validates and atomically saves the YAML, rejects stale revisions, and preserves edits on errors. Valid saves apply without restarting; return to the startup snapshot after saving. Legacy `/agents` and `/providers` links redirect to Settings. Root `settings.yaml` remains the default authoritative configuration. On first startup, existing saved worker settings, provider definitions and agent choices seed the file. SQLite retains runtime quota/availability, task/run history, versions and events.
-
-Before routing a Codex provider with saved `quota: exhausted`, Whirlwind rechecks account quota through the native `account/rateLimits/read` RPC, including when model execution uses ACP for explicit thinking. This metadata-only check starts no inference turn and has a five-second timeout. Fresh availability clears stale exhaustion and reset information; failed or unknown reads retain the previous state. Refresh results are recorded in `quota_observations` with `source: routing_refresh`. Missing reset times therefore cannot permanently block a provider after quota becomes available again.
-
-The YAML has `version: 1`, `workers` (capacity, reconciliation and ideation schedule), `providers` (IDs, names, kinds, commands, capabilities and optional discovery commands/cost), and `agents` (role-to-ordered-choice arrays, with optional exact `thinking.config_id` and `thinking.value`). Omit an agent role to keep existing default routing. Invalid files show an error and stop new worker dispatch; running attempts retain their settings. `--settings` / `WHIRLWIND_SETTINGS_FILE` override the file location for isolated deployments or tests; repository development defaults to root `settings.yaml`.
-
-## Bounded local execution
-
-Configure task/discovery budgets and shared quota pools before unattended inference. Selection precedes planning; agents and checks use the shared local OS sandbox. Inbox carries durable milestones, blockers and usage uncertainty. See [local orchestration setup and guarantees](docs/local-orchestration.md) for configuration, recovery, reviewer checks and evaluation.
-
-## Workflow modes
-
-[Personal and Agentic workflows](docs/workflow-modes.md) share coding, verification, review, and a configurable Submitter. Set global `mode` in `settings.yaml` on disk, then restart; a mode change cancels incomplete tasks while preserving their work. Settings exposes integration inventory and restart status.
+[Workflow details](docs/workflow-modes.md) and [local supervisor setup](docs/local-supervisor.md) explain approvals, local delivery, and recovery.

@@ -9,6 +9,32 @@ import (
 	"whirlwind/prompts/agents"
 )
 
+var directionCategories = []string{"expand", "optimize", "harden", "simplify"}
+
+func missingDirectionCategories(directions []model.Direction) []string {
+	present := map[string]bool{}
+	for _, direction := range directions {
+		present[direction.Category] = true
+	}
+	missing := make([]string, 0, len(directionCategories))
+	for _, category := range directionCategories {
+		if !present[category] {
+			missing = append(missing, category)
+		}
+	}
+	return missing
+}
+
+func validateCompleteDirections(directions []model.Direction) error {
+	if err := validateDirections(directions, nil, 4); err != nil {
+		return err
+	}
+	if len(directions) != len(directionCategories) || len(missingDirectionCategories(directions)) != 0 {
+		return fmt.Errorf("ideation requires exactly one candidate in each category; missing: %s", strings.Join(missingDirectionCategories(directions), ", "))
+	}
+	return nil
+}
+
 func validateDirections(directions, previous []model.Direction, maximum ...int) error {
 	limit := 4
 	if len(maximum) > 0 && maximum[0] > 0 {
@@ -17,7 +43,7 @@ func validateDirections(directions, previous []model.Direction, maximum ...int) 
 	if len(directions) > limit {
 		return fmt.Errorf("ideation must produce at most %d directions", limit)
 	}
-	titles, descriptions := map[string]bool{}, map[string]bool{}
+	titles, descriptions, categories := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, direction := range previous {
 		titles[directionKey(direction.Title)] = true
 		descriptions[directionKey(direction.Description)] = true
@@ -27,10 +53,11 @@ func validateDirections(directions, previous []model.Direction, maximum ...int) 
 			return err
 		}
 		title, description := directionKey(direction.Title), directionKey(direction.Description)
-		if title == "" || description == "" || titles[title] || descriptions[description] {
+		if title == "" || description == "" || titles[title] || descriptions[description] || categories[direction.Category] {
 			return errors.New("duplicate or incomplete direction; retry ideation")
 		}
 		titles[title], descriptions[description] = true, true
+		categories[direction.Category] = true
 	}
 	return nil
 }
@@ -39,12 +66,14 @@ func validateDirectionContent(direction model.Direction) error {
 	if len(strings.Fields(direction.Description)) > agents.MaxIdeaDescriptionWords {
 		return fmt.Errorf("idea description exceeds %d words", agents.MaxIdeaDescriptionWords)
 	}
-	switch direction.Category {
-	case "expand", "optimize", "harden", "simplify":
-	default:
+	for _, category := range directionCategories {
+		if direction.Category == category {
+			return nil
+		}
+	}
+	{
 		return errors.New("each idea needs category expand, optimize, harden, or simplify")
 	}
-	return nil
 }
 
 // directionKey ignores case, punctuation, and whitespace when checking repeated wording.

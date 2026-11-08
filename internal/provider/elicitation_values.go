@@ -22,7 +22,7 @@ func elicitationOptions(raw any) ([]string, error) {
 		}
 		encoded, err := json.Marshal(value)
 		if err != nil {
-			return nil, errors.New("Invalid MCP form enum option")
+			return nil, errors.New("invalid MCP form enum option")
 		}
 		label := string(encoded)
 		if text, ok := value.(string); ok {

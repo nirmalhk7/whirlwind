@@ -13,12 +13,16 @@ import (
 	"time"
 )
 
-// Opt-in real inference test. Enabling it requires working existing Codex login and network.
-func TestCodexLiveRoundTrip(t *testing.T) {
+// Opt-in ACP real inference test. Enabling it requires a configured Codex ACP adapter, login and network.
+func TestCodexACPLiveRoundTrip(t *testing.T) {
 	if os.Getenv("WHIRLWIND_TEST_CODEX_LIVE") != "1" {
-		t.Skip("set WHIRLWIND_TEST_CODEX_LIVE=1 to verify actual Codex inference")
+		t.Skip("set WHIRLWIND_TEST_CODEX_LIVE=1 to verify real Codex ACP inference")
 	}
-	logLiveCodexVersion(t)
+	configured := Defaults("")[0]
+	if !Available(configured) {
+		t.Skip("configured Codex ACP adapter is not installed")
+	}
+	logLiveACPCommand(t, configured.Command)
 	var nonce [16]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
 		t.Fatal(err)
@@ -37,34 +41,28 @@ func TestCodexLiveRoundTrip(t *testing.T) {
 	}
 }
 
-func logLiveCodexVersion(t *testing.T) {
+func logLiveACPCommand(t *testing.T, command []string) {
 	t.Helper()
-	path, err := exec.LookPath("codex")
+	path, err := exec.LookPath(command[0])
 	if err != nil {
-		t.Fatal("live verification requires installed codex:", err)
+		t.Skip("live verification requires installed Codex ACP adapter:", err)
 	}
-	versionCtx, versionCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer versionCancel()
-	version, err := exec.CommandContext(versionCtx, path, "--version").Output()
-	if err != nil {
-		t.Fatal("Codex version:", err)
-	}
-	t.Logf("live executable: %s; version: %s", path, strings.TrimSpace(string(version)))
+	t.Logf("live ACP adapter executable: %s", path)
 }
 
 func verifyLiveCodexTurn(t *testing.T, adapter ProcessAdapter, input Input, marker string, n int) Output {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	var mu sync.Mutex
-	deltas, completed := 0, false
+	deltas, stopped := 0, false
 	out, runErr := adapter.Run(ctx, input, Hooks{Event: func(kind string, _ any) {
 		mu.Lock()
 		defer mu.Unlock()
 		if kind == "item/agentMessage/delta" {
 			deltas++
 		}
-		if kind == "turn/completed" {
-			completed = true
+		if kind == "whirlwind/stop" {
+			stopped = true
 		}
 	}})
 	cancel()
@@ -78,8 +76,8 @@ func verifyLiveCodexTurn(t *testing.T, adapter ProcessAdapter, input Input, mark
 		t.Fatalf("live turn %d reply mismatch: %q", n+1, out.Text)
 	}
 	mu.Lock()
-	if deltas == 0 || !completed {
-		t.Errorf("live turn %d missing streamed reply/completion: deltas=%d completed=%t", n+1, deltas, completed)
+	if deltas == 0 || !stopped {
+		t.Errorf("live turn %d missing streamed reply/completion: deltas=%d stopped=%t", n+1, deltas, stopped)
 	}
 	mu.Unlock()
 	t.Logf("live turn %d: reply matched, streamed deltas=%d, resumed=%t", n+1, deltas, n > 0)

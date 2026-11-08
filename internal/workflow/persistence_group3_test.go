@@ -1,24 +1,22 @@
 package workflow
 
-import (
-	"context"
-	"testing"
-	"whirlwind/internal/model"
-	"whirlwind/internal/verification"
-)
+import "testing"
 
 func TestPublicationRejectsChangedCommitPolicyAndPlan(t *testing.T) {
-	e, task, _ := testEngine(t)
-	ctx := context.Background()
-	task.Base = "base-commit"
-	task.ReviewedCommit = "reviewed-commit"
-	task.VerificationID = "checks"
-	task.ReviewID = "review"
-	proof := model.Provenance{Task: task.ID, PlanVersion: task.PlanVersion, Base: task.Base, Head: task.ReviewedCommit, PolicyHash: "reviewed-policy", VerificationID: task.VerificationID, ReviewID: task.ReviewID}
-	if err := e.Store.Put(ctx, "verification", task.VerificationID, map[string]any{"stage": "complete", "provenance": proof, "report": verification.Report{Passed: true}}, 0); err != nil {
+	fixture := newAcceptedReviewFixture(t)
+	e, task, ctx := fixture.engine, fixture.task, fixture.ctx
+	proof := acceptedReviewProvenance(task, fixture.project.PolicyHash)
+	fixture.saveReport(t, fixture.report, proof)
+	review, adherence, accepted, err := e.LoadAcceptedReviewReport(ctx, task.ID)
+	if err != nil || !accepted {
+		t.Fatalf("fixture lacks complete accepted review evidence: %v", err)
+	}
+	review.Adherence, review.Score = &adherence, adherence.Score
+	reviewRecord, err := e.Store.Get(ctx, "reviews", task.ReviewID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Store.Put(ctx, "reviews", task.ReviewID, model.Review{Score: 9, Provenance: &proof}, 0); err != nil {
+	if err := e.Store.Put(ctx, "reviews", task.ReviewID, review, reviewRecord.Version); err != nil {
 		t.Fatal(err)
 	}
 	task.Approved = true

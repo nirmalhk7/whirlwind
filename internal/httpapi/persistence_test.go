@@ -46,6 +46,19 @@ func TestApprovalRejectsMissingProvenance(t *testing.T) {
 		t.Fatal("approval accepted without linked check/review evidence")
 	}
 }
+
+func TestRawApprovalRouteCannotBypassLocalFinalizationEvidence(t *testing.T) {
+	q := apiRequest{}
+	task := model.Task{ID: "critical", Stage: "approval", Risk: "critical"}
+	err := q.approveTask(&task)
+	apiErr, ok := err.(*apiError)
+	if !ok || apiErr.code != "local_finalization_required" {
+		t.Fatalf("raw task action did not require exact local finalization approval: %v", err)
+	}
+	if task.Stage != "approval" || task.Approved {
+		t.Fatalf("raw approval action changed critical task state: %+v", task)
+	}
+}
 func TestAttemptEvidenceReadEndpoints(t *testing.T) {
 	api := setup(t)
 	ctx := context.Background()

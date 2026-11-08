@@ -50,7 +50,7 @@ func TestClaudeStreamRetainsNativeSessionBeforeFailure(t *testing.T) {
 func TestACPTerminalEmitsUnpolledOutputAndExit(t *testing.T) {
 	var mu sync.Mutex
 	events := map[string][]map[string]any{}
-	c := NewClient(Input{CWD: t.TempDir()}, Hooks{
+	c, _, _ := newTerminalTestClient(t, t.TempDir(), false, Hooks{
 		Permission: func(context.Context, Permission) (bool, error) { return true, nil },
 		Event: func(kind string, value any) {
 			mu.Lock()
@@ -58,7 +58,6 @@ func TestACPTerminalEmitsUnpolledOutputAndExit(t *testing.T) {
 			events[kind] = append(events[kind], value.(map[string]any))
 		},
 	})
-	defer c.Close()
 	ctx := context.Background()
 	v, err := c.Handle(ctx, clientMessage("terminal/create", map[string]any{"command": "sh", "args": []string{"-c", "printf 'unpolled output'; exit 7"}}))
 	if err != nil {

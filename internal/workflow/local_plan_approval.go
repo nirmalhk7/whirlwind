@@ -48,7 +48,7 @@ func (e *Engine) localPlanForReview(ctx context.Context, id string, expected int
 	if err != nil {
 		return task, err
 	}
-	if task.Mode != model.AgenticMode || task.Stage != "plan_approval" || task.PlanDocument == nil {
+	if (model.EffectiveMode(task.Mode) != model.AgenticMode && model.EffectiveMode(task.Mode) != model.PersonalMode) || task.Stage != "plan_approval" || task.PlanDocument == nil {
 		return task, store.ErrConflict
 	}
 	return task, nil
@@ -74,6 +74,12 @@ func (e *Engine) approveLocalPlan(ctx context.Context, task *model.Task, hash st
 	content, plan, err := e.readLocalPlanApproval(*task, hash)
 	if err != nil {
 		return nil, err
+	}
+	if err := validatePlanRequirements(plan.Requirements); err != nil {
+		return nil, fmt.Errorf("plan approval requires complete frozen requirements: %w", err)
+	}
+	if err := validateDetailedPlan(plan); err != nil {
+		return nil, fmt.Errorf("plan approval requires a complete implementation specification: %w", err)
 	}
 	project, err := e.localPlanApprovalProject(ctx, task.ProjectID, plan)
 	if err != nil {
@@ -127,6 +133,9 @@ func (e *Engine) freshLocalPlanVersion(ctx context.Context, task *model.Task, co
 	// A revoked approval may still own this immutable artifact, for example
 	// after an inaccessible file is restored. Allocate a fresh version.
 	task.PlanVersion++
+	if task.PlanDocument != nil && task.PlanDocument.PlanVersion != 0 {
+		task.PlanDocument.PlanVersion = task.PlanVersion
+	}
 	path, err := e.writeLocalPlanFile(*task, content)
 	if err == nil {
 		task.PlanDocument.Path = path
@@ -147,7 +156,7 @@ func reviseLocalPlan(task *model.Task, feedback string) error {
 }
 
 func (e *Engine) ValidateLocalPlan(ctx context.Context, task model.Task) error {
-	if model.EffectiveMode(task.Mode) != model.AgenticMode {
+	if model.EffectiveMode(task.Mode) != model.AgenticMode && model.EffectiveMode(task.Mode) != model.PersonalMode {
 		return nil
 	}
 	project, projectErr := e.trustedProject(ctx, task.ProjectID)
@@ -155,11 +164,55 @@ func (e *Engine) ValidateLocalPlan(ctx context.Context, task model.Task) error {
 		e.invalidateLocalPlanPolicy(ctx, task.ID, project.PolicyHash, projectErr)
 		return errors.New("local plan policy approval is stale")
 	}
+	if task.PlanDocument == nil {
+		return e.requireLegacyPlanApproval(ctx, project, task.ID)
+	}
 	view, err := e.ReadLocalPlan(ctx, task.ID)
 	if err != nil {
 		return err
 	}
+	if err := validatePlanRequirements(view.Plan.Requirements); err != nil {
+		record, readErr := e.Store.Get(ctx, "tasks", task.ID)
+		if readErr != nil {
+			return readErr
+		}
+		current, decodeErr := store.Decode[model.Task](record)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		if localPlanApproved(current) {
+			if invalidateErr := e.invalidateLocalApproval(ctx, record, &current, "", "Legacy plan requirements lack stable evidence methods; add them and approve the plan again."); invalidateErr != nil {
+				return invalidateErr
+			}
+		}
+		return errors.New("local plan requires human review of stable requirement IDs and evidence methods")
+	}
 	return e.validateLocalPlanSnapshot(ctx, task, view.Hash)
+}
+
+func (e *Engine) requireLegacyPlanApproval(ctx context.Context, project model.Project, id string) error {
+	record, err := e.Store.Get(ctx, "tasks", id)
+	if err != nil {
+		return err
+	}
+	task, err := store.Decode[model.Task](record)
+	if err != nil {
+		return err
+	}
+	if task.Plan == nil {
+		return errors.New("coding cannot start: the legacy task has no recoverable plan; inspect its saved history")
+	}
+	task.Mode = model.EffectiveMode(task.Mode)
+	if task.PlanVersion < 1 {
+		task.PlanVersion = 1
+	}
+	if err := e.WriteLocalPlan(ctx, project, &task); err != nil {
+		return err
+	}
+	if err := e.Store.Put(ctx, "tasks", id, task, record.Version); err != nil {
+		return err
+	}
+	return nil
 }
 
 func localPlanPolicyStale(task model.Task, policyHash string, projectErr error) bool {

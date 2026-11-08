@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"whirlwind/internal/model"
 )
@@ -30,7 +31,7 @@ func TestReadyIssueAuthorizesAndDeduplicates(t *testing.T) {
 
 }
 
-func TestSavedDiscoveryDoesNotReintroduceDismissedEvidence(t *testing.T) {
+func TestSavedDiscoveryRejectsReintroducedDismissedEvidence(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	first := model.Direction{ID: "first", ProjectID: "p", Title: "Repair retry loss", Fingerprint: "same-evidence", Status: "dismissed"}
@@ -40,8 +41,8 @@ func TestSavedDiscoveryDoesNotReintroduceDismissedEvidence(t *testing.T) {
 	regenerated := first
 	regenerated.ID = "second"
 	regenerated.Status = "proposed"
-	if err := s.SaveDirections(ctx, "p", "2026-10-22", []model.Direction{regenerated}); err != nil {
-		t.Fatal(err)
+	if err := s.SaveDirections(ctx, "p", "2026-10-22", []model.Direction{regenerated}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("dismissed proposal was reintroduced: %v", err)
 	}
 	items, err := s.List(ctx, "directions")
 	if err != nil || len(items) != 1 {

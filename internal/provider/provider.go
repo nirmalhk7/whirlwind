@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
 	"slices"
 	"sort"
@@ -17,12 +18,16 @@ import (
 )
 
 type Input struct {
+	ReadinessOnly        bool
 	NativeIntegrations   bool
 	ProviderID           string
+	ACPProfile           string
 	DiscoverConnected    bool
 	CatalogOnly          bool
 	RequiredIntegrations []model.IntegrationTarget
 	IntegrationScopes    []model.IntegrationSource
+	MCPBroker            *execution.MCPBroker
+	MCPBrokerToken       string `json:"-"`
 	Execution            *execution.Profile
 	ExecutionProfile     string
 	UnitID               string
@@ -89,7 +94,8 @@ type ProcessAdapter struct{ Provider model.Provider }
 
 // Defaults describes built-in provider commands and capabilities, including the explicitly unavailable Antigravity entry.
 func Defaults(bridge string) []model.Provider {
-	return []model.Provider{{ID: "codex", Name: "Codex", Kind: "codex", Command: []string{"codex", "app-server", "--listen", "stdio://"}, Capabilities: []string{"ideate", "plan", "code", "review", "submit", "resume", "permissions", "quota"}, Quota: "unknown"}, {ID: "cursor", Name: "Cursor", Kind: "acp", Command: []string{"agent", "acp"}, Capabilities: []string{"ideate", "plan", "code", "review", "submit", "resume", "permissions"}, Quota: "unknown"}, {ID: "claude", Name: "Claude", Kind: "claude", Command: []string{"node", bridge}, Capabilities: []string{"ideate", "plan", "code", "review", "submit", "resume", "permissions"}, Quota: "unknown"}, {ID: "antigravity", Name: "Antigravity", Kind: "unavailable", Capabilities: []string{}, Quota: "unknown", Limitation: "Consumer-plan third-party application wrapping unsupported; supported integration required."}}
+	_ = bridge // Retained for callers from older configurations; Claude now uses its bundled ACP profile.
+	return []model.Provider{{ID: "codex", Name: "Codex", Kind: "acp", ACPProfile: "codex", Command: ACPCommand(model.Provider{Kind: "acp", ACPProfile: "codex"}), Capabilities: []string{"ideate", "plan", "code", "review", "finalizer", "submit", "resume", "permissions", "quota"}, Quota: "unknown"}, {ID: "cursor", Name: "Cursor", Kind: "acp", ACPProfile: "cursor", Command: ACPCommand(model.Provider{Kind: "acp", ACPProfile: "cursor"}), Capabilities: []string{"ideate", "plan", "code", "review", "finalizer", "submit", "resume", "permissions"}, Quota: "unknown"}, {ID: "claude", Name: "Claude", Kind: "acp", ACPProfile: "claude", Command: ACPCommand(model.Provider{Kind: "acp", ACPProfile: "claude"}), Capabilities: []string{"ideate", "plan", "code", "review", "finalizer", "submit", "resume", "permissions"}, Quota: "unknown"}, {ID: "antigravity", Name: "Antigravity", Kind: "unavailable", Capabilities: []string{}, Quota: "unknown", Limitation: "Consumer-plan third-party application wrapping unsupported; supported integration required."}}
 }
 
 // Available checks that a supported provider command executable exists; it does not prove authentication or quota.
@@ -132,64 +138,124 @@ func Route(ps []model.Provider, role string, preferred []string, outcomes map[st
 }
 
 // Run drives a Codex, ACP, or Claude-bridge session over stdio, handling streamed output, tool permissions, user questions, and cancellation.
-func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (Output, error) {
+func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (result Output, err error) {
+	p, err := ResolveExecutionProvider(a.Provider)
+	if err != nil {
+		return Output{SessionID: in.SessionID}, err
+	}
 	if in.NativeIntegrations {
-		a.Provider.NativeIntegrations = true
+		p.NativeIntegrations = true
 	}
 	in.ProviderID = a.Provider.ID
-	p := ExecutionProvider(a.Provider, in.Thinking)
-	s := &providerSession{ctx: ctx, input: in, hooks: h, client: NewClient(in, h), completed: make(chan string, 1), output: Output{SessionID: in.SessionID}}
-	defer s.client.Close()
-	profile, err := s.client.executionProfile()
+	in.ACPProfile = p.ACPProfile
+	s := &providerSession{ctx: ctx, input: in, hooks: h, client: NewClient(in, h), output: Output{SessionID: in.SessionID}}
+	defer func() { err = errors.Join(err, s.client.Close()) }()
+	profile, err := s.sessionExecutionProfile(ctx, p, in)
 	if err != nil {
 		return s.output, err
 	}
-	if in.Execution == nil {
-		profile, err = execution.ForProvider(in.CWD, in.ReadOnly, "", in.Policy.Sandbox, p.Command)
-		if err != nil {
-			return s.output, err
+	standalone := profile.StandaloneRuntime
+	transferred := false
+	defer func() {
+		if standalone && !transferred {
+			err = errors.Join(err, completeStandaloneProfile(profile))
 		}
-		profile.AllowedPaths = append([]string{}, in.Policy.AllowedPaths...)
+	}()
+	cleanup, err := s.prepareProviderIntegrations(p, a.Provider, &profile)
+	if err != nil {
+		return s.output, err
 	}
-	if in.NativeIntegrations {
-		if err := ProvisionNativeIntegrations(&profile, a.Provider); err != nil {
-			return s.output, err
-		}
-		if p.Kind == "acp" {
-			if err := s.prepareCursorIntegrations(p, profile); err != nil {
-				return s.output, err
-			}
-		}
-	}
-	s.input.CWD = profile.CWD
-	s.client.input.CWD = profile.CWD
-	if p.Kind == "acp" || p.Kind == "claude" {
-		cleanup, e := s.prepareCheckMCP(ctx, &profile)
-		if e != nil {
-			return s.output, e
-		}
+	if cleanup != nil {
 		defer cleanup()
 	}
 	rpc, err := StartWithProfile(ctx, p.Command, profile, s.handle, h.Event)
 	if err != nil {
-		return s.output, err
+		return s.output, actionableACPError(p, err)
 	}
+	transferred = true
 	s.rpc = rpc
-	defer rpc.Close()
-	switch p.Kind {
-	case "acp":
-		err = s.runACP()
-	case "codex":
-		err = s.runCodex()
-	case "claude":
-		err = s.runClaude()
-	default:
-		err = errors.New("unsupported provider kind")
-	}
+	defer func() { err = errors.Join(err, rpc.Close()) }()
+	err = authenticationACPError(p, s.runProviderKind(p.Kind))
 	s.mu.Lock()
-	result := s.output
+	result = s.output
 	s.mu.Unlock()
 	return result, err
+}
+
+func (s *providerSession) sessionExecutionProfile(ctx context.Context, executionProvider model.Provider, input Input) (execution.Profile, error) {
+	profile, err := s.client.executionProfile()
+	if input.Execution != nil {
+		profile = *input.Execution
+	}
+	if err != nil {
+		return profile, err
+	}
+	if input.Execution == nil {
+		profile, err = execution.ForProvider(input.CWD, input.ReadOnly, "", input.Policy.Sandbox, executionProvider.Command)
+		if err != nil {
+			return profile, err
+		}
+		profile.AllowedPaths = append([]string{}, input.Policy.AllowedPaths...)
+		profile, err = pinStandaloneProfile(ctx, profile, "")
+		if err != nil {
+			return execution.Profile{}, err
+		}
+	}
+	profile.MCPBroker = input.MCPBroker
+	profile.MCPBrokerToken = input.MCPBrokerToken
+	return profile, nil
+}
+
+func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider, profile *execution.Profile) (func(), error) {
+	if s.input.MCPBroker != nil {
+		if s.input.NativeIntegrations {
+			return nil, errors.New("selected read-only MCP broker conflicts with raw native integration mounts")
+		}
+		if s.hasCheckTool() {
+			return nil, errors.New("selected integration broker conflicts with reviewer check broker; use separate agent attempts")
+		}
+		if p.Kind != "acp" {
+			return nil, errors.New("selected integration broker requires the configured ACP transport")
+		}
+		if err := s.prepareBrokerMCP(profile); err != nil {
+			return nil, err
+		}
+	}
+	if p.Kind == "acp" && p.ACPProfile != "" {
+		if err := provisionACPAuth(profile, provider); err != nil {
+			return nil, err
+		}
+	}
+	if s.input.NativeIntegrations {
+		if err := ProvisionNativeIntegrations(profile, provider); err != nil {
+			return nil, err
+		}
+		if p.Kind == "acp" {
+			if err := s.prepareCursorIntegrations(p, *profile); err != nil {
+				return nil, err
+			}
+		}
+	}
+	s.input.Execution = profile
+	s.input.CWD = profile.CWD
+	s.client.input.CWD = profile.CWD
+	if p.Kind != "acp" && p.Kind != "claude" {
+		return nil, nil
+	}
+	return s.prepareCheckMCP(s.ctx, profile)
+}
+
+func (s *providerSession) runProviderKind(kind string) error {
+	switch kind {
+	case "acp":
+		return s.runACP()
+	case "codex":
+		return fmt.Errorf("native Codex execution is unsupported; configure its ACP agent and set kind: acp")
+	case "claude":
+		return fmt.Errorf("Claude bridge execution is unsupported; configure its ACP agent and set kind: acp")
+	default:
+		return errors.New("unsupported provider kind")
+	}
 }
 
 type providerSession struct {
@@ -204,8 +270,6 @@ type providerSession struct {
 	rpc            *RPC
 	mu             sync.Mutex
 	output         Output
-	completed      chan string
-	turnFailure    error
 	replaying      atomic.Bool
 }
 
@@ -250,33 +314,48 @@ func (s *providerSession) handle(c context.Context, m Message) (any, error) {
 	}
 	var p map[string]any
 	_ = json.Unmarshal(m.Params, &p)
-	switch m.Method {
-	case "whirlwind/run_check":
-		return s.runCheckTool(c, m.Params)
-	case "item/tool/call":
-		return s.dynamicCheck(c, m.Params)
-	case "mcpServer/elicitation/request", "item/permissions/requestApproval", "item/tool/requestUserInput", "question/request",
-		"session/request_permission", "item/commandExecution/requestApproval",
-		"item/fileChange/requestApproval", "permission/request",
-		"cursor/ask_question", "cursor/create_plan":
-		return s.handleRequest(c, m, p)
-	case "agent/event":
-		s.claudeEvent(p)
-	case "session/update":
-		s.sessionUpdate(p)
-	case "item/agentMessage/delta":
-		s.messageDelta(p)
-	case "account/rateLimits/updated":
-		s.quotaUpdate(m)
-	case "thread/tokenUsage/updated":
-		s.tokenUsage(p)
-	case "turn/completed":
-		s.turnCompleted(p)
+	if result, handled, err := s.handleToolRequest(c, m, p); handled {
+		return result, err
 	}
+	s.handleNotification(m, p)
 	if len(m.ID) > 0 {
 		return nil, errors.New("unsupported client method: " + m.Method)
 	}
 	return nil, nil
+}
+
+func (s *providerSession) handleToolRequest(ctx context.Context, m Message, params map[string]any) (any, bool, error) {
+	switch m.Method {
+	case "whirlwind/run_check":
+		result, err := s.runCheckTool(ctx, m.Params)
+		return result, true, err
+	case "item/tool/call":
+		result, err := s.dynamicCheck(ctx, m.Params)
+		return result, true, err
+	case "mcpServer/elicitation/request", "item/permissions/requestApproval", "item/tool/requestUserInput", "question/request",
+		"session/request_permission", "item/commandExecution/requestApproval",
+		"item/fileChange/requestApproval", "permission/request",
+		"cursor/ask_question", "cursor/create_plan":
+		result, err := s.handleRequest(ctx, m, params)
+		return result, true, err
+	default:
+		return nil, false, nil
+	}
+}
+
+func (s *providerSession) handleNotification(m Message, params map[string]any) {
+	switch m.Method {
+	case "agent/event":
+		s.claudeEvent(params)
+	case "session/update":
+		s.sessionUpdate(params)
+	case "item/agentMessage/delta":
+		s.messageDelta(params)
+	case "account/rateLimits/updated":
+		s.quotaUpdate(m)
+	case "thread/tokenUsage/updated":
+		s.tokenUsage(params)
+	}
 }
 
 func (s *providerSession) handleRequest(ctx context.Context, m Message, params map[string]any) (any, error) {

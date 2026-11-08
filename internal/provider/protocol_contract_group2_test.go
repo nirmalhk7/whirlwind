@@ -68,25 +68,29 @@ func TestACPResumeCapabilityAndEmptyLoadResult(t *testing.T) {
 }
 
 func TestProtocolFailures(t *testing.T) {
-	cases := []struct{ kind, scenario, want string }{
-		{"acp", contractInitError, contractAuthError},
+	cases := []struct{ profile, scenario, want string }{
+		{"", contractInitError, contractAuthError},
 		{"codex", contractInitError, contractAuthError},
-		{"acp", "incompatible-version", "protocol version"},
-		{"acp", contractEmptySession, "ACP returned empty session ID"},
-		{"codex", contractEmptySession, "codex returned empty thread ID"},
-		{"acp", "refusal", "refusal"},
+		{"", "incompatible-version", "protocol version"},
+		{"", contractEmptySession, "ACP returned empty session ID"},
+		{"codex", contractEmptySession, "ACP returned empty session ID"},
+		{"", "refusal", "refusal"},
 		{"codex", "failed", "fixture turn failed"},
 		{"codex", "interrupted", "interrupted"},
-		{"acp", "malformed", "malformed provider frame"},
+		{"", "malformed", "malformed provider frame"},
 		{"codex", "malformed", "malformed provider frame"},
-		{"acp", "exit", "exited"},
+		{"", "exit", "exited"},
 		{"codex", "exit", "exited"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.kind+"/"+tc.scenario, func(t *testing.T) {
+		name := tc.profile
+		if name == "" {
+			name = "acp"
+		}
+		t.Run(name+"/"+tc.scenario, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_, err := contractAdapter(t, protocolFixture{Kind: tc.kind, Scenario: tc.scenario}).Run(ctx,
+			_, err := contractAdapter(t, protocolFixture{Kind: "acp", ACPProfile: tc.profile, Scenario: tc.scenario}).Run(ctx,
 				Input{CWD: t.TempDir(), Prompt: contractPrompt}, Hooks{})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want %q, got %v", tc.want, err)
@@ -96,11 +100,15 @@ func TestProtocolFailures(t *testing.T) {
 }
 
 func TestProtocolCancellationDuringPrompt(t *testing.T) {
-	for _, kind := range []string{"acp", "codex"} {
-		t.Run(kind, func(t *testing.T) {
+	for _, profile := range []string{"", "codex"} {
+		name := profile
+		if name == "" {
+			name = "acp"
+		}
+		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			_, err := contractAdapter(t, protocolFixture{Kind: kind, Scenario: "stall"}).Run(ctx,
+			_, err := contractAdapter(t, protocolFixture{Kind: "acp", ACPProfile: profile, Scenario: "stall"}).Run(ctx,
 				Input{CWD: t.TempDir(), Prompt: contractPrompt}, Hooks{Event: func(kind string, _ any) {
 					if kind == "fixture/prompt" {
 						cancel()
@@ -114,24 +122,28 @@ func TestProtocolCancellationDuringPrompt(t *testing.T) {
 }
 
 func TestProtocolCallbacks(t *testing.T) {
-	for _, kind := range []string{"acp", "codex"} {
+	for _, profile := range []string{"", "codex"} {
+		name := profile
+		if name == "" {
+			name = "acp"
+		}
 		for _, allow := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/allow=%t", kind, allow), func(t *testing.T) {
+			t.Run(fmt.Sprintf("%s/allow=%t", name, allow), func(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				verifyProtocolCallbacks(t, ctx, kind, allow)
+				verifyProtocolCallbacks(t, ctx, profile, allow)
 			})
 		}
 	}
 }
 
-func verifyProtocolCallbacks(t *testing.T, ctx context.Context, kind string, allow bool) {
+func verifyProtocolCallbacks(t *testing.T, ctx context.Context, profile string, allow bool) {
 	t.Helper()
 	scenario := "deny"
 	if allow {
 		scenario = "allow"
 	}
-	out, err := contractAdapter(t, protocolFixture{Kind: kind, Scenario: scenario}).Run(ctx,
+	out, err := contractAdapter(t, protocolFixture{Kind: "acp", ACPProfile: profile, Scenario: scenario}).Run(ctx,
 		Input{CWD: t.TempDir(), Prompt: contractPrompt}, Hooks{
 			Permission: func(_ context.Context, p Permission) (bool, error) {
 				if !reflect.DeepEqual(p.Command, []string{"go", "test", "./..."}) {

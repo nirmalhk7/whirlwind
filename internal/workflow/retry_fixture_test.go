@@ -8,6 +8,7 @@ import (
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
+	"whirlwind/internal/testutil/openshell"
 )
 
 const retryFailureFormat = "calls=%d error=%v"
@@ -21,6 +22,10 @@ type retryHarness struct {
 
 func newRetryHarness(t *testing.T, chain ...model.AgentChoice) retryHarness {
 	t.Helper()
+	fixture := openshell.Install(t)
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
+	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "test-image")
+	t.Setenv("WHIRLWIND_OPENSHELL_PROXY_TOKEN", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	e, task, cwd := testEngine(t)
 	cwd, err := filepath.EvalSymlinks(cwd)
 	if err != nil {
@@ -32,7 +37,11 @@ func newRetryHarness(t *testing.T, chain ...model.AgentChoice) retryHarness {
 		t.Fatal(err)
 	}
 	if chain != nil {
-		if err := e.Store.Put(context.Background(), "agents", "code", model.AgentConfig{Role: "code", Chain: chain}, 0); err != nil {
+		record, err := e.Store.Get(context.Background(), "agents", "code")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Store.Put(context.Background(), "agents", "code", model.AgentConfig{Role: "code", Chain: chain}, record.Version); err != nil {
 			t.Fatal(err)
 		}
 	}

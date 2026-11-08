@@ -17,4 +17,4 @@ type AgentConfig struct {
 	Chain         []AgentChoice `json:"chain"`
 }
 
-func AgentRoles() []string { return []string{"ideate", "plan", "code", "review", "submit"} }
+func AgentRoles() []string { return []string{"ideate", "plan", "code", "review", "finalizer"} }

@@ -4,34 +4,15 @@ Whirlwind runs locally on macOS or Linux. Go owns scheduling, worktrees, verific
 
 ## Run
 
-Requirements: Go 1.26.9+, Git, authenticated GitHub CLI, Node.js for web UI and optional Claude SDK bridge. Install an agent separately and authenticate using its own documented setup.
+Requirements: Go version specified in `go.mod`, Git, and Node.js 20.9+ for the launcher and OpenShell bridge. Install an agent separately and authenticate using its own documented setup. npm is needed only when installing optional bridge dependencies such as the Claude SDK.
 
 ```sh
 go mod download
-go run ./cmd/whirlwind --data /absolute/path/to/whirlwind-state
+./bin/whirlwind start
+./bin/whirlwind dashboard
 ```
 
-Control server binds `127.0.0.1:9877`. From repository root, run both with `make dev`, or run backend and web UI in separate terminals:
-
-```sh
-make run
-```
-
-```sh
-make web
-```
-
-Open `http://127.0.0.1:9876`. The browser uses same-origin `/api/v1` requests; Next.js forwards requests and live events to the Go server. `make web` defaults to `http://127.0.0.1:9877`; override with `make web WHIRLWIND_BACKEND_URL=http://127.0.0.1:PORT` when running Go on another loopback port.
-
-Install web dependencies before first launch, or run web directly:
-
-```sh
-cd web
-npm ci
-WHIRLWIND_BACKEND_URL=http://127.0.0.1:9877 npm run dev
-```
-
-For direct `npm run dev` or `npm start`, optional `web/.env.local` can supply `WHIRLWIND_BACKEND_URL`; copy `web/.env.example` to start. Next.js keeps this setting on the server. Restart Next.js after changing it.
+The supervisor persists workflow state and accepts local control commands over a private Unix socket. `dashboard` starts the Go/tview terminal interface; there is no browser frontend or UI server. Go HTTP API and webhook endpoints remain available for integrations where configured.
 
 For Claude, install the pinned bridge dependency first:
 
@@ -122,17 +103,15 @@ See [Go adapter and onboarding verification](acp-codex-verification.md) for real
 ```sh
 go test -race ./...
 go vet ./...
-cd web
-npm run build
-npm run test:e2e
+node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs
 ```
 
-Go tests use real SQLite and Git worktrees, fake provider processes, and fake external GitHub boundary. Browser suite starts real Go and Next servers. Full onboarding-to-PR scenario uses real storage, ACP client tools, worktrees, verification, and review routing, with local fake external CLIs. Planner/approval interaction also has focused HTTP fixtures. Historical Python-era browser specs remain on disk but are excluded by new test configuration.
+Go tests use real SQLite and Git worktrees, fake provider processes, and fake external GitHub boundaries. Node tests cover launchers and provider bridges. Workflow and planner/approval interactions also have focused HTTP fixtures.
 
 ## Run evidence and recovery
 
-Schema migrations add bounded artifact storage and attempt event history without
-backfilling unknown historical values. Run inspection now exposes exact supplied
+The current SQLite schema includes bounded artifact storage and attempt event
+history, initialized directly without upgrade migrations. Run inspection exposes exact supplied
 inputs, streamed visible output/tools, diagnostics, scoped usage, and linked
 verification/review decisions. Startup reconciles interrupted attempts and orphaned
 transport requests after process reaping. Publication intent and related progress

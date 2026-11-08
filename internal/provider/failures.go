@@ -41,6 +41,17 @@ func (e *RPCError) RPCCode() int { return e.Code }
 // TransportError preserves a failed process or connection's underlying cause.
 type TransportError struct{ Cause error }
 
+// StartupError identifies an executable/interpreter failure before protocol readiness.
+type StartupError struct {
+	Cause      error
+	Diagnostic string
+}
+
+func (e *StartupError) Error() string {
+	return fmt.Sprintf("provider setup required: %v: %s", e.Cause, strings.TrimSpace(e.Diagnostic))
+}
+func (e *StartupError) Unwrap() error { return e.Cause }
+
 func (e *TransportError) Error() string { return "provider transport: " + e.Cause.Error() }
 func (e *TransportError) Unwrap() error { return e.Cause }
 
@@ -49,7 +60,8 @@ func ClassifyFailure(err error) FailureKind {
 	if err == nil || callerCancellation(err) {
 		return FailureUnknown
 	}
-	if errors.Is(err, exec.ErrNotFound) {
+	var startup *StartupError
+	if errors.Is(err, exec.ErrNotFound) || errors.As(err, &startup) {
 		return FailureConfiguration
 	}
 	if kind := remoteFailure(err); kind != FailureUnknown {

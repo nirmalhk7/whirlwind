@@ -136,6 +136,8 @@ func grantNativeMCPDefinitions(profile *execution.Profile, p model.Provider, fam
 
 func nativeProviderFamily(p model.Provider) (string, error) {
 	switch {
+	case p.Kind == "acp" && slices.Contains([]string{"codex", "claude", "cursor"}, p.ACPProfile):
+		return p.ACPProfile, nil
 	case p.Kind == "codex" || p.ID == "codex" && p.Kind == "acp":
 		return "codex", nil
 	case p.Kind == "claude" || p.ID == "claude" && p.Kind == "acp":

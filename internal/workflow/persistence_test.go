@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"testing"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
@@ -26,7 +28,9 @@ func (a evidenceAgent) Run(ctx context.Context, in provider.Input, h provider.Ho
 	}
 	h.Event("session/update", map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]string{"type": "text", "text": "partial reply"}}})
 	h.Event("item/agentMessage/delta", map[string]string{"delta": "visible reply"})
-	return provider.Output{Text: "final reply", SessionID: "native-s"}, nil
+	out, err := (fakeAgent{9}).Run(ctx, in, h)
+	out.SessionID = "native-s"
+	return out, err
 }
 
 func TestAttemptPersistsInputStreamsAndMetrics(t *testing.T) {
@@ -45,8 +49,9 @@ func TestAttemptPersistsInputStreamsAndMetrics(t *testing.T) {
 	if metric["attempt_id"] != sessions[0].ID {
 		t.Fatalf("metrics not linked: %s", metrics[0].Data)
 	}
-	if out.Text != "final reply" {
-		t.Fatal(out)
+	var plan model.Plan
+	if err := json.Unmarshal([]byte(out.Text), &plan); err != nil || plan.Objective != "Add file" || out.SessionID != "native-s" {
+		t.Fatalf("final planner output lost: %+v %v", out, err)
 	}
 	var n int
 	if err = e.Store.DB.QueryRow("SELECT count(*) FROM attempt_events WHERE attempt_id=?", sessions[0].ID).Scan(&n); err != nil || n < 2 {
@@ -88,54 +93,60 @@ func TestAutomaticPermissionIsAudited(t *testing.T) {
 }
 
 func TestPublicationIntentExistsBeforeRemoteWrite(t *testing.T) {
-	e, task, _ := testEngine(t)
+	e, task, _, _ := acceptedDeliveryFixture(t)
 	ctx := context.Background()
-	p, _ := e.Project(ctx, task.ProjectID)
-	_, _ = e.Store.DB.Exec("DELETE FROM issue_tasks WHERE task_id=?", task.ID)
-	task.Issue.Number = 0
-	task.Stage = "plan_ready"
-	task.Plan = &model.Plan{Objective: "publish", AcceptanceCriteria: []string{"exists"}}
-	r, _ := e.Store.Get(ctx, "tasks", task.ID)
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, r.Version); err != nil {
-		t.Fatal(err)
-	}
-	e.GitHub = publicationProbe{fakeGitHub: fakeGitHub{}, store: e.Store, t: t}
 	if err := e.Step(ctx, task.ID); err != nil {
 		t.Fatal(err)
 	}
-	records, _ := e.Store.List(ctx, "publications")
-	if len(records) != 1 {
-		t.Fatal("publication result missing")
+	stored, err := e.Store.Get(ctx, "tasks", task.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	_ = p
-}
-
-type publicationProbe struct {
-	fakeGitHub
-	store *store.Store
-	t     *testing.T
-}
-
-func (g publicationProbe) CreateIssue(ctx context.Context, repo, title, body, marker string) (model.Issue, error) {
-	records, _ := g.store.List(ctx, "publications")
-	if len(records) != 1 {
-		g.t.Error("remote write preceded durable intent")
+	persisted, err := store.Decode[model.Task](stored)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return model.Issue{Number: 2, Title: title, Body: body + "\n\n" + marker, State: "OPEN", Labels: []string{"whirlwind:ready"}}, nil
+	if persisted.Delivery == nil || persisted.Delivery.Stage != "prepared" || persisted.Delivery.ReviewedCommit != task.ReviewedCommit {
+		t.Fatalf("durable delivery intent does not bind accepted candidate: %+v", persisted.Delivery)
+	}
+	ref := "refs/heads/" + persisted.Delivery.Branch
+	if _, err := submissionGitRun(ctx, task.Worktree, "show-ref", "--verify", ref); err == nil {
+		t.Fatalf("delivery branch promoted before the intent checkpoint: %s", ref)
+	}
+	if _, err := os.Stat(persisted.Delivery.Worktree); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("delivery worktree exists before the intent checkpoint: err=%v", err)
+	}
+	publications, err := e.Store.List(ctx, "publications")
+	if err != nil || len(publications) != 0 || persisted.PR != "" {
+		t.Fatalf("local intent created remote publication state: PR=%q records=%d err=%v", persisted.PR, len(publications), err)
+	}
 }
 
 func TestVerificationEvidenceFailureBlocksProgress(t *testing.T) {
-	e, task, _ := testEngine(t)
+	e, task, project, _ := acceptedDeliveryFixture(t)
 	ctx := context.Background()
-	if err := e.Step(ctx, task.ID); err != nil {
-		t.Fatal(err)
-	}
 	_, err := e.Store.DB.Exec("CREATE TRIGGER fail_verification BEFORE INSERT ON resources WHEN NEW.kind='verification' BEGIN SELECT RAISE(ABORT,'verification unavailable'); END")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = e.Step(ctx, task.ID); err == nil {
-		t.Fatal("verification persistence failure accepted")
+	previousVerification := task.VerificationID
+	err = e.verify(ctx, project, &task)
+	if !errors.Is(err, store.ErrPersistence) {
+		t.Fatalf("verification persistence failure did not block progress: %v", err)
+	}
+	if task.Stage != "submitting" || task.VerificationID != previousVerification {
+		t.Fatalf("failed verification advanced the accepted task: stage=%s verification=%s", task.Stage, task.VerificationID)
+	}
+	stored, err := e.Store.Get(ctx, "tasks", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := store.Decode[model.Task](stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Stage != "submitting" || persisted.VerificationID != previousVerification {
+		t.Fatalf("verification failure persisted workflow progress: stage=%s verification=%s", persisted.Stage, persisted.VerificationID)
 	}
 }
 

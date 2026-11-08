@@ -28,8 +28,24 @@ func TestChangedDiffDoesNotHideUnchangedFailureEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if task.Stage != "paused" || task.Recoveries != 3 {
-		t.Fatalf("diff churn hid stagnation: %+v", task)
+	if task.Stage != "repair" || task.Recoveries != 3 || task.UnchangedFailures != 0 {
+		t.Fatalf("stall telemetry paused or lost progress without a human decision: %+v", task)
+	}
+}
+
+func TestUnchangedCorrectionTelemetryDoesNotPauseAfterTwentyAttempts(t *testing.T) {
+	e, task, repo := testEngine(t)
+	task.Worktree = repo
+	task.Base = "HEAD"
+	task.Stage = "repair"
+	task.Handoff.FailingTests = []string{"unit: still failing"}
+	for attempt := 0; attempt < 20; attempt++ {
+		if err := e.progress(context.Background(), &task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if task.Stage != "repair" || task.Recoveries < 4 {
+		t.Fatalf("ordinary correction progress was capped or lost: stage=%q recoveries=%d failures=%d", task.Stage, task.Recoveries, task.UnchangedFailures)
 	}
 }
 

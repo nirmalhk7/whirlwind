@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -12,71 +13,107 @@ import (
 	"whirlwind/internal/store"
 )
 
-// TestCriticalChangeWaitsForHumanBeforePR verifies critical-risk acceptance pauses for human approval before publication.
-func TestCriticalChangeWaitsForHumanBeforePR(t *testing.T) {
+// Critical-risk acceptance must wait for an exact human authorization before local finalization.
+func TestCriticalChangeWaitsForHumanBeforeLocalFinalization(t *testing.T) {
 	ctx := context.Background()
-	e, task, _ := testEngine(t)
-	p, _ := e.Project(ctx, task.ProjectID)
-	p.Policy.RiskRules = []model.RiskRule{{Level: "critical", Paths: []string{resultFile}}}
-	r, _ := e.Store.Get(ctx, "projects", p.ID)
-	if err := e.Store.Put(ctx, "projects", p.ID, p, r.Version); err != nil {
+	e, task, _, _ := criticalApprovalFixture(t)
+	project, err := e.Project(ctx, task.ProjectID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	before := submissionGit(t, project.Path, "rev-parse", "HEAD")
 	for n := 0; n < 6; n++ {
-		if err := e.Step(ctx, task.ID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	r, _ = e.Store.Get(ctx, "tasks", task.ID)
-	done, _ := store.Decode[model.Task](r)
-	if done.Stage != "approval" || done.PR != "" || done.Approved {
-		t.Fatalf("approval bypass: %+v", done)
-	}
-}
-
-// TestProductiveReviewHasNoPassCap verifies a task can be accepted after more than one hundred review passes.
-func TestProductiveReviewHasNoPassCap(t *testing.T) {
-	ctx := context.Background()
-	e, task, _ := testEngine(t)
-	for n := 0; n < 2; n++ {
 		if err := e.Step(ctx, task.ID); err != nil {
 			t.Fatal(err)
 		}
 	}
 	r, _ := e.Store.Get(ctx, "tasks", task.ID)
 	done, _ := store.Decode[model.Task](r)
-	done.ReviewPasses = 100
-	if err := e.Store.Put(ctx, "tasks", task.ID, done, r.Version); err != nil {
-		t.Fatal(err)
+	if done.Stage != "approval" || done.PR != "" || done.Approved || done.Delivery != nil || done.Approval != nil {
+		t.Fatalf("approval bypass: %+v", done)
 	}
-	if err := e.Step(ctx, task.ID); err != nil {
-		t.Fatal(err)
+	if after := submissionGit(t, project.Path, "rev-parse", "HEAD"); after != before {
+		t.Fatal("waiting for critical approval changed the accepted commit")
 	}
-	r, _ = e.Store.Get(ctx, "tasks", task.ID)
-	done, _ = store.Decode[model.Task](r)
-	if done.Stage != "submitting" || done.ReviewPasses != 101 {
-		t.Fatalf("review cap remains: %+v", done)
+	publications, err := e.Store.List(ctx, "publications")
+	if err != nil || len(publications) != 0 {
+		t.Fatalf("critical local approval created remote publication state: %d %v", len(publications), err)
 	}
 }
 
-// TestPRDescriptionListsEachUnitOnce verifies the published PR description lists each implementation unit once.
+// TestProductiveReviewHasNoPassCap verifies a task can be accepted after more than one hundred review passes.
+func TestProductiveReviewHasNoPassCap(t *testing.T) {
+	fixture := newAgenticReviewFixture(t, false)
+	ctx, e := fixture.ctx, fixture.e
+	if err := e.Step(ctx, fixture.task.ID); err != nil {
+		t.Fatal(err)
+	}
+	candidate, version := localStoredTask(t, e, fixture.task.ID)
+	if candidate.Stage != "review" || !candidate.ChecksPassed || candidate.PlanDocument == nil || candidate.PlanDocument.ApprovedHash == "" {
+		t.Fatalf("review did not receive an approved, verified candidate: %+v", candidate)
+	}
+	candidate.ReviewPasses = 100
+	if err := e.Store.Put(ctx, "tasks", candidate.ID, candidate, version); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Step(ctx, candidate.ID); err != nil {
+		t.Fatal(err)
+	}
+	accepted, _ := localStoredTask(t, e, candidate.ID)
+	if accepted.Stage != "submitting" || accepted.ReviewPasses != 101 || !accepted.ChecksPassed || accepted.Delivery != nil {
+		t.Fatalf("productive 101st review did not route to local delivery: %+v", accepted)
+	}
+	_, adherence, ok, err := e.LoadAcceptedReviewReport(ctx, accepted.ID)
+	if err != nil || !ok || adherence.Score != 100 || len(accepted.Handoff.CompletedCriteria) != 1 {
+		t.Fatalf("frozen requirement evidence was not accepted after the 101st review: adherence=%+v task=%+v err=%v", adherence, accepted, err)
+	}
+	done := fixture.completeLocalDelivery()
+	fixture.verifyTDD(done)
+	fixture.verifySubmission(done)
+	fixture.reconcile(done)
+	if done.Delivery == nil || done.Delivery.Stage != "complete" || done.PR != "" {
+		t.Fatalf("accepted candidate did not complete local delivery: %+v", done)
+	}
+}
+
+// TestPRDescriptionListsEachUnitOnce verifies the local finalizer receives each approved implementation unit once.
 func TestPRDescriptionListsEachUnitOnce(t *testing.T) {
 	ctx := context.Background()
-	e, task, _ := testEngine(t)
-	recorded := &recordingGitHub{}
-	e.GitHub = recorded
-	for n := 0; n < 7; n++ {
-		if err := e.Step(ctx, task.ID); err != nil {
-			t.Fatal(err)
+	var prompt string
+	e, task, project, record := acceptedDeliveryFixtureWith(t, nil, nil, &prompt)
+	done := completeAcceptedLocalDeliveryFixture(t, e, task, project, record)
+	planStart := strings.Index(prompt, "\nPlan: ")
+	if planStart < 0 {
+		t.Fatalf("local finalizer prompt omitted approved plan: %s", prompt)
+	}
+	planContext := prompt[planStart+len("\nPlan: "):]
+	if planEnd := strings.Index(planContext, "\nReview: "); planEnd >= 0 {
+		planContext = planContext[:planEnd]
+	}
+	var approvedPlan model.Plan
+	if err := json.Unmarshal([]byte(planContext), &approvedPlan); err != nil {
+		t.Fatalf("decode approved plan in local finalizer context: %v", err)
+	}
+	unitMatches := 0
+	for _, unit := range approvedPlan.Units {
+		if unit.ID == "main" && unit.Objective == "Write failing test, implement result, run checks" {
+			unitMatches++
 		}
 	}
-	if got := strings.Count(recorded.prBody, "- add result.txt"); got != 1 {
-		t.Fatalf("PR description lists implementation unit %d times; want once:\n%s", got, recorded.prBody)
+	if unitMatches != 1 {
+		t.Fatalf("local finalizer received the approved unit objective %d times in its structured inventory; want once: %+v", unitMatches, approvedPlan.Units)
+	}
+	if done.Delivery == nil || done.Delivery.Stage != "complete" || done.PR != "" {
+		t.Fatalf("unit handoff bypassed local-only delivery: %+v", done)
+	}
+	publications, err := e.Store.List(ctx, "publications")
+	if err != nil || len(publications) != 0 {
+		t.Fatalf("unit handoff created remote publication state: %d %v", len(publications), err)
 	}
 }
 
-// TestRepeatedUnchangedFailuresEscalateAfterThreeRecoveries verifies repeated unchanged diffs exhaust three recoveries and pause the task.
-func TestRepeatedUnchangedFailuresEscalateAfterThreeRecoveries(t *testing.T) {
+// Repeated unchanged corrections keep accumulating telemetry without an automatic pause.
+func TestRepeatedUnchangedFailuresRemainRunnableAfterThreeRecoveries(t *testing.T) {
 	ctx := context.Background()
 	e, task, repo := testEngine(t)
 	task.Worktree = repo
@@ -87,8 +124,8 @@ func TestRepeatedUnchangedFailuresEscalateAfterThreeRecoveries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if task.Stage != "paused" || task.Recoveries != 3 {
-		t.Fatalf("stall not escalated: %+v", task)
+	if task.Stage != "repair" || task.Recoveries != 3 || task.UnchangedFailures != 0 {
+		t.Fatalf("unchanged correction telemetry paused or reset unexpectedly: %+v", task)
 	}
 }
 

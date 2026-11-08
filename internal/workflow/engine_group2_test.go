@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 	"whirlwind/internal/model"
@@ -28,9 +29,10 @@ func TestQuotaFailureHandsOffToAnotherProvider(t *testing.T) {
 	e, task, repo := testEngine(t)
 	p, _ := e.Project(ctx, task.ProjectID)
 	p.Policy.Providers = []string{"fake", "backup"}
-	if err := e.Store.Put(ctx, "providers", "backup", model.Provider{ID: "backup", Available: true, Quota: "unknown", Capabilities: []string{"code"}}, 0); err != nil {
+	if err := e.Store.Put(ctx, "providers", "backup", model.Provider{ID: "backup", Kind: "acp", Available: true, Quota: "unknown", Capabilities: []string{"code"}}, 0); err != nil {
 		t.Fatal(err)
 	}
+	putFixtureAgent(t, e.Store, "code", model.AgentConfig{Role: "code", Chain: []model.AgentChoice{{Provider: "fake", Model: "fixture-model"}, {Provider: "backup", Model: "backup-model"}}})
 	e.Adapter = func(p model.Provider) provider.Adapter { return quotaAgent{fail: p.ID == "fake"} }
 	out, err := e.agent(ctx, p, task, provider.Input{Role: "code", CWD: repo, Prompt: "continue", ReadOnly: false, SessionID: ""})
 	if err != nil || out.Text != "continued" {
@@ -62,29 +64,36 @@ func (unitAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks) (
 	return provider.Output{Text: "done"}, nil
 }
 
-// TestParallelUnitsIntegrateAllCommits verifies serial integration retains every commit produced by independent parallel units.
+// TestParallelUnitsIntegrateAllCommits verifies every approved unit checkpoint reaches the isolated candidate before mandatory verification.
 func TestParallelUnitsIntegrateAllCommits(t *testing.T) {
 	ctx := context.Background()
-	e, task, _ := testEngine(t)
-	task.Stage = "coding"
-	task.Plan = &model.Plan{Objective: "two units", AcceptanceCriteria: []string{"both complete"}, Units: []model.Unit{{ID: "a", Objective: "first"}, {ID: "b", Objective: "second"}}}
-	r, _ := e.Store.Get(ctx, "tasks", task.ID)
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, r.Version); err != nil {
-		t.Fatal(err)
-	}
+	e, task, project, ready := approvedUnitCheckpointFixture(t)
+	project.Policy.RunTimeoutSeconds = 60
 	e.Adapter = func(model.Provider) provider.Adapter { return unitAgent{} }
-	if err := e.Step(ctx, task.ID); err != nil {
+	if err := e.prepareWorkspace(ctx, project, &task); err != nil {
 		t.Fatal(err)
 	}
-	r, _ = e.Store.Get(ctx, "tasks", task.ID)
-	done, _ := store.Decode[model.Task](r)
-	for _, name := range []string{"a-one.txt", "a-two.txt", "b-one.txt", "b-two.txt"} {
-		if _, err := os.Stat(filepath.Join(done.Worktree, name)); err != nil {
-			t.Fatalf("lost unit commit %s: %v", name, err)
+	if err := e.runUnits(ctx, project, &task, ready); err != nil {
+		t.Fatalf("run approved implementation units: %v", err)
+	}
+	if err := e.integrateUnits(ctx, project, &task, ready, map[string]bool{}); err != nil {
+		t.Fatalf("integrate all unit commits: %v", err)
+	}
+	validateIntegratedUnitCommits(t, task)
+	for _, name := range []string{"a-one.txt", "a-two.txt", "b-one.txt", "b-two.txt", resultFile} {
+		if _, err := os.Stat(filepath.Join(task.Worktree, name)); err != nil {
+			t.Fatalf("lost integrated unit change %s: %v", name, err)
 		}
 	}
-	if done.Stage != "review" || !done.ChecksPassed {
-		t.Fatalf("%+v", done)
+	if len(task.Handoff.Commits) != len(task.Plan.Units) || len(slices.Compact(slices.Clone(task.Handoff.Commits))) != len(task.Handoff.Commits) {
+		t.Fatalf("unit commit handoff omitted or duplicated a checkpoint: %+v", task.Handoff.Commits)
+	}
+	if task.ChecksPassed || task.Stage != "coding" {
+		t.Fatalf("unit integration bypassed mandatory candidate verification: %+v", task)
+	}
+	publications, err := e.Store.List(ctx, "publications")
+	if err != nil || len(publications) != 0 || task.PR != "" {
+		t.Fatalf("unit integration attempted remote publication: PR=%q records=%d err=%v", task.PR, len(publications), err)
 	}
 }
 

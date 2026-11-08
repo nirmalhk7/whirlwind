@@ -20,6 +20,8 @@ func (a *agentRun) prepareExecutionProfile(chosen model.Provider) error {
 	if err != nil {
 		return fmt.Errorf("sandbox setup required: %w", err)
 	}
+	profile.MCPBroker = a.input.MCPBroker
+	profile.MCPBrokerToken = a.input.MCPBrokerToken
 	if a.input.NativeIntegrations {
 		if err := provider.ProvisionNativeIntegrations(&profile, chosen); err != nil {
 			return err

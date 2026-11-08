@@ -4,25 +4,74 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+	ctxengine "whirlwind/internal/context"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 	"whirlwind/prompts/agents"
 )
 
 type discoverySnapshot struct {
-	Fingerprint   string              `json:"fingerprint"`
-	Commit        string              `json:"commit"`
-	Files         map[string]string   `json:"files"`
-	Sources       string              `json:"sources"`
-	Brief         model.IdeationBrief `json:"brief"`
-	Evidence      []model.EvidenceRef `json:"evidence"`
-	Diagnostics   map[string]string   `json:"diagnostics"`
-	PolicyHash    string              `json:"policy_hash"`
-	MaxCandidates int                 `json:"max_candidates"`
+	HistoryContextBytes   int                             `json:"-"`
+	PlanContextBytes      int                             `json:"-"`
+	Fingerprint           string                          `json:"fingerprint"`
+	Commit                string                          `json:"commit"`
+	Files                 map[string]string               `json:"files"`
+	Sources               string                          `json:"sources"`
+	ApprovedPlans         []approvedPlanContext           `json:"approved_plans,omitempty"`
+	HumanReconsiderations []model.ProposalReconsideration `json:"human_reconsiderations,omitempty"`
+	ExplorationAreas      []string                        `json:"exploration_areas,omitempty"`
+	CurrentRepository     []map[string]any                `json:"current_repository,omitempty"`
+	Brief                 model.IdeationBrief             `json:"brief"`
+	Evidence              []model.EvidenceRef             `json:"evidence"`
+	Diagnostics           map[string]string               `json:"diagnostics"`
+	PolicyHash            string                          `json:"policy_hash"`
+	MaxCandidates         int                             `json:"max_candidates"`
+}
+
+type approvedPlanContext struct {
+	TaskID      string   `json:"task"`
+	PlanVersion int      `json:"version"`
+	Hash        string   `json:"approved_hash"`
+	Objective   string   `json:"objective"`
+	Outcomes    []string `json:"outcomes,omitempty"`
+	Scope       []string `json:"scope,omitempty"`
+}
+
+type discoveryBase struct {
+	index          ctxengine.Index
+	sources        any
+	externalRefs   []model.EvidenceRef
+	previous       discoverySnapshot
+	brief          model.IdeationBrief
+	diagnostics    map[string]string
+	diagnosticRefs []model.EvidenceRef
+}
+
+type verificationCheck struct {
+	Name   string `json:"name"`
+	Passed bool   `json:"passed"`
+	Output string `json:"output"`
+	Error  string `json:"error"`
+}
+
+type verificationEvidence struct {
+	Task       string           `json:"task"`
+	Provenance model.Provenance `json:"provenance"`
+	Error      string           `json:"error"`
+	Report     struct {
+		Passed  bool                `json:"passed"`
+		Results []verificationCheck `json:"results"`
+	} `json:"report"`
+}
+
+type latestVerification struct {
+	record model.Record
+	value  verificationEvidence
 }
 
 type freshDiscoveryKey struct{}
@@ -32,282 +81,231 @@ func WithFreshDiscovery(ctx context.Context, fresh bool) context.Context {
 }
 
 func (e *Engine) prepareDiscovery(ctx context.Context, p model.Project) (string, []model.Direction, discoverySnapshot, bool, error) {
-	index, err := e.index(ctx, p)
+	base, err := e.loadDiscoveryBase(ctx, p)
 	if err != nil {
-		return "", nil, discoverySnapshot{}, false, err
+		return "", nil, base.previous, false, err
 	}
-	var sources any
-	var externalRefs []model.EvidenceRef
-	if e.Agentic(ctx) {
-		sources, externalRefs, err = e.integrationContext(ctx, p)
-	} else {
-		sources, err = e.GitHub.Sources(ctx, p.Repo)
-	}
-	if err != nil {
-		return "", nil, discoverySnapshot{}, false, err
-	}
-	var previous discoverySnapshot
-	record, err := e.Store.Get(ctx, "discovery_scans", p.ID)
-	if err == nil {
-		previous, err = store.Decode[discoverySnapshot](record)
-	}
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return "", nil, previous, false, err
-	}
-	brief := model.IdeationBrief{}
-	if r, load := e.Store.Get(ctx, "ideation_briefs", p.ID); load == nil {
-		brief, err = store.Decode[model.IdeationBrief](r)
-		if err != nil {
-			return "", nil, previous, false, err
-		}
-	} else if !errors.Is(load, store.ErrNotFound) {
-		return "", nil, previous, false, load
-	}
-	snapshot := discoverySnapshot{Commit: index.Commit, Files: map[string]string{}, Sources: jsonText(sources), Brief: brief}
-	snapshot.Evidence = append(snapshot.Evidence, externalRefs...)
+	index, previous, brief := base.index, base.previous, base.brief
+	snapshot := discoverySnapshot{Commit: index.Commit, Files: map[string]string{}, Sources: jsonText(base.sources), Brief: brief}
+	snapshot.Evidence = append(snapshot.Evidence, base.externalRefs...)
 	snapshot.PolicyHash = p.PolicyHash
-	snapshot.MaxCandidates = brief.MaxCandidates
-	if snapshot.MaxCandidates == 0 {
-		snapshot.MaxCandidates = e.settings(ctx).Ideation.MaxCandidates
+	configuredMax := brief.MaxCandidates
+	if configuredMax == 0 {
+		configuredMax = e.settings(ctx).Ideation.MaxCandidates
 	}
-	if snapshot.MaxCandidates == 0 {
-		snapshot.MaxCandidates = 4
+	if configuredMax != 0 && configuredMax != 4 {
+		return "", nil, snapshot, false, fmt.Errorf("ideation requires exactly four directions (one per category); configured maximum %d is incompatible, update the saved ideation configuration", configuredMax)
 	}
-	diagnostics, refs, err := e.discoveryDiagnostics(ctx, p.ID)
-	if err != nil {
-		return "", nil, snapshot, false, err
-	}
-	snapshot.Diagnostics = diagnostics
-	snapshot.Evidence = append(snapshot.Evidence, refs...)
+	snapshot.MaxCandidates = 4
+	snapshot.Diagnostics = base.diagnostics
+	snapshot.Evidence = append(snapshot.Evidence, base.diagnosticRefs...)
 	if p.PolicyHash != "" {
 		snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "policy", Ref: p.ID, Revision: p.PolicyHash, Summary: "Confirmed project execution policy"})
 	}
-	changed := []map[string]any{}
-	paths := make([]string, 0, len(index.Files))
-	for path := range index.Files {
-		paths = append(paths, path)
+	changed, paths := indexedDiscoveryChanges(index, previous, &snapshot)
+	snapshot.HumanReconsiderations, err = e.Store.PendingProposalReconsiderations(ctx, p.ID, 12)
+	if err != nil {
+		return "", nil, snapshot, false, err
 	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		entry := index.Files[path]
-		fingerprint := model.Fingerprint([]byte(entry.Text))
-		snapshot.Files[path] = fingerprint
-		if previous.Files[path] != fingerprint {
-			snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: index.Commit, Summary: "Changed indexed source"})
-			if len(changed) < 24 {
-				changed = append(changed, map[string]any{"path": path, "symbols": entry.Symbols, "todos": entry.TODOs, "action_markers": entry.ActionMarkers})
-			}
-		}
+	reconsiderationBytes := len(boundedSources(jsonText(snapshot.HumanReconsiderations)))
+	componentCounts, err := e.Store.ProposalComponentCounts(ctx, p.ID)
+	if err != nil {
+		return "", nil, snapshot, false, err
 	}
-	for path := range previous.Files {
-		if _, exists := snapshot.Files[path]; !exists {
-			snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: index.Commit, Summary: "Removed indexed source"})
-		}
-	}
+	snapshot.ExplorationAreas = rotatingDiscoveryAreas(paths, componentCounts, 12)
 	if previous.Sources != snapshot.Sources && !e.Agentic(ctx) {
 		snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "github", Ref: p.Repo, Revision: model.Fingerprint([]byte(snapshot.Sources)), Summary: "Issue and discussion snapshot"})
 	}
-	snapshot.Fingerprint = model.Fingerprint([]byte(jsonText(struct {
-		Commit        string
-		Files         map[string]string
-		Sources       string
-		Brief         model.IdeationBrief
-		Diagnostics   map[string]string
-		PolicyHash    string
-		MaxCandidates int
-	}{snapshot.Commit, snapshot.Files, stableIntegrationContext(snapshot.Sources), brief, snapshot.Diagnostics, snapshot.PolicyHash, snapshot.MaxCandidates})))
 	fresh, _ := ctx.Value(freshDiscoveryKey{}).(bool)
-	if previous.Fingerprint == snapshot.Fingerprint && !fresh {
-		return "", nil, snapshot, true, nil
+	changed = addFreshDiscoveryContext(fresh, changed, paths, index, &snapshot)
+	snapshot.CurrentRepository = changed
+	historyTerms := strings.Join([]string{brief.Goal, brief.Constraints, brief.Priorities, jsonText(changed), jsonText(snapshot.Diagnostics), jsonText(snapshot.Evidence)}, " ")
+	historyBudget, planBudget := discoveryHistoryBudgets(e.settings(ctx).Ideation)
+	if reconsiderationBytes > historyBudget {
+		return "", nil, snapshot, false, errors.New("ideation history budget cannot fit all pending human reconsideration requests")
 	}
-	if fresh && len(changed) == 0 {
-		for _, path := range paths[:min(len(paths), 24)] {
-			entry := index.Files[path]
-			changed = append(changed, map[string]any{"path": path, "symbols": entry.Symbols, "todos": entry.TODOs, "action_markers": entry.ActionMarkers})
-			snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: index.Commit, Summary: "Explicit fresh exploration"})
-		}
-	}
-	history, err := e.previousDirections(ctx, p.ID)
+	history, err := e.searchPreviousDirections(ctx, p.ID, historyTerms, historyBudget-reconsiderationBytes)
 	if err != nil {
 		return "", nil, snapshot, false, err
 	}
 	history = relevantDirections(history, changed, brief)
+	snapshot.ApprovedPlans, err = e.currentApprovedPlans(ctx, p.ID, historyTerms, planBudget, 12)
+	if err != nil {
+		return "", nil, snapshot, false, err
+	}
+	snapshot.HistoryContextBytes = len(boundedSources(jsonText(compactProposalHistory(history)))) + reconsiderationBytes
+	snapshot.PlanContextBytes = len(boundedSources(jsonText(snapshot.ApprovedPlans)))
+	snapshot.Fingerprint = discoveryFingerprint(snapshot)
+	if previous.Fingerprint == snapshot.Fingerprint && !fresh {
+		return "", nil, snapshot, true, nil
+	}
 	if len(snapshot.Evidence) == 0 {
 		snapshot.Evidence = []model.EvidenceRef{{Kind: "repository", Ref: p.Repo, Revision: index.Commit, Summary: "Current repository snapshot"}}
 	}
-	prompt, err := agents.Render("ideate.md", map[string]string{"Index": boundedSources(jsonText(changed)), "Sources": boundedSources(snapshot.Sources), "Previous": boundedSources(jsonText(history)), "Brief": jsonText(brief), "Evidence": boundedSources(jsonText(snapshot.Evidence)), "Diagnostics": boundedSources(jsonText(snapshot.Diagnostics)), "MaxCandidates": strconv.Itoa(snapshot.MaxCandidates)})
+	prompt, err := agents.Render("ideate.md", map[string]string{"Index": boundedSources(jsonText(changed)), "Sources": boundedSources(snapshot.Sources), "Previous": boundedSources(jsonText(compactProposalHistory(history))), "ApprovedPlans": boundedSources(jsonText(snapshot.ApprovedPlans)), "HumanReconsiderations": boundedSources(jsonText(snapshot.HumanReconsiderations)), "Areas": jsonText(snapshot.ExplorationAreas), "Brief": jsonText(brief), "Evidence": boundedSources(jsonText(snapshot.Evidence)), "Diagnostics": boundedSources(jsonText(snapshot.Diagnostics)), "MaxCandidates": strconv.Itoa(snapshot.MaxCandidates)})
 	return prompt, history, snapshot, false, err
 }
 
-func boundedSources(sources string) string {
-	// Keep valid source JSON available in the persisted snapshot; bound model context only.
-	if len(sources) > 24000 {
-		end := 24000
-		for end > 0 && !utf8.RuneStart(sources[end]) {
-			end--
-		}
-		return sources[:end] + "\n[Source excerpt truncated; do not infer missing evidence]"
-	}
-	return sources
-}
-
-func relevantDirections(history []model.Direction, changed []map[string]any, brief model.IdeationBrief) []model.Direction {
-	query := strings.ToLower(brief.Goal + " " + brief.Constraints + " " + brief.Priorities + " " + jsonText(changed))
-	sort.SliceStable(history, func(i, j int) bool { return relevance(history[i], query) > relevance(history[j], query) })
-	if len(history) > 20 {
-		history = history[:20]
-	}
-	return history
-}
-
-func (e *Engine) discoveryDiagnostics(ctx context.Context, project string) (map[string]string, []model.EvidenceRef, error) {
-	tasks, err := e.Store.List(ctx, "tasks")
+func (e *Engine) loadDiscoveryBase(ctx context.Context, project model.Project) (discoveryBase, error) {
+	base := discoveryBase{brief: model.IdeationBrief{}}
+	index, err := e.index(ctx, project)
 	if err != nil {
-		return nil, nil, err
+		return base, err
 	}
-	owned := map[string]bool{}
-	for _, record := range tasks {
-		task, decode := store.Decode[model.Task](record)
-		if decode != nil {
-			return nil, nil, decode
-		}
-		if task.ProjectID == project {
-			owned[task.ID] = true
-		}
+	base.index = index
+	if err := e.loadDiscoverySources(ctx, project, &base); err != nil {
+		return base, err
 	}
-	records, err := e.Store.List(ctx, "verification")
-	if err != nil {
-		return nil, nil, err
+	if err := e.loadDiscoveryRecords(ctx, project.ID, &base); err != nil {
+		return base, err
 	}
-	type check struct {
-		Name   string `json:"name"`
-		Passed bool   `json:"passed"`
-		Output string `json:"output"`
-		Error  string `json:"error"`
-	}
-	type verificationEvidence struct {
-		Task       string           `json:"task"`
-		Provenance model.Provenance `json:"provenance"`
-		Error      string           `json:"error"`
-		Report     struct {
-			Passed  bool    `json:"passed"`
-			Results []check `json:"results"`
-		} `json:"report"`
-	}
-	latest := map[string]struct {
-		record model.Record
-		value  verificationEvidence
-	}{}
-	for _, record := range records {
-		var value verificationEvidence
-		if err = json.Unmarshal(record.Data, &value); err != nil {
-			return nil, nil, err
-		}
-		if value.Task == "" {
-			value.Task = value.Provenance.Task
-		}
-		if owned[value.Task] {
-			latest[value.Task] = struct {
-				record model.Record
-				value  verificationEvidence
-			}{record, value}
-		}
-	}
-	ids := make([]string, 0, len(latest))
-	for id := range latest {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	diagnostics := map[string]string{}
-	refs := []model.EvidenceRef{}
-	for _, id := range ids[:min(len(ids), 20)] {
-		entry := latest[id]
-		failed := false
-		for _, result := range entry.value.Report.Results {
-			if !result.Passed {
-				key := id + ":" + result.Name
-				diagnostics[key] = boundedSources(result.Output + " " + result.Error)
-				failed = true
-			}
-		}
-		if entry.value.Error != "" {
-			diagnostics[id+":policy_or_verification"] = boundedSources(entry.value.Error)
-			failed = true
-		}
-		if failed {
-			refs = append(refs, model.EvidenceRef{Kind: "verification", Ref: entry.record.ID, Revision: model.Fingerprint([]byte(jsonText(entry.value.Report))), Summary: "Persisted failed checks; checks were not rerun for discovery"})
-		}
-	}
-	return diagnostics, refs, nil
+	base.diagnostics, base.diagnosticRefs, err = e.discoveryDiagnostics(ctx, project.ID)
+	return base, err
 }
 
-func relevance(direction model.Direction, query string) int {
-	score := 0
-	for _, word := range strings.Fields(directionKey(direction.Title + " " + direction.Description)) {
-		if len(word) > 3 && strings.Contains(query, word) {
-			score++
-		}
+func (e *Engine) loadDiscoverySources(ctx context.Context, project model.Project, base *discoveryBase) error {
+	var err error
+	if e.Agentic(ctx) {
+		base.sources, base.externalRefs, err = e.integrationContext(ctx, project, base.index.Commit)
+	} else {
+		base.sources, err = e.GitHub.Sources(ctx, project.Repo)
 	}
-	return score
+	return err
 }
 
-func validateCandidateEvidence(directions []model.Direction, snapshot discoverySnapshot) error {
-	available := map[string]model.EvidenceRef{}
-	for _, ref := range snapshot.Evidence {
-		available[ref.Kind+":"+ref.Ref] = ref
+func (e *Engine) loadDiscoveryRecords(ctx context.Context, projectID string, base *discoveryBase) error {
+	if record, err := e.Store.Get(ctx, "discovery_scans", projectID); err == nil {
+		base.previous, err = store.Decode[discoverySnapshot](record)
+		if err != nil {
+			return err
+		}
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
 	}
-	for n := range directions {
-		candidate := directions[n]
-		if strings.TrimSpace(candidate.ExpectedBenefit) == "" || strings.TrimSpace(candidate.EffortEstimate) == "" {
-			return errors.New("candidate must state expected_benefit and effort_estimate")
+	if record, err := e.Store.Get(ctx, "ideation_briefs", projectID); err == nil {
+		base.brief, err = store.Decode[model.IdeationBrief](record)
+		if err != nil {
+			return err
 		}
-		if candidate.ProblemKind != "observed_defect" && candidate.ProblemKind != "opportunity" {
-			return errors.New("candidate problem_kind must distinguish observed_defect from opportunity")
-		}
-		if candidate.ProblemKind == "opportunity" && len(candidate.Uncertainty) == 0 {
-			return errors.New("an opportunity must state uncertainty and validation still needed")
-		}
-		if len(candidate.ExpectedBenefit) > 2000 || len(candidate.EffortEstimate) > 500 || len(candidate.Uncertainty) > 10 {
-			return errors.New("candidate assessment exceeds bounded metadata size")
-		}
-		for _, uncertainty := range candidate.Uncertainty {
-			if strings.TrimSpace(uncertainty) == "" || len(uncertainty) > 1000 {
-				return errors.New("candidate uncertainty must be concise nonempty text")
-			}
-		}
-		if len(directions[n].Evidence) == 0 {
-			return errors.New("candidate must cite supplied evidence")
-		}
-		canonical := []model.EvidenceRef{}
-		directFailure := false
-		for _, ref := range directions[n].Evidence {
-			supplied, ok := available[ref.Kind+":"+ref.Ref]
-			if !ok {
-				return errors.New("candidate cites evidence outside the supplied snapshot")
-			}
-			canonical = append(canonical, supplied)
-			if supplied.Kind == "verification" {
-				directFailure = true
-			}
-		}
-		if candidate.ProblemKind == "observed_defect" && !directFailure {
-			return errors.New("observed_defect requires persisted verification failure evidence; classify unverified source hypotheses as opportunity")
-		}
-		sort.Slice(canonical, func(i, j int) bool {
-			return canonical[i].Kind+":"+canonical[i].Ref < canonical[j].Kind+":"+canonical[j].Ref
-		})
-		directions[n].Evidence = canonical
-		identity := append([]model.EvidenceRef{}, canonical...)
-		for i := range identity {
-			identity[i].RetrievedAt, identity[i].AttemptID = "", ""
-		}
-		directions[n].Fingerprint = model.Fingerprint([]byte(jsonText(struct {
-			Title, Description string
-			Evidence           []model.EvidenceRef
-		}{directionKey(directions[n].Title), directionKey(directions[n].Description), identity})))
-		directions[n].Status = "proposed"
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
 	}
 	return nil
+}
+
+func (e *Engine) currentApprovedPlans(ctx context.Context, projectID, terms string, maxBytes, limit int) ([]approvedPlanContext, error) {
+	if maxBytes <= 0 || limit <= 0 {
+		return nil, nil
+	}
+	tasks, err := e.Store.List(ctx, "tasks")
+	if err != nil {
+		return nil, err
+	}
+	plans := make([]approvedPlanContext, 0, min(len(tasks), limit))
+	for _, record := range tasks {
+		task, err := store.Decode[model.Task](record)
+		if err != nil {
+			return nil, err
+		}
+		if task.ProjectID != projectID || task.PlanDocument == nil || task.PlanDocument.ApprovedHash == "" || task.PlanDocument.ApprovedHash != task.PlanDocument.Hash {
+			continue
+		}
+		version := task.PlanVersion
+		if task.PlanDocument.PlanVersion > 0 {
+			if task.PlanDocument.PlanVersion != version {
+				continue
+			}
+			version = task.PlanDocument.PlanVersion
+		}
+		if version < 1 {
+			continue
+		}
+		approved, err := e.Store.Get(ctx, "plans", fmt.Sprintf("%s:%d", task.ID, version))
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		plan, err := store.Decode[model.Plan](approved)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, approvedPlanContext{TaskID: task.ID, PlanVersion: version, Hash: task.PlanDocument.ApprovedHash, Objective: plan.Objective, Outcomes: approvedPlanOutcomes(plan), Scope: approvedPlanScope(plan)})
+	}
+	sort.SliceStable(plans, func(i, j int) bool {
+		left, right := approvedPlanRelevance(plans[i], terms), approvedPlanRelevance(plans[j], terms)
+		if left != right {
+			return left > right
+		}
+		return plans[i].TaskID < plans[j].TaskID
+	})
+	bounded := make([]approvedPlanContext, 0, min(len(plans), limit))
+	for _, plan := range plans {
+		if len(bounded) >= limit {
+			break
+		}
+		candidate := append(append([]approvedPlanContext{}, bounded...), plan)
+		if len(jsonText(candidate)) > maxBytes {
+			continue
+		}
+		bounded = append(bounded, plan)
+	}
+	return bounded, nil
+}
+
+func approvedPlanOutcomes(plan model.Plan) []string {
+	outcomes := append([]string{}, plan.AcceptanceCriteria...)
+	for _, requirement := range plan.Requirements {
+		if outcome := strings.TrimSpace(requirement.Outcome); outcome != "" {
+			outcomes = append(outcomes, outcome)
+		}
+	}
+	return outcomes
+}
+
+func approvedPlanScope(plan model.Plan) []string {
+	scope := append([]string{}, plan.Where...)
+	for _, unit := range plan.Units {
+		scope = append(scope, unit.AllowedPaths...)
+	}
+	slices.Sort(scope)
+	return slices.Compact(scope)
+}
+
+func approvedPlanRelevance(plan approvedPlanContext, terms string) int {
+	content := strings.ToLower(jsonText(plan))
+	count := 0
+	seen := map[string]bool{}
+	for _, term := range strings.Fields(strings.ToLower(terms)) {
+		term = strings.Trim(term, "\"'.,:;!?()[]{}")
+		if len(term) < 3 || seen[term] {
+			continue
+		}
+		seen[term] = true
+		if strings.Contains(content, term) {
+			count++
+		}
+	}
+	return count
+}
+
+func rotatingDiscoveryAreas(paths []string, counts map[string]int, limit int) []string {
+	areas := append([]string{}, paths...)
+	sort.SliceStable(areas, func(i, j int) bool {
+		left, right := counts[areas[i]], counts[areas[j]]
+		if left != right {
+			return left < right
+		}
+		return areas[i] < areas[j]
+	})
+	if limit <= 0 || limit > 12 {
+		limit = 12
+	}
+	if len(areas) > limit {
+		areas = areas[:limit]
+	}
+	return areas
 }
 
 // Audit capture metadata stays in the persisted source snapshot. Only its

@@ -1,94 +1,164 @@
 package workflow
 
 import (
-	"encoding/json"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
-	"whirlwind/internal/github"
+	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
-	"whirlwind/prompts/agents"
+	"whirlwind/internal/store"
 )
 
 func (step *taskStep) submitting() (bool, error) {
-	if step.task.ReviewedCommit == "" || !step.task.ChecksPassed || step.task.Score < 9 {
-		return true, errors.New("submission requires accepted review and verification")
+	if step.task.Delivery == nil {
+		return step.prepareLocalDelivery()
 	}
-	if step.task.Submission == nil {
-		return step.prepareSubmission()
+	if _, accepted, err := step.acceptedDeliveryReport(); err != nil || !accepted {
+		if err != nil {
+			return true, err
+		}
+		return true, errors.New("local delivery requires accepted review and verification for the exact candidate")
 	}
-	return step.organizePreparedSubmission()
+	delivery := step.task.Delivery
+	switch delivery.Stage {
+	case "prepared":
+		commit, err := promoteReviewedSnapshot(step.ctx, delivery.OriginalWorktree, delivery.Worktree, delivery.Branch, delivery.Base, delivery.ReviewedCommit)
+		if err != nil {
+			return true, err
+		}
+		if commit != delivery.ReviewedCommit {
+			return true, errors.New("local delivery promotion changed the reviewed commit")
+		}
+		delivery.Stage = "snapshot_ready"
+		return false, nil
+	case "snapshot_ready":
+		return step.finishLocalDelivery()
+	case "complete":
+		step.task.Stage = "complete"
+		return true, step.Store.Put(step.ctx, "tasks", step.task.ID, step.task, step.record.Version)
+	default:
+		return true, fmt.Errorf("unknown local delivery state %q", delivery.Stage)
+	}
 }
 
-type submissionPlan struct {
-	Title, Body string
-	Commits     []CommitGroup
-}
-
-func (step *taskStep) submissionPlanOutput() (provider.Output, error) {
-	diff, err := github.Run(step.ctx, step.task.Worktree, "git", "diff", "--binary", step.task.Base+"...HEAD")
+func (step *taskStep) acceptedDeliveryReport() (model.Adherence, bool, error) {
+	review, report, accepted, err := step.LoadAcceptedReviewReport(step.ctx, step.task.ID)
 	if err != nil {
-		return provider.Output{}, err
+		return report, false, err
 	}
-	prompt, err := agents.Render("submit.md", map[string]string{"Plan": jsonText(step.task.Plan), "Sources": jsonText(step.task.Sources), "Diff": diff, "Validation": step.prDescription()})
-	if err != nil {
-		return provider.Output{}, err
+	provenance := report.Provenance
+	if !accepted || provenance.Task != step.task.ID || provenance.PlanVersion != step.task.PlanVersion ||
+		provenance.Head == "" || provenance.Head != step.task.ReviewedCommit || provenance.Base != step.task.Base ||
+		provenance.PolicyHash != step.project.PolicyHash || provenance.VerificationID != step.task.VerificationID ||
+		review.Provenance == nil || review.Provenance.ReviewID != step.task.ReviewID {
+		return report, false, nil
 	}
-	return step.agent(step.ctx, step.project, step.task, provider.Input{Role: "submit", Purpose: "submission_plan", CWD: step.task.Worktree, Prompt: prompt, ReadOnly: true})
+	if step.task.Risk == "critical" && !approvalMatches(step.task, step.project.PolicyHash) {
+		return report, false, nil
+	}
+	return report, true, nil
 }
 
-func decodeSubmissionPlan(text string) (submissionPlan, error) {
-	var result submissionPlan
-	if err := provider.JSON(text, &result); err != nil {
-		return result, err
-	}
-	if strings.TrimSpace(result.Title) == "" || strings.TrimSpace(result.Body) == "" || len(result.Commits) == 0 {
-		return result, errors.New("submitter omitted title, human-readable body or logical commits")
-	}
-	return result, nil
-}
-
-func (step *taskStep) prepareSubmission() (bool, error) {
-	out, err := step.submissionPlanOutput()
+func (step *taskStep) prepareLocalDelivery() (bool, error) {
+	report, accepted, err := step.acceptedDeliveryReport()
 	if err != nil {
 		return true, err
 	}
-	result, err := decodeSubmissionPlan(out.Text)
+	if !accepted {
+		return true, errors.New("local delivery requires accepted review and verification for the exact candidate")
+	}
+	if step.task.Worktree == "" || step.task.ReviewedCommit == "" || step.task.Base == "" {
+		return true, errors.New("local delivery is missing its reviewed candidate snapshot")
+	}
+	tree, err := submissionGitRun(step.ctx, step.task.Worktree, "rev-parse", step.task.ReviewedCommit+submissionTree)
 	if err != nil {
 		return true, err
 	}
-	groups, _ := json.Marshal(result.Commits)
-	step.task.Submission = &model.Submission{Stage: "prepared", OriginalWorktree: step.task.Worktree, OriginalBranch: step.task.Branch, ReviewedCommit: step.task.ReviewedCommit, Title: result.Title, Body: result.Body, Groups: groups}
+	diff, err := submissionGitRun(step.ctx, step.task.Worktree, "diff", "--binary", step.task.Base+"..."+step.task.ReviewedCommit)
+	if err != nil {
+		return true, err
+	}
+	key := deliveryKey(step.task.ID, step.task.PlanVersion)
+	unmet := deliveryUnmetRequirements(report)
+	step.task.Delivery = &model.LocalDelivery{
+		UnmetRequirements: unmet,
+		Adherence:         &report,
+		VerificationID:    step.task.VerificationID,
+		OriginalWorktree:  step.task.Worktree,
+		OriginalBranch:    step.task.Branch,
+		Worktree:          filepath.Join(filepath.Dir(step.task.Worktree), "delivery-"+key),
+		Branch:            "codex/delivery/" + key,
+		ReviewedCommit:    report.Provenance.Head,
+		Base:              report.Provenance.Base,
+		Tree:              tree,
+		ReviewID:          report.Provenance.ReviewID,
+		PolicyHash:        report.Provenance.PolicyHash,
+		PlanVersion:       step.task.PlanVersion,
+		Score:             report.Score,
+		Diff:              diff,
+		Stage:             "prepared",
+	}
+	step.task.Handoff.NextAction = "Prepare the exact accepted candidate for local delivery"
+	return false, nil
+}
+
+func deliveryUnmetRequirements(report model.Adherence) []string {
+	var unmet []string
+	for _, result := range report.Results {
+		if result.Status == "pass" {
+			continue
+		}
+		label := result.ID
+		if result.Explanation != "" {
+			label += ": " + result.Explanation
+		}
+		unmet = append(unmet, label)
+	}
+	return unmet
+}
+
+func deliveryKey(taskID string, planVersion int) string {
+	sum := sha256.Sum256([]byte(taskID))
+	return fmt.Sprintf("task-%x-v%d", sum[:8], planVersion)
+}
+
+func (step *taskStep) finishLocalDelivery() (bool, error) {
+	delivery := step.task.Delivery
+	if _, err := promoteReviewedSnapshot(step.ctx, delivery.OriginalWorktree, delivery.Worktree, delivery.Branch, delivery.Base, delivery.ReviewedCommit); err != nil {
+		return true, err
+	}
+	prompt := "You are the local delivery finalizer. Read the accepted plan, review evidence and exact candidate diff below. The candidate is already accepted and committed. Do not edit files, create commits, amend commits, push, create or modify remote artifacts, or change the worktree. Return a concise human-readable delivery summary. Report every unmet requirement exactly as listed; acceptance above 80 percent does not mean all requirements passed and must not be described as 100 percent.\n\nUnmet requirements: " + jsonText(delivery.UnmetRequirements) +
+		"\nPlan: " + jsonText(step.task.Plan) +
+		"\nReview: " + jsonText(step.task.Delivery.Adherence) +
+		"\nVerification ID: " + delivery.VerificationID +
+		"\nReviewed commit: " + delivery.ReviewedCommit +
+		"\nDiff:\n" + delivery.Diff
+	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Role: "finalizer", Purpose: "local_delivery_summary", CWD: delivery.Worktree, Prompt: prompt, ReadOnly: true})
+	if err != nil {
+		return true, err
+	}
+	if strings.TrimSpace(out.Text) == "" {
+		return true, errors.New("finalizer returned an empty local delivery summary")
+	}
+	if _, err := promoteReviewedSnapshot(step.ctx, delivery.OriginalWorktree, delivery.Worktree, delivery.Branch, delivery.Base, delivery.ReviewedCommit); err != nil {
+		return true, fmt.Errorf("finalizer changed the accepted candidate snapshot: %w", err)
+	}
+	delivery.Message = strings.TrimSpace(out.Text)
+	delivery.Stage = "complete"
+	delivery.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	step.task.LastAttemptID = out.AttemptID
-	return false, nil
-}
-
-func (step *taskStep) organizePreparedSubmission() (bool, error) {
-	submission := step.task.Submission
-	var groups []CommitGroup
-	if err := json.Unmarshal(submission.Groups, &groups); err != nil {
-		return true, err
-	}
-	suffix := submission.ReviewedCommit
-	if len(suffix) > 12 {
-		suffix = suffix[:12]
-	}
-	target := filepath.Join(filepath.Dir(submission.OriginalWorktree), "submission-"+suffix)
-	branch := submission.OriginalBranch + "-submit-" + suffix
-	if _, err := organizeSubmission(step.ctx, submission.OriginalWorktree, target, branch, step.task.Base, submission.ReviewedCommit, groups); err != nil {
-		return true, fmt.Errorf("organize logical commits: %w", err)
-	}
-	submission.Stage = "organized"
-	step.task.Worktree = target
-	step.task.Branch = branch
-	step.task.Stage = "review"
-	step.task.ReviewedCommit = ""
-	step.task.VerificationID = ""
-	step.task.ReviewID = ""
-	step.task.Approved = false
-	step.task.Approval = nil
-	step.task.Handoff.NextAction = "verify final commits and confirm reviewer acceptance"
-	return false, nil
+	step.task.Stage = "complete"
+	step.task.Error = ""
+	step.task.Wait = nil
+	step.task.Handoff.NextAction = "Review the local delivery branch and commit; decide whether to push it"
+	notice := model.Notification{ID: store.ID(), TaskID: step.task.ID, Kind: "delivery", Message: "Local delivery ready at " + delivery.Branch + " (" + delivery.ReviewedCommit + ")"}
+	err = step.Store.Write(step.ctx, []store.Change{
+		{Kind: "tasks", ID: step.task.ID, Value: step.task, Expected: step.record.Version},
+		{Kind: "inbox", ID: notice.ID, Value: notice},
+	}, nil)
+	return true, err
 }

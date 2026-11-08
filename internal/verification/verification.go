@@ -1,56 +1,54 @@
 package verification
 
 import (
-	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
-	"fmt"
-	"os/exec"
+	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
+	"strconv"
 	"time"
 
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
-	"whirlwind/internal/process"
 )
 
 type Result struct {
-	ExecutionProfile string   `json:"execution_profile,omitempty"`
-	ReusedFrom       string   `json:"reused_from,omitempty"`
-	Command          []string `json:"command"`
-	TimeoutSeconds   int      `json:"timeout_seconds"`
-	StartedAt        string   `json:"started_at"`
-	FinishedAt       string   `json:"finished_at"`
-	ExitCode         *int     `json:"exit_code"`
-	Truncated        bool     `json:"truncated"`
-	OutputArtifact   string   `json:"output_artifact,omitempty"`
-	Name             string   `json:"name"`
-	Passed           bool     `json:"passed"`
-	Output           string   `json:"output"`
-	Error            string   `json:"error,omitempty"`
-	DurationMS       int64    `json:"duration_ms"`
+	Runtime          RuntimeIdentity `json:"runtime,omitempty"`
+	ExecutionProfile string          `json:"execution_profile,omitempty"`
+	ReusedFrom       string          `json:"reused_from,omitempty"`
+	Command          []string        `json:"command"`
+	TimeoutSeconds   int             `json:"timeout_seconds"`
+	StartedAt        string          `json:"started_at"`
+	FinishedAt       string          `json:"finished_at"`
+	ExitCode         *int            `json:"exit_code"`
+	Truncated        bool            `json:"truncated"`
+	OutputArtifact   string          `json:"output_artifact,omitempty"`
+	Diagnostics      string          `json:"diagnostics,omitempty"`
+	Name             string          `json:"name"`
+	Passed           bool            `json:"passed"`
+	Output           string          `json:"output"`
+	Error            string          `json:"error,omitempty"`
+	DurationMS       int64           `json:"duration_ms"`
+}
+
+type RuntimeIdentity struct {
+	ExecutionID     string `json:"execution_id,omitempty"`
+	Launcher        string `json:"launcher,omitempty"`
+	LifecycleFile   string `json:"lifecycle_file,omitempty"`
+	SandboxName     string `json:"sandbox_name,omitempty"`
+	SandboxID       string `json:"sandbox_id,omitempty"`
+	GatewayName     string `json:"gateway_name,omitempty"`
+	GatewayEndpoint string `json:"gateway_endpoint,omitempty"`
+	Workspace       string `json:"workspace,omitempty"`
+	Kind            string `json:"kind,omitempty"`
+	CleanupVerified bool   `json:"cleanup_verified,omitempty"`
+	Generation      int    `json:"generation,omitempty"`
 }
 type Report struct {
 	Passed  bool     `json:"passed"`
 	Results []Result `json:"results"`
-}
-type capped struct {
-	bytes.Buffer
-	total int
-}
-
-// Write retains the first MiB of check output while reporting all input bytes consumed to the subprocess.
-func (b *capped) Write(p []byte) (int, error) {
-	n := len(p)
-	b.total += n
-	if b.Len() < 1024*1024 {
-		remaining := min(len(p), 1024*1024-b.Len())
-		_, _ = b.Buffer.Write(p[:remaining])
-	}
-	return n, nil
 }
 
 // Run executes checks sequentially with per-check timeouts, captures bounded diagnostics, and marks the report failed on any error.
@@ -70,17 +68,18 @@ func RunObserved(ctx context.Context, cwd string, checks []model.Check, observe 
 // RunObservedWithProfile uses the same enforced sandbox as providers for every committed check.
 func RunObservedWithProfile(ctx context.Context, cwd string, checks []model.Check, profile execution.Profile, observe func(Result) error) (Report, error) {
 	out := Report{Passed: len(checks) > 0, Results: []Result{}}
-	for _, c := range checks {
-		r := runCheckProfile(ctx, cwd, c, profile)
-		if !r.Passed {
-			out.Passed = false
-		}
+	for index, c := range checks {
+		r, setupFailed := runObservedCheck(ctx, cwd, c, profile, index, len(checks))
 		out.Results = append(out.Results, r)
+		out.Passed = out.Passed && r.Passed
 		if observe != nil {
 			if err := observe(r); err != nil {
 				out.Passed = false
 				return out, err
 			}
+		}
+		if setupFailed {
+			continue
 		}
 		if ctx.Err() != nil {
 			out.Passed = false
@@ -90,142 +89,120 @@ func RunObservedWithProfile(ctx context.Context, cwd string, checks []model.Chec
 	return out, nil
 }
 
-// runCheck captures one bounded check result before observers or cancellation are considered.
-func runCheck(ctx context.Context, cwd string, c model.Check) Result {
-	profile, err := execution.ForPolicy(cwd, false, "", nil)
+func runObservedCheck(ctx context.Context, cwd string, check model.Check, profile execution.Profile, index, count int) (Result, bool) {
+	checkProfile, err := checkRuntimeProfile(ctx, profile, index, count, check)
 	if err != nil {
-		return Result{Name: c.Name, Command: c.Command, Error: err.Error()}
+		return failedCheck(check, err), true
 	}
-	return runCheckProfile(ctx, cwd, c, profile)
+	result := runCheckProfile(ctx, cwd, check, checkProfile)
+	if execution.IsOpenShellLauncher(checkProfile.Launcher) {
+		result = reconcileCheckRuntime(result, checkProfile)
+	}
+	return result, false
 }
 
-func runCheckProfile(ctx context.Context, cwd string, c model.Check, profile execution.Profile) Result {
-	r := Result{Name: c.Name, Command: c.Command}
-	var profileErr error
-	profile, profileErr = execution.ForCheck(profile, c.OutputPaths)
-	if profileErr == nil {
-		profile, profileErr = execution.ForCommand(profile, c.Command)
+func failedCheck(check model.Check, err error) Result {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	return Result{Name: check.Name, Command: check.Command, StartedAt: now, FinishedAt: now, Error: err.Error()}
+}
+
+func checkRuntimeProfile(ctx context.Context, profile execution.Profile, index, count int, check model.Check) (execution.Profile, error) {
+	if !execution.IsOpenShellLauncher(profile.Launcher) {
+		return profile, nil
 	}
-	if profileErr == nil {
-		r.ExecutionProfile = profile.Digest()
+	profile, err := checkProfileIdentity(ctx, profile, index, count, check)
+	if err != nil {
+		return profile, err
 	}
-	r.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	start := time.Now()
-	timeout := time.Duration(c.TimeoutSeconds) * time.Second
+	if _, exists, err := execution.ReadOpenShellLifecycle(profile); err != nil {
+		return profile, err
+	} else if exists {
+		return profile, nil
+	}
+	return execution.PinOpenShellRuntime(ctx, profile, profile.ExecutionID, profile.ExecutionGeneration, profile.DeadlineAt, profile.SupervisorDir)
+}
+
+func checkProfileIdentity(ctx context.Context, profile execution.Profile, index, count int, check model.Check) (execution.Profile, error) {
+	var err error
+	profile, err = ensureCheckSupervisorDir(profile)
+	if err != nil {
+		return profile, err
+	}
+	profile, err = assignCheckExecutionID(profile, index, count)
+	if err != nil {
+		return profile, err
+	}
+	if profile.ExecutionGeneration < 1 {
+		profile.ExecutionGeneration = 1
+	}
+	if profile.DeadlineAt == "" {
+		profile.DeadlineAt = checkDeadline(ctx, check)
+	}
+	return profile, nil
+}
+
+func ensureCheckSupervisorDir(profile execution.Profile) (execution.Profile, error) {
+	if profile.SupervisorDir == "" {
+		root, err := os.MkdirTemp("", "whirlwind-check-runtime-")
+		if err != nil {
+			return profile, err
+		}
+		profile.SupervisorDir = filepath.Join(root, "executions")
+	}
+	return profile, nil
+}
+
+func assignCheckExecutionID(profile execution.Profile, index, count int) (execution.Profile, error) {
+	if profile.ExecutionID == "" {
+		id, err := randomExecutionID()
+		if err != nil {
+			return profile, err
+		}
+		profile.ExecutionID = id
+	} else if count > 1 {
+		profile.ExecutionID += "-check-" + strconv.Itoa(index+1)
+	}
+	return profile, nil
+}
+
+func checkDeadline(ctx context.Context, check model.Check) string {
+	timeout := time.Duration(check.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
-	r.TimeoutSeconds = int(timeout.Seconds())
-	run, cancel := context.WithTimeout(ctx, timeout)
-	var b capped
-	var e error
-	if profileErr != nil {
-		e = profileErr
-	} else if len(c.Command) == 0 {
-		e = fmt.Errorf("missing command")
-	} else {
-		var cmd *exec.Cmd
-		cmd, e = execution.Command(run, c.Command, profile)
-		if e == nil {
-			cmd.Dir = cwd
-			cmd.Stdout = &b
-			cmd.Stderr = &b
-			e = process.Run(cmd)
+	if parentDeadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(parentDeadline)
+		if remaining < timeout {
+			timeout = remaining
 		}
 	}
-	cancel()
-	r.Passed = e == nil
-	r.Output = b.String()
-	r.Truncated = b.total > b.Len()
-	r.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	if e == nil {
-		code := 0
-		r.ExitCode = &code
-	} else {
-		var exit *exec.ExitError
-		if errors.As(e, &exit) {
-			code := exit.ExitCode()
-			r.ExitCode = &code
-		}
-	}
-	if e != nil {
-		r.Error = e.Error()
-	}
-	r.DurationMS = time.Since(start).Milliseconds()
-	if r.Passed && len(c.Command) > 1 && filepath.Base(c.Command[0]) == "qlty" && c.Command[1] == "smells" {
-		if err := qltySmellsError(r.Output); err != nil {
-			r.Passed = false
-			r.Error = err.Error()
-		}
-	}
-	return r
+	return time.Now().Add(timeout).UTC().Format(time.RFC3339Nano)
 }
 
-// Select keeps baseline checks, adds checks for matching path, code-type, or API rules, and selects the highest matched risk.
-func Select(p model.Policy, files []string, diff ...string) (string, []model.Check) {
-	symbols := changedAPISymbols(diff)
-	extensions := make([]string, len(files))
-	for n, file := range files {
-		extensions[n] = filepath.Ext(file)
+func randomExecutionID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
 	}
-	levels := map[string]int{"low": 0, "medium": 1, "high": 2, "critical": 3}
-	risk := "low"
-	matchedAny := false
-	checks := append([]model.Check{}, p.Checks...)
-	seen := map[string]bool{}
-	for _, c := range checks {
-		seen[c.Name] = true
-	}
-	for _, rule := range p.RiskRules {
-		if !matchesAny(rule.Paths, files, policy.Match) &&
-			!matchesAny(rule.APISymbols, symbols, policy.Match) &&
-			!matchesAny(rule.CodeTypes, extensions, strings.EqualFold) {
-			continue
-		}
-		matchedAny = true
-		if levels[rule.Level] > levels[risk] {
-			risk = rule.Level
-		}
-		for _, c := range rule.Checks {
-			if !seen[c.Name] {
-				checks = append(checks, c)
-				seen[c.Name] = true
-			}
-		}
-	}
-	if !matchedAny {
-		risk = "medium"
-	}
-	return risk, checks
+	return "check-" + hex.EncodeToString(raw[:]), nil
 }
 
-// matchesAny reports whether any configured selector matches any changed value.
-func matchesAny(patterns, values []string, match func(string, string) bool) bool {
-	for _, pattern := range patterns {
-		for _, value := range values {
-			if match(pattern, value) {
-				return true
-			}
-		}
+func reconcileCheckRuntime(result Result, profile execution.Profile) Result {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cleanupErr := execution.ReconcileOpenShellRuntime(cleanupCtx, profile)
+	identity := RuntimeIdentity{ExecutionID: profile.ExecutionID, Generation: profile.ExecutionGeneration,
+		Kind: "openshell", Launcher: profile.Launcher, SandboxName: profile.SandboxName,
+		LifecycleFile: profile.LifecycleFile, GatewayName: profile.GatewayName,
+		GatewayEndpoint: profile.GatewayEndpoint, Workspace: profile.Workspace}
+	if lifecycle, exists, err := execution.ReadOpenShellLifecycle(profile); err == nil && exists {
+		identity.SandboxID = lifecycle.SandboxID
 	}
-	return false
-}
-
-var apiPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?m)^[-+]\s*func\s+(?:\([^)]*\)\s*)?([A-Z][A-Za-z0-9_]*)`),
-	regexp.MustCompile(`(?m)^[-+]\s*type\s+([A-Z][A-Za-z0-9_]*)`),
-	regexp.MustCompile(`(?m)^[-+]\s*export\s+(?:default\s+)?(?:function|class|type|interface|const)\s+([A-Za-z_][A-Za-z0-9_]*)`),
-	regexp.MustCompile(`(?m)^[-+].*HandleFunc\("([A-Z]+ /[^" ]*)"`),
-}
-
-func changedAPISymbols(diff []string) []string {
-	symbols := []string{}
-	for _, patch := range diff {
-		for _, pattern := range apiPatterns {
-			for _, match := range pattern.FindAllStringSubmatch(patch, -1) {
-				symbols = append(symbols, match[1])
-			}
-		}
+	identity.CleanupVerified = cleanupErr == nil
+	result.Runtime = identity
+	if cleanupErr != nil {
+		result.Passed = false
+		result.Error = errors.Join(errors.New(result.Error), cleanupErr).Error()
 	}
-	return symbols
+	return result
 }

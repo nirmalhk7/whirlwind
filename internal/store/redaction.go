@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+	"whirlwind/internal/redaction"
 )
 
 // SafeJSON strips credential-bearing protocol fields without collecting process environment.
@@ -46,6 +47,8 @@ func redactObject(v map[string]any) {
 func secretField(key string, marked bool) bool {
 	switch key {
 	case "authorization", "access_token", "accesstoken", "refresh_token", "refreshtoken", "auth_token", "authtoken", "api_key", "apikey", "password", "secret", "client_secret", "clientsecret", "env", "environment":
+		return true
+	case "proxy_authorization", "proxy-authorization", "http_proxy", "https_proxy", "all_proxy":
 		return true
 	case "answer", "answers", "text", "content":
 		return marked
@@ -97,9 +100,14 @@ func redactArgument(v []any, i int, key string) {
 
 var bearerSecret = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+`)
 var assignedSecret = regexp.MustCompile(`(?i)(access_token|refresh_token|api_key|client_secret|password|auth_token)([=:]\s*)[^\s&"']+`)
+var proxyURLCredentials = regexp.MustCompile(`(?i)(https?://)[^/\s@]+@`)
+var proxyAuthorization = regexp.MustCompile(`(?i)(proxy-authorization\s*[:=]\s*(?:basic|bearer)\s+)[A-Za-z0-9._~+/=-]+`)
 
 // RedactText removes credential literals from otherwise useful provider diagnostics.
 func RedactText(text string) string {
 	text = bearerSecret.ReplaceAllString(text, "Bearer [redacted]")
-	return assignedSecret.ReplaceAllString(text, "${1}${2}[redacted]")
+	text = assignedSecret.ReplaceAllString(text, "${1}${2}[redacted]")
+	text = proxyAuthorization.ReplaceAllString(text, "${1}[redacted]")
+	text = proxyURLCredentials.ReplaceAllString(text, "${1}[redacted]@")
+	return redaction.RedactText(text)
 }

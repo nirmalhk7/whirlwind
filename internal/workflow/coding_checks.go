@@ -84,10 +84,12 @@ func (r *codingCheckRun) execute(ctx context.Context) error {
 		return err
 	}
 	checks := structuredChecks([]model.Check{r.check})
-	r.report, err = verification.RunObservedWithProfile(ctx, r.attempt.input.CWD, checks, profile, nil)
-	if err != nil || len(r.report.Results) != 1 {
+	var result verification.Result
+	result, err = r.attempt.Engine.runOwnedCheck(ctx, r.attempt.input.CWD, checks[0], profile, runtimeCheckOwner{TaskID: r.attempt.task.ID, AttemptID: r.attempt.id, Role: "code"})
+	if err != nil {
 		return fmt.Errorf("coding check returned no complete result: %w", err)
 	}
+	r.report = verification.Report{Passed: result.Passed, Results: []verification.Result{result}}
 	after, _, _, err := codingSnapshot(ctx, r.attempt.input.CWD)
 	if err != nil || after != r.entry.Snapshot {
 		return errors.New("source changed while coding check ran")

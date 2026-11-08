@@ -1,12 +1,7 @@
 package policy
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"go.yaml.in/yaml/v3"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -16,11 +11,8 @@ import (
 
 // Validate rejects missing baseline checks, malformed risk rules, negative run budgets, and allowed paths outside the repository.
 func Validate(p model.Policy) error {
-	if p.ContextInputTokens < 0 {
-		return errors.New("context_input_tokens must be nonnegative")
-	}
-	if p.RunTimeoutSeconds < 0 {
-		return errors.New("run_timeout_seconds must be nonnegative")
+	if err := validatePolicyLimits(p); err != nil {
+		return err
 	}
 	if len(p.Checks) == 0 || len(p.AllowedPaths) == 0 || len(p.RiskRules) == 0 {
 		return errors.New("policy requires checks, allowed_paths and risk_rules")
@@ -34,58 +26,14 @@ func Validate(p model.Policy) error {
 	return validateAllowedPaths(p.AllowedPaths)
 }
 
-const (
-	policyYAML = ".whirlwind.yaml"
-	policyYML  = ".whirlwind.yml"
-)
-
-// Load reads committed project policy, requires the local file to match it, validates known fields, and returns its content hash.
-func Load(path string) (model.Policy, string, error) {
-	var p model.Policy
-	b, e := committedPolicy(path)
-	if e != nil {
-		return p, "", e
+func validatePolicyLimits(policy model.Policy) error {
+	if policy.ContextInputTokens < 0 {
+		return errors.New("context_input_tokens must be nonnegative")
 	}
-	decoder := yaml.NewDecoder(strings.NewReader(string(b)))
-	decoder.KnownFields(true)
-	if e = decoder.Decode(&p); e != nil {
-		return p, "", e
+	if policy.RunTimeoutSeconds < 0 {
+		return errors.New("run_timeout_seconds must be nonnegative")
 	}
-	if e = Validate(p); e != nil {
-		return p, "", e
-	}
-	sum := sha256.Sum256(b)
-	return p, hex.EncodeToString(sum[:]), nil
-}
-
-func committedPolicy(path string) ([]byte, error) {
-	name, e := policyName(path)
-	if e != nil {
-		return nil, e
-	}
-	cmd := exec.Command("git", "-C", path, "show", "HEAD:"+name)
-	b, e := cmd.Output()
-	if e != nil {
-		return nil, errors.New("committed .whirlwind.yml or .whirlwind.yaml required; review and commit project policy, then register again")
-	}
-	local, e := os.ReadFile(filepath.Join(path, name))
-	if e != nil || string(local) != string(b) {
-		return nil, errors.New(name + " must match committed policy")
-	}
-	return b, nil
-}
-
-func policyName(path string) (string, error) {
-	name := policyYAML
-	if _, err := os.Lstat(filepath.Join(path, policyYML)); err == nil {
-		name = policyYML
-		if _, err := os.Lstat(filepath.Join(path, policyYAML)); err == nil {
-			return "", errors.New("keep only one project policy: .whirlwind.yml or .whirlwind.yaml")
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
-	}
-	return name, nil
+	return nil
 }
 
 // AllowedCommand allows only commands whose argument arrays begin with an explicitly configured prefix.

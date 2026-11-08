@@ -67,24 +67,6 @@ func (s *providerSession) tokenUsage(p map[string]any) {
 	s.mu.Unlock()
 }
 
-func (s *providerSession) turnCompleted(p map[string]any) {
-	if s.hooks.Event != nil {
-		s.hooks.Event("whirlwind/stop", p)
-	}
-	turn, _ := p["turn"].(map[string]any)
-	status, _ := turn["status"].(string)
-	if status == "failed" && turn["error"] != nil {
-		b, _ := json.Marshal(turn["error"])
-		s.mu.Lock()
-		s.turnFailure = codexTurnFailure(b)
-		s.mu.Unlock()
-	}
-	select {
-	case s.completed <- status:
-	default:
-	}
-}
-
 func (s *providerSession) claudeEvent(p map[string]any) {
 	sid, _ := p["session_id"].(string)
 	resolved, _ := p["resolved_model"].(string)

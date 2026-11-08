@@ -12,6 +12,13 @@ import (
 
 // Reconcile leases GitHub reconciliation, ingests eligible or withdrawn issues, and records terminal PR decisions.
 func (e *Engine) Reconcile(ctx context.Context) {
+	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
+		log.Printf("reconcile standalone OpenShell runtimes: %v", err)
+		return
+	}
+	if err := e.reconcileRuntimeJobs(ctx, runtimeCheckOwner{}); err != nil {
+		log.Printf("reconcile interrupted check runtimes: %v", err)
+	}
 	lease, err := e.Store.Claim(ctx, "reconcile", e.owner, 4*time.Minute)
 	if err != nil {
 		return
@@ -32,8 +39,13 @@ func (e *Engine) reconcileProject(ctx context.Context, p model.Project) {
 	}
 	issues, err := e.GitHub.Issues(ctx, p.Repo)
 	if err != nil {
-		_ = e.Store.Notify(ctx, "", "github", err.Error())
+		if ctx.Err() == nil {
+			_ = e.Store.Notify(ctx, "", "github", connectionFailureMessage(p, err))
+		}
 		return
+	}
+	if err := e.resolveProjectNotices(ctx, p, "github"); err != nil {
+		log.Printf("resolve GitHub connection notice: %v", err)
 	}
 	seen := map[int]bool{}
 	for _, issue := range issues {
@@ -58,9 +70,8 @@ func (e *Engine) reconcileTask(ctx context.Context, p model.Project, t model.Tas
 			_, _ = e.Ingest(ctx, p, issue)
 		}
 	}
-	if t.PR != "" && t.Stage != "complete" {
-		e.reconcilePR(ctx, p, t, version)
-	}
+	// Existing PR values remain historical data. Canonical runtime no longer
+	// polls or changes remote PR state after local delivery.
 }
 func (e *Engine) reconcilePR(ctx context.Context, p model.Project, t model.Task, version int) {
 	if t.Cancelled() {

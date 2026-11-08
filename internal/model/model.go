@@ -60,6 +60,7 @@ type Provider struct {
 	QuotaPool          string         `json:"quota_pool,omitempty"`
 	QuotaSnapshot      *QuotaSnapshot `json:"quota_snapshot,omitempty"`
 	ModelCommand       []string       `json:"model_command,omitempty"`
+	ACPProfile         string         `json:"acp_profile,omitempty"`
 	ID                 string         `json:"id"`
 	Name               string         `json:"name"`
 	Kind               string         `json:"kind"`
@@ -94,6 +95,7 @@ type Task struct {
 	Sources                []SourceRef             `json:"sources,omitempty"`
 	PlanDocument           *PlanDocument           `json:"plan_document,omitempty"`
 	Submission             *Submission             `json:"submission,omitempty"`
+	Delivery               *LocalDelivery          `json:"local_delivery,omitempty"`
 	Progress               *ProgressEvidence       `json:"progress,omitempty"`
 	Selection              *SelectionAuthorization `json:"selection,omitempty"`
 	Budget                 *BudgetPolicy           `json:"budget,omitempty"`
@@ -119,6 +121,7 @@ type Task struct {
 	ReviewPasses           int                     `json:"review_passes"`
 	UnchangedFailures      int                     `json:"unchanged_failures"`
 	Recoveries             int                     `json:"recoveries"`
+	RecoveryGeneration     int                     `json:"recovery_generation,omitempty"`
 	Fingerprint            string                  `json:"fingerprint,omitempty"`
 	Risk                   string                  `json:"risk,omitempty"`
 	Approved               bool                    `json:"approved"`
@@ -128,15 +131,24 @@ type Task struct {
 	Handoff                Handoff                 `json:"handoff"`
 }
 type Plan struct {
-	What               string     `json:"what,omitempty"`
-	Why                string     `json:"why,omitempty"`
-	Benefit            string     `json:"benefit,omitempty"`
-	Where              []string   `json:"where,omitempty"`
-	Specification      string     `json:"specification,omitempty"`
-	Objective          string     `json:"objective"`
-	AcceptanceCriteria []string   `json:"acceptance_criteria"`
-	Questions          []Question `json:"questions"`
-	Units              []Unit     `json:"units"`
+	Requirements             []Requirement `json:"requirements,omitempty"`
+	Checks                   []Check       `json:"checks,omitempty"`
+	RepositoryTestCommands   [][]string    `json:"repository_test_commands,omitempty"`
+	RepositoryBuildCommands  [][]string    `json:"repository_build_commands,omitempty"`
+	RepositoryTestInventory  string        `json:"repository_test_inventory,omitempty"`
+	RepositoryBuildInventory string        `json:"repository_build_inventory,omitempty"`
+	Scope                    []string      `json:"scope,omitempty"`
+	Exclusions               []string      `json:"exclusions,omitempty"`
+	Steps                    []string      `json:"steps,omitempty"`
+	What                     string        `json:"what,omitempty"`
+	Why                      string        `json:"why,omitempty"`
+	Benefit                  string        `json:"benefit,omitempty"`
+	Where                    []string      `json:"where,omitempty"`
+	Specification            string        `json:"specification,omitempty"`
+	Objective                string        `json:"objective"`
+	AcceptanceCriteria       []string      `json:"acceptance_criteria"`
+	Questions                []Question    `json:"questions"`
+	Units                    []Unit        `json:"units"`
 }
 type Question struct {
 	Options []string `json:"options,omitempty"`
@@ -166,32 +178,44 @@ type Finding struct {
 	Resolved bool   `json:"resolved"`
 }
 type Review struct {
-	Provenance  *Provenance `json:"provenance,omitempty"`
-	Perspective string      `json:"perspective,omitempty"`
-	Score       float64     `json:"score"`
-	Findings    []Finding   `json:"findings"`
-	Summary     string      `json:"summary"`
+	Adherence    *Adherence          `json:"adherence,omitempty"`
+	Requirements []RequirementResult `json:"requirements,omitempty"`
+	Provenance   *Provenance         `json:"provenance,omitempty"`
+	Perspective  string              `json:"perspective,omitempty"`
+	Score        float64             `json:"score"`
+	Findings     []Finding           `json:"findings"`
+	Summary      string              `json:"summary"`
 }
 type Direction struct {
-	ExpectedBenefit string        `json:"expected_benefit,omitempty"`
-	Uncertainty     []string      `json:"uncertainty,omitempty"`
-	EffortEstimate  string        `json:"effort_estimate,omitempty"`
-	ProblemKind     string        `json:"problem_kind,omitempty"`
-	Rank            int           `json:"rank,omitempty"`
-	Status          string        `json:"status,omitempty"`
-	TaskID          string        `json:"task_id,omitempty"`
-	SourceIssue     *Issue        `json:"source_issue,omitempty"`
-	Fingerprint     string        `json:"fingerprint,omitempty"`
-	Scope           []string      `json:"scope,omitempty"`
-	Evidence        []EvidenceRef `json:"evidence,omitempty"`
-	GroupID         string        `json:"group_id,omitempty"`
-	Category        string        `json:"category,omitempty"`
-	ID              string        `json:"id"`
-	ProjectID       string        `json:"project_id"`
-	Title           string        `json:"title"`
-	Description     string        `json:"description"`
-	Day             string        `json:"day"`
-	Selected        bool          `json:"selected"`
+	ExpectedBenefit    string        `json:"expected_benefit,omitempty"`
+	Problem            string        `json:"problem,omitempty"`
+	Mechanism          string        `json:"mechanism,omitempty"`
+	RepositoryRevision string        `json:"repository_revision,omitempty"`
+	RejectionReason    string        `json:"rejection_reason,omitempty"`
+	DeferralReason     string        `json:"deferral_reason,omitempty"`
+	RevisitReason      string        `json:"revisit_reason,omitempty"`
+	PredecessorID      string        `json:"predecessor_id,omitempty"`
+	Components         []string      `json:"components,omitempty"`
+	RelatedProposalIDs []string      `json:"related_proposal_ids,omitempty"`
+	ApprovedPlanIDs    []string      `json:"approved_plan_ids,omitempty"`
+	Uncertainty        []string      `json:"uncertainty,omitempty"`
+	EffortEstimate     string        `json:"effort_estimate,omitempty"`
+	ProblemKind        string        `json:"problem_kind,omitempty"`
+	Rank               int           `json:"rank,omitempty"`
+	Status             string        `json:"status,omitempty"`
+	TaskID             string        `json:"task_id,omitempty"`
+	SourceIssue        *Issue        `json:"source_issue,omitempty"`
+	Fingerprint        string        `json:"fingerprint,omitempty"`
+	Scope              []string      `json:"scope,omitempty"`
+	Evidence           []EvidenceRef `json:"evidence,omitempty"`
+	GroupID            string        `json:"group_id,omitempty"`
+	Category           string        `json:"category,omitempty"`
+	ID                 string        `json:"id"`
+	ProjectID          string        `json:"project_id"`
+	Title              string        `json:"title"`
+	Description        string        `json:"description"`
+	Day                string        `json:"day"`
+	Selected           bool          `json:"selected"`
 }
 type Handoff struct {
 	Version           int      `json:"version"`

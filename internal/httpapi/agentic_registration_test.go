@@ -10,6 +10,7 @@ import (
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
+	"whirlwind/internal/testutil/openshell"
 	"whirlwind/internal/workflow"
 )
 
@@ -45,11 +46,17 @@ func agenticRegistrationRepository(t *testing.T, remote string) (string, string)
 }
 
 func TestAgenticRegistrationDoesNotRequireGitHubCLI(t *testing.T) {
+	fixture := openshell.Install(t)
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
 	s := setup(t)
 	ctx := context.Background()
 	const remote = "https://forge.example/team/repo"
 	repo, marker := agenticRegistrationRepository(t, remote)
-	if err := s.Store.Put(ctx, "providers", "native", model.Provider{ID: "native", Kind: "codex", Available: true, Quota: "unknown", Command: []string{"/usr/bin/true"}, Capabilities: []string{"code", "submit"}}, 0); err != nil {
+	if err := s.Store.Put(ctx, "providers", "native", model.Provider{ID: "native", Kind: "acp", ACPProfile: "codex", Available: true, Quota: "unknown", Command: []string{"/usr/bin/true"}, Capabilities: []string{"code", "finalizer"}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	finalizer := model.AgentConfig{Role: "finalizer", Chain: []model.AgentChoice{{Provider: "native", Model: "fixture-model"}}}
+	if err := s.Store.Put(ctx, "agents", "finalizer", finalizer, 0); err != nil {
 		t.Fatal(err)
 	}
 	settings := workflow.DefaultSettings()

@@ -22,7 +22,7 @@ const (
 func TestStopAllRunnersPausesUnfinishedTasksAndCanReplay(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
-	for _, stage := range []string{"planning", "coding", "questions", "approval", "paused", "complete", "pr_created"} {
+	for _, stage := range []string{"planning", "coding", "questions", "approval", "paused", "complete", "pr_created", "cancelled"} {
 		if err := s.Store.Put(ctx, "tasks", stage, model.Task{ID: stage, Stage: stage, ResumeStage: "review"}, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -58,13 +58,13 @@ func assertPausedRunnerCount(t *testing.T, response *httptest.ResponseRecorder, 
 
 func assertStoppedTaskStages(t *testing.T, db *store.Store, ctx context.Context) {
 	t.Helper()
-	for _, stage := range []string{"planning", "coding", "questions", "approval", "paused", "complete", "pr_created"} {
+	for _, stage := range []string{"planning", "coding", "questions", "approval", "paused", "complete", "pr_created", "cancelled"} {
 		record, err := db.Get(ctx, "tasks", stage)
 		if err != nil {
 			t.Fatal(err)
 		}
 		task, _ := store.Decode[model.Task](record)
-		if stage == "paused" || stage == "complete" || stage == "pr_created" {
+		if stage == "paused" || stage == "complete" || stage == "pr_created" || stage == "cancelled" {
 			if task.Stage != stage || record.Version != 1 {
 				t.Fatalf("changed %s: %+v", stage, task)
 			}

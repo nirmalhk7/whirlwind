@@ -126,13 +126,23 @@ func workflowLocalPlan(t *testing.T) (*Server, model.Task) {
 	s := setup(t)
 	ctx := context.Background()
 	s.Engine.PlansRoot = filepath.Join(t.TempDir(), "plans")
-	project := model.Project{ID: "project", PolicyHash: "approved-policy", Policy: model.Policy{AllowedPaths: []string{workflowResultPath}}}
+	project := model.Project{ID: "project", Name: "fixture", PolicyHash: "approved-policy", Policy: model.Policy{AllowedPaths: []string{workflowResultPath}}}
 	if err := s.Store.Put(ctx, "projects", project.ID, project, 0); err != nil {
 		t.Fatal(err)
 	}
 	task := model.Task{ID: "task", ProjectID: project.ID, Mode: model.AgenticMode, PlanVersion: 1,
 		Issue: model.Issue{Title: workflowPlanObjective, Body: "Make result useful"},
-		Plan:  &model.Plan{Objective: workflowPlanObjective, What: workflowPlanChange, Why: "Result incomplete", Benefit: "Useful result", Where: []string{workflowResultPath}, AcceptanceCriteria: []string{"Result is correct"}, Units: []model.Unit{{ID: "main", Objective: "Test and implement result", AllowedPaths: []string{workflowResultPath}}}}}
+		Plan: &model.Plan{
+			Objective: workflowPlanObjective, What: workflowPlanChange, Why: "Result incomplete", Benefit: "Useful result",
+			Where: []string{workflowResultPath}, Scope: []string{"Correct the result value."}, Exclusions: []string{"Keep the result file format."},
+			Steps:                    []string{"Add a failing result assertion.", "Correct the result and rerun the assertion."},
+			RepositoryTestInventory:  "None configured: the fixture project has no repository test commands.",
+			RepositoryBuildInventory: "None configured: the fixture project has no repository build commands.",
+			AcceptanceCriteria:       []string{"Result is correct"},
+			Requirements:             []model.Requirement{{ID: "REQ-RESULT", Outcome: "result.txt contains correct.", EvidenceMethod: "Run result-content and inspect its exit status."}},
+			Checks:                   []model.Check{{Name: "result-content", Command: []string{"sh", "-c", "test \"$(cat result.txt)\" = correct"}}},
+			Units:                    []model.Unit{{ID: "main", Objective: "Test and implement result", AllowedPaths: []string{workflowResultPath}}},
+		}}
 	if err := s.Engine.WriteLocalPlan(ctx, project, &task); err != nil {
 		t.Fatal(err)
 	}
@@ -337,20 +347,40 @@ func workflowCredentialInventoryAdapter(failed bool) provider.Adapter {
 	})
 }
 
-func TestWorkflowSubmitterDisplaysInheritedCodingChoices(t *testing.T) {
+func TestWorkflowFinalizerUsesOnlyIndependentChoices(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
 	chain := []model.AgentChoice{{Provider: "native", Model: "configured-model"}}
 	if err := s.Store.Put(ctx, "agents", "code", model.AgentConfig{Role: "code", Chain: chain}, 0); err != nil {
 		t.Fatal(err)
 	}
-	response := workflowModeRequest(t, s, "GET", "agents/submit", "", nil)
+	response := workflowModeRequest(t, s, "GET", "agents/finalizer", "", nil)
 	var record model.Record
+	if response.Code == 200 {
+		if err := json.Unmarshal(response.Body.Bytes(), &record); err != nil {
+			t.Fatal(err)
+		}
+		config, err := store.Decode[model.AgentConfig](record)
+		if err != nil || len(config.Chain) != 0 || config.InheritedFrom != "" {
+			t.Fatalf("unconfigured finalizer borrowed coding choices: %+v %v", config, err)
+		}
+	} else if response.Code != 404 {
+		t.Fatalf("unconfigured finalizer read: %d %s", response.Code, response.Body)
+	}
+	finalizerChoice := model.AgentChoice{Provider: "finalizer-only", Model: "finalizer-model"}
+	if err := s.Store.Put(ctx, "agents", "finalizer", model.AgentConfig{Role: "finalizer", Chain: []model.AgentChoice{finalizerChoice}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	chain[0].Model = "changed-coding-model"
+	if err := s.Store.Put(ctx, "agents", "code", model.AgentConfig{Role: "code", Chain: chain}, 1); err != nil {
+		t.Fatal(err)
+	}
+	response = workflowModeRequest(t, s, "GET", "agents/finalizer", "", nil)
 	if err := json.Unmarshal(response.Body.Bytes(), &record); err != nil || response.Code != 200 {
-		t.Fatalf("agent read: %d %s", response.Code, response.Body)
+		t.Fatalf("configured finalizer read: %d %s", response.Code, response.Body)
 	}
 	config, err := store.Decode[model.AgentConfig](record)
-	if err != nil || record.Version != 0 || config.Role != "submit" || config.InheritedFrom != "code" || len(config.Chain) != 1 || config.Chain[0] != chain[0] {
-		t.Fatalf("incorrect inherited Submitter: %+v %v", config, err)
+	if err != nil || record.Version != 1 || config.Role != "finalizer" || config.InheritedFrom != "" || len(config.Chain) != 1 || config.Chain[0] != finalizerChoice {
+		t.Fatalf("finalizer changed with coding configuration: %+v %v", config, err)
 	}
 }

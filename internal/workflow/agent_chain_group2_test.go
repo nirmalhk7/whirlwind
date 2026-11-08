@@ -61,9 +61,7 @@ func TestConfiguredAgentExhaustionIncludesProviderCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	chain := model.AgentConfig{Role: "code", Chain: []model.AgentChoice{{Provider: "blocked", Model: chosenModelID}}}
-	if err := e.Store.Put(ctx, "agents", "code", chain, 0); err != nil {
-		t.Fatal(err)
-	}
+	putFixtureAgent(t, e.Store, "code", chain)
 	_, err := e.agent(ctx, project, task, provider.Input{Role: "code", CWD: cwd, Prompt: "work"})
 	if err == nil || !strings.Contains(err.Error(), "blocked/"+chosenModelID) || !strings.Contains(err.Error(), quotaExhaustedFailure) {
 		t.Fatalf("fallback exhaustion lost actionable cause: %v", err)
@@ -75,9 +73,7 @@ func TestConfiguredAgentExhaustionPreservesExecutionFailure(t *testing.T) {
 	ctx := context.Background()
 	project, _ := e.Project(ctx, task.ProjectID)
 	chain := model.AgentConfig{Role: "code", Chain: []model.AgentChoice{{Provider: "fake", Model: chosenModelID}}}
-	if err := e.Store.Put(ctx, "agents", "code", chain, 0); err != nil {
-		t.Fatal(err)
-	}
+	putFixtureAgent(t, e.Store, "code", chain)
 	failure := errors.New("usageLimitExceeded: weekly limit reached")
 	e.Adapter = func(model.Provider) provider.Adapter {
 		return connectionAdapterFunc(func(context.Context, provider.Input, provider.Hooks) (provider.Output, error) {

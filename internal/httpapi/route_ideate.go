@@ -20,11 +20,8 @@ func (q apiRequest) ideate() error {
 		return &apiError{422, "invalid_input", "Ideation brief must be a JSON object"}
 	}
 	brief := input.IdeationBrief
-	brief.Goal = strings.TrimSpace(brief.Goal)
-	brief.Constraints = strings.TrimSpace(brief.Constraints)
-	brief.Priorities = strings.TrimSpace(brief.Priorities)
-	if len(brief.Goal) > 4000 || len(brief.Constraints) > 8000 || len(brief.Priorities) > 4000 || brief.MaxCandidates < 0 || brief.MaxCandidates > 12 {
-		return &apiError{422, "invalid_input", "Ideation goal or constraints too long"}
+	if err := normalizeIdeationBrief(&brief); err != nil {
+		return err
 	}
 	p, e := q.Engine.Project(q.r.Context(), q.id)
 	if e != nil {
@@ -33,14 +30,12 @@ func (q apiRequest) ideate() error {
 	if p.Paused {
 		return &apiError{409, "project_paused", workflow.ErrProjectPaused.Error()}
 	}
-	if brief.Goal != "" || brief.Constraints != "" || brief.Priorities != "" || brief.MaxCandidates > 0 {
-		record, err := q.Store.Get(q.r.Context(), "ideation_briefs", p.ID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return err
-		}
-		if err = q.Store.Put(q.r.Context(), "ideation_briefs", p.ID, brief, record.Version); err != nil {
-			return err
-		}
+	return q.queueIdeation(p, brief, input.Fresh)
+}
+
+func (q apiRequest) queueIdeation(p model.Project, brief model.IdeationBrief, fresh bool) error {
+	if err := persistIdeationBrief(q, p.ID, brief); err != nil {
+		return err
 	}
 	day, e := q.Engine.IdeationDay(q.r.Context(), time.Now())
 	if e != nil {
@@ -53,7 +48,7 @@ func (q apiRequest) ideate() error {
 	}
 	store.AfterCommit(q.r.Context(), func() {
 		go func() {
-			err := q.Engine.IdeateWhenAvailable(workflow.WithFreshDiscovery(workflow.WithOperation(q.Context, operation), input.Fresh), p, day)
+			err := q.Engine.IdeateWhenAvailable(workflow.WithFreshDiscovery(workflow.WithOperation(q.Context, operation), fresh), p, day)
 			result.Stage = "complete"
 			if err != nil {
 				result.Stage = "failed"
@@ -66,4 +61,33 @@ func (q apiRequest) ideate() error {
 	})
 	reply(q.w, 202, map[string]string{"operation_id": operation})
 	return nil
+}
+
+func normalizeIdeationBrief(brief *model.IdeationBrief) error {
+	brief.Goal = strings.TrimSpace(brief.Goal)
+	brief.Constraints = strings.TrimSpace(brief.Constraints)
+	brief.Priorities = strings.TrimSpace(brief.Priorities)
+	if invalidIdeationBrief(*brief) {
+		return &apiError{422, "invalid_input", "Ideation goal or constraints too long"}
+	}
+	return nil
+}
+
+func invalidIdeationBrief(brief model.IdeationBrief) bool {
+	return invalidBriefText(brief) || brief.MaxCandidates < 0 || brief.MaxCandidates > 12
+}
+
+func invalidBriefText(brief model.IdeationBrief) bool {
+	return len(brief.Goal) > 4000 || len(brief.Constraints) > 8000 || len(brief.Priorities) > 4000
+}
+
+func persistIdeationBrief(q apiRequest, projectID string, brief model.IdeationBrief) error {
+	if brief.Goal == "" && brief.Constraints == "" && brief.Priorities == "" && brief.MaxCandidates <= 0 {
+		return nil
+	}
+	record, err := q.Store.Get(q.r.Context(), "ideation_briefs", projectID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return q.Store.Put(q.r.Context(), "ideation_briefs", projectID, brief, record.Version)
 }

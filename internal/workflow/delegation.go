@@ -40,13 +40,30 @@ func scopesOverlap(a, b []string) bool {
 	for _, x := range a {
 		for _, y := range b {
 			px, py := scopePrefix(x), scopePrefix(y)
-			if px == "" || py == "" || px == py || strings.HasPrefix(px, py+"/") || strings.HasPrefix(py, px+"/") {
+			if scopePrefixesOverlap(px, py) {
 				return true
 			}
 		}
 	}
 	return false
 }
+
+func scopePrefixesOverlap(a, b string) bool {
+	return missingScopePrefix(a, b) || sameOrNestedScope(a, b)
+}
+
+func missingScopePrefix(a, b string) bool {
+	return a == "" || b == ""
+}
+
+func sameOrNestedScope(a, b string) bool {
+	return a == b || nestedScope(a, b)
+}
+
+func nestedScope(a, b string) bool {
+	return strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/")
+}
+
 func scopePrefix(pattern string) string {
 	if n := strings.IndexAny(pattern, "*?["); n >= 0 {
 		pattern = pattern[:n]

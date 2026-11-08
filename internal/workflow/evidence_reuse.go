@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -37,7 +36,15 @@ type cachedCheck struct {
 
 func (c cachedCheck) valid(key evidenceKey, now time.Time, freshness int) bool {
 	at, err := time.Parse(time.RFC3339Nano, c.FinishedAt)
-	return err == nil && c.Key == key && c.VerificationID != "" && c.Result.Passed && freshness > 0 && !at.After(now) && now.Sub(at) <= time.Duration(freshness)*time.Second
+	return err == nil && cacheIdentityMatches(c, key) && cacheFreshnessMatches(at, now, freshness)
+}
+
+func cacheIdentityMatches(check cachedCheck, key evidenceKey) bool {
+	return check.Key == key && check.VerificationID != "" && check.Result.Passed
+}
+
+func cacheFreshnessMatches(at, now time.Time, freshness int) bool {
+	return freshness > 0 && !at.After(now) && now.Sub(at) <= time.Duration(freshness)*time.Second
 }
 func evidenceDigest(value any) string {
 	raw, _ := json.Marshal(value)
@@ -46,7 +53,7 @@ func evidenceDigest(value any) string {
 }
 
 func (run *verificationRun) checkKey(policy model.Policy, check model.Check) (evidenceKey, bool) {
-	if !check.Reusable || check.FreshnessSeconds <= 0 || len(check.Command) == 0 {
+	if !reusableCheck(check) {
 		return evidenceKey{}, false
 	}
 	// Shell command strings can hide untracked executables/toolchains; never reuse.
@@ -54,10 +61,31 @@ func (run *verificationRun) checkKey(policy model.Policy, check model.Check) (ev
 	if slices.Contains([]string{"sh", "bash", "zsh", "fish", "env"}, filepath.Base(name)) {
 		return evidenceKey{}, false
 	}
-	clean, err := github.Run(run.ctx, run.task.Worktree, "git", "status", "--porcelain", "-uall")
-	if err != nil || clean != "" {
+	if !run.cleanWorktree() {
 		return evidenceKey{}, false
 	}
+	return run.reusableEvidenceKey(policy, check, name)
+}
+
+func reusableCheck(check model.Check) bool {
+	if !check.Reusable {
+		return false
+	}
+	if check.FreshnessSeconds <= 0 {
+		return false
+	}
+	if len(check.Command) > 1 && filepath.Base(check.Command[0]) == "qlty" && (check.Command[1] == "check" || check.Command[1] == "smells") {
+		return false
+	}
+	return len(check.Command) > 0
+}
+
+func (run *verificationRun) cleanWorktree() bool {
+	clean, err := github.Run(run.ctx, run.task.Worktree, "git", "status", "--porcelain", "-uall")
+	return err == nil && clean == ""
+}
+
+func (run *verificationRun) reusableEvidenceKey(policy model.Policy, check model.Check, name string) (evidenceKey, bool) {
 	tree, err := github.Run(run.ctx, run.task.Worktree, "git", "rev-parse", "HEAD^{tree}")
 	if err != nil {
 		return evidenceKey{}, false
@@ -126,27 +154,9 @@ func (run *verificationRun) runChecks(policy model.Policy, checks []model.Check,
 	}
 	report := verification.Report{Passed: len(checks) > 0, Results: []verification.Result{}}
 	for _, check := range checks {
-		key, cacheable := run.checkKey(policy, check)
-		result, reused := run.cachedResult(key, check)
-		if !cacheable {
-			reused = false
-		}
-		if !reused {
-			part, err := verification.RunObservedWithProfile(run.ctx, run.task.Worktree, []model.Check{check}, profile, nil)
-			if err != nil {
-				return report, err
-			}
-			if len(part.Results) == 0 {
-				return report, fmt.Errorf("check %s returned no evidence", check.Name)
-			}
-			result = part.Results[0]
-			// A concurrent source/toolchain change invalidates the just-produced result.
-			after, stillCacheable := run.checkKey(policy, check)
-			if cacheable && stillCacheable && key == after {
-				if err = run.cacheResult(run.ctx, key, result); err != nil {
-					return report, err
-				}
-			}
+		result, err := run.runCheck(policy, check, profile)
+		if err != nil {
+			return report, err
 		}
 		report.Results = append(report.Results, result)
 		report.Passed = report.Passed && result.Passed
@@ -160,4 +170,25 @@ func (run *verificationRun) runChecks(policy model.Policy, checks []model.Check,
 		}
 	}
 	return report, nil
+}
+
+func (run *verificationRun) runCheck(policy model.Policy, check model.Check, profile execution.Profile) (verification.Result, error) {
+	key, cacheable := run.checkKey(policy, check)
+	if cacheable {
+		if result, reused := run.cachedResult(key, check); reused {
+			return result, nil
+		}
+	}
+	result, err := run.engine.runOwnedCheck(run.ctx, run.task.Worktree, check, profile, runtimeCheckOwner{TaskID: run.task.ID, VerificationID: run.id, Role: "verify"})
+	if err != nil {
+		return verification.Result{}, err
+	}
+	// A concurrent source/toolchain change invalidates the just-produced result.
+	after, stillCacheable := run.checkKey(policy, check)
+	if cacheable && stillCacheable && key == after {
+		if err = run.cacheResult(run.ctx, key, result); err != nil {
+			return verification.Result{}, err
+		}
+	}
+	return result, nil
 }

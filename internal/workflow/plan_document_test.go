@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -8,14 +9,20 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	planInternalCIPath  = "internal/ci/**"
+	planRetrySourcePath = "internal/ci/retry.go"
+	planSourceGlob      = "src/**"
+)
+
 func TestPlanDocumentRoundTripPreservesExecutableScope(t *testing.T) {
-	plan := model.Plan{Objective: "Keep CI failures visible", What: "Show failed jobs and retry status.", Why: "A completed retry currently hides the original failure.", Benefit: "Developers can identify recurring build failures.", Where: []string{"internal/ci/**", "web/components/Builds.tsx"}, Specification: "Preserve failure timestamps during refresh.", AcceptanceCriteria: []string{"Failed jobs remain visible.", "Retries retain their original failure time."}, Units: []model.Unit{{ID: "backend", Objective: "Write failing timestamp regression test, then retain timestamps.", AllowedPaths: []string{"internal/ci/**"}}, {ID: "frontend", Objective: "Render retry status and test refresh behavior.", AllowedPaths: []string{"web/components/Builds.tsx"}}}}
+	plan := model.Plan{Objective: "Keep CI failures visible", What: "Show failed jobs and retry status.", Why: "A completed retry currently hides the original failure.", Benefit: "Developers can identify recurring build failures.", Where: []string{planInternalCIPath, "web/components/Builds.tsx"}, Scope: []string{"Retain original failed job state.", "Render the retry timestamp."}, Exclusions: []string{"Do not alter CI provider APIs."}, Steps: []string{"Add retry-history regression tests.", "Preserve and display original failure data."}, RepositoryTestInventory: "Configured: go test ./... from .github/workflows/test.yml.", RepositoryBuildInventory: "Configured: go build ./... from .github/workflows/test.yml.", RepositoryTestCommands: [][]string{{"go", "test", "./..."}}, RepositoryBuildCommands: [][]string{{"go", "build", "./..."}}, Specification: "Preserve failure timestamps during refresh.", AcceptanceCriteria: []string{"Failed jobs remain visible.", "Retries retain their original failure time."}, Units: []model.Unit{{ID: "backend", Objective: "Write failing timestamp regression test, then retain timestamps.", AllowedPaths: []string{planInternalCIPath}}, {ID: "frontend", Objective: "Render retry status and test refresh behavior.", AllowedPaths: []string{"web/components/Builds.tsx"}}}}
 	document := RenderPlanDocument(plan)
 	parsed, err := ParsePlanDocument(document)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.Objective != plan.Objective || parsed.What != plan.What || parsed.Why != plan.Why || parsed.Benefit != plan.Benefit || !reflect.DeepEqual(parsed.Where, plan.Where) || !reflect.DeepEqual(parsed.AcceptanceCriteria, plan.AcceptanceCriteria) {
+	if parsed.Objective != plan.Objective || parsed.What != plan.What || parsed.Why != plan.Why || parsed.Benefit != plan.Benefit || !reflect.DeepEqual(parsed.Where, plan.Where) || !reflect.DeepEqual(parsed.Scope, plan.Scope) || !reflect.DeepEqual(parsed.Exclusions, plan.Exclusions) || !reflect.DeepEqual(parsed.Steps, plan.Steps) || parsed.RepositoryTestInventory != plan.RepositoryTestInventory || parsed.RepositoryBuildInventory != plan.RepositoryBuildInventory || !reflect.DeepEqual(parsed.AcceptanceCriteria, plan.AcceptanceCriteria) {
 		t.Fatalf("approved semantics changed: %+v", parsed)
 	}
 	if !reflect.DeepEqual(parsed.Units, plan.Units) || !strings.Contains(parsed.Specification, "Preserve failure timestamps") {
@@ -23,6 +30,38 @@ func TestPlanDocumentRoundTripPreservesExecutableScope(t *testing.T) {
 	}
 	if next := RenderPlanDocument(parsed); strings.Count(next, "## Specification") != 1 {
 		t.Fatalf("render duplicated approved document: %s", next)
+	}
+}
+
+func TestPlanDocumentPreservesRequirementsAndVerificationCommands(t *testing.T) {
+	var plan model.Plan
+	raw := []byte(`{"objective":"Fix retries","what":"Preserve failures","why":"Retries overwrite evidence","benefit":"Failures remain visible","where":["internal/retry.go"],"acceptance_criteria":["Old failure remains visible"],"units":[{"id":"main","objective":"Add regression test and preserve history","allowed_paths":["internal/retry.go"]}],"requirements":[{"id":"REQ-001","outcome":"A retry never removes the original failure record.","evidence_method":"Run TestRetryRetainsOriginalFailure"}],"checks":[{"id":"check-001","name":"retry regression","command":["go","test","./internal/retry"]}],"repository_test_commands":[["go","test","./..."]],"repository_build_commands":[["go","build","./..."]]}`)
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatal(err)
+	}
+	document := RenderPlanDocument(plan)
+	for _, want := range []string{"REQ-001", "A retry never removes the original failure record.", "Run TestRetryRetainsOriginalFailure", "`go test ./internal/retry`", "`go test ./...`", "`go build ./...`"} {
+		if !strings.Contains(document, want) {
+			t.Errorf("approved plan document omitted %q: %s", want, document)
+		}
+	}
+	parsed, err := ParsePlanDocument(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err = json.Unmarshal(encoded, &got); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"requirements", "checks", "repository_test_commands", "repository_build_commands"} {
+		values, ok := got[key].([]any)
+		if !ok || len(values) != 1 {
+			t.Errorf("parsed plan dropped %s: %s", key, encoded)
+		}
 	}
 }
 
@@ -48,10 +87,10 @@ func TestPlanDocumentManualEditsBecomeAuthoritative(t *testing.T) {
 	for _, invalid := range []string{
 		strings.Replace(document, "## Why\n\nFailures are hidden.", "", 1),
 		strings.Replace(document, "- [ ] Retry failure remains visible.", "Retry failure remains visible.", 1),
-		strings.ReplaceAll(document, "internal/ci/retry.go", "../secrets"),
-		strings.ReplaceAll(document, "internal/ci/retry.go", "/etc/passwd"),
-		strings.ReplaceAll(document, "internal/ci/retry.go", "src/../../outside"),
-		strings.ReplaceAll(document, "internal/ci/retry.go", "C:\\outside"),
+		strings.ReplaceAll(document, planRetrySourcePath, "../secrets"),
+		strings.ReplaceAll(document, planRetrySourcePath, "/etc/passwd"),
+		strings.ReplaceAll(document, planRetrySourcePath, "src/../../outside"),
+		strings.ReplaceAll(document, planRetrySourcePath, "C:\\outside"),
 		document + "\n## Where\n\n- other.go\n",
 	} {
 		if _, err := ParsePlanDocument(invalid); err == nil {
@@ -61,12 +100,12 @@ func TestPlanDocumentManualEditsBecomeAuthoritative(t *testing.T) {
 }
 
 func TestPlanDocumentLegacyPlanUsesExplicitFallbacks(t *testing.T) {
-	plan := model.Plan{Objective: "Fix retry history", Specification: "Retries overwrite failures.", AcceptanceCriteria: []string{"History retains failures."}, Units: []model.Unit{{ID: "first", Objective: "Add regression test.", AllowedPaths: []string{"src/**"}}, {ID: "second", Objective: "Retain failure.", AllowedPaths: []string{"src/**", "tests/**"}}}}
+	plan := model.Plan{Objective: "Fix retry history", Specification: "Retries overwrite failures.", AcceptanceCriteria: []string{"History retains failures."}, Units: []model.Unit{{ID: "first", Objective: "Add regression test.", AllowedPaths: []string{planSourceGlob}}, {ID: "second", Objective: "Retain failure.", AllowedPaths: []string{planSourceGlob, "tests/**"}}}}
 	parsed, err := ParsePlanDocument(RenderPlanDocument(plan))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if parsed.What != "Fix retry history" || parsed.Why != "Retries overwrite failures." || parsed.Benefit != "History retains failures." || !reflect.DeepEqual(parsed.Where, []string{"src/**", "tests/**"}) {
+	if parsed.What != "Fix retry history" || parsed.Why != "Retries overwrite failures." || parsed.Benefit != "History retains failures." || !reflect.DeepEqual(parsed.Where, []string{planSourceGlob, "tests/**"}) {
 		t.Fatalf("legacy fallback lost intent: %+v", parsed)
 	}
 	plan.Units = nil
@@ -87,7 +126,7 @@ func TestPlanDocumentKeepsScopedUnitsAndDependencies(t *testing.T) {
 }
 
 func TestPlanDocumentUnitsCanNarrowComponentScope(t *testing.T) {
-	plan := model.Plan{Objective: "Fix CI", What: "Keep CI failures", Why: "Missing failure", Benefit: "Correct CI", Where: []string{"internal/ci/**"}, AcceptanceCriteria: []string{"Failure visible"}, Units: []model.Unit{{ID: "ci", Objective: "Fix and test", AllowedPaths: []string{"internal/ci/run.go", "internal/ci/run_test.go"}}}}
+	plan := model.Plan{Objective: "Fix CI", What: "Keep CI failures", Why: "Missing failure", Benefit: "Correct CI", Where: []string{planInternalCIPath}, AcceptanceCriteria: []string{"Failure visible"}, Units: []model.Unit{{ID: "ci", Objective: "Fix and test", AllowedPaths: []string{"internal/ci/run.go", "internal/ci/run_test.go"}}}}
 	parsed, err := ParsePlanDocument(RenderPlanDocument(plan))
 	if err != nil {
 		t.Fatal(err)

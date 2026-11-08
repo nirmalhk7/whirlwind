@@ -132,7 +132,7 @@ func parseIssues(text string) ([]model.Issue, error) {
 
 // Issues loads up to 1,000 open whirlwind:ready issues for reconciliation.
 func (c CLI) Issues(ctx context.Context, repo string) ([]model.Issue, error) {
-	b, e := gh(ctx, "issue", "list", repoFlag, repo, stateFlag, "open", labelFlag, readyLabel, limitFlag, "1000", jsonFlag, issueFields)
+	b, e := ghRead(ctx, "issue", "list", repoFlag, repo, stateFlag, "open", labelFlag, readyLabel, limitFlag, "1000", jsonFlag, issueFields)
 	if e != nil {
 		return nil, e
 	}
@@ -141,7 +141,7 @@ func (c CLI) Issues(ctx context.Context, repo string) ([]model.Issue, error) {
 
 // Issue fetches one issue snapshot, including its state, labels, and update timestamp.
 func (c CLI) Issue(ctx context.Context, repo string, n int) (model.Issue, error) {
-	b, e := gh(ctx, "issue", "view", fmt.Sprint(n), repoFlag, repo, jsonFlag, issueFields)
+	b, e := ghRead(ctx, "issue", "view", fmt.Sprint(n), repoFlag, repo, jsonFlag, issueFields)
 	if e != nil {
 		return model.Issue{}, e
 	}
@@ -150,13 +150,13 @@ func (c CLI) Issue(ctx context.Context, repo string, n int) (model.Issue, error)
 
 // Sources collects issues and attempts to fetch discussions, reporting discussion availability without failing the issue collection.
 func (c CLI) Sources(ctx context.Context, repo string) (any, error) {
-	issues, e := gh(ctx, "issue", "list", repoFlag, repo, limitFlag, "100", jsonFlag, "number,title,body,labels")
+	issues, e := ghRead(ctx, "issue", "list", repoFlag, repo, limitFlag, "100", jsonFlag, "number,title,body,labels")
 	if e != nil {
 		return nil, e
 	}
 	parts := strings.Split(repo, "/")
 	query := fmt.Sprintf(`query { repository(owner: %q,name: %q) { discussions(first: 30) { nodes { title body url } } } }`, parts[0], parts[1])
-	discussions, de := gh(ctx, "api", "graphql", "-f", "query="+query)
+	discussions, de := ghRead(ctx, "api", "graphql", "-f", "query="+query)
 	return map[string]any{"issues": json.RawMessage(issues), "discussions": discussions, "discussions_available": de == nil}, nil
 }
 
@@ -230,7 +230,7 @@ func (c CLI) RegisterWebhook(ctx context.Context, repo, url, secret string) erro
 
 // PRState fetches the published PR state so reconciliation can record closure or merge.
 func (c CLI) PRState(ctx context.Context, repo, url string) (string, error) {
-	b, e := gh(ctx, "pr", "view", url, repoFlag, repo, jsonFlag, "state")
+	b, e := ghRead(ctx, "pr", "view", url, repoFlag, repo, jsonFlag, "state")
 	var v struct {
 		State string `json:"state"`
 	}
@@ -243,5 +243,5 @@ func (c CLI) PRState(ctx context.Context, repo, url string) (string, error) {
 
 // DefaultBranch asks GitHub for the repository default branch name.
 func DefaultBranch(ctx context.Context, repo string) (string, error) {
-	return gh(ctx, "repo", "view", repo, jsonFlag, "defaultBranchRef", "--jq", ".defaultBranchRef.name")
+	return ghRead(ctx, "repo", "view", repo, jsonFlag, "defaultBranchRef", "--jq", ".defaultBranchRef.name")
 }

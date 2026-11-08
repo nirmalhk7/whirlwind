@@ -17,6 +17,15 @@ import (
 
 // verify reserves capacity, checks diff scope, runs baseline and risk-specific checks, and stores diagnostics in the task handoff.
 func (e *Engine) verify(ctx context.Context, p model.Project, t *model.Task) (resultErr error) {
+	var plan model.Plan
+	if t.Plan != nil {
+		plan = *t.Plan
+	}
+	checks, err := planVerificationChecks(p.Policy, plan)
+	if err != nil {
+		return err
+	}
+	p.Policy.Checks = checks
 	if err := e.acquire(ctx, p); err != nil {
 		return err
 	}
@@ -36,6 +45,11 @@ func (e *Engine) verify(ctx context.Context, p model.Project, t *model.Task) (re
 		run.value["stage"] = "failed"
 		run.value["error"] = err.Error()
 		return errors.Join(err, run.save())
+	}
+	if verification.ChangesQltyConfiguration(strings.Split(files, "\n")) {
+		message := "Qlty configuration or ignore files changed; baseline comparison is invalid until quality policy is unchanged"
+		blocked := verification.Report{Passed: false, Results: []verification.Result{{Name: "qlty-config-comparability", Passed: false, Error: message}}}
+		return run.finish(blocked, blocked, errors.New(message))
 	}
 	return run.checkDiff(p.Policy, files, patch)
 }
@@ -163,12 +177,6 @@ func (e *Engine) progress(ctx context.Context, t *model.Task) error {
 		t.UnchangedFailures = 0
 		t.Recoveries++
 		t.Handoff.NextAction = "recover with new context or another provider"
-		if t.Recoveries >= 3 {
-			t.ResumeStage = t.Stage
-			t.Stage = "paused"
-			t.Error = "Three unsuccessful stall recoveries; user decision required"
-			_ = e.Store.Notify(ctx, t.ID, "stall", t.Error)
-		}
 	}
 	return nil
 }

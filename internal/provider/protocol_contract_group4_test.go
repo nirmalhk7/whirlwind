@@ -54,7 +54,7 @@ func (p *protocolPeer) acpFixtureSessionReply(f protocolFixture, params map[stri
 		}
 		return
 	}
-	if f.ReadOnly && f.Scenario != contractThinkingCatalog {
+	if f.ReadOnly && f.Scenario != contractThinkingCatalog && f.Scenario != "metadata-only" {
 		params = p.read("session/set_mode")
 		p.require(params["sessionId"] == testSessionID && params["modeId"] == "ask", "read-only mode lost")
 		p.reply(map[string]any{})

@@ -17,27 +17,44 @@ type configurationChanges struct {
 
 func (s *Source) configurationChanges(ctx context.Context, doc Document) ([]store.Change, error) {
 	c := &configurationChanges{source: s, ctx: ctx, values: []store.Change{}}
-	if err := c.appendValue("settings", "global", doc.Workers); err != nil {
+	if err := c.settingsValues(doc); err != nil {
 		return nil, err
 	}
-	state := model.WorkflowConfig{ActiveMode: model.EffectiveMode(s.activeMode), ConfiguredMode: model.EffectiveMode(doc.Mode), RestartRequired: model.EffectiveMode(s.activeMode) != model.EffectiveMode(doc.Mode), Integrations: doc.Integrations}
-	if err := c.appendValue("workflow_config", "global", state); err != nil {
+	if err := c.providerValues(doc); err != nil {
 		return nil, err
 	}
-	for _, p := range doc.Providers {
-		if err := c.provider(p); err != nil {
-			return nil, err
-		}
-	}
-	for role, chain := range doc.Agents {
-		if err := c.appendValue("agents", role, model.AgentConfig{Role: role, Chain: chain}); err != nil {
-			return nil, err
-		}
+	if err := c.projectValues(doc); err != nil {
+		return nil, err
 	}
 	if err := c.removals(doc); err != nil {
 		return nil, err
 	}
 	return c.values, nil
+}
+
+func (c *configurationChanges) settingsValues(doc Document) error {
+	if err := c.appendValue("settings", "global", doc.Workers); err != nil {
+		return err
+	}
+	state := model.WorkflowConfig{ActiveMode: model.EffectiveMode(c.source.activeMode), ConfiguredMode: model.EffectiveMode(doc.Mode), RestartRequired: model.EffectiveMode(c.source.activeMode) != model.EffectiveMode(doc.Mode), Integrations: doc.Integrations}
+	if err := c.appendValue("workflow_config", "global", state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *configurationChanges) providerValues(doc Document) error {
+	for _, p := range doc.Providers {
+		if err := c.provider(p); err != nil {
+			return err
+		}
+	}
+	for role, chain := range doc.Agents {
+		if err := c.appendValue("agents", role, model.AgentConfig{Role: role, Chain: chain}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c *configurationChanges) appendValue(kind, id string, value any) error {

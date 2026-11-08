@@ -38,13 +38,20 @@ func (a *agentAttempt) checkUsageEvent(ctx context.Context, kind string, b []byt
 		}
 		usage = event.Usage
 	}
-	if usage != nil && usage.InputTokens != nil && usage.OutputTokens != nil && usage.TotalTokens != nil && usage.Source == "codex" {
+	if completeCodexUsage(usage) {
 		usage.Completeness = "reported_complete"
 	}
 	if usage == nil {
 		return nil
 	}
 	a.state.Usage = usage
+	return a.checkReportedUsage(ctx, usage)
+}
+
+func (a *agentAttempt) checkReportedUsage(ctx context.Context, usage *model.Usage) error {
+	if a.timeLimitedPreparation() {
+		return nil
+	}
 	budget, err := a.budgetPolicy()
 	if err != nil {
 		return err
@@ -55,6 +62,19 @@ func (a *agentAttempt) checkUsageEvent(ctx context.Context, kind string, b []byt
 	}
 	return a.Store.CheckUsageLimit(ctx, entry, budget)
 }
+
+func completeCodexUsage(usage *model.Usage) bool {
+	return hasInputOutputTokens(usage) && hasTotalTokens(usage) && usage.Source == "codex"
+}
+
+func hasInputOutputTokens(usage *model.Usage) bool {
+	return usage != nil && usage.InputTokens != nil && usage.OutputTokens != nil
+}
+
+func hasTotalTokens(usage *model.Usage) bool {
+	return usage != nil && usage.TotalTokens != nil
+}
+
 func (a *agentAttempt) checkLiveQuota(ctx context.Context, data any) error {
 	if a.input.Purpose == "provider_test" {
 		return nil
@@ -63,6 +83,10 @@ func (a *agentAttempt) checkLiveQuota(ctx context.Context, data any) error {
 	if err != nil {
 		return nil
 	}
+	return a.persistLiveQuotaSnapshot(ctx, snapshot)
+}
+
+func (a *agentAttempt) persistLiveQuotaSnapshot(ctx context.Context, snapshot *model.QuotaSnapshot) error {
 	record, err := a.Store.Get(ctx, "providers", a.chosen.ID)
 	if err != nil {
 		return err

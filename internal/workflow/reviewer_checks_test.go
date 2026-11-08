@@ -9,6 +9,7 @@ import (
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
+	"whirlwind/internal/testutil/openshell"
 )
 
 // Allowing arbitrary IDs/commands would turn the reviewer broker into a host shell.
@@ -25,6 +26,9 @@ func TestReviewerBrokerRejectsUncommittedCheck(t *testing.T) {
 
 // A dirty/deleted live file must not change what a reviewer check verifies: only the reviewed commit is used.
 func TestReviewerBrokerRunsCommittedSnapshotAndCapturesEvidence(t *testing.T) {
+	fixture := openshell.Install(t)
+	fixture.EnableCommandExecution()
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
 	e, task, cwd := testEngine(t)
 	ctx := context.Background()
 	if err := os.WriteFile(filepath.Join(cwd, resultFile), []byte("committed"), 0600); err != nil {

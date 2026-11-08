@@ -69,6 +69,10 @@ func notifyTaskTransition(ctx context.Context, tx *sql.Tx, before, after []byte)
 	if err := json.Unmarshal(after, &task); err != nil {
 		return err
 	}
+	return notifyTaskStage(ctx, tx, old, task)
+}
+
+func notifyTaskStage(ctx context.Context, tx *sql.Tx, old, task model.Task) error {
 	if task.Stage == old.Stage && task.Error == old.Error {
 		return nil
 	}

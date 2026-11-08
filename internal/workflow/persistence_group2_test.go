@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"whirlwind/internal/model"
@@ -62,48 +64,75 @@ func TestPermissionEvidenceFailureCannotBeSwallowed(t *testing.T) {
 }
 
 func TestUncertainPublicationReconcilesFrozenIntent(t *testing.T) {
-	e, task, _ := testEngine(t)
+	e, task, project, record := acceptedDeliveryFixture(t)
 	ctx := context.Background()
-	remote := &uncertainPublication{fakeGitHub: fakeGitHub{}}
-	e.GitHub = remote
-	for i := 0; i < 6; i++ {
-		if err := e.Step(ctx, task.ID); err != nil {
-			t.Fatal(err)
-		}
+	step := &taskStep{Engine: e, ctx: ctx, project: project, task: task, record: record}
+	finished, err := step.submitting()
+	if err != nil || finished || step.task.Delivery == nil || step.task.Delivery.Stage != "prepared" {
+		t.Fatalf("local delivery intent not prepared: finished=%v delivery=%+v err=%v", finished, step.task.Delivery, err)
 	}
-	if err := e.Step(ctx, task.ID); err == nil {
-		t.Fatal("lost remote response accepted")
-	}
-	records, _ := e.Store.List(ctx, "publications")
-	if len(records) != 1 || !strings.Contains(string(records[0].Data), "uncertain") {
-		t.Fatal("uncertain intent missing", records)
-	}
-	if err := e.Step(ctx, task.ID); err != nil {
+	if err := e.Store.Put(ctx, "tasks", step.task.ID, step.task, step.record.Version); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := e.Store.Get(ctx, "tasks", task.ID)
-	done, _ := store.Decode[model.Task](r)
-	if done.Stage != "pr_created" || remote.created != 1 {
-		t.Fatal("publication recovery duplicated remote write", done.Stage, remote.created)
+	step.record.Version++
+	delivery := *step.task.Delivery
+	if commit, err := promoteReviewedSnapshot(ctx, delivery.OriginalWorktree, delivery.Worktree, delivery.Branch, delivery.Base, delivery.ReviewedCommit); err != nil || commit != delivery.ReviewedCommit {
+		t.Fatalf("simulate promotion before supervisor acknowledgement: commit=%q err=%v", commit, err)
 	}
-}
-
-type uncertainPublication struct {
-	fakeGitHub
-	created int
-	body    string
-}
-
-func (g *uncertainPublication) CreatePR(_ context.Context, _, _, _, _, _, body string) (string, error) {
-	if g.created == 0 {
-		g.created = 1
-		g.body = body
-		return "", errors.New("connection lost after remote write")
+	storePath := filepath.Join(e.Root, "state.db")
+	if err := e.Store.Close(); err != nil {
+		t.Fatal(err)
 	}
-	if body != g.body {
-		return "", errors.New("recovery changed publication body")
+	reopened, err := store.Open(storePath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return "https://github.com/o/r/pull/1", nil
+	t.Cleanup(func() { _ = reopened.Close() })
+	restarted := New(reopened, e.GitHub, e.Root)
+	project, err = restarted.Project(ctx, task.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskRecord, err := reopened.Get(ctx, "tasks", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err = store.Decode[model.Task](taskRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalizer := &countingLocalDeliveryAdapter{}
+	restarted.Adapter = func(model.Provider) provider.Adapter { return finalizer }
+	step = &taskStep{Engine: restarted, ctx: ctx, project: project, task: task, record: taskRecord}
+	finished, err = step.submitting()
+	if err != nil || finished || step.task.Delivery.Stage != "snapshot_ready" {
+		t.Fatalf("recovery did not recognize completed promotion: finished=%v delivery=%+v err=%v", finished, step.task.Delivery, err)
+	}
+	if err := reopened.Put(ctx, "tasks", step.task.ID, step.task, step.record.Version); err != nil {
+		t.Fatal(err)
+	}
+	step.record.Version++
+	if finished, err = step.submitting(); err != nil || !finished {
+		t.Fatalf("recovered local delivery did not finish: finished=%v err=%v", finished, err)
+	}
+	completedRecord, err := reopened.Get(ctx, "tasks", task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := store.Decode[model.Task](completedRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if completed.Stage != "complete" || completed.Delivery == nil || completed.Delivery.Stage != "complete" || finalizer.calls != 1 {
+		t.Fatalf("local delivery recovery duplicated or lost finalization: stage=%s delivery=%+v finalizer_calls=%d", completed.Stage, completed.Delivery, finalizer.calls)
+	}
+	if got := submissionGit(t, delivery.Worktree, "rev-parse", "HEAD"); got != delivery.ReviewedCommit {
+		t.Fatalf("recovered worktree changed reviewed commit: got=%s want=%s", got, delivery.ReviewedCommit)
+	}
+	publications, err := reopened.List(ctx, "publications")
+	if err != nil || len(publications) != 0 || completed.PR != "" {
+		t.Fatalf("local delivery recovery created remote publication: task_pr=%q count=%d err=%v", completed.PR, len(publications), err)
+	}
 }
 
 func TestEmptyConnectivityReplyHasFailedAttempt(t *testing.T) {
@@ -137,13 +166,47 @@ func TestAnsweredNativeQuestionsSurviveFreshAttempt(t *testing.T) {
 	e.Adapter = func(model.Provider) provider.Adapter {
 		return connectionAdapterFunc(func(_ context.Context, in provider.Input, _ provider.Hooks) (provider.Output, error) {
 			seen = strings.Contains(in.Prompt, "Earlier answered agent questions") && strings.Contains(in.Prompt, "Use which database?") && strings.Contains(in.Prompt, "SQLite")
-			return provider.Output{Text: "done"}, nil
+			return provider.Output{Text: answeredQuestionPlan(t)}, nil
 		})
 	}
 	if _, err := e.agent(ctx, p, task, provider.Input{Role: "plan", CWD: path, Prompt: "continue", ReadOnly: true}); err != nil {
-		t.Fatal(err)
+		rows, listErr := e.Store.List(ctx, "sessions")
+		var attempts []string
+		if listErr == nil {
+			for _, row := range rows {
+				attempt, decodeErr := store.Decode[model.Attempt](row)
+				if decodeErr == nil && attempt.Task == task.ID {
+					attempts = append(attempts, fmt.Sprintf("%s:%s:%s:%s", attempt.Role, attempt.Status, attempt.Error, attempt.ProcessState))
+				}
+			}
+		}
+		t.Fatalf("fresh attempt did not retain answered question: %v attempts=%v list_error=%v", err, attempts, listErr)
 	}
 	if !seen {
 		t.Fatal("durable native answers absent from recovered input")
 	}
+}
+
+func answeredQuestionPlan(t *testing.T) string {
+	t.Helper()
+	plan := model.Plan{
+		Objective:                "Preserve the answered database choice",
+		What:                     "Use the saved answer in planning",
+		Why:                      "A fresh attempt must retain human decisions",
+		Benefit:                  "The selected database remains explicit",
+		Where:                    []string{"internal/workflow/persistence_group2_test.go"},
+		Scope:                    []string{"Keep the answered choice in the plan"},
+		Exclusions:               []string{"Do not ask the same answered question again"},
+		Steps:                    []string{"Include the saved choice in the plan"},
+		AcceptanceCriteria:       []string{"The plan preserves the saved SQLite choice"},
+		Requirements:             []model.Requirement{{ID: "REQ-ANSWER-1", Outcome: "The plan includes the saved SQLite choice.", EvidenceMethod: "Inspect the generated plan."}},
+		RepositoryTestCommands:   [][]string{{"sh", "-c", "test -f result.txt"}},
+		RepositoryTestInventory:  "configured: .whirlwind.yaml checks",
+		RepositoryBuildInventory: "none configured: .whirlwind.yaml has no build commands",
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
 }

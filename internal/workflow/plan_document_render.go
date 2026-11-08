@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"whirlwind/internal/model"
@@ -11,6 +12,9 @@ func sameDocumentPlan(left, right model.Plan) bool {
 		return false
 	}
 	if !slices.Equal(left.Where, right.Where) || !slices.Equal(left.AcceptanceCriteria, right.AcceptanceCriteria) {
+		return false
+	}
+	if !reflect.DeepEqual(left.Requirements, right.Requirements) || !reflect.DeepEqual(left.Checks, right.Checks) || !reflect.DeepEqual(left.RepositoryTestCommands, right.RepositoryTestCommands) || !reflect.DeepEqual(left.RepositoryBuildCommands, right.RepositoryBuildCommands) || !reflect.DeepEqual(left.Scope, right.Scope) || !reflect.DeepEqual(left.Exclusions, right.Exclusions) || !reflect.DeepEqual(left.Steps, right.Steps) || left.RepositoryTestInventory != right.RepositoryTestInventory || left.RepositoryBuildInventory != right.RepositoryBuildInventory {
 		return false
 	}
 	return sameDocumentUnits(left.Units, right.Units)

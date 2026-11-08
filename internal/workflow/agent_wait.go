@@ -2,9 +2,12 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"time"
 	"whirlwind/internal/store"
 )
+
+var ErrHumanDecisionPending = errors.New("human decision pending")
 
 // awaitResource preserves the one-second polling cadence and stops on cancellation or decode failure.
 func awaitResource[T any](ctx context.Context, s *store.Store, kind, id string, ready func(T) bool) (T, error) {

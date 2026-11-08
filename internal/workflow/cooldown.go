@@ -11,23 +11,35 @@ import (
 
 func (a *agentRun) cooldown(p model.Provider) error {
 	pool := providerPool(p)
+	value, err := a.loadCooldown(pool)
+	if err != nil || value == nil {
+		return err
+	}
+	return cooldownWait(value, pool, p, a.input.Role)
+}
+
+func (a *agentRun) loadCooldown(pool string) (*model.ProviderCooldown, error) {
 	record, err := a.Store.Get(a.ctx, "provider_cooldowns", pool)
 	if errors.Is(err, store.ErrNotFound) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	value, err := store.Decode[model.ProviderCooldown](record)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return &value, nil
+}
+
+func cooldownWait(value *model.ProviderCooldown, pool string, provider model.Provider, role string) error {
 	until, err := time.Parse(time.RFC3339Nano, value.Until)
 	if err != nil {
 		return err
 	}
 	if time.Now().Before(until) {
-		return &AdmissionWait{Kind: "retry", Reason: value.Reason, Pool: pool, Provider: p.ID, Role: a.input.Role, NextCheck: until}
+		return &AdmissionWait{Kind: "retry", Reason: value.Reason, Pool: pool, Provider: provider.ID, Role: role, NextCheck: until}
 	}
 	return nil
 }

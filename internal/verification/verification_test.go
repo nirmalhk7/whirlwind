@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"whirlwind/internal/model"
+	"whirlwind/internal/testutil/openshell"
 )
 
 // TestChecksExecuteAndFailureBlocksAcceptance verifies project check commands execute and any failed check makes the report fail.
 func TestChecksExecuteAndFailureBlocksAcceptance(t *testing.T) {
+	installVerificationOpenShell(t)
 	r := Run(context.Background(), t.TempDir(), []model.Check{{Name: "pass", Command: []string{"sh", "-c", "exit 0"}}, {Name: "fail", Command: []string{"sh", "-c", "echo diagnostic; exit 2"}}})
 	if r.Passed || len(r.Results) != 2 || r.Results[1].Output != "diagnostic\n" {
 		t.Fatalf("%+v", r)
@@ -17,6 +19,7 @@ func TestChecksExecuteAndFailureBlocksAcceptance(t *testing.T) {
 }
 
 func TestInterruptedSuiteRetainsCompletedChecksWithoutPassing(t *testing.T) {
+	installVerificationOpenShell(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	observed := []Result{}
@@ -34,6 +37,13 @@ func TestInterruptedSuiteRetainsCompletedChecksWithoutPassing(t *testing.T) {
 	if !report.Results[0].Passed || report.Results[0].Output != "completed" {
 		t.Fatal("interrupted suite mislabeled or completed check lost", report, err)
 	}
+}
+
+func installVerificationOpenShell(t *testing.T) {
+	t.Helper()
+	fixture := openshell.Install(t)
+	fixture.EnableCommandExecution()
+	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "test-image")
 }
 
 // TestRiskKeepsBaselineAndSelectsHighest verifies risk selection retains baseline checks and selects the highest matching level.

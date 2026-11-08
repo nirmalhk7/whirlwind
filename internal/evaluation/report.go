@@ -78,110 +78,136 @@ func Build(samples []Sample) Report {
 	groups := map[string]*Group{}
 	seen := map[string]bool{}
 	for _, s := range samples {
-		if s.Operation {
-			r.OperationRuns++
-			if slices.ContainsFunc(s.Attempts, func(a model.Attempt) bool { return a.Role == "ideate" }) {
-				r.DiscoveryRuns++
-			}
-		} else {
-			r.Tasks++
+		accumulateSampleTotals(&r, s)
+		accumulateDecisions(&r, s)
+		appendTaskResult(&r, s)
+		accumulateAttemptGroups(groups, seen, s)
+	}
+	r.Groups = orderedGroups(groups)
+	return r
+}
+
+func accumulateSampleTotals(report *Report, sample Sample) {
+	if sample.Operation {
+		report.OperationRuns++
+		if slices.ContainsFunc(sample.Attempts, func(a model.Attempt) bool { return a.Role == "ideate" }) {
+			report.DiscoveryRuns++
 		}
-		r.Attempts += s.Usage.Attempts
-		r.PreflightFailures += s.Usage.PreflightFailures
-		r.VerificationRuns += s.Usage.VerificationRuns
-		r.UnknownRuntimeAttempts += s.Usage.UnknownRuntimeAttempts
-		r.ReportedTokens += s.Usage.TotalTokens
-		r.ReportedCost += s.Usage.Cost
-		r.UnknownTokenAttempts += s.Usage.UnknownTokenAttempts
-		r.UnknownCostAttempts += s.Usage.UnknownCostAttempts
-		r.ElapsedMS += s.Usage.ElapsedMS
-		r.Interventions += s.Interventions
-		if s.Verified {
-			r.VerifiedTasks++
-		}
-		if s.Task.PR != "" {
-			r.CreatedPRs++
-		}
-		decisions := append(slices.Clone(s.Decisions), s.Decision)
-		if slices.Contains(decisions, "merged") {
-			r.MergedPRs++
-			if !slices.Contains(decisions, "accepted") && !slices.Contains(decisions, "regression") && !slices.Contains(decisions, "reverted") {
-				r.UnknownPostMergeOutcomes++
-			}
-		}
-		if slices.Contains(decisions, "closed") {
-			r.ClosedPRs++
-		}
-		if slices.Contains(decisions, "accepted") {
-			r.UserAcceptedTasks++
-		}
-		if slices.Contains(decisions, "regression") {
-			r.Regressions++
-		}
-		if slices.Contains(decisions, "reverted") {
-			r.Reverts++
-		}
-		if !s.Operation && !slices.Contains(decisions, "accepted") && !slices.Contains(decisions, "rejected") {
-			r.UnknownAcceptanceTasks++
-		}
-		usage := s.Usage
-		usage.Entries = nil
-		r.Results = append(r.Results, TaskResult{s.Task.ID, s.Task.Stage, s.Verified, s.Task.PR != "", s.Decision, usage, s.Interventions})
-		entries := map[string]model.UsageEntry{}
-		for _, entry := range s.Entries {
-			entries[entry.AttemptID] = entry
-		}
-		for _, a := range s.Attempts {
-			thinking := a.EffectiveThinking
-			if thinking == nil {
-				thinking = a.Thinking
-			}
-			raw, _ := json.Marshal(thinking)
-			name := a.ResolvedModel
-			if name == "" {
-				name = a.Model
-			}
-			identity := []string{a.Provider, name, string(raw), a.Role, s.Category}
-			keyBytes, _ := json.Marshal(identity)
-			key := string(keyBytes)
-			g := groups[key]
-			if g == nil {
-				g = &Group{Provider: a.Provider, Model: name, Thinking: string(raw), Role: a.Role, Category: s.Category}
-				groups[key] = g
-			}
-			entry := entries[a.AttemptID]
-			if entry.Kind == "preflight" {
-				g.PreflightFailures++
-				continue
-			}
-			g.Attempts++
-			if a.Success != nil && !*a.Success {
-				g.FailedAttempts++
-			}
-			if !a.Finished {
-				g.UnfinishedAttempts++
-			}
-			g.ElapsedMS += entry.ElapsedMS
-			if entry.Delta == nil || entry.Delta.TotalTokens == nil {
-				g.UnknownTokenAttempts++
-			} else {
-				g.ReportedTokens += *entry.Delta.TotalTokens
-			}
-			if s.Verified && !seen[key+"\x00"+s.Task.ID] {
-				g.VerifiedTasks++
-				seen[key+"\x00"+s.Task.ID] = true
-			}
+	} else {
+		report.Tasks++
+	}
+	report.Attempts += sample.Usage.Attempts
+	report.PreflightFailures += sample.Usage.PreflightFailures
+	report.VerificationRuns += sample.Usage.VerificationRuns
+	report.UnknownRuntimeAttempts += sample.Usage.UnknownRuntimeAttempts
+	report.ReportedTokens += sample.Usage.TotalTokens
+	report.ReportedCost += sample.Usage.Cost
+	report.UnknownTokenAttempts += sample.Usage.UnknownTokenAttempts
+	report.UnknownCostAttempts += sample.Usage.UnknownCostAttempts
+	report.ElapsedMS += sample.Usage.ElapsedMS
+	report.Interventions += sample.Interventions
+	if sample.Verified {
+		report.VerifiedTasks++
+	}
+	if sample.Task.PR != "" {
+		report.CreatedPRs++
+	}
+}
+
+func accumulateDecisions(report *Report, sample Sample) {
+	decisions := append(slices.Clone(sample.Decisions), sample.Decision)
+	if slices.Contains(decisions, "merged") {
+		report.MergedPRs++
+		if !slices.Contains(decisions, "accepted") && !slices.Contains(decisions, "regression") && !slices.Contains(decisions, "reverted") {
+			report.UnknownPostMergeOutcomes++
 		}
 	}
+	if slices.Contains(decisions, "closed") {
+		report.ClosedPRs++
+	}
+	if slices.Contains(decisions, "accepted") {
+		report.UserAcceptedTasks++
+	}
+	if slices.Contains(decisions, "regression") {
+		report.Regressions++
+	}
+	if slices.Contains(decisions, "reverted") {
+		report.Reverts++
+	}
+	if !sample.Operation && !slices.Contains(decisions, "accepted") && !slices.Contains(decisions, "rejected") {
+		report.UnknownAcceptanceTasks++
+	}
+}
+
+func appendTaskResult(report *Report, sample Sample) {
+	usage := sample.Usage
+	usage.Entries = nil
+	report.Results = append(report.Results, TaskResult{sample.Task.ID, sample.Task.Stage, sample.Verified, sample.Task.PR != "", sample.Decision, usage, sample.Interventions})
+}
+
+func accumulateAttemptGroups(groups map[string]*Group, seen map[string]bool, sample Sample) {
+	entries := make(map[string]model.UsageEntry, len(sample.Entries))
+	for _, entry := range sample.Entries {
+		entries[entry.AttemptID] = entry
+	}
+	for _, attempt := range sample.Attempts {
+		addAttemptGroup(groups, seen, sample, attempt, entries[attempt.AttemptID])
+	}
+}
+
+func addAttemptGroup(groups map[string]*Group, seen map[string]bool, sample Sample, attempt model.Attempt, entry model.UsageEntry) {
+	thinking := attempt.EffectiveThinking
+	if thinking == nil {
+		thinking = attempt.Thinking
+	}
+	raw, _ := json.Marshal(thinking)
+	name := attempt.ResolvedModel
+	if name == "" {
+		name = attempt.Model
+	}
+	identity := []string{attempt.Provider, name, string(raw), attempt.Role, sample.Category}
+	keyBytes, _ := json.Marshal(identity)
+	key := string(keyBytes)
+	group := groups[key]
+	if group == nil {
+		group = &Group{Provider: attempt.Provider, Model: name, Thinking: string(raw), Role: attempt.Role, Category: sample.Category}
+		groups[key] = group
+	}
+	if entry.Kind == "preflight" {
+		group.PreflightFailures++
+		return
+	}
+	group.Attempts++
+	if attempt.Success != nil && !*attempt.Success {
+		group.FailedAttempts++
+	}
+	if !attempt.Finished {
+		group.UnfinishedAttempts++
+	}
+	group.ElapsedMS += entry.ElapsedMS
+	if entry.Delta == nil || entry.Delta.TotalTokens == nil {
+		group.UnknownTokenAttempts++
+	} else {
+		group.ReportedTokens += *entry.Delta.TotalTokens
+	}
+	verifiedKey := key + "\x00" + sample.Task.ID
+	if sample.Verified && !seen[verifiedKey] {
+		group.VerifiedTasks++
+		seen[verifiedKey] = true
+	}
+}
+
+func orderedGroups(groups map[string]*Group) []Group {
 	keys := make([]string, 0, len(groups))
 	for key := range groups {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
+	out := make([]Group, 0, len(keys))
 	for _, key := range keys {
-		r.Groups = append(r.Groups, *groups[key])
+		out = append(out, *groups[key])
 	}
-	return r
+	return out
 }
 
 type Comparison struct {
@@ -201,7 +227,7 @@ func Compare(baseline, candidate Report) Comparison {
 		result.Reason = "Incomplete telemetry prevents a consumption claim."
 	case baseline.VerifiedTasks != baseline.Tasks || candidate.VerifiedTasks != candidate.Tasks:
 		result.Reason = "Every corpus task must have verified acceptance coverage."
-	case candidate.VerifiedTasks < baseline.VerifiedTasks || candidate.UserAcceptedTasks < baseline.UserAcceptedTasks || candidate.Regressions > baseline.Regressions || candidate.Reverts > baseline.Reverts || candidate.Interventions > baseline.Interventions:
+	case qualityRegressed(baseline, candidate):
 		result.Reason = "Quality or required intervention regressed."
 	case candidate.ReportedTokens >= baseline.ReportedTokens:
 		result.Reason = "Reported consumption did not improve."
@@ -210,4 +236,16 @@ func Compare(baseline, candidate Report) Comparison {
 		result.Reason = "Reported consumption improved under these observations; inspect acceptance coverage and task comparability before enabling the optimization."
 	}
 	return result
+}
+
+func qualityRegressed(baseline, candidate Report) bool {
+	return acceptanceRegressed(baseline, candidate) || operationalRegressed(baseline, candidate)
+}
+
+func acceptanceRegressed(baseline, candidate Report) bool {
+	return candidate.VerifiedTasks < baseline.VerifiedTasks || candidate.UserAcceptedTasks < baseline.UserAcceptedTasks
+}
+
+func operationalRegressed(baseline, candidate Report) bool {
+	return candidate.Regressions > baseline.Regressions || candidate.Reverts > baseline.Reverts || candidate.Interventions > baseline.Interventions
 }

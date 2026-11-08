@@ -6,7 +6,6 @@ import (
 	"time"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
-	"whirlwind/internal/workflow"
 )
 
 func (q apiRequest) taskAction() error {
@@ -14,7 +13,19 @@ func (q apiRequest) taskAction() error {
 	if err != nil {
 		return err
 	}
-	if t.Cancelled() {
+	if err := q.applyTaskAction(&t); err != nil {
+		return err
+	}
+	audit := model.Audit{Task: t.ID, Source: "local_operator", Action: q.action, Target: t.ID, Version: record.Version, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Evidence: t.Approval}
+	if err = q.Store.Put(q.r.Context(), "audit", store.ID(), audit, 0); err != nil {
+		return err
+	}
+	q.save(q.w, q.r, "tasks", q.id, t, record.Version, 200)
+	return nil
+}
+
+func (q apiRequest) applyTaskAction(task *model.Task) error {
+	if task.Cancelled() {
 		return &apiError{409, "task_cancelled", "Cancelled tasks cannot resume; start new work explicitly"}
 	}
 	handlers := map[string]func(*model.Task) error{
@@ -24,15 +35,7 @@ func (q apiRequest) taskAction() error {
 	if !ok {
 		return &apiError{404, "route_not_found", "Unknown task action"}
 	}
-	if err := handler(&t); err != nil {
-		return err
-	}
-	audit := model.Audit{Task: t.ID, Source: "local_operator", Action: q.action, Target: t.ID, Version: record.Version, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano), Evidence: t.Approval}
-	if err = q.Store.Put(q.r.Context(), "audit", store.ID(), audit, 0); err != nil {
-		return err
-	}
-	q.save(q.w, q.r, "tasks", q.id, t, record.Version, 200)
-	return nil
+	return handler(task)
 }
 
 func (q apiRequest) pauseTask(t *model.Task) error {
@@ -72,6 +75,8 @@ func (q apiRequest) resumeTask(t *model.Task) error {
 	t.EligibilityOverride = !t.Issue.Eligible()
 	t.UnchangedFailures = 0
 	t.Recoveries = 0
+	t.Wait = nil
+	t.RecoveryGeneration++
 	return nil
 }
 
@@ -128,21 +133,7 @@ func (q apiRequest) approveTask(t *model.Task) error {
 	if t.Stage != "approval" {
 		return &apiError{409, "invalid_stage", "Task does not await critical approval"}
 	}
-	if t.ReviewID == "" || t.VerificationID == "" {
-		return &apiError{409, "evidence_required", "Refresh verification and review before approval"}
-	}
-	project, err := q.Engine.Project(q.r.Context(), t.ProjectID)
-	if err != nil {
-		return err
-	}
-	proof, err := workflow.PublicationEvidence(q.r.Context(), q.Store, *t, project.PolicyHash)
-	if err != nil {
-		return &apiError{409, "evidence_required", err.Error()}
-	}
-	t.Approval = &proof
-	t.Approved = true
-	t.Stage = "publishing"
-	return nil
+	return &apiError{409, "local_finalization_required", "Use the terminal dashboard's local finalization report and exact-candidate approval; raw task approval cannot change critical candidate state."}
 }
 
 func resumedImplementationStage(t *model.Task) string {

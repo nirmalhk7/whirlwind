@@ -12,7 +12,7 @@ import (
 func projectActivityRequest(s *Server, action, version, key string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest("POST", "http://localhost/api/v1/projects/p/"+action, strings.NewReader(`{}`))
 	r.Header.Set("If-Match", version)
-	r.Header.Set("Idempotency-Key", key)
+	r.Header.Set(idempotencyKeyHeader, key)
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	return w
@@ -89,7 +89,7 @@ func TestPausedProjectRejectsManualIdeationWithoutQueuingOperation(t *testing.T)
 		t.Fatal(err)
 	}
 	r := httptest.NewRequest("POST", "http://localhost/api/v1/projects/p/ideation", strings.NewReader(`{}`))
-	r.Header.Set("Idempotency-Key", "paused-ideation")
+	r.Header.Set(idempotencyKeyHeader, "paused-ideation")
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, r)
 	if w.Code != 409 || !strings.Contains(w.Body.String(), `"project_paused"`) {
@@ -124,7 +124,7 @@ func TestProjectPauseAndGlobalStopRemainIndependent(t *testing.T) {
 	}
 	for _, action := range []string{"stop", "resume"} {
 		r := httptest.NewRequest("POST", "http://localhost/api/v1/runners/"+action, strings.NewReader(`{}`))
-		r.Header.Set("Idempotency-Key", "global-"+action)
+		r.Header.Set(idempotencyKeyHeader, "global-"+action)
 		w := httptest.NewRecorder()
 		s.Handler().ServeHTTP(w, r)
 		if w.Code != 200 {

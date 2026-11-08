@@ -102,7 +102,7 @@ func (s *providerSession) startNativeCodexThread(thread *codexThread, params map
 		return fmt.Errorf("apply native integration permissions on new thread: %w", err)
 	}
 	if thread.Thread.ID == "" || thread.Thread.ID == probeID {
-		return errors.New("Codex did not create a fresh policy-bound execution thread")
+		return errors.New("codex did not create a fresh policy-bound execution thread")
 	}
 	return nil
 }

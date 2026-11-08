@@ -68,19 +68,23 @@ func (s *Source) prepareSave(ctx context.Context, content, expected string) (Doc
 	if expected == "" || revision(previous) != expected {
 		return Document{}, nil, nil, store.ErrConflict
 	}
+	changes, err := s.prepareSaveChanges(ctx, previous, doc)
+	if err != nil {
+		return Document{}, nil, nil, err
+	}
+	return doc, previous, changes, nil
+}
+
+func (s *Source) prepareSaveChanges(ctx context.Context, previous []byte, doc Document) ([]store.Change, error) {
 	prior, priorErr := decode(previous)
 	priorMode := s.activeMode
 	if priorErr == nil {
 		priorMode = prior.Mode
 	}
 	if model.EffectiveMode(priorMode) != model.EffectiveMode(doc.Mode) {
-		return Document{}, nil, nil, errors.New("mode is editable only on disk; restart Whirlwind to activate it")
+		return nil, errors.New("mode is editable only on disk; restart Whirlwind to activate it")
 	}
-	changes, err := s.configurationChanges(store.Unstaged(store.WithoutSettingsSource(ctx)), doc)
-	if err != nil {
-		return Document{}, nil, nil, err
-	}
-	return doc, previous, changes, nil
+	return s.configurationChanges(store.Unstaged(store.WithoutSettingsSource(ctx)), doc)
 }
 
 func (s *Source) ValidateModeEdit(content string) error {

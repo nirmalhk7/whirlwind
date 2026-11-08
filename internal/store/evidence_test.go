@@ -19,7 +19,7 @@ func TestEvidenceSchemaExists(t *testing.T) {
 	}
 }
 
-func TestEvidenceMigrationPreservesHistoricalRecords(t *testing.T) {
+func TestReopenPreservesEvidenceRecords(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "historical.db")
 	s, err := Open(path)
 	if err != nil {
@@ -29,11 +29,6 @@ func TestEvidenceMigrationPreservesHistoricalRecords(t *testing.T) {
 	payload := `{"role":"code","text":"historical output","finished":true}`
 	if _, err = s.DB.Exec("INSERT INTO resources(kind,id,version,data,updated_at) VALUES('sessions','historical',7,?,'2025-01-02T03:04:05Z')", payload); err != nil {
 		t.Fatal(err)
-	}
-	for _, query := range []string{"DROP TABLE attempt_events", "DROP TABLE artifacts", "DELETE FROM migrations WHERE version >= 3"} {
-		if _, err = s.DB.Exec(query); err != nil {
-			t.Fatal(err)
-		}
 	}
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
@@ -45,16 +40,13 @@ func TestEvidenceMigrationPreservesHistoricalRecords(t *testing.T) {
 	defer func() { _ = s.Close() }()
 	record, err := s.Get(ctx, "sessions", "historical")
 	if err != nil || string(record.Data) != payload || record.Version != 7 || record.UpdatedAt != "2025-01-02T03:04:05Z" {
-		t.Fatal("migration invented historical data", record, err)
+		t.Fatal("reopening changed saved data", record, err)
 	}
 	events, err := s.AttemptEvents(ctx, "historical", 0, 100)
 	if err != nil || len(events) != 0 {
-		t.Fatal("migration invented historical events", events, err)
+		t.Fatal("reopening invented events", events, err)
 	}
-	var version int
-	if err = s.DB.QueryRow("SELECT max(version) FROM migrations").Scan(&version); err != nil || version != 6 {
-		t.Fatal(version, err)
-	}
+
 }
 
 func TestArtifactCapsAndOrderedReplay(t *testing.T) {

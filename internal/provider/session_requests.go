@@ -145,7 +145,7 @@ func (s *providerSession) declineElicitation(reason string) map[string]any {
 
 func elicitationAnswers(ctx context.Context, hooks Hooks, questions []model.Question) (map[string]string, error) {
 	if hooks.Questions == nil {
-		return nil, errors.New("User question handler unavailable")
+		return nil, errors.New("user question handler unavailable")
 	}
 	if err := validateQuestions(questions); err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func elicitationAnswers(ctx context.Context, hooks Hooks, questions []model.Ques
 		return nil, context.Canceled
 	}
 	if err != nil {
-		return nil, errors.New("User question could not be answered")
+		return nil, errors.New("user question could not be answered")
 	}
 	return answers, nil
 }
@@ -178,7 +178,7 @@ func (form elicitationForm) content(ctx context.Context, answers map[string]stri
 	for _, question := range answered {
 		value, err := elicitationValue(form.fields[question.ID], answers[question.ID])
 		if err != nil {
-			return nil, fmt.Errorf("Invalid answer for %s: %s", question.ID, err.Error())
+			return nil, fmt.Errorf("invalid answer for %s: %s", question.ID, err.Error())
 		}
 		content[question.ID] = value
 	}

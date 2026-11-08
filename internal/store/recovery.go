@@ -12,7 +12,7 @@ import (
 func (s *Store) RecoverInterrupted(ctx context.Context, owner string) error {
 	changes := []Change{}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	for _, kind := range []string{"sessions", "operations", "verification", "publications", "mutations", "questions", "permissions", "budget_reservations"} {
+	for _, kind := range []string{"sessions", "operations", "verification", "publications", "mutations", "budget_reservations", "recovery_episodes"} {
 		records, err := s.List(ctx, kind)
 		if err != nil {
 			return err
@@ -55,12 +55,29 @@ func interruptValue(kind string, value map[string]any, now string) bool {
 		changed = interruptOperation(value, now)
 	case "publications":
 		changed = interruptPublication(value)
-	case "questions":
-		changed = cancelPending(value, "status")
-	case "permissions":
-		changed = cancelPending(value, "decision")
+	case "recovery_episodes":
+		changed = interruptRecoveryEpisode(value, now)
 	}
 	return changed
+}
+
+func interruptRecoveryEpisode(value map[string]any, now string) bool {
+	if value["status"] != "running" {
+		return false
+	}
+	value["status"] = "interrupted"
+	if raw, ok := value["restart_count"].(float64); ok {
+		restart := int(raw) + 1
+		delays := [...]time.Duration{0, time.Second, 2 * time.Second, 4 * time.Second}
+		if restart >= 1 && restart < len(delays) {
+			started, err := time.Parse(time.RFC3339Nano, now)
+			if err == nil {
+				value["next_retry_at"] = started.Add(delays[restart]).Format(time.RFC3339Nano)
+			}
+		}
+	}
+	value["updated_at"] = now
+	return true
 }
 
 func interruptSession(value map[string]any, now string) bool {

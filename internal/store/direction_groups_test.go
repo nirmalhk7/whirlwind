@@ -10,9 +10,7 @@ import (
 )
 
 const (
-	directionTestDay      = "2026-10-19"
-	legacyTaskID          = "direction-idea1"
-	directionTestWorktree = "/saved-work"
+	directionTestDay = "2026-10-19"
 )
 
 func groupID(t *testing.T, record model.Record) string {
@@ -59,72 +57,33 @@ func TestSaveDirectionsKeepsSameDayBatchesSeparate(t *testing.T) {
 	}
 }
 
-func TestUpgradePreservesOriginalGroupsAfterSelectionChangesTimestamps(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy.db")
-	s, err := Open(path)
+func TestPartialDirectionRunIsPersistedAsIncomplete(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "partial.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer s.Close()
 	ctx := context.Background()
-	writeLegacyDirections(t, s, ctx)
-	// Selection changes must not pull old ideas into a newer generation.
-	record, _ := s.Get(ctx, "directions", "idea0")
-	d, _ := Decode[model.Direction](record)
-	if err := s.Put(ctx, "directions", record.ID, d, record.Version); err != nil {
+	partial := []model.Direction{{ID: "expand-1", Category: "expand", Title: "Expand", Description: "Evidence-backed expansion"}}
+	if err := s.SaveDirections(ctx, "p", directionTestDay, partial); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Put(ctx, "tasks", legacyTaskID, model.Task{ID: legacyTaskID, Stage: "paused", ResumeStage: "coding", Error: "Paused by global runner stop", Worktree: directionTestWorktree}, 0); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.DB.Exec("DELETE FROM migrations WHERE version>5"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	s, err = Open(path)
+	record, err := s.Get(ctx, "schedules", "p:"+directionTestDay)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if err := s.Close(); err != nil {
-			t.Errorf("close store: %v", err)
-		}
-	}()
-	a, _ := s.Get(ctx, "directions", "idea0")
-	b, _ := s.Get(ctx, "directions", "idea4")
-	assertLegacyDirectionGroups(t, s, ctx, a, b)
-	record, _ = s.Get(ctx, "tasks", legacyTaskID)
-	task, _ := Decode[model.Task](record)
-	if task.Stage != "paused" || task.ResumeStage != "coding" || task.Worktree != directionTestWorktree || task.Error != "Direction deselected" {
-		t.Fatalf("old choice not paused safely: %+v", task)
+	var state struct {
+		Stage             string   `json:"stage"`
+		MissingCategories []string `json:"missing_categories"`
 	}
-}
-
-func writeLegacyDirections(t *testing.T, s *Store, ctx context.Context) {
-	t.Helper()
-	for i := 0; i < 8; i++ {
-		id := fmt.Sprintf("idea%d", i)
-		direction := model.Direction{ID: id, ProjectID: "p", Day: directionTestDay, Selected: i < 2}
-		if err := s.Put(ctx, "directions", id, direction, 0); err != nil {
-			t.Fatal(err)
-		}
+	if err := json.Unmarshal(record.Data, &state); err != nil {
+		t.Fatal(err)
 	}
-}
-
-func assertLegacyDirectionGroups(t *testing.T, s *Store, ctx context.Context, first, second model.Record) {
-	t.Helper()
-	if groupID(t, first) == "" || groupID(t, first) == groupID(t, second) {
-		t.Fatal("legacy generations merged")
+	if state.Stage != "incomplete" {
+		t.Fatalf("partial run stage=%q, want incomplete", state.Stage)
 	}
-	for i := 0; i < 4; i++ {
-		record, _ := s.Get(ctx, "directions", fmt.Sprintf("idea%d", i))
-		if groupID(t, record) != groupID(t, first) {
-			t.Fatal("legacy generation split")
-		}
-		direction, _ := Decode[model.Direction](record)
-		if direction.Selected != (i == 0) {
-			t.Fatal("multiple legacy selections retained")
-		}
+	want := []string{"optimize", "harden", "simplify"}
+	if fmt.Sprint(state.MissingCategories) != fmt.Sprint(want) {
+		t.Fatalf("missing categories=%v, want %v", state.MissingCategories, want)
 	}
 }

@@ -21,6 +21,7 @@ import (
 type Provider struct {
 	Sandbox      *model.SandboxPolicy `json:"sandbox,omitempty"`
 	QuotaPool    string               `json:"quota_pool,omitempty"`
+	ACPProfile   string               `json:"acp_profile,omitempty"`
 	ID           string               `json:"id"`
 	Name         string               `json:"name"`
 	Kind         string               `json:"kind"`
@@ -36,6 +37,7 @@ type Document struct {
 	Workers      workflow.Settings              `json:"workers"`
 	Providers    []Provider                     `json:"providers"`
 	Agents       map[string][]model.AgentChoice `json:"agents"`
+	Projects     []string                       `json:"projects,omitempty"`
 }
 type Source struct {
 	activeMode string
@@ -48,7 +50,11 @@ type Source struct {
 }
 
 func project(p model.Provider) Provider {
-	return Provider{ID: p.ID, Name: p.Name, Kind: p.Kind, Command: p.Command, ModelCommand: p.ModelCommand, Capabilities: p.Capabilities, Cost: p.Cost, QuotaPool: p.QuotaPool, Sandbox: p.Sandbox}
+	command := p.Command
+	if p.ACPProfile != "" && provider.ACPProfileIDForCommand(command) == p.ACPProfile {
+		command = nil
+	}
+	return Provider{ID: p.ID, Name: p.Name, Kind: p.Kind, Command: command, ModelCommand: p.ModelCommand, ACPProfile: p.ACPProfile, Capabilities: p.Capabilities, Cost: p.Cost, QuotaPool: p.QuotaPool, Sandbox: p.Sandbox}
 }
 func managed(p Provider, previous model.Provider) model.Provider {
 	previous.ID = p.ID
@@ -57,6 +63,13 @@ func managed(p Provider, previous model.Provider) model.Provider {
 	previous.Name = p.Name
 	previous.Kind = p.Kind
 	previous.Command = p.Command
+	previous.ACPProfile = p.ACPProfile
+	if len(previous.Command) == 0 && p.ACPProfile != "" {
+		configured, err := provider.ResolveExecutionProvider(model.Provider{ID: p.ID, Kind: p.Kind, ACPProfile: p.ACPProfile})
+		if err == nil {
+			previous.Command = configured.Command
+		}
+	}
 	previous.ModelCommand = p.ModelCommand
 	previous.Capabilities = p.Capabilities
 	previous.Cost = p.Cost
@@ -73,29 +86,41 @@ func Attach(ctx context.Context, s *store.Store, path string) error {
 	if err != nil {
 		return err
 	}
-	source := &Source{store: s, path: absolute}
-	ctx = store.WithoutSettingsSource(ctx)
-	if err = source.ensureFile(ctx); err != nil {
+	source, err := attachSource(ctx, s, absolute)
+	if err != nil {
 		return err
 	}
-	raw, readErr := os.ReadFile(source.path)
-	if readErr != nil {
-		return readErr
-	}
-	initial, decodeErr := decode(raw)
-	if decodeErr != nil {
-		return decodeErr
-	}
-	source.activeMode = model.EffectiveMode(initial.Mode)
-	if err = s.ActivateMode(ctx, source.activeMode); err != nil {
-		return err
-	}
-	if err = source.Refresh(ctx); err != nil {
-		return err
-	}
-	source.startup = FileView{Path: source.path, Content: string(source.raw), LoadedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	s.Source = source
 	return nil
+}
+
+func attachSource(ctx context.Context, s *store.Store, path string) (*Source, error) {
+	source := &Source{store: s, path: path}
+	_, initial, err := loadStartupSettings(store.WithoutSettingsSource(ctx), source)
+	if err != nil {
+		return nil, err
+	}
+	source.activeMode = model.EffectiveMode(initial.Mode)
+	if err = s.ActivateMode(store.WithoutSettingsSource(ctx), source.activeMode); err != nil {
+		return nil, err
+	}
+	if err = source.Refresh(ctx); err != nil {
+		return nil, err
+	}
+	source.startup = FileView{Path: source.path, Content: string(source.raw), LoadedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	return source, nil
+}
+
+func loadStartupSettings(ctx context.Context, source *Source) ([]byte, Document, error) {
+	if err := source.ensureFile(ctx); err != nil {
+		return nil, Document{}, err
+	}
+	raw, err := os.ReadFile(source.path)
+	if err != nil {
+		return nil, Document{}, err
+	}
+	initial, err := decode(raw)
+	return raw, initial, err
 }
 func validate(doc Document) error {
 	if err := model.ValidateMode(doc.Mode); err != nil {
@@ -107,6 +132,10 @@ func validate(doc Document) error {
 	if doc.Version != 1 {
 		return errors.New("settings.yaml version must be 1")
 	}
+	return validateDocumentPolicies(doc)
+}
+
+func validateDocumentPolicies(doc Document) error {
 	if err := validateWorkers(doc.Workers); err != nil {
 		return err
 	}

@@ -13,21 +13,26 @@ import (
 )
 
 type Engine struct {
-	Store            *store.Store
-	GitHub           github.Client
-	Root             string
-	PlansRoot        string
-	Adapter          func(model.Provider) provider.Adapter
-	owner            string
-	mu               sync.Mutex
-	runners          map[string]context.CancelFunc
-	projectRunners   map[string]projectRunner
-	running          map[string]context.CancelFunc
-	active           map[string]int
-	gitMu            sync.Mutex
-	background       sync.WaitGroup
-	providerStatuses providerStatusCache
-	retryWait        func(context.Context, time.Duration) error
+	Store                    *store.Store
+	GitHub                   github.Client
+	Root                     string
+	PlansRoot                string
+	Adapter                  func(model.Provider) provider.Adapter
+	owner                    string
+	mu                       sync.Mutex
+	runners                  map[string]context.CancelFunc
+	projectRunners           map[string]projectRunner
+	running                  map[string]context.CancelFunc
+	active                   map[string]int
+	gitMu                    sync.Mutex
+	background               sync.WaitGroup
+	runnerWait               sync.WaitGroup
+	closing                  bool
+	providerStatuses         providerStatusCache
+	retryWait                func(context.Context, time.Duration) error
+	attemptTimeout           time.Duration
+	integrationBrokerFactory func(context.Context, model.Project, []model.IntegrationSource) (*integrationMCPBroker, error)
+	integrationPromptSource  func(string) (string, error)
 }
 
 // New constructs the workflow engine with default process adapters, a unique lease owner, and execution tracking.
@@ -43,18 +48,21 @@ func (e *Engine) Run(ctx context.Context) {
 	defer ticker.Stop()
 	lastSettingsError := ""
 	nextReconcile := time.Now().Add(5 * time.Minute)
+	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
+		log.Printf("reconcile standalone OpenShell runtimes: %v", err)
+	}
 	if !e.settings(ctx).Stopped {
 		e.background.Go(func() { e.Reconcile(ctx) })
 	}
 	for {
 		select {
 		case <-ctx.Done():
-			e.mu.Lock()
-			for _, cancel := range e.running {
-				cancel()
-			}
-			e.mu.Unlock()
+			e.stopRunners()
+			e.runnerWait.Wait()
 			e.background.Wait()
+			e.mu.Lock()
+			e.closing = false
+			e.mu.Unlock()
 			return
 		case <-ticker.C:
 			lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
@@ -73,6 +81,10 @@ func (e *Engine) runCycle(ctx context.Context, lastSettingsError string, nextRec
 	if e.settings(ctx).Stopped {
 		e.StopAll()
 		return "", nextReconcile
+	}
+	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
+		log.Printf("standalone OpenShell runtime recovery blocks dispatch: %v", err)
+		return lastSettingsError, nextReconcile
 	}
 	e.refreshLocalApprovals(ctx)
 	e.refreshQuotaWaits(ctx)

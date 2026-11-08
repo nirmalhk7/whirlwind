@@ -12,18 +12,19 @@ import (
 	"whirlwind/prompts/agents"
 )
 
-func (step *taskStep) primaryReview(prompt string) (model.Review, error) {
+func (step *taskStep) primaryReview(prompt, commit string) (model.Review, error) {
 	prompt += step.reviewCheckInstructions()
 	var review model.Review
-	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Purpose: "primary", Role: "review", CWD: step.task.Worktree, Prompt: prompt, ReadOnly: true, SessionID: ""})
+	cwd, err := step.reviewerWorktree(commit, "primary")
+	if err != nil {
+		return review, err
+	}
+	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Purpose: "primary", Role: "review", CWD: cwd, Prompt: prompt, ReadOnly: true, SessionID: ""})
 	if err != nil {
 		return review, err
 	}
 	if err = provider.JSON(out.Text, &review); err != nil {
 		return review, err
-	}
-	if review.Score < 0 || review.Score > 10 {
-		return review, errors.New("review score outside 0..10")
 	}
 	if err = validateReviewFindings(review.Findings); err != nil {
 		return review, err
@@ -43,39 +44,94 @@ func validateReviewFindings(findings []model.Finding) error {
 	}
 	return nil
 }
-func (step *taskStep) supplementReview(prompt string, review *model.Review) error {
+func (step *taskStep) supplementReview(prompt, commit string, review *model.Review) error {
 	if step.task.Risk != "high" && step.task.Risk != "critical" {
 		return nil
 	}
 	for _, perspective := range []string{"security", "architecture"} {
-		extra, err := step.specialistReview(prompt, perspective)
+		extra, err := step.specialistReview(prompt, perspective, commit)
 		if err != nil {
 			return err
 		}
-		if extra.Score < review.Score {
-			review.Score = extra.Score
-		}
 		review.Summary += "\n" + perspective + ": " + extra.Summary
 		review.Findings = MergeFindings(review.Findings, extra.Findings)
+		review.Requirements, err = mergeSpecialistRequirements(review.Requirements, extra.Requirements, step.task.Plan)
+		if err != nil {
+			return fmt.Errorf("%s reviewer returned invalid requirement judgments: %w", perspective, err)
+		}
 	}
 	return nil
 }
-func (step *taskStep) specialistReview(prompt, perspective string) (model.Review, error) {
+
+func mergeSpecialistRequirements(primary, specialist []model.RequirementResult, plan *model.Plan) ([]model.RequirementResult, error) {
+	if plan == nil {
+		if len(specialist) > 0 {
+			return nil, errors.New("specialist judgments require the frozen approved plan")
+		}
+		return primary, nil
+	}
+	approved := make(map[string]bool, len(plan.Requirements))
+	for _, requirement := range plan.Requirements {
+		approved[requirement.ID] = true
+	}
+	seen := map[string]bool{}
+	merged := append([]model.RequirementResult(nil), primary...)
+	for _, judgment := range specialist {
+		if seen[judgment.ID] {
+			return nil, fmt.Errorf("duplicate specialist judgment: %s", judgment.ID)
+		}
+		seen[judgment.ID] = true
+		if !approved[judgment.ID] {
+			return nil, fmt.Errorf("unapproved requirement judgment: %s", judgment.ID)
+		}
+		if judgment.Status != "pass" && judgment.Status != "fail" && judgment.Status != "unverified" {
+			return nil, fmt.Errorf("invalid specialist judgment status: %s", judgment.Status)
+		}
+		index := -1
+		for candidate := range merged {
+			if merged[candidate].ID == judgment.ID {
+				index = candidate
+				break
+			}
+		}
+		if index < 0 {
+			if judgment.Status == "pass" {
+				judgment.Status = "unverified"
+				judgment.Explanation = "Specialist pass cannot establish a requirement omitted by the primary review. " + judgment.Explanation
+			}
+			merged = append(merged, judgment)
+			continue
+		}
+		if judgment.Status == "pass" {
+			continue
+		}
+		current := &merged[index]
+		if judgment.Status == "fail" || current.Status != "fail" {
+			current.Status = judgment.Status
+		}
+		current.Explanation += " Specialist finding: " + judgment.Explanation
+		current.Code = append(current.Code, judgment.Code...)
+		current.Evidence = append(current.Evidence, judgment.Evidence...)
+	}
+	return merged, nil
+}
+func (step *taskStep) specialistReview(prompt, perspective, commit string) (model.Review, error) {
 	prompt += step.reviewCheckInstructions()
 	var extra model.Review
 	specialized, err := agents.Render("specialist", map[string]string{"Prompt": prompt, "Perspective": perspective})
 	if err != nil {
 		return extra, err
 	}
-	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Purpose: perspective, Role: "review", CWD: step.task.Worktree, Prompt: specialized, ReadOnly: true, SessionID: ""})
+	cwd, err := step.reviewerWorktree(commit, perspective)
+	if err != nil {
+		return extra, err
+	}
+	out, err := step.agent(step.ctx, step.project, step.task, provider.Input{Purpose: perspective, Role: "review", CWD: cwd, Prompt: specialized, ReadOnly: true, SessionID: ""})
 	if err != nil {
 		return extra, err
 	}
 	if err = provider.JSON(out.Text, &extra); err != nil {
 		return extra, err
-	}
-	if extra.Score < 0 || extra.Score > 10 {
-		return extra, errors.New("invalid specialist score")
 	}
 	for n := range extra.Findings {
 		f := &extra.Findings[n]

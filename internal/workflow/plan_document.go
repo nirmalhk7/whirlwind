@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -33,13 +34,36 @@ func RenderPlanDocument(plan model.Plan) string {
 	for _, criterion := range plan.AcceptanceCriteria {
 		fmt.Fprintf(&body, "- [ ] %s\n", strings.TrimSpace(criterion))
 	}
+	writePlanList(&body, "Scope", plan.Scope, "Pending human review: implementation scope is not documented.")
+	writePlanList(&body, "Exclusions", plan.Exclusions, "Pending human review: exclusions are not documented.")
+	writePlanList(&body, "Implementation steps", plan.Steps, "Pending human review: implementation steps are not documented.")
+	body.WriteString("\n## Requirements\n\n")
+	for _, requirement := range plan.Requirements {
+		encoded, _ := json.Marshal(requirement)
+		fmt.Fprintf(&body, "- %s: %s — Evidence: %s <!-- %s -->\n", requirement.ID, requirement.Outcome, requirement.EvidenceMethod, encoded)
+	}
+	body.WriteString("\n## Checks\n\n")
+	for _, check := range plan.Checks {
+		encoded, _ := json.Marshal(check)
+		name := strings.TrimSpace(check.Name)
+		if name == "" {
+			name = "Approved check"
+		}
+		fmt.Fprintf(&body, "- %s: `%s` <!-- %s -->\n", name, strings.Join(check.Command, " "), encoded)
+	}
+	body.WriteString("\n## Repository test commands\n\n")
+	writePlanCommands(&body, plan.RepositoryTestCommands)
+	fmt.Fprintf(&body, "\n## Repository test command inventory\n\n%s\n", inventoryText(plan.RepositoryTestInventory))
+	body.WriteString("\n## Repository build commands\n\n")
+	writePlanCommands(&body, plan.RepositoryBuildCommands)
+	fmt.Fprintf(&body, "\n## Repository build command inventory\n\n%s\n", inventoryText(plan.RepositoryBuildInventory))
 	// A parsed plan retains its full document as Specification. Retain only its
 	// optional detail section on subsequent renders rather than nesting documents.
 	specification := strings.TrimSpace(plan.Specification)
 	if title, sections, err := splitPlanDocument(specification); err == nil && title == strings.TrimSpace(plan.Objective) {
 		specification = sections["specification"]
 	}
-	if specification != "" && specification != why {
+	if specification != "" {
 		fmt.Fprintf(&body, "\n## Specification\n\n%s\n", specification)
 	}
 	body.WriteString("\n## Implementation\n\n")
@@ -61,8 +85,8 @@ func ParsePlanDocument(text string) (model.Plan, error) {
 	if err != nil {
 		return model.Plan{}, err
 	}
-	for _, heading := range []string{"what", "why", "benefit", "where", "acceptance criteria", "implementation"} {
-		if strings.TrimSpace(sections[heading]) == "" {
+	for _, heading := range []string{"what", "why", "benefit", "where", "acceptance criteria", "implementation", "requirements", "checks", "repository test commands", "repository build commands"} {
+		if strings.TrimSpace(sections[heading]) == "" && !optionalPlanSection(heading) {
 			return model.Plan{}, fmt.Errorf("plan requires nonempty %s section", heading)
 		}
 	}
@@ -71,11 +95,136 @@ func ParsePlanDocument(text string) (model.Plan, error) {
 		return model.Plan{}, err
 	}
 	plan := model.Plan{Objective: objective, What: sections["what"], Why: sections["why"], Benefit: sections["benefit"], Where: where, Specification: strings.TrimSpace(text)}
-	plan.AcceptanceCriteria, err = documentList(sections["acceptance criteria"], true)
+	plan.Scope, err = parsePlanDetailList(sections["scope"])
+	if err == nil {
+		plan.Exclusions, err = parsePlanDetailList(sections["exclusions"])
+	}
+	if err == nil {
+		plan.Steps, err = parsePlanDetailList(sections["implementation steps"])
+	}
+	plan.RepositoryTestInventory = inventoryValue(sections["repository test command inventory"])
+	plan.RepositoryBuildInventory = inventoryValue(sections["repository build command inventory"])
+	if err == nil {
+		plan.AcceptanceCriteria, err = documentList(sections["acceptance criteria"], true)
+	}
 	if err == nil {
 		plan.Units, err = parseDocumentUnits(sections["implementation"], where)
 	}
+	if err == nil {
+		plan.Requirements, err = parseDocumentJSONList[model.Requirement](sections["requirements"])
+	}
+	if err == nil {
+		plan.Checks, err = parseDocumentJSONList[model.Check](sections["checks"])
+	}
+	if err == nil {
+		plan.RepositoryTestCommands, err = parsePlanCommands(sections["repository test commands"])
+	}
+	if err == nil {
+		plan.RepositoryBuildCommands, err = parsePlanCommands(sections["repository build commands"])
+	}
 	return plan, err
+}
+
+func writePlanList(body *strings.Builder, heading string, values []string, pending string) {
+	fmt.Fprintf(body, "\n## %s\n\n", heading)
+	if len(values) == 0 {
+		body.WriteString(pending + "\n")
+		return
+	}
+	for _, value := range values {
+		fmt.Fprintf(body, "- %s\n", strings.TrimSpace(value))
+	}
+}
+
+func parsePlanDetailList(section string) ([]string, error) {
+	if strings.TrimSpace(section) == "" || isPendingPlanSection(section) {
+		return nil, nil
+	}
+	return documentList(section, false)
+}
+
+func isPendingPlanSection(section string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(section)), "pending human review:")
+}
+
+func inventoryText(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "Pending human review: command inventory is not documented."
+	}
+	return strings.TrimSpace(value)
+}
+
+func inventoryValue(section string) string {
+	value := strings.TrimSpace(section)
+	if isPendingPlanSection(value) {
+		return ""
+	}
+	return value
+}
+
+func writePlanCommands(body *strings.Builder, commands [][]string) {
+	for _, command := range commands {
+		encoded, _ := json.Marshal(command)
+		fmt.Fprintf(body, "- `%s` <!-- %s -->\n", strings.Join(command, " "), encoded)
+	}
+}
+
+func parseDocumentJSONList[T any](text string) ([]T, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+	lines, err := documentList(text, false)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]T, 0, len(lines))
+	for _, line := range lines {
+		line = planMetadata(line)
+		line = strings.Trim(line, "`")
+		var value T
+		if err := json.Unmarshal([]byte(line), &value); err != nil {
+			return nil, fmt.Errorf("invalid plan entry: %w", err)
+		}
+		values = append(values, value)
+	}
+	return values, nil
+}
+
+func planMetadata(line string) string {
+	if start := strings.LastIndex(line, "<!--"); start >= 0 {
+		if end := strings.Index(line[start:], "-->"); end > 0 {
+			return strings.TrimSpace(line[start+4 : start+end])
+		}
+	}
+	return line
+}
+
+func parsePlanCommands(text string) ([][]string, error) {
+	if strings.TrimSpace(text) == "" {
+		return nil, nil
+	}
+	lines, err := documentList(text, false)
+	if err != nil {
+		return nil, err
+	}
+	commands := make([][]string, 0, len(lines))
+	for _, line := range lines {
+		line = planMetadata(line)
+		line = strings.Trim(line, "`")
+		var command []string
+		if err := json.Unmarshal([]byte(line), &command); err != nil {
+			command = strings.Fields(line)
+		}
+		if len(command) == 0 {
+			return nil, errors.New("plan commands must be nonempty")
+		}
+		commands = append(commands, command)
+	}
+	return commands, nil
+}
+
+func optionalPlanSection(heading string) bool {
+	return heading == "requirements" || heading == "checks" || heading == "repository test commands" || heading == "repository build commands"
 }
 
 func documentWhere(text string) ([]string, error) {

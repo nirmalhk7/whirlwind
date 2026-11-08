@@ -17,7 +17,7 @@ func eventMetadata(content []byte) []byte {
 	return b
 }
 
-var metadataFields = map[string]bool{"id": true, "request_id": true, "method": true, "session_id": true, "sessionId": true, "threadId": true, "thread_id": true, "turnId": true, "turn_id": true, "itemId": true, "item_id": true, "terminalId": true, "terminal_id": true, "exit_code": true, "exitCode": true, "signal": true, "status": true, "stopReason": true, "stop_reason": true, "resumed": true, "resolved_model": true, "previous_attempt_id": true, "type": true}
+var metadataFields = map[string]bool{"id": true, "request_id": true, "action_id": true, "method": true, "session_id": true, "sessionId": true, "threadId": true, "thread_id": true, "turnId": true, "turn_id": true, "itemId": true, "item_id": true, "terminalId": true, "terminal_id": true, "exit_code": true, "exitCode": true, "signal": true, "status": true, "cleanup_verified": true, "stopReason": true, "stop_reason": true, "resumed": true, "resolved_model": true, "previous_attempt_id": true, "type": true}
 
 func walkMetadata(value any, path string, depth int, result map[string]any) {
 	if depth > 4 || len(result) >= 32 {

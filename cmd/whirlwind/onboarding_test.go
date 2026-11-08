@@ -15,10 +15,11 @@ import (
 	"whirlwind/internal/httpapi"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
+	"whirlwind/internal/testutil/openshell"
 	"whirlwind/internal/workflow"
 )
 
-const onboardingReply = `[{"category":"expand","title":"Add completion alerts","description":"Notify external tools when work finishes","expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"optimize","title":"Cache file indexes","description":"Reuse unchanged repository scans","expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"harden","title":"Bound cancellation","description":"Terminate abandoned worker processes","expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"simplify","title":"Unify provider setup","description":"Remove duplicate registration paths","expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]}]`
+const onboardingReply = `[{"category":"expand","title":"Add completion alerts","problem":"External clients cannot detect completed local runs","mechanism":"Emit a bounded completion event through the existing local event stream","components":["internal/control"],"description":"Notify external tools when work finishes","scope":["internal/control"],"expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"optimize","title":"Cache file indexes","problem":"Repeated repository scans recompute unchanged file indexes","mechanism":"Reuse a fingerprinted index for unchanged repository revisions","components":["internal/context"],"description":"Reuse unchanged repository scans","scope":["internal/context"],"expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"harden","title":"Bound cancellation","problem":"Abandoned worker processes may outlive cancellation","mechanism":"Stop and verify the owned process group after cancellation","components":["internal/process"],"description":"Terminate abandoned worker processes","scope":["internal/process"],"expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]},{"category":"simplify","title":"Unify provider setup","problem":"Provider setup has duplicate registration paths","mechanism":"Route setup through one validated registration path","components":["internal/provider"],"description":"Remove duplicate registration paths","scope":["internal/provider"],"expected_benefit":"Avoid repeated work","effort_estimate":"Small scoped change","uncertainty":["Validate workload"],"problem_kind":"opportunity","evidence":[{"kind":"code","ref":"main.go"}]}]`
 
 const (
 	onboardingPolicyYAML    = ".whirlwind.yaml"
@@ -30,6 +31,7 @@ const (
 	onboardingProjectsPath  = "/projects"
 	onboardingSessionID     = "onboarding-session"
 	onboardingTurnID        = "onboarding-turn"
+	onboardingModelID       = "onboarding-test-model"
 	onboardingProjectName   = "New project"
 	onboardingUserFile      = "user.txt"
 	onboardingBinaryFlag    = "--binary"
@@ -104,13 +106,38 @@ esac
 		t.Fatal(err)
 	}
 	writeFixtureFile(t, filepath.Join(bin, "codex"), "#!/bin/sh\nexec "+quoteFixtureShell(exe)+" -test.run=^TestOnboardingAgentHelper$ -- codex\n", 0700)
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	parentPath := os.Getenv("PATH")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+parentPath)
 	s, err := store.Open(filepath.Join(root, "state.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	if err := initializeProviders(ctx, s, filepath.Join(root, "bridge.mjs")); err != nil {
+		t.Fatal(err)
+	}
+	openShell := openshell.Install(t)
+	openShell.EnableCommandExecution()
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", openShell.Binary)
+	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "onboarding-test-image")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+openShell.Directory+string(os.PathListSeparator)+parentPath)
+	providerRecord, err := s.Get(ctx, "providers", "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	codex, err := store.Decode[model.Provider](providerRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	codex.Kind = "acp"
+	codex.ACPProfile = ""
+	codex.Command = []string{executable, "-test.run=^TestOnboardingAgentHelper$", "--", "acp"}
+	codex.Available = true
+	if err := s.Put(ctx, "providers", "codex", codex, providerRecord.Version); err != nil {
 		t.Fatal(err)
 	}
 	// Keep tests independent of locally installed external agents.
@@ -140,6 +167,10 @@ esac
 	allowance := &model.BudgetPolicy{MaxAttempts: 100, MaxRuntimeSeconds: 3600, VerificationAttempts: 4, VerificationRuntimeSeconds: 60}
 	settings.Admission = model.AdmissionSettings{DefaultBudget: allowance, DiscoveryBudget: allowance, Pools: map[string]model.QuotaReserve{"*": {MinRemainingPercent: 0, MaxAgeSeconds: 60, MaxConcurrent: 8}}}
 	if err = s.Put(ctx, "settings", "global", settings, record.Version); err != nil {
+		t.Fatal(err)
+	}
+	ideation := model.AgentConfig{Role: "ideate", Chain: []model.AgentChoice{{Provider: preferred, Model: onboardingModelID}}}
+	if err := s.Put(ctx, "agents", "ideate", ideation, 0); err != nil {
 		t.Fatal(err)
 	}
 	server := httpapi.New(s, workflow.New(s, github.CLI{}, filepath.Join(root, "work")), "fixture-secret")
@@ -198,6 +229,10 @@ func TestGoOnboardingRunsRegisteredProvider(t *testing.T) {
 
 func (f onboardingFixture) verifyProvider(t *testing.T, kind, chosen string) {
 	t.Helper()
+	expectedKind := kind
+	if kind == "codex" {
+		expectedKind = "acp"
+	}
 	if kind == "acp" {
 		exe, err := os.Executable()
 		if err != nil {
@@ -216,7 +251,7 @@ func (f onboardingFixture) verifyProvider(t *testing.T, kind, chosen string) {
 			t.Fatal(err)
 		}
 		if p.ID == chosen {
-			found = p.Available && p.Kind == kind
+			found = p.Available && p.Kind == expectedKind
 		}
 	}
 	if !found {

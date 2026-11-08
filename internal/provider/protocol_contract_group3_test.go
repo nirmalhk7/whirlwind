@@ -16,6 +16,7 @@ func TestProtocolContractHelper(t *testing.T) {
 			if err := json.Unmarshal([]byte(os.Args[n+1]), &fixture); err != nil {
 				os.Exit(2)
 			}
+			verifyProtocolAuth(t, fixture.Auth)
 			runProtocolFixture(fixture)
 			os.Exit(0)
 		}
@@ -88,12 +89,30 @@ func runProtocolFixture(f protocolFixture) {
 	p := &protocolPeer{scanner: bufio.NewScanner(os.Stdin)}
 	p.initializeFixture(f)
 	cwd := p.openFixtureSession(f)
+	if f.Scenario == "metadata-only" {
+		for p.scanner.Scan() {
+			p.message = Message{}
+			p.require(json.Unmarshal(p.scanner.Bytes(), &p.message) == nil, "invalid metadata-only request JSON")
+			p.require(false, "metadata-only connection check sent an inference or extra session request")
+		}
+		return
+	}
+	if f.Scenario == "thinking-readiness" {
+		if p.scanner.Scan() {
+			p.require(false, "readiness sent inference")
+		}
+		return
+	}
 	p.readFixturePrompt(f)
 	if p.stopFixturePrompt(f) {
 		return
 	}
 	p.fixtureCallbacks(f, cwd)
-	for _, text := range []string{"received ", "café ", "👋\n", "second line"} {
+	chunks := f.Chunks
+	if chunks == nil {
+		chunks = []string{"received ", "café ", "👋\n", "second line"}
+	}
+	for _, text := range chunks {
 		p.chunk(f.Kind, text)
 	}
 	p.finishFixtureTurn(f)

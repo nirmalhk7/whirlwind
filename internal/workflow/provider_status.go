@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 	"whirlwind/internal/model"
@@ -107,30 +108,9 @@ func (e *Engine) publishProviderStatuses(ctx context.Context, stopped bool, key 
 
 func (e *Engine) checkProviderStatus(parent context.Context, p model.Provider, stopped bool) ProviderStatus {
 	status := ProviderStatus{QuotaPool: providerPool(p), QuotaSnapshot: p.QuotaSnapshot, ID: p.ID, Name: p.Name, Kind: p.Kind, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	if record, err := e.Store.Get(parent, "quota_snapshots", status.QuotaPool); err == nil {
-		snapshot, decodeErr := store.Decode[model.QuotaSnapshot](record)
-		if decodeErr == nil && (status.QuotaSnapshot == nil || snapshot.ObservedAt > status.QuotaSnapshot.ObservedAt) {
-			status.QuotaSnapshot = &snapshot
-		}
-	}
-	reserve, configured := e.settings(parent).Admission.Pools[status.QuotaPool]
-	if !configured {
-		reserve, configured = e.settings(parent).Admission.Pools["*"]
-	}
-	if configured && status.QuotaSnapshot != nil {
-		observed, err := time.Parse(time.RFC3339Nano, status.QuotaSnapshot.ObservedAt)
-		fresh := err == nil && time.Since(observed) >= 0 && time.Since(observed) <= time.Duration(reserve.MaxAgeSeconds)*time.Second
-		status.QuotaFresh = &fresh
-	}
+	e.populateQuotaStatus(parent, &status)
 	if !provider.Available(p) {
-		status.Status = "unavailable"
-		status.Detail = "Configured command executable not found."
-		if p.Kind == "unavailable" {
-			status.Detail = p.Limitation
-			if status.Detail == "" {
-				status.Detail = "Supported integration required."
-			}
-		}
+		status.Status, status.Detail = "unavailable", providerUnavailableDetail(p)
 		return status
 	}
 	if stopped {
@@ -138,6 +118,39 @@ func (e *Engine) checkProviderStatus(parent context.Context, p model.Provider, s
 		status.Detail = "Command installed. Connection checks paused while runners are stopped."
 		return status
 	}
+	return e.runProviderStatusCheck(parent, p, status)
+}
+
+func (e *Engine) populateQuotaStatus(ctx context.Context, status *ProviderStatus) {
+	if record, err := e.Store.Get(ctx, "quota_snapshots", status.QuotaPool); err == nil {
+		snapshot, decodeErr := store.Decode[model.QuotaSnapshot](record)
+		if decodeErr == nil && (status.QuotaSnapshot == nil || snapshot.ObservedAt > status.QuotaSnapshot.ObservedAt) {
+			status.QuotaSnapshot = &snapshot
+		}
+	}
+	settings := e.settings(ctx).Admission
+	reserve, configured := settings.Pools[status.QuotaPool]
+	if !configured {
+		reserve, configured = settings.Pools["*"]
+	}
+	if configured && status.QuotaSnapshot != nil {
+		observed, err := time.Parse(time.RFC3339Nano, status.QuotaSnapshot.ObservedAt)
+		fresh := err == nil && time.Since(observed) >= 0 && time.Since(observed) <= time.Duration(reserve.MaxAgeSeconds)*time.Second
+		status.QuotaFresh = &fresh
+	}
+}
+
+func providerUnavailableDetail(provider model.Provider) string {
+	if provider.Kind != "unavailable" {
+		return "Configured command executable not found."
+	}
+	if provider.Limitation != "" {
+		return provider.Limitation
+	}
+	return "Supported integration required."
+}
+
+func (e *Engine) runProviderStatusCheck(parent context.Context, p model.Provider, status ProviderStatus) ProviderStatus {
 	ctx, release := e.runnerContext(parent)
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -153,7 +166,7 @@ func (e *Engine) checkProviderStatus(parent context.Context, p model.Provider, s
 	workspace, err := os.MkdirTemp("", "whirlwind-status-")
 	if err == nil {
 		defer func() { _ = os.RemoveAll(workspace) }()
-		status.Detail, err = provider.CheckConnection(ctx, p, workspace)
+		status.Detail, err = provider.CheckConnectionWithSupervisorDir(ctx, p, workspace, filepath.Join(e.Root, "supervisor", "standalone"))
 	}
 	if err != nil {
 		status.Detail = err.Error()

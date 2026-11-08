@@ -4,7 +4,7 @@
 
 ## Platform
 
-web
+Go terminal application
 
 ## Users
 
@@ -13,9 +13,9 @@ by the user on October 12, 2026.
 
 ## Product Purpose
 
-Turn selected project directions and eligible GitHub issues into durable,
-inspectable implementation and review workflows. The operator chooses work,
-answers questions, resolves permissions, and decides whether a PR should merge.
+Turn approved plans into durable, inspectable implementation, verification, review,
+and local delivery workflows. The operator selects directions, approves plans,
+answers questions, resolves permissions, and decides whether to publish.
 
 ## Positioning
 
@@ -25,34 +25,33 @@ review findings, and recovery across interrupted attempts.
 
 ## Operating Context
 
-Local browser application backed by a loopback Go service. Projects require
-trusted local GitHub repositories, authenticated gh, and committed policy.
-Daily ideation, active tasks, review gates, and Inbox decisions are recurring
-operator work. Inbox is the default screen. Agents configures role routing;
-Providers manages connected model sources. Tasks is absent from the menu, while
-the active task view at /tasks remains accessible from Inbox. Workspace navigation
-is removed. Projects includes a local folder selector that fills the repository
-path without uploading files.
+Local Go/tview dashboard opened with `./bin/whirlwind dashboard`, backed by a
+durable local supervisor and private Unix command/event interface. No browser
+frontend or HTTP UI server runs. Existing SQLite records, paused plans, questions,
+permissions, worktrees, and recovery counters survive closing the terminal.
 
 ## Capabilities and Constraints
 
-Four agent roles: ideation, planning, coding, review. Codex, Cursor, Claude,
-and configurable ACP providers. Antigravity remains visibly unavailable.
-Publication requires passing checks, a review score of at least 9/10, no
-blocking findings, and explicit approval for critical-risk changes. Whirlwind does
-not merge automatically. Provider availability is not proof of authentication;
-unknown quota remains unknown.
+Five roles: Ideation, Planner, Coding, Reviewer, and Finalizer. Independent YAML
+queues select ACP providers, models, and supported thinking settings. Bundled
+Claude, Codex, and Cursor profiles require compatible installed, authorized
+runtimes. Every agent runs inside NVIDIA OpenShell in its own Git worktree.
 
-Agents at /agents configures the fixed ideate, plan, code, and review roles. Each
-role has a primary provider and explicit model, followed by ordered provider/model
-fallback pairs. Load models requests the source's real model metadata; Test model
-sends Hello World to the selected pair. Saving uses versioned configuration.
+Direction selection and plan approval are separate human decisions. Approval
+freezes the specification and requirement IDs. Coding and review repeat until the
+unrounded requirement score is strictly greater than 80% and all mandatory gates
+pass for the same candidate: plan checks, configured tests/build, and no new Qlty
+findings. Failed and unverified outcomes earn no credit.
 
-Configured chains preserve the operator's exact order, skip ineligible or exhausted
-sources, and advance on quota or authentication failure. Ordinary failures pause
-the workflow; exhausting every source stops it. Quotas are shared across models
-from the same source. Sessions retain their selected model, and fallback preserves
-worktree and context handoff. Unconfigured roles retain legacy project routing.
+Finalization preserves the exact accepted snapshot locally and displays its
+branch, commit, diff, review, unmet requirements, and verification evidence.
+Agents cannot push, create PRs, or merge. Pending questions and permissions pause
+the affected plan; changed specifications require renewed human approval.
+
+Each attempt has a fixed 300-second deadline. Persisted recovery allows three
+restarts after the initial launch, then the same role's next configured choice.
+Old writers and interrupted effects must be reconciled before replacement work.
+Missing credentials, unknown ownership, and unavailable enforcement fail closed.
 
 ## Brand Commitments
 
@@ -66,7 +65,7 @@ control center and existing navigation; branding must not obscure decisions.
 
 ## Evidence on Hand
 
-PLAN.md, API.md, docs/go-backend.md, the current Go and Next.js implementation,
+The unchanged Whirlwind Plan, PLAN.md, API.md, the current Go implementation,
 and local automated workflow fixtures. No comparative performance benchmarks
 or universal capability claims are available; do not invent them.
 

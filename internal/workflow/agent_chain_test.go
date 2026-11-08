@@ -23,15 +23,13 @@ func TestConfiguredAgentUsesOrderedProviderModelsAndPreservesWork(t *testing.T) 
 	cwd, _ = filepath.EvalSymlinks(cwd)
 	ctx := context.Background()
 	for _, id := range []string{"primary", "fallback", "outside"} {
-		p := model.Provider{ID: id, Kind: "codex", Available: true, Quota: "unknown", Capabilities: []string{"code"}}
+		p := model.Provider{ID: id, Kind: "acp", Available: true, Quota: "unknown", Capabilities: []string{"code"}}
 		if err := e.Store.Put(ctx, "providers", id, p, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 	chain := map[string]any{"role": "code", "chain": []map[string]string{{"provider": "primary", "model": "model-one"}, {"provider": "fallback", "model": "model-two"}}}
-	if err := e.Store.Put(ctx, "agents", "code", chain, 0); err != nil {
-		t.Fatal(err)
-	}
+	putFixtureAgent(t, e.Store, "code", chain)
 	project, err := e.Project(ctx, task.ProjectID)
 	if err != nil {
 		t.Fatal(err)
@@ -62,9 +60,7 @@ func TestConfiguredAgentDoesNotTryUnlistedProviderOrRetryOrdinaryErrors(t *testi
 		t.Run(failure, func(t *testing.T) {
 			e, task, cwd := testEngine(t)
 			ctx := context.Background()
-			if err := e.Store.Put(ctx, "agents", "code", map[string]any{"role": "code", "chain": []map[string]string{{"provider": "fake", "model": chosenModelID}}}, 0); err != nil {
-				t.Fatal(err)
-			}
+			putFixtureAgent(t, e.Store, "code", map[string]any{"role": "code", "chain": []map[string]string{{"provider": "fake", "model": chosenModelID}}})
 			var calls int
 			e.Adapter = func(model.Provider) provider.Adapter {
 				return connectionAdapterFunc(func(context.Context, provider.Input, provider.Hooks) (provider.Output, error) {
@@ -87,18 +83,38 @@ func TestConfiguredAgentDoesNotTryUnlistedProviderOrRetryOrdinaryErrors(t *testi
 	}
 }
 
+func TestCanonicalRoleWithoutQueueDoesNotRouteToAvailableProvider(t *testing.T) {
+	e, task, cwd := testEngine(t)
+	putFixtureAgent(t, e.Store, "code", model.AgentConfig{Role: "code"})
+	project, err := e.Project(context.Background(), task.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	e.Adapter = func(model.Provider) provider.Adapter {
+		return connectionAdapterFunc(func(context.Context, provider.Input, provider.Hooks) (provider.Output, error) {
+			calls++
+			return provider.Output{Text: "unexpected"}, nil
+		})
+	}
+	_, err = e.agent(context.Background(), project, task, provider.Input{Role: "code", CWD: cwd, Prompt: "finish"})
+	if err == nil || !strings.Contains(err.Error(), "queue") || calls != 0 {
+		t.Fatalf("missing role queue fell through: calls=%d err=%v", calls, err)
+	}
+}
+
 func TestFallbackRetainsEachChoicesThinkingAndRunOutcome(t *testing.T) {
 	e, task, cwd := testEngine(t)
 	ctx := context.Background()
 	project, _ := e.Project(ctx, task.ProjectID)
 	for _, id := range []string{"primary", "fallback"} {
-		_ = e.Store.Put(ctx, "providers", id, model.Provider{ID: id, Name: id, Kind: "codex", Available: true, Quota: "unknown", Capabilities: []string{"code"}}, 0)
+		_ = e.Store.Put(ctx, "providers", id, model.Provider{ID: id, Name: id, Kind: "acp", Available: true, Quota: "unknown", Capabilities: []string{"code"}}, 0)
 	}
 	chain := model.AgentConfig{Role: "code", Chain: []model.AgentChoice{
 		{Provider: "primary", Model: "m1", Thinking: &model.ThinkingChoice{ConfigID: "effort", Value: "high"}},
 		{Provider: "fallback", Model: "m2", Thinking: &model.ThinkingChoice{ConfigID: "reasoning", Value: "low"}},
 	}}
-	_ = e.Store.Put(ctx, "agents", "code", chain, 0)
+	putFixtureAgent(t, e.Store, "code", chain)
 	e.Adapter = func(source model.Provider) provider.Adapter {
 		return connectionAdapterFunc(func(_ context.Context, input provider.Input, _ provider.Hooks) (provider.Output, error) {
 			return thinkingFallbackOutput(t, source, input, chain)

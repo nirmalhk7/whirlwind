@@ -68,8 +68,12 @@ func (s *Server) receiveWebhook(w http.ResponseWriter, r *http.Request) (map[str
 	if err != nil {
 		return nil, err
 	}
+	return s.receiveIssueWebhook(r, body, delivery)
+}
+
+func (s *Server) receiveIssueWebhook(r *http.Request, body []byte, delivery string) (map[string]bool, error) {
 	var received string
-	err = s.Store.DB.QueryRowContext(r.Context(), "SELECT received_at FROM deliveries WHERE id=?", delivery).Scan(&received)
+	err := s.Store.DB.QueryRowContext(r.Context(), "SELECT received_at FROM deliveries WHERE id=?", delivery).Scan(&received)
 	if err == nil || r.Header.Get("X-GitHub-Event") == "ping" {
 		return map[string]bool{"accepted": true}, nil
 	}

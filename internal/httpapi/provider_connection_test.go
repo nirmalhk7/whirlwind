@@ -12,6 +12,7 @@ import (
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
+	"whirlwind/internal/testutil/openshell"
 	"whirlwind/internal/workflow"
 )
 
@@ -68,6 +69,8 @@ type connectionTestResult struct {
 
 func runProviderConnectionScenario(t *testing.T, fail bool) {
 	t.Helper()
+	fixture := openshell.Install(t)
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
 	s := setup(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

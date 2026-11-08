@@ -9,16 +9,20 @@ import (
 )
 
 func (step *taskStep) planReady() (bool, error) {
-	if step.Agentic(step.ctx) {
-		return false, step.WriteLocalPlan(step.ctx, step.project, &step.task)
+	if _, err := readyPlanBody(step.project, step.task.Plan); err != nil {
+		return false, err
 	}
-	if step.task.Plan == nil {
-		return true, errors.New("ready plan missing")
+	return false, step.WriteLocalPlan(step.ctx, step.project, &step.task)
+}
+
+func (step *taskStep) publishReadyPlan() (model.Issue, error) {
+	body, err := readyPlanBody(step.project, step.task.Plan)
+	if err != nil {
+		return model.Issue{}, err
 	}
-	body := planIssueBody(*step.task.Plan)
 	id, intent, version, x := step.publicationIntent(model.Publication{Kind: "issue", Title: step.task.Issue.Title, Body: body})
 	if x != nil {
-		return true, x
+		return model.Issue{}, x
 	}
 	var i model.Issue
 	if intent.Stage == "complete" && intent.Issue != nil {
@@ -26,22 +30,27 @@ func (step *taskStep) planReady() (bool, error) {
 	} else {
 		i, x = step.GitHub.CreateIssue(step.ctx, step.project.Repo, intent.Title, intent.Body, "<!-- whirlwind-plan:"+step.task.ID+" -->")
 		if x != nil {
-			return true, step.publicationFailure(id, intent, version, x)
+			return model.Issue{}, step.publicationFailure(id, intent, version, x)
 		}
 		intent.Issue = &i
 		intent.URL = i.URL
 		intent.Stage = "complete"
 		intent.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		if x = step.Store.Put(step.ctx, "publications", id, intent, version); x != nil {
-			return true, x
+			return model.Issue{}, x
 		}
 	}
-	if !i.Eligible() {
-		return true, errors.New("published plan issue must be open and tagged whirlwind:ready before coding")
+	return i, nil
+}
+
+func readyPlanBody(project model.Project, plan *model.Plan) (string, error) {
+	if plan == nil {
+		return "", errors.New("ready plan missing")
 	}
-	step.task.Issue = i
-	step.task.Stage = "coding"
-	return true, step.Store.BindIssue(step.ctx, step.project.Repo, step.task, step.record.Version)
+	if err := ValidateUnitScopes(project, plan.Units); err != nil {
+		return "", err
+	}
+	return planIssueBody(*plan), nil
 }
 
 func planIssueBody(plan model.Plan) string {

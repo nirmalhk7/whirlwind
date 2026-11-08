@@ -5,18 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"unicode/utf8"
-
-	"whirlwind/internal/execution"
-	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
-	"whirlwind/internal/process"
-	"whirlwind/internal/store"
 )
 
 type Client struct {
@@ -24,18 +14,20 @@ type Client struct {
 	hooks     Hooks
 	mu        sync.Mutex
 	terminals map[string]*terminal
+	closed    bool
 }
 type terminal struct {
-	mu        sync.Mutex
-	buffer    []byte
-	limit     int
-	truncated bool
-	code      int
-	signal    any
-	done      chan struct{}
-	cancel    context.CancelFunc
-	id        string
-	event     func(string, any)
+	mu         sync.Mutex
+	buffer     []byte
+	limit      int
+	truncated  bool
+	code       int
+	signal     any
+	done       chan struct{}
+	cancel     context.CancelFunc
+	id         string
+	event      func(string, any)
+	cleanupErr error
 }
 
 // NewClient creates the ACP filesystem and terminal handler for one worktree and its permission hooks.
@@ -84,17 +76,21 @@ func (t *terminal) Write(p []byte) (int, error) {
 }
 
 // Close cancels all managed terminal processes and waits for their exit.
-func (c *Client) Close() {
+func (c *Client) Close() error {
 	c.mu.Lock()
+	c.closed = true
 	terminals := []*terminal{}
 	for _, term := range c.terminals {
 		terminals = append(terminals, term)
 		term.cancel()
 	}
 	c.mu.Unlock()
+	var failures []error
 	for _, term := range terminals {
 		<-term.done
+		failures = append(failures, term.cleanupErr)
 	}
+	return errors.Join(failures...)
 }
 
 type clientParams struct {
@@ -111,215 +107,4 @@ type clientParams struct {
 		Name  string `json:"name"`
 		Value string `json:"value"`
 	} `json:"env"`
-}
-
-func (c *Client) readFile(ctx context.Context, m Message, p clientParams) (any, error) {
-
-	path, e := c.path(p.Path)
-	if e != nil {
-		return nil, e
-	}
-	root, e := filepath.EvalSymlinks(c.input.CWD)
-	if e != nil {
-		return nil, e
-	}
-	relative, e := filepath.Rel(root, path)
-	if e != nil {
-		return nil, e
-	}
-	f, e := openACPFile(root, relative, false)
-	if e != nil {
-		return nil, e
-	}
-	defer func() { _ = f.Close() }()
-	b, e := io.ReadAll(io.LimitReader(f, 1024*1024+1))
-	if e != nil {
-		return nil, e
-	}
-	if len(b) > 1024*1024 {
-		return nil, errors.New("file exceeds 1 MiB")
-	}
-	lines := strings.Split(string(b), "\n")
-	start := min(max(p.Line-1, 0), len(lines))
-	end := len(lines)
-	if p.Limit > 0 && start+p.Limit < end {
-		end = start + p.Limit
-	}
-	return map[string]any{"content": strings.Join(lines[start:end], "\n")}, nil
-
-}
-
-func (c *Client) writeFile(ctx context.Context, m Message, p clientParams) (any, error) {
-
-	path, e := c.path(p.Path)
-	if e != nil {
-		return nil, e
-	}
-	root, err := filepath.EvalSymlinks(c.input.CWD)
-	if err != nil {
-		return nil, err
-	}
-	relative, err := filepath.Rel(root, path)
-	if err != nil || !policy.AllowedPath(c.input.Policy, relative) {
-		return nil, errors.New("ACP write outside committed scope")
-	}
-	if len(p.Content) > 1024*1024 {
-		return nil, errors.New("file content exceeds 1 MiB")
-	}
-	if e = c.allow(ctx, Permission{Tool: m.Method, Paths: []string{path}, Raw: m.Params}); e != nil {
-		return nil, e
-	}
-	f, e := openACPFile(root, relative, true)
-	if e != nil {
-		return nil, e
-	}
-	defer func() { _ = f.Close() }()
-	_, e = f.WriteString(p.Content)
-	return map[string]any{}, e
-
-}
-
-func (term *terminal) wait(cmd *exec.Cmd) {
-
-	defer close(term.done)
-	defer process.Forget(cmd)
-	err := cmd.Wait()
-	term.mu.Lock()
-	term.code = 0
-	if err != nil {
-		term.code = -1
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			term.code = exit.ExitCode()
-			if exit.ProcessState != nil && term.code < 0 {
-				term.signal = exit.String()
-			}
-		}
-	}
-	code, signal := term.code, term.signal
-	term.mu.Unlock()
-	if term.event != nil {
-		term.event("whirlwind/terminal/exit", map[string]any{"terminalId": term.id, "exitCode": code, "signal": signal})
-	}
-}
-
-func (c *Client) createTerminal(ctx context.Context, m Message, p clientParams) (any, error) {
-	cwd, err := c.authorizeTerminal(ctx, m, p)
-	if err != nil {
-		return nil, err
-	}
-	run, cancel := context.WithCancel(ctx)
-	profile, e := c.executionProfile()
-	if e != nil {
-		cancel()
-		return nil, e
-	}
-	profile.CWD = cwd
-	cmd, e := execution.Command(run, append([]string{p.Command}, p.Args...), profile)
-	if e != nil {
-		cancel()
-		return nil, e
-	}
-	cmd.Dir = cwd
-	if err := p.applyEnvironment(cmd, c.input.Policy.Sandbox); err != nil {
-		cancel()
-		return nil, err
-	}
-	limit := p.OutputByteLimit
-	if limit <= 0 || limit > 1024*1024 {
-		limit = 1024 * 1024
-	}
-	id := store.ID()
-	term := &terminal{limit: limit, done: make(chan struct{}), cancel: cancel, id: id, event: c.hooks.Event}
-	cmd.Stdout = term
-	cmd.Stderr = term
-	if e := process.Start(cmd); e != nil {
-		cancel()
-		return nil, e
-	}
-	c.mu.Lock()
-	c.terminals[id] = term
-	c.mu.Unlock()
-	go term.wait(cmd)
-	return map[string]any{"terminalId": id}, nil
-
-}
-
-func (c *Client) authorizeTerminal(ctx context.Context, m Message, p clientParams) (string, error) {
-	if p.Command == "" {
-		return "", errors.New("terminal command required")
-	}
-	cwd := c.input.CWD
-	if p.CWD != "" {
-		var err error
-		cwd, err = c.path(p.CWD)
-		if err != nil {
-			return "", err
-		}
-	}
-	args := append([]string{p.Command}, p.Args...)
-	err := c.allow(ctx, Permission{Tool: m.Method, Command: args, Raw: m.Params})
-	return cwd, err
-}
-
-func (p clientParams) applyEnvironment(cmd *exec.Cmd, policies ...*model.SandboxPolicy) error {
-	var policy *model.SandboxPolicy
-	if len(policies) > 0 {
-		policy = policies[0]
-	}
-	for _, env := range p.Env {
-		if !execution.EnvironmentOverrideAllowed(env.Name, policy) {
-			return errors.New("reserved process environment")
-		}
-		cmd.Env = append(cmd.Env, env.Name+"="+env.Value)
-	}
-	return nil
-}
-
-func (c *Client) handleTerminal(ctx context.Context, m Message, p clientParams) (any, error) {
-
-	c.mu.Lock()
-	term := c.terminals[p.TerminalID]
-	c.mu.Unlock()
-	if term == nil {
-		return nil, errors.New("terminal not found")
-	}
-	switch m.Method {
-	case "terminal/output":
-		term.mu.Lock()
-		v := map[string]any{"output": strings.ToValidUTF8(string(term.buffer), ""), "truncated": term.truncated}
-		select {
-		case <-term.done:
-			v["exitStatus"] = map[string]any{"exitCode": term.code, "signal": term.signal}
-		default:
-		}
-		term.mu.Unlock()
-		return v, nil
-	case "terminal/wait_for_exit":
-		return term.waitForExit(ctx)
-	default:
-		term.cancel()
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-term.done:
-		}
-		if m.Method == "terminal/release" {
-			c.mu.Lock()
-			delete(c.terminals, p.TerminalID)
-			c.mu.Unlock()
-		}
-		return map[string]any{}, nil
-	}
-}
-
-func (term *terminal) waitForExit(ctx context.Context) (any, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-term.done:
-		term.mu.Lock()
-		defer term.mu.Unlock()
-		return map[string]any{"exitCode": term.code, "signal": term.signal}, nil
-	}
 }

@@ -14,7 +14,23 @@ import (
 
 // code executes dependency-ready batches, preserving partial checkpoints before full-task verification.
 func (e *Engine) code(ctx context.Context, p model.Project, t *model.Task) error {
+	if t.Plan == nil {
+		return errors.New("plan required")
+	}
+	if err := ValidateUnits(t.Plan.Units); err != nil {
+		return err
+	}
+	if err := ValidateUnitScopes(p, t.Plan.Units); err != nil {
+		return err
+	}
+	return e.executeUnits(ctx, p, t)
+}
+
+func (e *Engine) executeUnits(ctx context.Context, p model.Project, t *model.Task) error {
 	if err := e.prepareWorkspace(ctx, p, t); err != nil {
+		return err
+	}
+	if err := e.validateIntegratedUnitCheckpoints(ctx, p, *t); err != nil {
 		return err
 	}
 	completed := e.restoreUnits(ctx, t)

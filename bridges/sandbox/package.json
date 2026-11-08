@@ -1,5 +1,9 @@
 {
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.81"
+  },
+  "overrides": {
+    "node-forge": "1.4.2",
+    "zod": "4.6.6"
   }
 }

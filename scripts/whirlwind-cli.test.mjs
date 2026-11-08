@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
-import { once } from "node:events";
-import { access, chmod, copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import http from "node:http";
+import { createHash } from "node:crypto";
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -13,267 +13,216 @@ const exec = promisify(execFile);
 const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const entry = join(repo, "bin/whirlwind");
 
-async function freePort() {
-  const server = http.createServer();
-  server.listen(0, "127.0.0.1");
-  await once(server, "listening");
-  const port = server.address().port;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
-
-async function fixture(t, extraEnv = {}, timeout = 30000) {
-  const root = await mkdtemp(join(tmpdir(), "whirlwind cli test "));
-  const data = join(root, "data");
-  const backendPort = await freePort();
-  const webPort = await freePort();
-  await mkdir(join(root, "scripts"));
-  await mkdir(join(root, "tools"));
-  await mkdir(join(root, "elsewhere"));
-  await mkdir(join(root, "web/node_modules/next/dist/bin"), { recursive: true });
-  await mkdir(join(root,"bridges/sandbox/node_modules/@anthropic-ai/sandbox-runtime"),{recursive:true});
-  await writeFile(join(root,"bridges/sandbox/node_modules/@anthropic-ai/sandbox-runtime/package.json"),JSON.stringify({version:"0.0.81"}));
-  await copyFile(join(repo, "scripts/dev.mjs"), join(root, "scripts/dev.mjs"));
-  await copyFile(join(repo,"scripts/sandbox-prerequisites.mjs"),join(root,"scripts/sandbox-prerequisites.mjs"));
-  await writeFile(join(root, "go.mod"), "module whirlwind\n\ngo 1.26.9\n");
-  const server = `import http from 'node:http';
-import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-const backend = process.argv.includes('--listen');
-if (!backend && process.env.FAIL_FRONTEND) {
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  process.exit(7);
-}
-const port = backend ? process.argv[process.argv.indexOf('--listen') + 1].split(':').at(-1) : process.argv[process.argv.indexOf('--port') + 1];
-const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
-writeFileSync(process.env.WHIRLWIND_DATA_DIR + '/' + (backend ? 'backend' : 'frontend') + '.json', JSON.stringify({ pid: process.pid, child: child.pid, args: process.argv.slice(2), mode: process.env.NODE_ENV, dist: process.env.WHIRLWIND_NEXT_DIST_DIR }));
-const app = http.createServer((req, res) => {
-  if (!backend && process.env.FRONTEND_REDIRECT && req.url === '/') { res.statusCode = 307; res.setHeader('location', '/tasks'); res.end(); return; }
-  if (req.url === '/api/v1/health') { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ status: 'ok' })); }
-  else if (backend) { res.statusCode = 404; res.end(); }
-  else { res.end('Whirlwind UI'); }
-});
-app.listen(Number(port), '127.0.0.1');
-`;
-  const build = `import { appendFileSync, existsSync } from 'node:fs';
-const command = process.argv[2];
-const artifact = process.env.WHIRLWIND_DATA_DIR + '/builds';
-if (command === 'build') {
-  if (process.env.FAIL_BUILD) process.exit(8);
-  appendFileSync(artifact, 'built\\n');
-  process.exit(0);
-}
-if (command === 'start' && !existsSync(artifact)) process.exit(9);
-`;
-  await writeFile(join(root, "web/node_modules/next/dist/bin/next"), build + server);
-  await writeFile(join(root, "tools/go"), `#!${process.execPath}\nconst fs = require('node:fs');\nif (process.argv[2] === 'version') { console.log('go version go1.27.1'); }\nelse { fs.writeFileSync(process.argv[process.argv.indexOf('-o') + 1], ${JSON.stringify(`#!${process.execPath}\n${server}`)}, { mode: 0o755 }); }\n`);
-  await chmod(join(root, "tools/go"), 0o755);
-  const env = {
-    ...process.env,
-    PATH: `${join(root, "tools")}:${process.env.PATH}`,
-    WHIRLWIND_ROOT: root,
-    WHIRLWIND_DATA_DIR: data,
-    WHIRLWIND_LISTEN: `127.0.0.1:${backendPort}`,
-    WHIRLWIND_WEB_PORT: String(webPort),
-    ...extraEnv,
-  };
-  delete env.WHIRLWIND_BACKEND_URL;
-  const run = async (...args) => {
+async function fixture(t, timeout = 90000) {
+  const data = await mkdtemp(join("/tmp", "ww-data-"));
+  const env = { ...process.env, WHIRLWIND_ROOT: repo, WHIRLWIND_DATA_DIR: data, WHIRLWIND_SETTINGS_FILE: join(data, "settings.yaml") };
+  const runAt = async (executable, commandEnv, ...args) => {
     try {
-      const result = await exec(process.execPath, [entry, ...args], { cwd: join(root, "elsewhere"), env, timeout });
+      const result = await exec(process.execPath, [executable, ...args], { cwd: tmpdir(), env: commandEnv, timeout, maxBuffer: 4 * 1024 * 1024 });
       return { code: 0, output: result.stdout + result.stderr };
     } catch (error) {
       return { code: error.code, output: (error.stdout ?? "") + (error.stderr ?? "") };
     }
   };
-  t.after(async () => {
-    await run("stop");
-    await rm(root, { recursive: true, force: true });
-  });
-  return { root, data, env, run, backendPort, webPort };
+  const run = (...args) => runAt(entry, env, ...args);
+  t.after(async () => { await run("stop"); await rm(data, { recursive: true, force: true }); });
+  return { data, env, run, runAt };
 }
-
-function alive(pid) {
-  try { process.kill(pid, 0); return true; }
-  catch (error) { if (error.code === "ESRCH") return false; throw error; }
-}
-
-test('start refuses missing required sandbox runtime before launching services',async t=>{
- const f=await fixture(t);
- await rm(join(f.root,'bridges/sandbox/node_modules'),{recursive:true,force:true});
- const result=await f.run('start');
- assert.notEqual(result.code,0);
- assert.match(result.output,/npm ci --prefix bridges\/sandbox/);
- await assert.rejects(access(join(f.data,'backend.json')));
-});
 
 async function waitGone(pid) {
   for (let i = 0; i < 100; i++) {
-    if (!alive(pid)) return;
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    try { process.kill(pid, 0); } catch (error) { if (error.code === "ESRCH") return; throw error; }
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
   assert.fail(`process ${pid} survived shutdown`);
 }
 
-test("help and invalid commands work without starting services", async (t) => {
+function processAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch (error) { if (error.code === "ESRCH") return false; throw error; }
+}
+
+test("help and invalid commands describe the local terminal supervisor", async t => {
   const { run } = await fixture(t);
   const help = await run("--help");
   assert.equal(help.code, 0, help.output);
-  for (const command of ["start", "status", "stop", "restart", "doctor"]) assert.match(help.output, new RegExp(command));
+  for (const command of ["dashboard", "start", "status", "stop", "restart", "doctor"]) assert.match(help.output, new RegExp(command));
+  assert.match(help.output, /private local socket/i);
   assert.equal((await run("wat")).code, 1);
   assert.equal((await run("start", "--typo")).code, 1);
 });
 
-test("start, status, restart, stop manage both services from unrelated cwd", async (t) => {
-  const { run, data, root } = await fixture(t);
+test("start, status, restart and stop manage the durable local supervisor", async t => {
+  const { run, data } = await fixture(t);
   assert.equal((await run("status")).code, 1);
   let result = await run("start");
   assert.equal(result.code, 0, result.output);
-  assert.match(result.output, /http:\/\/127\.0\.0\.1:/);
-  const first = JSON.parse(await readFile(join(data, "backend.json"), "utf8"));
-  const firstWeb = JSON.parse(await readFile(join(data, "frontend.json"), "utf8"));
-  result = await run("status");
-  assert.equal(result.code, 0, result.output);
-  assert.match(result.output, /backend.*healthy/i);
-  assert.match(result.output, /frontend.*healthy/i);
-  assert.match(result.output, new RegExp(root));
-  result = await run("start");
-  assert.equal(result.code, 0, result.output);
-  assert.equal(JSON.parse(await readFile(join(data, "backend.json"), "utf8")).pid, first.pid);
+  const first = JSON.parse(await readFile(join(data, "control/supervisor.json"), "utf8"));
+  assert.equal((await run("status")).code, 0);
+  const concurrent = await Promise.all([run("start"), run("start")]);
+  for (const item of concurrent) assert.equal(item.code, 0, item.output);
   result = await run("restart");
   assert.equal(result.code, 0, result.output);
-  assert.notEqual(JSON.parse(await readFile(join(data, "backend.json"), "utf8")).pid, first.pid);
-  for (const pid of [first.pid, first.child, firstWeb.pid, firstWeb.child]) await waitGone(pid);
-  const second = JSON.parse(await readFile(join(data, "backend.json"), "utf8"));
-  const secondWeb = JSON.parse(await readFile(join(data, "frontend.json"), "utf8"));
+  const second = JSON.parse(await readFile(join(data, "control/supervisor.json"), "utf8"));
+  assert.notEqual(second.pid, first.pid);
+  await waitGone(first.pid);
   assert.equal((await run("stop")).code, 0);
-  for (const pid of [second.pid, second.child, secondWeb.pid, secondWeb.child]) await waitGone(pid);
-  assert.equal((await run("stop")).code, 0);
+  await waitGone(second.pid);
+  assert.equal((await run("status")).code, 1);
+  await assert.rejects(access(join(data, "control/supervisor.json")), { code: "ENOENT" });
+});
+
+test("supervisor starts and stops from a checkout without web or npm files", async t => {
+  const checkout = await mkdtemp(join("/tmp", "ww-no-web-checkout-"));
+  const data = await mkdtemp(join("/tmp", "ww-no-web-data-"));
+  t.after(async () => { await rm(checkout, { recursive: true, force: true }); await rm(data, { recursive: true, force: true }); });
+  for (const name of ["bin", "scripts", "cmd", "internal", "prompts", "bridges"]) {
+    await cp(join(repo, name), join(checkout, name), { recursive: true });
+  }
+  for (const name of ["go.mod", "go.sum"]) await cp(join(repo, name), join(checkout, name));
+  await assert.rejects(access(join(checkout, "web")), { code: "ENOENT" });
+  await assert.rejects(access(join(checkout, "package.json")), { code: "ENOENT" });
+  const go = (await exec("which", ["go"])).stdout.trim();
+  const tools = join(checkout, "test-tools");
+  await mkdir(tools);
+  await symlink(go, join(tools, "go"));
+  await symlink("/bin/ps", join(tools, "ps"));
+  const env = {
+    ...process.env,
+    PATH: tools,
+    CGO_ENABLED: "0",
+    WHIRLWIND_ROOT: checkout,
+    WHIRLWIND_DATA_DIR: data,
+    WHIRLWIND_SETTINGS_FILE: join(data, "settings.yaml"),
+  };
+  const run = async (...args) => {
+    try {
+      const result = await exec(process.execPath, [join(checkout, "bin/whirlwind"), ...args], { cwd: tmpdir(), env, timeout: 90000, maxBuffer: 4 * 1024 * 1024 });
+      return { code: 0, output: result.stdout + result.stderr };
+    } catch (error) { return { code: error.code, output: (error.stdout ?? "") + (error.stderr ?? "") }; }
+  };
+  const started = await run("start");
+  assert.equal(started.code, 0, started.output);
+  assert.equal((await run("status")).code, 0);
+  const state = JSON.parse(await readFile(join(data, "control/supervisor.json"), "utf8"));
+  const stopped = await run("stop");
+  assert.equal(stopped.code, 0, stopped.output);
+  await waitGone(state.pid);
   assert.equal((await run("status")).code, 1);
 });
 
-test("concurrent starts serialize and preserve one running instance", async (t) => {
-  const { run } = await fixture(t);
-  const results = await Promise.all([run("start"), run("start")]);
-  for (const result of results) assert.equal(result.code, 0, result.output);
+test("cold concurrent starts create one supervisor", async t => {
+  const { run, data } = await fixture(t);
+  const starts = await Promise.all([run("start"), run("start"), run("start")]);
+  for (const result of starts) assert.equal(result.code, 0, result.output);
   assert.equal((await run("status")).code, 0);
 });
 
-test("launcher builds production frontend before serving and rebuilds on restart", async (t) => {
-  const { run, data } = await fixture(t, { NODE_ENV: "development" });
-  let result = await run("start");
-  assert.equal(result.code, 0, result.output);
-  const frontend = JSON.parse(await readFile(join(data, "frontend.json"), "utf8"));
-  assert.equal(frontend.args[0], "start");
-  assert.equal(frontend.mode, "production");
-  assert.equal(frontend.dist, ".next-production");
-  assert.equal(await readFile(join(data, "builds"), "utf8"), "built\n");
-  result = await run("start");
-  assert.equal(result.code, 0, result.output);
-  assert.equal(await readFile(join(data, "builds"), "utf8"), "built\n");
-  result = await run("restart");
-  assert.equal(result.code, 0, result.output);
-  assert.equal(await readFile(join(data, "builds"), "utf8"), "built\nbuilt\n");
-});
-
-test("failed production build leaves no services running and reports logs", async (t) => {
-  const { run, data } = await fixture(t, { FAIL_BUILD: "1" });
-  const result = await run("start");
-  assert.equal(result.code, 1, result.output);
-  assert.match(result.output, /log/i);
-  await assert.rejects(access(join(data, "backend.json")), { code: "ENOENT" });
-  await assert.rejects(access(join(data, "frontend.json")), { code: "ENOENT" });
-  assert.equal((await run("status")).code, 1);
-});
-
-test("occupied ports fail without terminating unrelated listener", async (t) => {
-  const { run, webPort } = await fixture(t);
-  const server = http.createServer((req, res) => res.end("unrelated"));
-  server.listen(webPort, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-  const result = await run("start");
-  assert.equal(result.code, 1, result.output);
-  assert.match(result.output, /port|in use|occupied/i);
-  assert.equal(await (await fetch(`http://127.0.0.1:${webPort}`)).text(), "unrelated");
-});
-
-test("failed frontend startup cleans backend and reports log location", async (t) => {
-  const { run, data } = await fixture(t, { FAIL_FRONTEND: "1" });
-  const result = await run("start");
-  assert.equal(result.code, 1, result.output);
-  assert.match(result.output, /log/i);
-  const backend = JSON.parse(await readFile(join(data, "backend.json"), "utf8"));
-  await waitGone(backend.pid);
-  await waitGone(backend.child);
-  assert.equal((await run("status")).code, 1);
-});
-
-test("stale state never signals unrelated PID and can be restarted", async (t) => {
-  const { run, data } = await fixture(t);
-  const other = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
-  t.after(() => other.kill());
-  await mkdir(join(data, "launcher"), { recursive: true });
-  await writeFile(join(data, "launcher/state.json"), JSON.stringify({ version: 1, token: "a".repeat(32), pid: other.pid }));
-  assert.equal((await run("stop")).code, 0);
-  assert.equal(alive(other.pid), true);
-  const result = await run("start");
-  assert.equal(result.code, 0, result.output);
-  assert.equal(alive(other.pid), true);
-});
-
-test("doctor checks prerequisites and reports missing frontend dependencies", async (t) => {
-  const { run, root } = await fixture(t);
-  let result = await run("doctor");
-  assert.equal(result.code, 0, result.output);
-  assert.match(result.output, /go|Go/);
-  assert.match(result.output, /Node/);
-  await rm(join(root, "web/node_modules"), { recursive: true });
-  result = await run("doctor");
-  assert.equal(result.code, 1, result.output);
-  assert.match(result.output, /npm ci --prefix web/);
-});
-
-test("executable symlink resolves checkout from unrelated directory", async (t) => {
-  const { root, env } = await fixture(t);
-  const link = join(root, "tools/whirlwind");
-  await symlink(entry, link);
-  delete env.WHIRLWIND_ROOT;
-  let result;
-  try { await exec(link, ["status"], { cwd: tmpdir(), env }); }
-  catch (error) { result = error; }
+test("failed supervisor build leaves no state or temporary binary and preserves build diagnostics", async t => {
+  const { env, data, runAt } = await fixture(t);
+  const toolchain = join(data, "test-bin");
+  const fakeGo = join(toolchain, "go");
+  await mkdir(toolchain, { recursive: true });
+  await writeFile(fakeGo, "#!/bin/sh\nprintf 'synthetic build failure\\n' >&2\nexit 17\n", { mode: 0o700 });
+  await chmod(fakeGo, 0o700);
+  const updated = { ...env, PATH: `${toolchain}:${env.PATH}` };
+  const result = await runAt(entry, updated, "start");
   assert.equal(result.code, 1);
-  assert.ok(result.stdout.includes(`Checkout: ${repo}`), result.stdout);
+  assert.match(result.output, /Logs: .*whirlwind-supervisor\.log/);
+  await assert.rejects(access(join(data, "control/supervisor.json")), { code: "ENOENT" });
+  const log = await readFile(join(data, "whirlwind-supervisor.log"), "utf8");
+  assert.match(log, /synthetic build failure/);
+  await assert.rejects(access(join(data, "runtime/whirlwind-supervisor")), { code: "ENOENT" });
+  const runtimeEntries = await import("node:fs/promises").then(fs => fs.readdir(join(data, "runtime")));
+  assert.deepEqual(runtimeEntries, []);
 });
 
 
-test("stop recovers child groups after supervisor is killed", async (t) => {
+test("a stale PID cannot signal an unrelated process", async t => {
   const { run, data } = await fixture(t);
+  const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  t.after(() => unrelated.kill());
+  await mkdir(join(data, "launcher"), { recursive: true });
+  await writeFile(join(data, "launcher/state.json"), JSON.stringify({ version: 1, token: "a".repeat(32), pid: unrelated.pid }));
+  assert.equal((await run("stop")).code, 0);
+  assert.equal(processAlive(unrelated.pid), true);
   const result = await run("start");
   assert.equal(result.code, 0, result.output);
-  const state = JSON.parse(await readFile(join(data, "launcher/state.json"), "utf8"));
-  const backend = JSON.parse(await readFile(join(data, "backend.json"), "utf8"));
-  const frontend = JSON.parse(await readFile(join(data, "frontend.json"), "utf8"));
+  assert.equal(processAlive(unrelated.pid), true);
+});
+
+test("a stale supervisor PID cannot signal an unrelated process", async t => {
+  const { run, data } = await fixture(t);
+  const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  t.after(() => unrelated.kill());
+  const statePath = join(data, "control/supervisor.json");
+  await mkdir(dirname(statePath), { recursive: true });
+  await writeFile(statePath, JSON.stringify({ version: 1, token: "c".repeat(32), pid: unrelated.pid, root: repo, startedAt: new Date().toISOString() }));
+  assert.equal((await run("stop")).code, 0);
+  assert.equal(processAlive(unrelated.pid), true);
+  await assert.rejects(access(statePath), { code: "ENOENT" });
+});
+
+test("stop recovers an owned supervisor process after its control socket owner is killed", async t => {
+  const { run, data } = await fixture(t);
+  const start = await run("start");
+  assert.equal(start.code, 0, start.output);
+  const statePath = join(data, "control/supervisor.json");
+  const state = JSON.parse(await readFile(statePath, "utf8"));
+  const orphan = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+    env: { ...process.env, WHIRLWIND_SUPERVISOR_TOKEN: state.token },
+    detached: true,
+    stdio: "ignore",
+  });
+  t.after(() => { if (processAlive(orphan.pid)) orphan.kill(); });
   process.kill(state.pid, "SIGKILL");
   await waitGone(state.pid);
-  const status = await run("status");
-  assert.equal(status.code, 1);
-  assert.match(status.output, /orphaned/);
-  assert.equal((await run("stop")).code, 0);
-  for (const pid of [backend.pid, backend.child, frontend.pid, frontend.child]) await waitGone(pid);
+  const stopped = await run("stop");
+  assert.equal(stopped.code, 0, stopped.output);
+  await waitGone(orphan.pid);
+  await assert.rejects(access(statePath), { code: "ENOENT" });
 });
 
-test("invalid network configuration fails before starting processes", async (t) => {
-  const { run } = await fixture(t, { WHIRLWIND_LISTEN: "0.0.0.0:9877" });
-  const result = await run("start");
-  assert.equal(result.code, 1);
-  assert.match(result.output, /loopback/);
+test("executable symlink finds checkout from an unrelated working directory", async t => {
+  const { data, env, runAt } = await fixture(t);
+  const link = join(data, "whirlwind-link");
+  await symlink(entry, link);
+  const symlinkEnv = { ...env };
+  delete symlinkEnv.WHIRLWIND_ROOT;
+  const started = await runAt(link, symlinkEnv, "start");
+  assert.equal(started.code, 0, started.output);
+  assert.equal((await runAt(link, symlinkEnv, "status")).code, 0);
 });
 
-
-test("frontend page redirects count as a responsive UI", async (t) => {
-  const { run } = await fixture(t, { FRONTEND_REDIRECT: "1" }, 5000);
+test("an unrelated active Unix socket cannot impersonate the supervisor", async t => {
+  const { data, run } = await fixture(t);
+  const owner = process.getuid();
+  const key = createHash("sha256").update(data).digest("hex").slice(0, 16);
+  const socketPath = join("/tmp", `whirlwind-${owner}`, `${key}.sock`);
+  await mkdir(dirname(socketPath), { recursive: true, mode: 0o700 });
+  const server = net.createServer(socket => socket.on("data", () => socket.end(JSON.stringify({ request_id: "foreign-response", result: [] }) + "\n")));
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
+  t.after(() => new Promise(resolve => server.close(resolve)));
   const result = await run("start");
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /active.*not.*Whirlwind supervisor/i);
+  await assert.rejects(access(join(data, "control/supervisor.json")), { code: "ENOENT" });
+});
+
+test("legacy browser ownership requires explicit stop before supervisor startup", async t => {
+  const { run, data, env } = await fixture(t);
+  const token = "b".repeat(32);
+  const legacy = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore", env: { ...env, WHIRLWIND_LAUNCHER_TOKEN: token } });
+  t.after(() => { if (processAlive(legacy.pid)) legacy.kill(); });
+  await mkdir(join(data, "launcher"), { recursive: true });
+  await writeFile(join(data, "launcher/state.json"), JSON.stringify({ version: 1, token, pid: legacy.pid, root: repo, backendURL: "http://127.0.0.1:9877", webURL: "http://127.0.0.1:9876", startedAt: new Date().toISOString() }));
+  let result = await run("start");
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /legacy HTTP\/browser instance.*run.*stop/i);
+  assert.equal(processAlive(legacy.pid), true);
+  result = await run("stop");
   assert.equal(result.code, 0, result.output);
-  assert.equal((await run("status")).code, 0);
+  await waitGone(legacy.pid);
+  result = await run("start");
+  assert.equal(result.code, 0, result.output);
 });

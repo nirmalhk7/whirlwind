@@ -6,9 +6,13 @@ import (
 	"whirlwind/internal/model"
 )
 
-// Accepted requires passing checks, a score from 9 through 10, and no unresolved blocking findings.
+// Accepted requires passing mandatory gates, computed requirement adherence above
+// 80 percent, and no unresolved blocking findings.
 func Accepted(r model.Review, checks bool) bool {
-	if !checks || r.Score < 9 || r.Score > 10 {
+	if !checks || r.Adherence == nil || !r.Adherence.Accepted || r.Adherence.Score <= 80 || r.Adherence.Total == 0 || r.Adherence.Passed < 0 || r.Adherence.Passed > r.Adherence.Total {
+		return false
+	}
+	if r.Adherence.Score != 100*float64(r.Adherence.Passed)/float64(r.Adherence.Total) {
 		return false
 	}
 	for _, f := range r.Findings {

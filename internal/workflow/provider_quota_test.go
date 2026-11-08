@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -100,9 +101,7 @@ func TestConfiguredAgentRunsAfterQuotaRecovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	chain := model.AgentConfig{Role: "code", Chain: []model.AgentChoice{{Provider: "codex", Model: "gpt-6-luna", Thinking: &model.ThinkingChoice{ConfigID: "reasoning_effort", Value: "high"}}}}
-	if err := e.Store.Put(ctx, "agents", "code", chain, 0); err != nil {
-		t.Fatal(err)
-	}
+	putFixtureAgent(t, e.Store, "code", chain)
 	e.Adapter = func(model.Provider) provider.Adapter {
 		return recoveredQuotaAdapter{quotaReaderAdapter{state: "available"}}
 	}
@@ -113,5 +112,37 @@ func TestConfiguredAgentRunsAfterQuotaRecovers(t *testing.T) {
 	out, err := e.agent(ctx, project, task, provider.Input{CWD: cwd, Role: "code", Prompt: "work"})
 	if err != nil || out.Text != "recovered" {
 		t.Fatalf("configured agent remains blocked: %+v %v", out, err)
+	}
+}
+
+type supervisorQuotaReader struct {
+	quotaReaderAdapter
+	supervisorDir string
+}
+
+func (q *supervisorQuotaReader) ReadQuotaWithSupervisorDir(ctx context.Context, cwd, supervisorDir string) (string, string, error) {
+	q.supervisorDir = supervisorDir
+	return q.state, q.reset, q.err
+}
+
+func TestQuotaRefreshUsesEngineStandaloneRegistry(t *testing.T) {
+	e, _, cwd := testEngine(t)
+	ctx := context.Background()
+	source := model.Provider{ID: "codex", Kind: "codex", Available: true, Quota: "exhausted", Capabilities: []string{"code"}}
+	if err := e.Store.Put(ctx, "providers", source.ID, source, 0); err != nil {
+		t.Fatal(err)
+	}
+	record, err := e.Store.Get(ctx, "providers", source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &supervisorQuotaReader{quotaReaderAdapter: quotaReaderAdapter{state: "available"}}
+	run := &agentRun{Engine: e, ctx: ctx, input: provider.Input{CWD: cwd}}
+	if _, err := run.refreshProviderQuota(record, source, reader); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(e.Root, "supervisor", "standalone")
+	if reader.supervisorDir != want {
+		t.Fatalf("quota refresh registry=%q, want engine registry %q", reader.supervisorDir, want)
 	}
 }

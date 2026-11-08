@@ -2,14 +2,24 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
+	"whirlwind/internal/redaction"
 )
 
-func TestRecoveryPreservesAnswersAndClosesOrphanedTransport(t *testing.T) {
+const proxyEvidenceOwner = "proxy-redaction"
+
+func TestRecoveryPreservesPendingDecisionsAndClosesOrphanedTransport(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
+	if _, err := s.Claim(ctx, "task:a", "old", time.Minute); err != nil {
+		t.Fatal(err)
+	}
 	for _, c := range []Change{{"sessions", "a", map[string]any{"finished": false, "owner": "old"}, 0}, {"operations", "o", map[string]any{"stage": "running", "kind": "provider_test"}, 0}, {"questions", "pending", map[string]any{"status": "pending", "attempt_id": "a"}, 0}, {"questions", "answered", map[string]any{"status": "answered", "answers": map[string]string{"q": "keep"}}, 0}, {"permissions", "p", map[string]any{"decision": "pending", "attempt_id": "a"}, 0}} {
 		if err := s.Put(ctx, c.Kind, c.ID, c.Value, c.Expected); err != nil {
 			t.Fatal(err)
@@ -18,13 +28,16 @@ func TestRecoveryPreservesAnswersAndClosesOrphanedTransport(t *testing.T) {
 	if err := s.RecoverInterrupted(ctx, "new"); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ kind, id, field, want string }{{"sessions", "a", "status", "interrupted"}, {"operations", "o", "stage", "failed"}, {"questions", "pending", "status", "cancelled"}, {"questions", "answered", "status", "answered"}, {"permissions", "p", "decision", "cancelled"}} {
+	for _, tc := range []struct{ kind, id, field, want string }{{"sessions", "a", "status", "interrupted"}, {"operations", "o", "stage", "failed"}, {"questions", "pending", "status", "pending"}, {"questions", "answered", "status", "answered"}, {"permissions", "p", "decision", "pending"}} {
 		r, _ := s.Get(ctx, tc.kind, tc.id)
 		var v map[string]any
 		_ = json.Unmarshal(r.Data, &v)
 		if v[tc.field] != tc.want {
 			t.Errorf("%s: %s", tc.id, r.Data)
 		}
+	}
+	if _, err := s.Claim(ctx, "task:a", "new", time.Minute); err != nil {
+		t.Fatalf("orphaned task lease survived restart: %v", err)
 	}
 }
 
@@ -40,6 +53,74 @@ func TestEvidenceExcludesSecretsAndPrivateThoughts(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "visible text") {
 		t.Fatal("visible evidence lost")
+	}
+}
+
+func TestProxyCredentialsAreRedactedBeforeEvidenceAndEventPersistence(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	if err := s.Put(ctx, "sessions", proxyEvidenceOwner, map[string]bool{"finished": false}, 0); err != nil {
+		t.Fatal(err)
+	}
+	secret := syntheticProxyCredential(t)
+	encoded := base64.StdEncoding.EncodeToString([]byte("whirlwind:" + secret))
+	releaseToken, err := redaction.RegisterSecret(secret, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseToken()
+	releaseBasic, err := redaction.RegisterSecret(encoded, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseBasic()
+	jsonContent := []byte(`{"method":"http://whirlwind:` + secret + `@host.openshell.internal:49001/connect","proxy-authorization":"Basic ` + encoded + `","raw_value":"` + secret + `","raw_basic":"` + encoded + `","text":"visible response"}`)
+	artifact, err := s.Capture(ctx, proxyEvidenceOwner, "provider/message", evidenceJSONType, jsonContent, MessagePayloadLimit, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, stored, err := s.Artifact(ctx, artifact.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata string
+	if err := s.DB.QueryRowContext(ctx, "SELECT metadata FROM attempt_events WHERE artifact_id=?", artifact.ID).Scan(&metadata); err != nil {
+		t.Fatal(err)
+	}
+	var global string
+	if err := s.DB.QueryRowContext(ctx, "SELECT data FROM events WHERE kind='attempt_events' AND resource_id=?", proxyEvidenceOwner).Scan(&global); err != nil {
+		t.Fatal(err)
+	}
+	assertProxyCredentialsRedacted(t, secret, encoded, map[string][]byte{"artifact": stored, "attempt event": []byte(metadata), "global event": []byte(global)})
+	if !strings.Contains(string(stored), "visible response") {
+		t.Fatal("redaction discarded useful event text")
+	}
+	plain, err := s.Capture(ctx, proxyEvidenceOwner, "whirlwind/stderr", "text/plain", []byte("HTTP_PROXY=http://whirlwind:"+secret+"@host.openshell.internal:49001; Proxy-Authorization: Basic "+encoded), MessagePayloadLimit, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, plainStored, err := s.Artifact(ctx, plain.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertProxyCredentialsRedacted(t, secret, encoded, map[string][]byte{"text artifact": plainStored})
+}
+
+func syntheticProxyCredential(t *testing.T) string {
+	t.Helper()
+	var random [24]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		t.Fatal(err)
+	}
+	return hex.EncodeToString(random[:])
+}
+
+func assertProxyCredentialsRedacted(t *testing.T, secret, encoded string, values map[string][]byte) {
+	t.Helper()
+	for label, value := range values {
+		if strings.Contains(string(value), secret) || strings.Contains(string(value), encoded) {
+			t.Errorf("proxy credential retained in %s: %s", label, value)
+		}
 	}
 }
 

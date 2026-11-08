@@ -19,19 +19,19 @@ func qltySmellsError(output string) error {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal([]byte(output), &report); err != nil || report.Version != "2.1.0" || len(report.Runs) == 0 {
-		return errors.New("Qlty smells requires a valid SARIF report; run with --sarif")
+		return errors.New("qlty smells requires a valid SARIF report; run with --sarif")
 	}
 	findings := 0
 	for _, run := range report.Runs {
 		for _, invocation := range run.Invocations {
 			if invocation.ExecutionSuccessful != nil && !*invocation.ExecutionSuccessful {
-				return errors.New("Qlty smells analysis did not complete successfully")
+				return errors.New("qlty smells analysis did not complete successfully")
 			}
 		}
 		findings += len(run.Results)
 	}
 	if findings > 0 {
-		return fmt.Errorf("Qlty reported %d code smells; repair findings before review", findings)
+		return fmt.Errorf("qlty reported %d code smells; repair findings before review", findings)
 	}
 	return nil
 }

@@ -9,6 +9,9 @@ async function request(params) {
   const root = await mkdtemp(join(tmpdir(), 'whirlwind-bridge-test-'));
   const source = (await readFile(new URL('./bridge.mjs', import.meta.url), 'utf8')).replace('@anthropic-ai/claude-agent-sdk', './sdk.mjs');
   await writeFile(join(root, 'bridge.mjs'), source);
+  const bridgeRun = (await readFile(new URL('./bridge-run.mjs', import.meta.url), 'utf8')).replace('@anthropic-ai/claude-agent-sdk', './sdk.mjs');
+  await writeFile(join(root, 'bridge-run.mjs'), bridgeRun);
+  await writeFile(join(root, 'native-catalog.mjs'), await readFile(new URL('./native-catalog.mjs', import.meta.url)));
   await writeFile(join(root, 'sdk.mjs'), params.sdkSource ?? `export function query({options}) { return { async *[Symbol.asyncIterator]() {
     if (options.model !== 'selected-model') throw new Error('selected model not forwarded');
     if (${params.checkTool===true}) {

@@ -18,14 +18,40 @@ type BudgetPolicy struct {
 }
 
 func (b BudgetPolicy) Validate() error {
+	if err := validateBudgetCeilings(b); err != nil {
+		return err
+	}
+	if err := validateBudgetReserves(b); err != nil {
+		return err
+	}
+	return validateBudgetAllowances(b)
+}
+
+func validateBudgetCeilings(b BudgetPolicy) error {
 	if b.MaxAttempts <= 0 || b.MaxRuntimeSeconds <= 0 {
 		return errors.New("configure finite max_attempts and max_runtime_seconds before unattended execution")
 	}
-	if b.VerificationAttempts < 0 || b.VerificationRuntimeSeconds < 0 || b.VerificationAttempts >= b.MaxAttempts || b.VerificationRuntimeSeconds >= b.MaxRuntimeSeconds {
+	return nil
+}
+
+func validateBudgetReserves(b BudgetPolicy) error {
+	if negativeVerificationReserve(b) || reserveExceedsCeiling(b) {
 		return errors.New("verification reserves must be nonnegative and below task ceilings")
 	}
-	if b.MaxTokens < 0 || b.AttemptTokens < 0 || b.MaxCost < 0 || b.AttemptCost < 0 || math.IsNaN(b.MaxCost) || math.IsInf(b.MaxCost, 0) || math.IsNaN(b.AttemptCost) || math.IsInf(b.AttemptCost, 0) {
-		return errors.New("budget allowances must be finite and nonnegative")
+	return nil
+}
+
+func negativeVerificationReserve(b BudgetPolicy) bool {
+	return b.VerificationAttempts < 0 || b.VerificationRuntimeSeconds < 0
+}
+
+func reserveExceedsCeiling(b BudgetPolicy) bool {
+	return b.VerificationAttempts >= b.MaxAttempts || b.VerificationRuntimeSeconds >= b.MaxRuntimeSeconds
+}
+
+func validateBudgetAllowances(b BudgetPolicy) error {
+	if err := validateFiniteAllowances(b); err != nil {
+		return err
 	}
 	if b.MaxTokens > 0 && b.AttemptTokens <= 0 {
 		return errors.New("token ceiling requires an explicit attempt_tokens reservation")
@@ -34,6 +60,20 @@ func (b BudgetPolicy) Validate() error {
 		return errors.New("cost ceiling requires an explicit attempt_cost reservation")
 	}
 	return nil
+}
+
+func validateFiniteAllowances(b BudgetPolicy) error {
+	if b.MaxTokens < 0 || b.AttemptTokens < 0 {
+		return errors.New("budget allowances must be finite and nonnegative")
+	}
+	if !finiteNonnegativeCost(b.MaxCost) || !finiteNonnegativeCost(b.AttemptCost) {
+		return errors.New("budget allowances must be finite and nonnegative")
+	}
+	return nil
+}
+
+func finiteNonnegativeCost(value float64) bool {
+	return value >= 0 && !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 type BudgetReservation struct {

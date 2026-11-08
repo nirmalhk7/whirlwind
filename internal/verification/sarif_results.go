@@ -3,6 +3,7 @@ package verification
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -198,5 +199,13 @@ func baselineProcessEvidence(r Result) error {
 }
 
 func baselineAdvisoryProcessError(r Result) bool {
-	return baselineQlty(r) && strings.HasPrefix(r.Error, "Qlty reported ") && strings.Contains(r.Error, "code smells")
+	if len(r.Command) < 2 || filepath.Base(r.Command[0]) != "qlty" || r.Command[1] != "smells" {
+		return false
+	}
+	findings, err := baselineSARIF(r.Output)
+	if err != nil || len(findings) == 0 {
+		return false
+	}
+	want := fmt.Sprintf("qlty reported %d code smells; repair findings before review", len(findings))
+	return r.Error == want
 }

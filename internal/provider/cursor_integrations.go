@@ -5,14 +5,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/process"
+	"whirlwind/internal/store"
 )
 
 // prepareCursorIntegrations keeps native discovery and transport in Cursor's
@@ -36,6 +40,9 @@ func (s *providerSession) prepareCursorIntegrations(p model.Provider, profile ex
 			item.Tools, setupErr = s.cursorIntegrationTools(p.Command, name, profile)
 		}
 		if setupErr != nil {
+			if errors.Is(setupErr, execution.ErrIsolationUnverified) {
+				return setupErr
+			}
 			item.Error = setupErr.Error()
 		} else {
 			item.Callable = true
@@ -58,27 +65,144 @@ func (s *providerSession) cursorIntegrationTools(command []string, name string, 
 	}
 	ctx, cancel := context.WithTimeout(s.ctx, 60*time.Second)
 	defer cancel()
-	data, err := cursorNativeToolProbe(ctx, args, profile)
+	probeProfile, err := pinCursorProbeProfile(ctx, profile)
+	if err != nil {
+		return nil, err
+	}
+	data, err := cursorNativeToolProbe(ctx, args, probeProfile)
 	if err != nil {
 		return nil, err
 	}
 	return cursorToolCatalog(data)
 }
 
+func pinCursorProbeProfile(ctx context.Context, parent execution.Profile) (execution.Profile, error) {
+	if !execution.IsOpenShellLauncher(parent.Launcher) {
+		return parent, nil
+	}
+	registryDir, err := cursorStandaloneRegistryDir(parent)
+	if err != nil {
+		return execution.Profile{}, err
+	}
+	parentDeadline, err := time.Parse(time.RFC3339Nano, parent.DeadlineAt)
+	if err != nil || !parentDeadline.After(time.Now()) {
+		return execution.Profile{}, fmt.Errorf("%w: Cursor probe requires the parent execution's live deadline", execution.ErrIsolationUnverified)
+	}
+	probeDeadline := parentDeadline
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(probeDeadline) {
+		probeDeadline = ctxDeadline
+	}
+	if !probeDeadline.After(time.Now()) {
+		return execution.Profile{}, context.DeadlineExceeded
+	}
+	name, endpoint, workspace, err := execution.ResolveOpenShellGateway(ctx)
+	if err != nil {
+		return execution.Profile{}, err
+	}
+	if name != parent.GatewayName || endpoint != parent.GatewayEndpoint || workspace != parent.Workspace {
+		return execution.Profile{}, fmt.Errorf("%w: Cursor probe gateway differs from its parent execution authority", execution.ErrIsolationUnverified)
+	}
+	probe := parent
+	probe.SandboxID = ""
+	probe.ReadOnly = true
+	probe.AllowedPaths = nil
+	probe.WriteRoots = nil
+	probe.SupervisorDir = registryDir
+	pinned, err := execution.PinOpenShellRuntime(ctx, probe, store.ID(), 1, probeDeadline.UTC().Format(time.RFC3339Nano), registryDir)
+	if err != nil {
+		return execution.Profile{}, err
+	}
+	if pinned.GatewayName != parent.GatewayName || pinned.GatewayEndpoint != parent.GatewayEndpoint || pinned.Workspace != parent.Workspace {
+		removeErr := discardUnlaunchedCursorIdentity(pinned)
+		return execution.Profile{}, errors.Join(fmt.Errorf("%w: Cursor probe gateway changed while pinning its child identity", execution.ErrIsolationUnverified), removeErr)
+	}
+	if err := execution.RegisterStandaloneRuntime(pinned); err != nil {
+		removeErr := discardUnlaunchedCursorIdentity(pinned)
+		return execution.Profile{}, errors.Join(err, removeErr)
+	}
+	pinned.StandaloneRuntime = true
+	return pinned, nil
+}
+
+func cursorStandaloneRegistryDir(parent execution.Profile) (string, error) {
+	lifecycle := filepath.Clean(parent.LifecycleFile)
+	if !filepath.IsAbs(lifecycle) || filepath.Base(lifecycle) != "openshell.json" || filepath.Base(filepath.Dir(lifecycle)) != parent.ExecutionID {
+		return "", fmt.Errorf("%w: Cursor probe cannot derive a supervisor registry from the parent lifecycle identity", execution.ErrIsolationUnverified)
+	}
+	scopeDir := filepath.Dir(filepath.Dir(lifecycle))
+	scope := filepath.Base(scopeDir)
+	supervisorDir := filepath.Dir(scopeDir)
+	if (scope != "executions" && scope != "standalone") || filepath.Base(supervisorDir) != "supervisor" {
+		return "", fmt.Errorf("%w: parent lifecycle is outside a recognized supervisor execution directory", execution.ErrIsolationUnverified)
+	}
+	registryDir := filepath.Join(supervisorDir, "standalone")
+	if scope == "standalone" {
+		registryDir = scopeDir
+	}
+	if parent.SupervisorDir != "" {
+		providedRoot, err := filepath.EvalSymlinks(parent.SupervisorDir)
+		if err != nil || providedRoot != registryDir {
+			return "", fmt.Errorf("%w: parent supervisor registry conflicts with lifecycle-derived registry", execution.ErrIsolationUnverified)
+		}
+	}
+	resolved, err := filepath.EvalSymlinks(scopeDir)
+	if err != nil || resolved != scopeDir {
+		return "", fmt.Errorf("%w: parent lifecycle directory is not a canonical supervisor path", execution.ErrIsolationUnverified)
+	}
+	return registryDir, nil
+}
+
+func discardUnlaunchedCursorIdentity(profile execution.Profile) error {
+	if !execution.IsOpenShellLauncher(profile.Launcher) || filepath.Base(filepath.Dir(profile.LifecycleFile)) != profile.ExecutionID {
+		return fmt.Errorf("%w: refusing to remove an unrecognized Cursor probe identity", execution.ErrIsolationUnverified)
+	}
+	if err := os.Remove(profile.LifecycleFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: cannot remove unlaunched Cursor probe identity", execution.ErrIsolationUnverified)
+	}
+	if err := os.Remove(filepath.Dir(profile.LifecycleFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: cannot remove unlaunched Cursor probe directory", execution.ErrIsolationUnverified)
+	}
+	return nil
+}
+
 func cursorNativeToolProbe(ctx context.Context, args []string, profile execution.Profile) ([]byte, error) {
 	cmd, err := execution.Command(ctx, args, profile)
 	if err != nil {
+		if execution.IsOpenShellLauncher(profile.Launcher) {
+			if cleanupErr := reconcileCursorProbe(profile); cleanupErr != nil {
+				return nil, retainStandaloneProfile(profile, cleanupErr)
+			}
+			if cleanupErr := completeStandaloneProfile(profile); cleanupErr != nil {
+				return nil, retainStandaloneProfile(profile, cleanupErr)
+			}
+		}
 		return nil, errors.New("cursor MCP probe could not start in configured sandbox; check native CLI and sandbox setup")
 	}
 	output := &cursorCatalogOutput{}
 	cmd.Stdout, cmd.Stderr = output, io.Discard
-	if err := process.Run(cmd); err != nil {
+	runErr := process.Run(cmd)
+	if execution.IsOpenShellLauncher(profile.Launcher) {
+		cleanupErr := reconcileCursorProbe(profile)
+		if cleanupErr != nil {
+			return nil, retainStandaloneProfile(profile, cleanupErr)
+		}
+		if cleanupErr = completeStandaloneProfile(profile); cleanupErr != nil {
+			return nil, retainStandaloneProfile(profile, cleanupErr)
+		}
+	}
+	if runErr != nil {
 		return nil, cursorProbeFailure(ctx)
 	}
 	if output.overflow {
 		return nil, errors.New("cursor MCP tool catalog exceeded supported output limit")
 	}
 	return output.Bytes(), nil
+}
+
+func reconcileCursorProbe(profile execution.Profile) error {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return execution.ReconcileOpenShellRuntime(cleanupCtx, profile)
 }
 
 func cursorProbeFailure(ctx context.Context) error {

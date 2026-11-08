@@ -43,6 +43,7 @@ type AdmissionSettings struct {
 	Pools           map[string]QuotaReserve `json:"pools,omitempty"`
 }
 type TaskWait struct {
+	AttemptID   string `json:"attempt_id,omitempty"`
 	Kind        string `json:"kind"`
 	Reason      string `json:"reason"`
 	Provider    string `json:"provider,omitempty"`
@@ -66,9 +67,29 @@ func (a AdmissionSettings) Validate() error {
 		}
 	}
 	for pool, r := range a.Pools {
-		if pool == "" || r.MaxAgeSeconds <= 0 || r.MaxAgeSeconds > 86400 || r.MinRemainingPercent < 0 || r.MinRemainingPercent >= 100 || math.IsNaN(r.MinRemainingPercent) || math.IsInf(r.MinRemainingPercent, 0) || r.MaxConcurrent < 0 || r.MaxConcurrent > 32 {
+		if !validQuotaPool(pool, r) {
 			return fmt.Errorf("invalid quota reserve/freshness for pool %s", pool)
 		}
 	}
 	return nil
+}
+
+func validQuotaPool(pool string, reserve QuotaReserve) bool {
+	return validQuotaIdentity(pool, reserve) && validQuotaWindow(reserve) && validQuotaConcurrency(reserve)
+}
+
+func validQuotaIdentity(pool string, reserve QuotaReserve) bool {
+	return pool != "" && reserve.MaxAgeSeconds > 0 && reserve.MaxAgeSeconds <= 86400
+}
+
+func validQuotaWindow(reserve QuotaReserve) bool {
+	return reserve.MinRemainingPercent >= 0 && reserve.MinRemainingPercent < 100 && finiteQuotaPercent(reserve.MinRemainingPercent)
+}
+
+func finiteQuotaPercent(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func validQuotaConcurrency(reserve QuotaReserve) bool {
+	return reserve.MaxConcurrent >= 0 && reserve.MaxConcurrent <= 32
 }

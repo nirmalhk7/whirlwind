@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 	"unicode/utf8"
 	"whirlwind/internal/model"
@@ -44,6 +45,7 @@ type CaptureOptions struct {
 }
 
 func (s *Store) CaptureResource(ctx context.Context, owner ArtifactOwner, kind, contentType string, content []byte, options CaptureOptions) (model.Artifact, error) {
+	content = redactEvidenceContent(contentType, content)
 
 	a := model.Artifact{OwnerKind: owner.Kind, ID: ID(), AttemptID: owner.ID, Kind: kind, ContentType: contentType, Bytes: len(content), CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	hash := sha256.Sum256(content)
@@ -74,6 +76,21 @@ func (s *Store) CaptureResource(ctx context.Context, owner ArtifactOwner, kind, 
 		return err
 	})
 	return a, err
+}
+
+func redactEvidenceContent(contentType string, content []byte) []byte {
+	if strings.HasPrefix(strings.ToLower(contentType), "application/json") {
+		var value any
+		if json.Unmarshal(content, &value) == nil {
+			if redacted, err := SafeJSON(value); err == nil {
+				return redacted
+			}
+		}
+	}
+	if utf8.Valid(content) && (strings.HasPrefix(strings.ToLower(contentType), "text/") || contentType == "") {
+		return []byte(RedactText(string(content)))
+	}
+	return content
 }
 
 func retainedPayloadLimit(ctx context.Context, tx *sql.Tx, owner ArtifactOwner, stream string, limit int) (int, error) {
@@ -131,6 +148,33 @@ func (s *Store) AttemptEvents(ctx context.Context, attempt string, after int64, 
 		events[i].Artifact = &a
 	}
 	return events, nil
+}
+
+// AttemptActionEvents returns only durable tool action boundary metadata used
+// to decide whether an interrupted attempt can be safely retried.
+func (s *Store) AttemptActionEvents(ctx context.Context, attempt string) ([]model.AttemptEvent, error) {
+	if _, err := s.Get(ctx, "sessions", attempt); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT sequence,kind,created_at,metadata FROM attempt_events
+		WHERE attempt_id=? AND kind IN ('whirlwind/action_started','whirlwind/action_result','whirlwind/terminal/exit')
+		ORDER BY sequence`, attempt)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	events := []model.AttemptEvent{}
+	for rows.Next() {
+		var event model.AttemptEvent
+		var metadata string
+		event.AttemptID = attempt
+		if err := rows.Scan(&event.Sequence, &event.Kind, &event.CreatedAt, &metadata); err != nil {
+			return nil, err
+		}
+		event.Metadata = json.RawMessage(metadata)
+		events = append(events, event)
+	}
+	return events, rows.Err()
 }
 
 func readAttemptEvents(rows *sql.Rows, attempt string) ([]model.AttemptEvent, error) {

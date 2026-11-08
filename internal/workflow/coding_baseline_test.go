@@ -83,18 +83,18 @@ func TestCodingBaselinePassingAggregateRequiresRegressionPass(t *testing.T) {
 }
 
 func TestCodingBaselineLatestRedCannotFallBackToOlderFailureSet(t *testing.T) {
-	base := codingBaselineResult(codingBaselineOutcome{"TestOld", "fail"})
-	green := codingBaselineResult(codingBaselineOutcome{"TestOld", "fail"}, codingBaselineOutcome{"TestFirst", "pass"}, codingBaselineOutcome{"TestSecond", "skip"})
+	base := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"})
+	green := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"}, codingBaselineOutcome{"TestFirst", "pass"}, codingBaselineOutcome{"TestSecond", "skip"})
 	run := codingBaselineFixture(t, green)
-	saveCodingBaselineRed(t, run, "a-older", codingBaselineResult(codingBaselineOutcome{"TestOld", "fail"}, codingBaselineOutcome{"TestFirst", "fail"}, codingBaselineOutcome{"TestSecond", "skip"}))
-	saveCodingBaselineRed(t, run, "z-latest", codingBaselineResult(codingBaselineOutcome{"TestOld", "fail"}, codingBaselineOutcome{"TestFirst", "fail"}, codingBaselineOutcome{"TestSecond", "fail"}))
+	saveCodingBaselineRed(t, run, "a-older", codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"}, codingBaselineOutcome{"TestFirst", "fail"}, codingBaselineOutcome{"TestSecond", "skip"}))
+	saveCodingBaselineRed(t, run, "z-latest", codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"}, codingBaselineOutcome{"TestFirst", "fail"}, codingBaselineOutcome{"TestSecond", "fail"}))
 	assertCodingBaselinePhase(t, run, base, "invalid", true)
-	if !run.entry.BaselineAccepted {
-		t.Fatal("unchanged baseline debt lost its advisory status")
+	if run.entry.BaselineAccepted {
+		t.Fatal("clean baseline was recorded as accepted test debt")
 	}
 }
 
-func TestCodingBaselineExplicitRegressionPassSupportsCleanAndDebtReports(t *testing.T) {
+func TestCodingBaselineExplicitRegressionPassDoesNotWaiveExistingFailures(t *testing.T) {
 	for _, old := range []string{"pass", "fail"} {
 		t.Run(old, func(t *testing.T) {
 			base := codingBaselineResult(codingBaselineOutcome{"TestOld", old})
@@ -102,9 +102,13 @@ func TestCodingBaselineExplicitRegressionPassSupportsCleanAndDebtReports(t *test
 			green := codingBaselineResult(codingBaselineOutcome{"TestOld", old}, codingBaselineOutcome{"TestRegression", "pass"})
 			run := codingBaselineFixture(t, green)
 			saveCodingBaselineRed(t, run, "red", red)
-			assertCodingBaselinePhase(t, run, base, "green", true)
-			if run.entry.BaselineAccepted != (old == "fail") || *run.result.ExitCode != *green.ExitCode {
-				t.Fatal("raw result or baseline debt status changed")
+			phase, gate := "green", true
+			if old == "fail" {
+				phase, gate = "invalid", false
+			}
+			assertCodingBaselinePhase(t, run, base, phase, gate)
+			if run.entry.BaselineAccepted || *run.result.ExitCode != *green.ExitCode {
+				t.Fatal("failed mandatory check was waived or raw exit evidence changed")
 			}
 		})
 	}
@@ -117,5 +121,5 @@ func TestCodingBaselinePreservesTestFirstRedAndNonRegressionGate(t *testing.T) {
 	run.entry.Production = "original"
 	assertCodingBaselinePhase(t, run, base, "red", false)
 	run = codingBaselineFixture(t, base)
-	assertCodingBaselinePhase(t, run, base, "invalid", true)
+	assertCodingBaselinePhase(t, run, base, "invalid", false)
 }

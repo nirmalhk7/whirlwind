@@ -50,10 +50,15 @@ func compactReviewReport(report verification.Report) verification.Report {
 }
 
 func reviewOutputExcerpt(output string) string {
-	if len(output) <= 4096 {
+	const maximumExcerptBytes = 1024
+	const marker = "\n[output excerpt; full output retained in host artifact]\n"
+	if len(output) <= maximumExcerptBytes {
 		return output
 	}
-	return output[:2048] + "\n[output excerpt; full output retained in host artifact]\n" + output[len(output)-2048:]
+	retained := maximumExcerptBytes - len(marker)
+	head := retained / 2
+	tail := retained - head
+	return output[:head] + marker + output[len(output)-tail:]
 }
 
 func (step *taskStep) reviewTDDPhase(check tddCheck) (map[string]any, error) {

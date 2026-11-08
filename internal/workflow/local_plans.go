@@ -3,8 +3,10 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
@@ -23,8 +25,19 @@ type PlanDocumentView struct {
 // WriteLocalPlan prepares an approval document; the caller persists the task
 // together with its other planning-stage changes. Existing edits are retained.
 func (e *Engine) WriteLocalPlan(ctx context.Context, project model.Project, task *model.Task) error {
-	if task.Mode != model.AgenticMode || task.Plan == nil || task.ProjectID != project.ID {
-		return errors.New("local plans require an Agentic task with a plan and matching project")
+	if (model.EffectiveMode(task.Mode) != model.AgenticMode && model.EffectiveMode(task.Mode) != model.PersonalMode) || task.Plan == nil || task.ProjectID != project.ID {
+		return errors.New("local plans require a configured task with a plan and matching project")
+	}
+	if task.PlanVersion < 1 {
+		task.PlanVersion = 1
+	}
+	if len(task.Plan.Requirements) == 0 {
+		task.Plan.Requirements = legacyPendingRequirements(task.Plan.AcceptanceCriteria)
+	}
+	if task.PlanDocument == nil {
+		if err := e.restoreLocalPlanIdentity(ctx, project, task); err != nil {
+			return err
+		}
 	}
 	content, err := e.recoverLocalPlanContent(task, renderLocalPlanContent(*task))
 	if err != nil {
@@ -37,10 +50,21 @@ func (e *Engine) WriteLocalPlan(ctx context.Context, project model.Project, task
 	if err != nil {
 		return err
 	}
-	task.PlanDocument = &model.PlanDocument{Path: path, Hash: localPlanHash(content)}
+	task.PlanDocument.Path, task.PlanDocument.Hash = path, localPlanHash(content)
 	task.Stage, task.ResumeStage, task.Error = "plan_approval", "", ""
 	task.Handoff.NextAction = "Open the local plan in Inbox, review it, then approve, request revision, or reject."
 	return e.Store.Notify(ctx, task.ID, "plan_approval", "Review local plan: "+path)
+}
+
+func legacyPendingRequirements(criteria []string) []model.Requirement {
+	requirements := make([]model.Requirement, 0, len(criteria))
+	for index, criterion := range criteria {
+		if strings.TrimSpace(criterion) == "" {
+			continue
+		}
+		requirements = append(requirements, model.Requirement{ID: fmt.Sprintf("LEGACY-%s-%d", localPlanHash(criterion)[:12], index+1), Outcome: criterion, EvidenceMethod: "PENDING HUMAN REVIEW: specify an evidence method before approving this migrated criterion."})
+	}
+	return requirements
 }
 
 func renderLocalPlanContent(task model.Task) string {
@@ -65,7 +89,9 @@ func (e *Engine) recoverLocalPlanContent(task *model.Task, content string) (stri
 	// A previous process may have published the document before its task write
 	// committed. Recover that document, including manual edits, on planning retry.
 	recovered := *task
-	recovered.PlanDocument = &model.PlanDocument{Path: filepath.Join(root, relative)}
+	metadata := *task.PlanDocument
+	metadata.Path = filepath.Join(root, relative)
+	recovered.PlanDocument = &metadata
 	existing, err := e.readLocalPlanFile(recovered)
 	if os.IsNotExist(err) {
 		return content, nil
@@ -105,8 +131,8 @@ func (e *Engine) localPlanForRead(ctx context.Context, id string) (model.Record,
 		return record, model.Task{}, err
 	}
 	task, err := store.Decode[model.Task](record)
-	if err != nil || task.Mode != model.AgenticMode || task.PlanDocument == nil {
-		return record, task, errors.New("task has no Agentic local plan")
+	if err != nil || task.PlanDocument == nil {
+		return record, task, errors.New("task has no local plan")
 	}
 	return record, task, nil
 }
@@ -150,6 +176,9 @@ func (e *Engine) invalidateLocalApproval(ctx context.Context, record model.Recor
 	if content != "" {
 		next := *task
 		next.PlanVersion++
+		if next.PlanDocument != nil && next.PlanDocument.PlanVersion != 0 {
+			next.PlanDocument.PlanVersion = next.PlanVersion
+		}
 		path, err := e.writeLocalPlanFile(next, content)
 		if err != nil {
 			snapshotError = err

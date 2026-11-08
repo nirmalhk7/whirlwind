@@ -10,6 +10,11 @@ import (
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
+	"whirlwind/internal/testutil/openshell"
+)
+
+const (
+	runnerStartsLog = "agent-starts.log"
 )
 
 const stoppedRunDay = "2026-10-19"
@@ -113,11 +118,15 @@ func TestStoppedFlagBlocksRunnersUntilCleared(t *testing.T) {
 // Uses the real process adapter: the probe records execution before any protocol
 // handshake. The enabled control proves that absence of the marker means no spawn.
 func TestStoppedFlagNeverSpawnsAgentProcess(t *testing.T) {
+	fixture := openshell.Install(t)
+	fixture.EnableCommandExecution()
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
+	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "test-image")
 	e, task, path := testEngine(t)
 	ctx := context.Background()
 	root := t.TempDir()
 	t.Setenv("WHIRLWIND_PROCESS_REGISTRY", filepath.Join(root, "processes"))
-	marker := filepath.Join(root, "agent-starts.log")
+	marker := filepath.Join(root, runnerStartsLog)
 	script := filepath.Join(root, "probe-agent.sh")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'started\\n' >> \"$HOME/agent-starts.log\"\nexit 73\n"), 0700); err != nil {
 		t.Fatal(err)
@@ -133,7 +142,8 @@ func TestStoppedFlagNeverSpawnsAgentProcess(t *testing.T) {
 	}
 	setRunnerStopped(t, e, true)
 	assertStoppedRunnerCalls(t, stoppedRunnerFixture{e, project, task, p, path, ctx})
-	assertSchedulerDoesNotStartAgent(t, e, ctx, marker, p)
+	runtimeMarkers := filepath.Join(fixture.Directory, "guest", "tmp", "ww-*", "home", runnerStartsLog)
+	assertSchedulerDoesNotStartAgent(t, e, ctx, marker, runtimeMarkers, p)
 }
 
 func setRunnerStopped(t *testing.T, e *Engine, stopped bool) {
@@ -192,13 +202,16 @@ func assertStoppedRunnerCalls(t *testing.T, fixture stoppedRunnerFixture) {
 	}
 }
 
-func assertSchedulerDoesNotStartAgent(t *testing.T, e *Engine, ctx context.Context, marker string, p model.Provider) {
+func assertSchedulerDoesNotStartAgent(t *testing.T, e *Engine, ctx context.Context, marker, runtimeMarkers string, p model.Provider) {
 	t.Helper()
 	// Exercise the actual scheduler across three 2-second dispatch ticks.
 	runCtx, cancel := context.WithTimeout(ctx, 6500*time.Millisecond)
 	defer cancel()
 	e.Run(runCtx)
-	markers, _ := filepath.Glob(filepath.Join(e.Root, "sandbox", "*", "home", "agent-starts.log"))
+	markers, err := filepath.Glob(runtimeMarkers)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) || len(markers) > 0 {
 		t.Fatalf("agent process launched while stopped: %v", err)
 	}
@@ -212,7 +225,10 @@ func assertSchedulerDoesNotStartAgent(t *testing.T, e *Engine, ctx context.Conte
 	defer controlCancel()
 	_, controlErr := e.TestProviderConnection(controlCtx, p)
 	t.Logf("positive control provider outcome: %v", controlErr)
-	markers, _ = filepath.Glob(filepath.Join(e.Root, "sandbox", "*", "home", "agent-starts.log"))
+	markers, err = filepath.Glob(runtimeMarkers)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(markers) != 1 {
 		t.Fatalf("positive control runtime markers: %v", markers)
 	}

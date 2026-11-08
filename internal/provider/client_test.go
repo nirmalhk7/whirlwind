@@ -25,7 +25,11 @@ func TestACPFilesystemRespectsWorkspaceAndReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := NewClient(Input{CWD: root}, Hooks{Permission: func(context.Context, Permission) (bool, error) { return true, nil }})
-	defer c.Close()
+	t.Cleanup(func() {
+		if err := c.Close(); err != nil {
+			t.Errorf("close ACP client: %v", err)
+		}
+	})
 	v, e := c.Handle(context.Background(), clientMessage("fs/read_text_file", map[string]any{"path": filepath.Join(root, "read.txt"), "line": 2, "limit": 1}))
 	if e != nil || v.(map[string]any)["content"] != "two" {
 		t.Fatalf(valueErrorFormat, v, e)
@@ -41,8 +45,7 @@ func TestACPFilesystemRespectsWorkspaceAndReadOnly(t *testing.T) {
 
 // TestACPTerminalLifecycleAndOutputLimit verifies ACP terminals finish with an exit status and retain only the configured output tail.
 func TestACPTerminalLifecycleAndOutputLimit(t *testing.T) {
-	c := NewClient(Input{CWD: t.TempDir()}, Hooks{Permission: func(context.Context, Permission) (bool, error) { return true, nil }})
-	defer c.Close()
+	c, _, _ := newTerminalTestClient(t, t.TempDir(), false, Hooks{Permission: func(context.Context, Permission) (bool, error) { return true, nil }})
 	ctx := context.Background()
 	v, e := c.Handle(ctx, clientMessage("terminal/create", map[string]any{"command": "sh", "args": []string{"-c", "printf 'abcdef'"}, "outputByteLimit": 3}))
 	if e != nil {

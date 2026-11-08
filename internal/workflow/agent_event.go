@@ -32,6 +32,10 @@ func (a *agentAttempt) event(kind string, data any) {
 func (a *agentAttempt) saveEvent(kind string, data any) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(a.ctx), 5*time.Second)
 	defer cancel()
+	if err := a.verifyLiveOwner(ctx); err != nil {
+		return err
+	}
+	providerProgress(&a.state, kind, data, time.Now())
 	b, err := store.SafeJSON(data)
 	if err != nil {
 		return err
@@ -40,6 +44,10 @@ func (a *agentAttempt) saveEvent(kind string, data any) error {
 	if _, err = a.Store.Capture(ctx, a.id, kind, "application/json", b, store.MessagePayloadLimit, replay); err != nil {
 		return err
 	}
+	return a.applyCapturedEvent(ctx, kind, data, b)
+}
+
+func (a *agentAttempt) applyCapturedEvent(ctx context.Context, kind string, data any, b []byte) error {
 	if kind == "whirlwind/quota" {
 		if err := a.quotaEvent(ctx, data); err != nil {
 			return err
@@ -68,6 +76,13 @@ func (a *agentAttempt) saveStateEvent(ctx context.Context, kind string, b []byte
 	record, err := a.Store.Get(ctx, "sessions", a.id)
 	if err != nil {
 		return err
+	}
+	current, err := store.Decode[model.Attempt](record)
+	if err != nil {
+		return err
+	}
+	if !sameRuntimeOwner(current, a.state) || !runtimeLeaseActive(current, time.Now().UTC()) {
+		return store.ErrConflict
 	}
 	return a.Store.Put(ctx, "sessions", a.id, a.state, record.Version)
 }

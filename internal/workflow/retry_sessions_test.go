@@ -28,7 +28,7 @@ func TestFailedResumeKeepsSavedSession(t *testing.T) {
 		})
 	}
 	_, err := h.run(context.Background())
-	if err == nil || calls != 3 {
+	if err == nil || calls != 4 {
 		t.Fatalf("calls=%d error=%v", calls, err)
 	}
 	records, _ := h.engine.Store.List(context.Background(), "sessions")
@@ -44,7 +44,7 @@ func TestUnitSessionDoesNotCrossScope(t *testing.T) {
 	h := newRetryHarness(t)
 	ctx := context.Background()
 	for _, unit := range []string{"wanted", "other"} {
-		saved := model.Attempt{ElapsedMS: fixtureRuntime(0), ExecutionProfile: h.executionProfile(t), Task: h.task.ID, UnitID: unit, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, Transport: "acp", SessionID: unit}
+		saved := model.Attempt{ElapsedMS: fixtureRuntime(0), ExecutionProfile: h.executionProfile(t), Task: h.task.ID, UnitID: unit, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, Model: "fixture-model", Transport: "acp", SessionID: unit}
 		if err := h.engine.Store.Put(ctx, "sessions", store.ID(), saved, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -81,7 +81,7 @@ func TestSessionLookupFailureStopsExecution(t *testing.T) {
 	}
 }
 
-func TestNewRunResetsCrashBudget(t *testing.T) {
+func TestRepeatedRunPreservesExhaustedCrashBudget(t *testing.T) {
 	h := newRetryHarness(t, model.AgentChoice{Provider: "fake", Model: "m"})
 	calls := 0
 	h.engine.Adapter = func(model.Provider) provider.Adapter {
@@ -95,7 +95,7 @@ func TestNewRunResetsCrashBudget(t *testing.T) {
 			t.Fatal("failure lost")
 		}
 	}
-	if calls != 6 {
-		t.Fatalf("new run inherited exhausted budget: %d", calls)
+	if calls != 4 {
+		t.Fatalf("repeated run reset the persisted initial-plus-three restart budget: %d", calls)
 	}
 }

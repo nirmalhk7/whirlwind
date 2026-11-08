@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 	"whirlwind/internal/model"
+	"whirlwind/internal/testutil/openshell"
 	"whirlwind/internal/verification"
 )
 
@@ -59,7 +60,21 @@ func TestReusableEvidenceKeepsLargeOutputInArtifact(t *testing.T) {
 	}
 }
 
+func TestQltyChecksAlwaysRunAgainstCurrentBaseline(t *testing.T) {
+	for _, check := range []model.Check{
+		{Name: "qlty-check", Command: []string{"qlty", "check", "--all", "--sarif"}, Reusable: true, FreshnessSeconds: 300},
+		{Name: "qlty-smells", Command: []string{"qlty", "smells", "--all", "--sarif"}, Reusable: true, FreshnessSeconds: 300},
+	} {
+		if reusableCheck(check) {
+			t.Errorf("%s reused stale quality output instead of checking the current candidate", check.Name)
+		}
+	}
+}
+
 func TestReusableCheckUsesEvidenceButDirtySourceForcesExecution(t *testing.T) {
+	fixture := openshell.Install(t)
+	fixture.EnableCommandExecution()
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
 	e, task, repo := testEngine(t)
 	task.Worktree = repo
 	policy := model.Policy{Checks: []model.Check{{Name: "pure", Command: []string{"/usr/bin/true"}, Reusable: true, FreshnessSeconds: 60}}}

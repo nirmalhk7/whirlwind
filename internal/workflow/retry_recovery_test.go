@@ -20,6 +20,7 @@ func TestCrashRetriesResumeSessionUntilSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	putFixtureAgent(t, e.Store, "code", model.AgentConfig{Role: "code", Chain: []model.AgentChoice{{Provider: "fake", Model: "m"}}})
 	calls := 0
 	e.Adapter = func(model.Provider) provider.Adapter {
 		return connectionAdapterFunc(func(_ context.Context, in provider.Input, hooks provider.Hooks) (provider.Output, error) {

@@ -40,7 +40,7 @@ func ID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// Open opens SQLite with one connection, enables WAL and foreign keys, and applies pending schema migrations.
+// Open opens SQLite with one connection, enables WAL and foreign keys, and initializes the current schema.
 func Open(path string) (*Store, error) {
 	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return nil, e
@@ -51,13 +51,13 @@ func Open(path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{DB: db}
-	for _, q := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON", "PRAGMA busy_timeout=5000", "CREATE TABLE IF NOT EXISTS migrations(version INTEGER PRIMARY KEY)"} {
+	for _, q := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON", "PRAGMA busy_timeout=5000"} {
 		if _, e = db.Exec(q); e != nil {
 			_ = db.Close()
 			return nil, e
 		}
 	}
-	if e = s.migrate(); e != nil {
+	if e = s.initializeSchema(); e != nil {
 		_ = db.Close()
 		return nil, e
 	}

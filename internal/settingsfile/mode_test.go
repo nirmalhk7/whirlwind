@@ -10,6 +10,8 @@ import (
 	"whirlwind/internal/store"
 )
 
+const agenticModeYAML = "mode: agentic\n"
+
 func TestModeChangeWaitsForRestartAndCancelsOnlyUnfinishedWork(t *testing.T) {
 	s := editorSource(t)
 	ctx := context.Background()
@@ -18,7 +20,7 @@ func TestModeChangeWaitsForRestartAndCancelsOnlyUnfinishedWork(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	next := "mode: agentic\n" + editorYAML
+	next := agenticModeYAML + editorYAML
 	if err := os.WriteFile(s.path, []byte(next), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -66,12 +68,12 @@ func TestYAMLEditorCannotChangeModeButPreservesPendingDiskMode(t *testing.T) {
 	s := editorSource(t)
 	ctx := context.Background()
 	current, _ := s.File()
-	if err := s.SaveFile(ctx, "mode: agentic\n"+editorYAML, current.Revision, func(changes []store.Change) error {
+	if err := s.SaveFile(ctx, agenticModeYAML+editorYAML, current.Revision, func(changes []store.Change) error {
 		return s.store.Write(store.WithoutSettingsSource(ctx), changes, nil)
 	}); err == nil {
 		t.Fatal("UI changed mode")
 	}
-	if err := os.WriteFile(s.path, []byte("mode: agentic\n"+editorYAML), 0600); err != nil {
+	if err := os.WriteFile(s.path, []byte(agenticModeYAML+editorYAML), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Refresh(ctx); err != nil {

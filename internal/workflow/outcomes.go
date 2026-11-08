@@ -69,5 +69,5 @@ func (e *Engine) metricOutcome(ctx context.Context, m providerMetric, decisions 
 	if err != nil || (task.Stage != "pr_created" && task.Stage != "complete") {
 		return false, false
 	}
-	return m.Success && task.ChecksPassed && task.Score >= 9 && decisions[m.Task] != "closed", true
+	return m.Success && task.ChecksPassed && task.Score > 80 && decisions[m.Task] != "closed", true
 }

@@ -3,9 +3,11 @@ package workflow
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"time"
 
 	"whirlwind/internal/model"
+	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
 )
 
@@ -15,6 +17,14 @@ type quotaSnapshotReader interface {
 
 type quotaReader interface {
 	ReadQuota(context.Context, string) (string, string, error)
+}
+
+type supervisorQuotaSnapshotReader interface {
+	ReadQuotaSnapshotWithSupervisorDir(context.Context, string, string) (*model.QuotaSnapshot, error)
+}
+
+type scopedQuotaReader interface {
+	ReadQuotaWithSupervisorDir(context.Context, string, string) (string, string, error)
 }
 
 // A saved exhaustion flag must not prevent the metadata read that can clear it.
@@ -27,6 +37,10 @@ func (a *agentRun) refreshBlockedQuota(record model.Record) (model.Provider, err
 		return p, nil
 	}
 	adapter := a.Adapter(p)
+	return a.refreshProviderQuota(record, p, adapter)
+}
+
+func (a *agentRun) refreshProviderQuota(record model.Record, p model.Provider, adapter provider.Adapter) (model.Provider, error) {
 	if reader, ok := adapter.(quotaSnapshotReader); ok {
 		_, gateErr := a.quotaAdmission(p)
 		if p.Quota == "exhausted" || gateErr != nil {
@@ -46,7 +60,13 @@ func (a *agentRun) refreshBlockedQuota(record model.Record) (model.Provider, err
 func (a *agentRun) refreshQuota(record model.Record, p model.Provider, reader quotaReader) (model.Provider, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	state, reset, err := reader.ReadQuota(ctx, a.input.CWD)
+	var state, reset string
+	var err error
+	if scoped, ok := reader.(scopedQuotaReader); ok {
+		state, reset, err = scoped.ReadQuotaWithSupervisorDir(ctx, a.input.CWD, a.quotaSupervisorDir())
+	} else {
+		state, reset, err = reader.ReadQuota(ctx, a.input.CWD)
+	}
 	if err != nil {
 		return p, nil
 	}
@@ -74,7 +94,13 @@ func (a *agentRun) latestProvider(id string) (model.Provider, error) {
 func (a *agentRun) refreshSnapshot(record model.Record, p model.Provider, reader quotaSnapshotReader) (model.Provider, error) {
 	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 	defer cancel()
-	snapshot, err := reader.ReadQuotaSnapshot(ctx, a.input.CWD)
+	var snapshot *model.QuotaSnapshot
+	var err error
+	if scoped, ok := reader.(supervisorQuotaSnapshotReader); ok {
+		snapshot, err = scoped.ReadQuotaSnapshotWithSupervisorDir(ctx, a.input.CWD, a.quotaSupervisorDir())
+	} else {
+		snapshot, err = reader.ReadQuotaSnapshot(ctx, a.input.CWD)
+	}
 	if err != nil || snapshot == nil {
 		return p, nil
 	}
@@ -92,6 +118,11 @@ func (a *agentRun) refreshSnapshot(record model.Record, p model.Provider, reader
 	}
 	return p, err
 }
+
+func (a *agentRun) quotaSupervisorDir() string {
+	return filepath.Join(a.Engine.Root, "supervisor", "standalone")
+}
+
 func quotaSnapshotSummary(snapshot *model.QuotaSnapshot) (string, string) {
 	state := "unknown"
 	var reset int64

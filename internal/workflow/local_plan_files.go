@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
@@ -32,7 +33,37 @@ func (e *Engine) localPlanLocation(task model.Task) (string, string, error) {
 		root = filepath.Join(home, ".whirlwind", "plans")
 	}
 	root, err := filepath.Abs(root)
-	return root, filepath.Join(task.ProjectID, task.ID, fmt.Sprintf("v%d.md", task.PlanVersion)), err
+	if err != nil {
+		return "", "", err
+	}
+	if task.PlanDocument != nil && (task.PlanDocument.CreatedAt != "" || task.PlanDocument.RepoName != "") {
+		if task.PlanDocument.CreatedAt == "" || task.PlanDocument.RepoName == "" {
+			return "", "", errors.New("local plan identity is incomplete")
+		}
+		created, parseErr := time.Parse(time.RFC3339Nano, task.PlanDocument.CreatedAt)
+		if parseErr != nil || created.IsZero() || safePlanRepoName(task.PlanDocument.RepoName) != task.PlanDocument.RepoName || task.PlanDocument.PlanVersion != task.PlanVersion {
+			return "", "", errors.New("local plan identity is invalid")
+		}
+		name := fmt.Sprintf("%s_%s.md", task.PlanDocument.RepoName, created.UTC().Format("20060102T150405.000000000Z"))
+		return root, name, nil
+	}
+	return root, filepath.Join(task.ProjectID, task.ID, fmt.Sprintf("v%d.md", task.PlanVersion)), nil
+}
+
+func safePlanRepoName(name string) string {
+	var builder strings.Builder
+	separator := false
+	for _, r := range name {
+		valid := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
+		if valid {
+			builder.WriteRune(r)
+			separator = false
+		} else if builder.Len() > 0 && !separator {
+			builder.WriteByte('-')
+			separator = true
+		}
+	}
+	return strings.Trim(builder.String(), "-_")
 }
 
 func localPlanID(id string) bool {

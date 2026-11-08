@@ -77,7 +77,7 @@ func (e *Engine) integrationOperation(ctx context.Context, p model.Project, t mo
 
 func nativeOperationInput(p model.Project, t model.Task, operation nativeRepositoryOperation) provider.Input {
 	prompt := "Use only the explicitly selected native integration. Never invoke gh, curl, shell network clients, or a different connection. Perform operation " + operation.Name + " for repository " + p.RemoteURL + ". Return ONLY JSON matching operation contract below, derived from actual successful native tool results. Do not invent data or URLs. lookup_pr: {found:boolean,repository:string,url?:string,head?:string,head_sha?:string,base?:string}; create_pr: {url:string,head:string,head_sha:string,base:string,repository:string}; pr_state: {state:OPEN|CLOSED|MERGED}; repository_metadata: {default_branch:string,repository:string,lookup_pr_tool:string,create_pr_tool:string}. repository must be the exact canonical repository URL. Metadata discovery is read-only: return exact native tool names for PR lookup and creation without invoking any write tool. Names must come from the selected connection inventory, with lookup read-only and creation a write tool. For lookup_pr, search the exact repository/head/base and return the existing PR even if an earlier create timed out. create_pr must first recheck existing head/base to avoid duplicates. Never merge or close a PR.\nConnection: " + jsonText(operation.Target) + "\nArguments: " + jsonText(operation.Arguments)
-	input := provider.Input{Role: "submit", Purpose: "integration:" + operation.Name, CWD: p.Path, Prompt: prompt, ReadOnly: operation.Name != "create_pr", NativeIntegrations: true, RequiredIntegrations: []model.IntegrationTarget{operation.Target}}
+	input := provider.Input{Role: "finalizer", Purpose: "integration:" + operation.Name, CWD: p.Path, Prompt: prompt, ReadOnly: operation.Name != "create_pr", NativeIntegrations: true, RequiredIntegrations: []model.IntegrationTarget{operation.Target}}
 	if t.Worktree != "" {
 		input.CWD = t.Worktree
 	}
@@ -119,17 +119,8 @@ func (e *Engine) InspectIntegrationRepository(ctx context.Context, p model.Proje
 	return inspectedDefaultBranch(ctx, p, raw)
 }
 func (e *Engine) reconcileAgenticProject(ctx context.Context, p model.Project) {
-	records, err := e.Store.List(ctx, "tasks")
-	if err != nil {
-		return
-	}
-	for _, record := range records {
-		t, err := store.Decode[model.Task](record)
-		if err != nil || !integrationTaskNeedsObservation(t, p.ID) {
-			continue
-		}
-		e.observeIntegrationOutcome(ctx, p, t, record.Version)
-	}
+	// Legacy publication records remain stored as historical data. Local-only
+	// delivery does not poll remote pull requests or infer a human decision.
 }
 
 func integrationTaskNeedsObservation(task model.Task, projectID string) bool {

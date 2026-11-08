@@ -11,12 +11,10 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"whirlwind/internal/model"
 )
@@ -159,42 +157,6 @@ func (f Fixture) score(entries []Entry) (float64, float64) {
 		coverage = float64(criteria) / float64(len(f.Criteria))
 	}
 	return recall, coverage
-}
-
-// Package builds a bounded JSON context package with relevant files, nearby tests, and dependency manifests.
-func (i Index) Package(query string) string {
-	entries := i.Search(query, 8)
-	seen := map[string]bool{}
-	directories := map[string]bool{}
-	for _, e := range entries {
-		seen[e.Path] = true
-		directories[filepath.Dir(e.Path)] = true
-	}
-	keys := slices.Sorted(maps.Keys(i.Files))
-	for _, key := range keys {
-		e := i.Files[key]
-		if seen[key] {
-			continue
-		}
-		if (directories[filepath.Dir(key)] && len(e.Tests) > 0) || slices.Contains([]string{"go.mod", "package.json"}, key) {
-			entries = append(entries, e)
-		}
-	}
-	for n := range entries {
-		entries[n].Vector = nil
-		text := entries[n].Text[:min(len(entries[n].Text), 12000)]
-		for !utf8.ValidString(text) && len(text) > 0 {
-			text = text[:len(text)-1]
-		}
-		entries[n].Text = text
-	}
-	for {
-		b, _ := json.Marshal(map[string]any{"index_version": i.Version, "commit": i.Commit, "files": entries})
-		if len(b) <= 256*1024 || len(entries) == 0 {
-			return string(b)
-		}
-		entries = entries[:len(entries)-1]
-	}
 }
 
 func embeddingRequest(ctx context.Context, c model.Embeddings, texts []string) (*http.Request, error) {

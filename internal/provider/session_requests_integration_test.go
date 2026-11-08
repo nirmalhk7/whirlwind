@@ -11,13 +11,17 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	elicitationRequestMethod = "mcpServer/elicitation/request"
+)
+
 func elicitationRequest(t *testing.T, raw string) (Message, map[string]any) {
 	t.Helper()
 	var params map[string]any
 	if err := json.Unmarshal([]byte(raw), &params); err != nil {
 		t.Fatal(err)
 	}
-	return Message{Method: "mcpServer/elicitation/request", Params: json.RawMessage(raw)}, params
+	return Message{Method: elicitationRequestMethod, Params: json.RawMessage(raw)}, params
 }
 
 func TestNativePermissionResponsesMatchProtocol(t *testing.T) {
@@ -26,7 +30,7 @@ func TestNativePermissionResponsesMatchProtocol(t *testing.T) {
 		if allowed {
 			action = "accept"
 		}
-		result := permissionResponse("mcpServer/elicitation/request", nil, allowed)
+		result := permissionResponse(elicitationRequestMethod, nil, allowed)
 		if !reflect.DeepEqual(result, map[string]any{"action": action}) {
 			t.Fatalf("elicitation response: %#v", result)
 		}
@@ -45,7 +49,7 @@ func TestNativePermissionResponsesMatchProtocol(t *testing.T) {
 func TestMCPElicitationURLUsesPermissionHook(t *testing.T) {
 	m, params := elicitationRequest(t, `{"mode":"url","serverName":"jenkins","url":"https://ci.example/verify","message":"Verify CI access","elicitationId":"verify-1"}`)
 	s := &providerSession{hooks: Hooks{Permission: func(_ context.Context, permission Permission) (bool, error) {
-		if permission.Tool != "mcpServer/elicitation/request" || string(permission.Raw) != string(m.Params) {
+		if permission.Tool != elicitationRequestMethod || string(permission.Raw) != string(m.Params) {
 			t.Fatalf("lost native authentication request: %+v", permission)
 		}
 		return true, nil
@@ -97,7 +101,7 @@ func TestMCPElicitationInvalidOrUnsupportedFormsDecline(t *testing.T) {
 				return map[string]string{"field": tc.answer}, nil
 			}, Event: func(kind string, value any) {
 				if kind == "elicitation_declined" {
-					reason, _ = value.(map[string]string)["reason"]
+					reason = value.(map[string]string)["reason"]
 				}
 			}}}
 			response, err := s.mcpElicitation(context.Background(), m, params)

@@ -1,6 +1,8 @@
 # Whirlwind HTTP API
 
-Go server owns `/api/v1`; Next.js forwards same-origin requests to loopback `WHIRLWIND_BACKEND_URL` (default `http://127.0.0.1:8090`). See [OpenAPI contract](docs/openapi.json).
+The Go backend owns `/api/v1` compatibility and integration handlers. The human interface is `./bin/whirlwind dashboard`, using the supervisor's private Unix command/event interface. There is no browser frontend or Next.js proxy. See [local supervisor setup](docs/local-supervisor.md) and the [OpenAPI contract](docs/openapi.json).
+
+Historical task/publication terminology below does not authorize remote publication or alternate model transports. The current local workflow requires explicit plan approval, ACP in OpenShell, a requirement score strictly greater than 80%, every mandatory verification gate, and local delivery only; see [workflow details](docs/workflow-modes.md).
 
 ## Contracts
 
@@ -34,6 +36,7 @@ Control Host must be localhost/loopback; Origin, when present, must exactly matc
 | PATCH | `/agents/{role}` | `{chain:[{provider,model,thinking?:{config_id,value}},...]}` in strict primary/fallback order; If-Match required (0 for first save) |
 | POST | `/directions/{id}/select` | Select the sole idea in its `group_id`, pausing the previous choice and beginning or restoring its planner task; If-Match required; 202 task resource |
 | POST | `/directions/{id}/deselect` | Unselect idea and pause linked unfinished task; If-Match required; 200 direction |
+| POST | `/directions/{id}/reconsider` | `{project_id,reason}` for an unselected dismissed/rejected direction; current If-Match and Idempotency-Key required; records a one-use human reconsideration request without selecting work or approving a plan |
 | DELETE | `/directions/{id}/group` | Delete the idea's entire generation group and pause linked unfinished tasks, preserving task history; `{versions:{idea_id:version,...}}` for every member and If-Match for the target required; 200 `{deleted:number}` |
 | POST | `/tasks/{id}/answers` | `{answers:{question_id:string}}`; If-Match required |
 | GET | `/runners/status` | `{processing:boolean}`; true while a session has status `running` and is unfinished, including ideation and provider tests |

@@ -114,7 +114,7 @@ func elicitationQuestion(name string, field map[string]any, required bool) (mode
 	format, _ := field["format"].(string)
 	question.Secret = format == "password" || format == "secret"
 	if format != "" && !question.Secret {
-		return question, errors.New("Unsupported MCP property format")
+		return question, errors.New("unsupported MCP property format")
 	}
 	if rawEnum, exists := field["enum"]; exists {
 		options, err := elicitationOptions(rawEnum)
@@ -131,13 +131,13 @@ func validateElicitationProperty(field map[string]any) error {
 		switch key {
 		case "type", "title", "description", "enum", "format", "default":
 		default:
-			return errors.New("Unsupported MCP property schema keyword")
+			return errors.New("unsupported MCP property schema keyword")
 		}
 	}
 	switch field["type"] {
 	case "string", "number", "integer", "boolean":
 	default:
-		return errors.New("Nested or unsupported MCP form schema; only primitive fields are supported")
+		return errors.New("nested or unsupported MCP form schema; only primitive fields are supported")
 	}
 	return nil
 }

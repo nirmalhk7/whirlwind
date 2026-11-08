@@ -5,37 +5,70 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+	"whirlwind/internal/model"
 )
 
 // put performs a version-checked resource write inside an existing transaction and appends the matching event.
 func put(ctx context.Context, tx *sql.Tx, kind, id string, v any, expected int) error {
-	if _, removal := v.(directionRemoval); removal {
-		return removeDirection(ctx, tx, id, expected)
+	if handled, err := putRemoval(ctx, tx, kind, id, v, expected); handled {
+		return err
 	}
-	if _, remove := v.(ConfigurationRemoval); remove {
-		return removeConfiguration(ctx, tx, kind, id, expected)
-	}
-	if _, removal := v.(projectRemoval); removal {
-		return removeProject(ctx, tx, id, expected)
-	}
-	b, err := json.Marshal(v)
+	return putResource(ctx, tx, kind, id, v, expected)
+}
+
+func putResource(ctx context.Context, tx *sql.Tx, kind, id string, v any, expected int) error {
+	data, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
-	var before []byte
-	if kind == "tasks" {
-		err = tx.QueryRowContext(ctx, "SELECT data FROM resources WHERE kind='tasks' AND id=?", id).Scan(&before)
-		if err != nil && err != sql.ErrNoRows {
-			return err
-		}
-	}
-	if err = writeResource(ctx, tx, Change{kind, id, v, expected}, b); err != nil {
+	before, err := previousTaskData(ctx, tx, kind, id)
+	if err != nil {
 		return err
 	}
+	if err = writeResource(ctx, tx, Change{kind, id, v, expected}, data); err != nil {
+		return err
+	}
+	return notifyResourceChange(ctx, tx, kind, id, v, before, data)
+}
+
+func previousTaskData(ctx context.Context, tx *sql.Tx, kind, id string) ([]byte, error) {
+	if kind != "tasks" {
+		return nil, nil
+	}
+	var before []byte
+	err := tx.QueryRowContext(ctx, "SELECT data FROM resources WHERE kind='tasks' AND id=?", id).Scan(&before)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	return before, nil
+}
+
+func notifyResourceChange(ctx context.Context, tx *sql.Tx, kind, id string, value any, before, data []byte) error {
 	if kind == "tasks" {
-		return notifyTaskTransition(ctx, tx, before, b)
+		return notifyTaskTransition(ctx, tx, before, data)
+	}
+	if kind == "directions" {
+		if direction, ok := value.(model.Direction); ok && direction.ProjectID != "" {
+			if direction.ID == "" {
+				direction.ID = id
+			}
+			return syncProposalTx(ctx, tx, direction)
+		}
 	}
 	return nil
+}
+
+func putRemoval(ctx context.Context, tx *sql.Tx, kind, id string, value any, expected int) (bool, error) {
+	switch value.(type) {
+	case directionRemoval:
+		return true, removeDirection(ctx, tx, id, expected)
+	case ConfigurationRemoval:
+		return true, removeConfiguration(ctx, tx, kind, id, expected)
+	case projectRemoval:
+		return true, removeProject(ctx, tx, id, expected)
+	default:
+		return false, nil
+	}
 }
 
 func writeResource(ctx context.Context, tx *sql.Tx, change Change, data []byte) error {

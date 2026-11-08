@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"whirlwind/internal/model"
+	"whirlwind/internal/testutil/openshell"
 	"whirlwind/internal/workflow"
 )
 
@@ -49,9 +50,13 @@ func TestProviderStatusWhileStoppedNeverSpawnsProcesses(t *testing.T) {
 }
 
 func TestProviderStatusCachesChecksAndInvalidatesOnConfigurationAndStop(t *testing.T) {
+	fixture := openshell.Install(t)
+	fixture.EnableCommandExecution()
+	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
+	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "test-image")
 	s := setup(t)
 	ctx := context.Background()
-	p := model.Provider{ID: "probe", Name: "Probe", Kind: "claude", Command: []string{"sh", "-c", `read -r request; printf '%s\n' '{"id":1,"result":{"models":[{"id":"fixture"}]}}'; cat >/dev/null`}}
+	p := model.Provider{ID: "probe", Name: "Probe", Kind: "acp", Command: []string{"node", "-e", providerStatusMetadataPeer}}
 	if err := s.Store.Put(ctx, "providers", p.ID, p, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +77,7 @@ func TestProviderStatusCachesChecksAndInvalidatesOnConfigurationAndStop(t *testi
 	if cached := get("working"); cached != checkedAt {
 		t.Fatalf("cached check replaced its observation time: %s %s", checkedAt, cached)
 	}
-	p.Command = []string{"sh", "-c", `read -r request; printf '%s\n' '{"id":1,"error":{"code":-32000,"message":"Authentication required"}}'; cat >/dev/null`}
+	p.Command = []string{"node", "-e", providerStatusMetadataPeer, "authentication-failure"}
 	if err := s.Store.Put(ctx, "providers", p.ID, p, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -86,3 +91,23 @@ func TestProviderStatusCachesChecksAndInvalidatesOnConfigurationAndStop(t *testi
 	}
 	get("paused")
 }
+
+// This peer accepts metadata operations only; inference would fail the status check.
+const providerStatusMetadataPeer = `
+const readline = require('node:readline');
+readline.createInterface({input:process.stdin}).on('line', line => {
+  const request = JSON.parse(line);
+  if (request.id === undefined) return;
+  const reply = {jsonrpc:'2.0',id:request.id};
+  if (process.argv[1] === 'authentication-failure') {
+    reply.error = {code:-32000,message:'Authentication required'};
+  } else if (request.method === 'initialize') {
+    reply.result = {protocolVersion:1,agentCapabilities:{},authMethods:[]};
+  } else if (request.method === 'session/new') {
+    reply.result = {sessionId:'status-fixture-session'};
+  } else {
+    reply.error = {code:-32601,message:'Only metadata operations are allowed'};
+  }
+  process.stdout.write(JSON.stringify(reply)+'\n');
+});
+`

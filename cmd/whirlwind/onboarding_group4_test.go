@@ -33,7 +33,10 @@ func TestOnboardingAgentHelper(t *testing.T) {
 		case "initialized":
 			continue
 		case "session/new":
-			result = map[string]any{"sessionId": onboardingSessionID}
+			result = map[string]any{"sessionId": onboardingSessionID, "models": map[string]any{
+				"currentModelId":  onboardingModelID,
+				"availableModels": []any{map[string]string{"modelId": onboardingModelID, "name": "Onboarding fixture model"}},
+			}}
 		case "thread/start":
 			result = map[string]any{"thread": map[string]any{"id": onboardingSessionID}}
 		case "session/prompt", "turn/start":
@@ -61,11 +64,22 @@ func validOnboardingPrompt(kind string, m provider.Message, emit func(any)) bool
 	var prompt []struct{ Text string }
 	_ = json.Unmarshal(m.Params, &params)
 	_ = json.Unmarshal(params[key], &prompt)
-	if len(prompt) != 1 || (!strings.Contains(prompt[0].Text, "Generate zero to") && !strings.Contains(prompt[0].Text, "Candidate ideas:")) || !strings.Contains(prompt[0].Text, "Versioned handoff:") {
+	if len(prompt) != 1 || !validOnboardingPromptText(prompt[0].Text) {
 		emit(map[string]any{"id": m.ID, "error": map[string]any{"code": -32602, "message": "workflow prompt missing"}})
 		return false
 	}
 	return true
+}
+
+func validOnboardingPromptText(text string) bool {
+	if strings.Contains(text, "Evaluate substantive novelty for the supplied candidate proposals") {
+		return strings.Contains(text, "Return only JSON")
+	}
+	return strings.Contains(text, "Return one proposal for each of these four categories: expand, optimize, harden, simplify.") &&
+		strings.Contains(text, "Current approved plans for this project (immutable approved versions only):") &&
+		strings.Contains(text, "Source inventory is frozen for this run") &&
+		strings.Contains(text, "Ideation is read-only") &&
+		strings.Contains(text, "Available evidence references:")
 }
 
 func streamOnboardingReply(kind string, m provider.Message, emit func(any)) {
@@ -81,7 +95,7 @@ func streamOnboardingReply(kind string, m provider.Message, emit func(any)) {
 		key = "input"
 	}
 	_ = json.Unmarshal(params[key], &content)
-	if len(content) == 1 && strings.Contains(content[0].Text, "Candidate ideas:") {
+	if len(content) == 1 && strings.Contains(content[0].Text, "Evaluate substantive novelty for the supplied candidate proposals") {
 		reply = `{"unique":true}`
 	}
 	middle := len(reply) / 2

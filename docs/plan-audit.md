@@ -1,5 +1,11 @@
 # PLAN.md implementation audit
 
+> Historical audit of an earlier browser-interface and remote-publication
+> implementation. The browser frontend has since been removed; current human
+> interaction uses the Go/tview terminal dashboard. This document preserves
+> the earlier review record and is not current setup guidance or acceptance
+> evidence for the present implementation.
+
 Audit date: October 12, 2026. Scope: the current working tree, including the
 existing uncommitted Go refactors. Requirements repeated in PLAN.md are mapped
 to the same implementation below. Examples illustrate the corresponding
@@ -23,7 +29,7 @@ Antigravity is intentionally unavailable, as PLAN.md requires.
 | Agent work outside transactions | Agent execution in `agentAttempt.execute`; store transactions contain database operations |
 | Renewable fenced leases and child-process restart reconciliation | `internal/workflow/leases.go`, `store.Claim/Renew/Release`, `internal/process`; lease fencing, renewal, orphan and crash-before-PID tests |
 | Separate webhook-only listener with signature validation | `cmd/whirlwind/listeners.go`, `Server.Webhoowhirlwinddler`, `internal/httpapi/webhook.go`; HMAC tampering test |
-| Fresh SQLite store, no Python migration | Go schema migrations only; backend setup documented in `docs/go-backend.md` |
+| Fresh SQLite store, no Python migration | Single current SQLite schema initialized directly; no upgrade migrations |
 
 ## Project and agent onboarding
 

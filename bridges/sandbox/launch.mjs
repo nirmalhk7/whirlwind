@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, realpath, rm, lstat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // The host supplies a structured profile and an argv array. No model-provided shell interpolation.
@@ -16,6 +16,8 @@ try {
  const command=process.argv.slice(4);
  if(process.argv[3]!=='--'||!command.length||!profile.cwd||typeof profile.read_only!=='boolean')throw new Error('Execution profile and argv required');
  const cwd=await realpath(profile.cwd);
+ const node=await realpath(process.execPath);
+ const runtimePath=dirname(node)+(process.env.PATH?delimiter+process.env.PATH:'');
  const bridge=await realpath(dirname(fileURLToPath(import.meta.url)));
  if(profile.runtime_dir){if((await lstat(profile.runtime_dir)).isSymbolicLink())throw new Error('Runtime root must not be a symbolic link');scratch=await realpath(profile.runtime_dir);}else{scratch=await mkdtemp(join(tmpdir(),'whirlwind-sandbox-'));temporary=true;}
  const homes={HOME:join(scratch,'home'),TMPDIR:join(scratch,'tmp'),XDG_CACHE_HOME:join(scratch,'cache'),XDG_CONFIG_HOME:join(scratch,'config'),CODEX_HOME:join(scratch,'codex'),CLAUDE_CONFIG_DIR:join(scratch,'claude')};
@@ -32,9 +34,9 @@ try {
  if(deps.errors?.length)throw new Error(`Sandbox dependencies unavailable: ${deps.errors.join('; ')}`);
  await SandboxManager.initialize(config,undefined,false);
  if(!SandboxManager.isSandboxingEnabled())throw new Error('Sandbox enforcement unavailable');
- const bootstrap=[process.execPath,join(bridge,'initialize-state.mjs'),JSON.stringify({homes,readRoots:profile.read_roots??[],nativeFiles:profile.native_files??[]}),'--',...command];
+ const bootstrap=[node,join(bridge,'initialize-state.mjs'),JSON.stringify({homes,readRoots:profile.read_roots??[],nativeFiles:profile.native_files??[]}),'--',...command];
  const wrapped=await SandboxManager.wrapWithSandbox(bootstrap.map(quote).join(' '),'/bin/sh');
- const child=spawn(wrapped,{cwd,shell:'/bin/sh',stdio:'inherit',env:{...process.env,...homes,PWD:cwd,OPENSSL_CONF:'/dev/null'}});
+ const child=spawn(wrapped,{cwd,shell:'/bin/sh',stdio:'inherit',env:{...process.env,...homes,PATH:runtimePath,PWD:cwd,OPENSSL_CONF:'/dev/null'}});
  for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>child.kill(signal));
  const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>resolve(code??(signal?128:1)));});
  process.exitCode=code;

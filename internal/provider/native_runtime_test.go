@@ -41,6 +41,16 @@ func TestProvisionNativeIntegrationsKeepsBoundedProviderState(t *testing.T) {
 	}
 }
 
+func TestNativeMCPDefinitionsResolveBundledACPProfileForCustomProviderID(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	project := t.TempDir()
+	writeNativeFixture(t, filepath.Join(project, nativeFixtureProjectConfig), `{"mcpServers":{"ci":{"url":"https://ci.example/mcp"}}}`)
+	definitions, err := NativeMCPDefinitions(model.Provider{ID: "team-agent", Kind: "acp", ACPProfile: "claude"}, project)
+	if err != nil || len(definitions) != 1 {
+		t.Fatalf("custom bundled ACP profile did not resolve its configured MCP inventory: definitions=%v err=%v", definitions, err)
+	}
+}
+
 func TestNativeMCPDefinitionsProjectPrecedenceAndDisabledServers(t *testing.T) {
 	home, project := t.TempDir(), t.TempDir()
 	t.Setenv("HOME", home)

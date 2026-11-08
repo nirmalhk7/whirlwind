@@ -9,129 +9,151 @@ import (
 
 // Load reads durable evidence only. It never starts inference or runs checks.
 func Load(ctx context.Context, s *store.Store) (Report, error) {
-	tasks, err := s.List(ctx, "tasks")
+	records, err := loadEvaluationRecords(ctx, s)
 	if err != nil {
 		return Report{}, err
 	}
-	attempts, err := s.List(ctx, "sessions")
+	data, err := loadSampleData(records)
 	if err != nil {
 		return Report{}, err
 	}
-	outcomes, err := s.List(ctx, "outcomes")
+	samples, known, err := taskSamples(ctx, s, records["tasks"], data)
 	if err != nil {
 		return Report{}, err
 	}
-	metrics, err := s.List(ctx, "metrics")
+	operationSamples, err := unknownTaskSamples(ctx, s, data.attempts, known, data.categories)
 	if err != nil {
 		return Report{}, err
 	}
-	audits, err := s.List(ctx, "audit")
+	samples = append(samples, operationSamples...)
+	return Build(samples), nil
+}
+
+func loadSampleData(records map[string][]model.Record) (sampleData, error) {
+	byTask, err := attemptsByTask(records["sessions"])
 	if err != nil {
-		return Report{}, err
+		return sampleData{}, err
 	}
-	decisions := map[string]string{}
-	decisionHistory := map[string][]string{}
-	for _, r := range outcomes {
-		var v struct {
-			Task     string `json:"task"`
-			Decision string `json:"human_decision"`
-		}
-		if err = json.Unmarshal(r.Data, &v); err != nil {
-			return Report{}, err
-		}
-		decisions[v.Task] = v.Decision
-		decisionHistory[v.Task] = append(decisionHistory[v.Task], v.Decision)
+	decisions, history, err := loadDecisions(records["outcomes"])
+	if err != nil {
+		return sampleData{}, err
 	}
-	categories := map[string]string{}
-	for _, r := range metrics {
-		var v struct {
-			Task     string `json:"task"`
-			Category string `json:"category"`
-		}
-		if err = json.Unmarshal(r.Data, &v); err != nil {
-			return Report{}, err
-		}
-		categories[v.Task] = v.Category
+	categories, err := loadCategories(records["metrics"])
+	if err != nil {
+		return sampleData{}, err
 	}
-	interventions := map[string]int{}
-	for _, r := range audits {
-		a, e := store.Decode[model.Audit](r)
-		if e != nil {
-			return Report{}, e
-		}
-		if a.Source == "local_operator" {
-			interventions[a.Task]++
-		}
+	interventions, err := countInterventions(records["audit"])
+	if err != nil {
+		return sampleData{}, err
 	}
-	byTask := map[string][]model.Attempt{}
-	for _, r := range attempts {
-		a, e := store.Decode[model.Attempt](r)
-		if e != nil {
-			return Report{}, e
-		}
-		byTask[a.Task] = append(byTask[a.Task], a)
-	}
+	return sampleData{attempts: byTask, categories: categories, decisions: decisions, history: history, interventions: interventions}, nil
+}
+
+func unknownTaskSamples(ctx context.Context, s *store.Store, byTask map[string][]model.Attempt, known map[string]bool, categories map[string]string) ([]Sample, error) {
 	samples := []Sample{}
-	known := map[string]bool{}
-	for _, record := range tasks {
-		task, e := store.Decode[model.Task](record)
-		if e != nil {
-			return Report{}, e
-		}
-		known[task.ID] = true
-		usage, e := s.TaskUsage(ctx, task.ID)
-		if e != nil {
-			return Report{}, e
-		}
-		samples = append(samples, Sample{Task: task, Usage: usage, Entries: usage.Entries, Attempts: byTask[task.ID], Category: categories[task.ID], Decision: decisions[task.ID], Decisions: decisionHistory[task.ID], Verified: verified(ctx, s, task), Interventions: interventions[task.ID]})
-	}
 	for id, attempts := range byTask {
 		if known[id] {
 			continue
 		}
 		usage, err := s.TaskUsage(ctx, id)
 		if err != nil {
-			return Report{}, err
+			return nil, err
 		}
 		samples = append(samples, Sample{Operation: true, Task: model.Task{ID: id, Stage: "operation"}, Usage: usage, Entries: usage.Entries, Attempts: attempts, Category: categories[id]})
 	}
-	return Build(samples), nil
+	return samples, nil
 }
-func verified(ctx context.Context, s *store.Store, t model.Task) bool {
-	if !t.ChecksPassed || t.Score < 9 || t.VerificationID == "" || t.ReviewID == "" || t.ReviewedCommit == "" {
-		return false
+
+func loadEvaluationRecords(ctx context.Context, s *store.Store) (map[string][]model.Record, error) {
+	records := make(map[string][]model.Record, 5)
+	for _, kind := range []string{"tasks", "sessions", "outcomes", "metrics", "audit"} {
+		items, err := s.List(ctx, kind)
+		if err != nil {
+			return nil, err
+		}
+		records[kind] = items
 	}
-	v, err := s.Get(ctx, "verification", t.VerificationID)
-	if err != nil {
-		return false
+	return records, nil
+}
+
+func loadDecisions(records []model.Record) (map[string]string, map[string][]string, error) {
+	decisions, history := map[string]string{}, map[string][]string{}
+	for _, record := range records {
+		var outcome struct {
+			Task     string `json:"task"`
+			Decision string `json:"human_decision"`
+		}
+		if err := json.Unmarshal(record.Data, &outcome); err != nil {
+			return nil, nil, err
+		}
+		decisions[outcome.Task] = outcome.Decision
+		history[outcome.Task] = append(history[outcome.Task], outcome.Decision)
 	}
-	var evidence struct {
-		Stage      string           `json:"stage"`
-		Provenance model.Provenance `json:"provenance"`
+	return decisions, history, nil
+}
+
+func loadCategories(records []model.Record) (map[string]string, error) {
+	categories := map[string]string{}
+	for _, record := range records {
+		var metric struct {
+			Task     string `json:"task"`
+			Category string `json:"category"`
+		}
+		if err := json.Unmarshal(record.Data, &metric); err != nil {
+			return nil, err
+		}
+		categories[metric.Task] = metric.Category
 	}
-	if json.Unmarshal(v.Data, &evidence) != nil || evidence.Stage != "complete" {
-		return false
-	}
-	p := evidence.Provenance
-	if p.Task != t.ID || p.PlanVersion != t.PlanVersion || p.Head != t.ReviewedCommit || p.Base != t.Base {
-		return false
-	}
-	r, err := s.Get(ctx, "reviews", t.ReviewID)
-	if err != nil {
-		return false
-	}
-	review, err := store.Decode[model.Review](r)
-	if err != nil || review.Provenance == nil || review.Score < 9 {
-		return false
-	}
-	rp := review.Provenance
-	if rp.Task != p.Task || rp.Base != p.Base || rp.Head != p.Head || rp.PolicyHash != p.PolicyHash || rp.PlanVersion != p.PlanVersion || rp.VerificationID != t.VerificationID {
-		return false
-	}
-	for _, f := range review.Findings {
-		if f.Blocking && !f.Resolved {
-			return false
+	return categories, nil
+}
+
+func countInterventions(records []model.Record) (map[string]int, error) {
+	interventions := map[string]int{}
+	for _, record := range records {
+		audit, err := store.Decode[model.Audit](record)
+		if err != nil {
+			return nil, err
+		}
+		if audit.Source == "local_operator" {
+			interventions[audit.Task]++
 		}
 	}
-	return true
+	return interventions, nil
+}
+
+func attemptsByTask(records []model.Record) (map[string][]model.Attempt, error) {
+	byTask := map[string][]model.Attempt{}
+	for _, record := range records {
+		attempt, err := store.Decode[model.Attempt](record)
+		if err != nil {
+			return nil, err
+		}
+		byTask[attempt.Task] = append(byTask[attempt.Task], attempt)
+	}
+	return byTask, nil
+}
+
+type sampleData struct {
+	attempts      map[string][]model.Attempt
+	categories    map[string]string
+	decisions     map[string]string
+	history       map[string][]string
+	interventions map[string]int
+}
+
+func taskSamples(ctx context.Context, s *store.Store, records []model.Record, data sampleData) ([]Sample, map[string]bool, error) {
+	samples, known := []Sample{}, map[string]bool{}
+	for _, record := range records {
+		task, err := store.Decode[model.Task](record)
+		if err != nil {
+			return nil, nil, err
+		}
+		known[task.ID] = true
+		usage, err := s.TaskUsage(ctx, task.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		samples = append(samples, Sample{Task: task, Usage: usage, Entries: usage.Entries, Attempts: data.attempts[task.ID], Category: data.categories[task.ID], Decision: data.decisions[task.ID], Decisions: data.history[task.ID], Verified: verified(ctx, s, task), Interventions: data.interventions[task.ID]})
+	}
+	return samples, known, nil
 }

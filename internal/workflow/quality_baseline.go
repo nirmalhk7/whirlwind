@@ -48,7 +48,20 @@ func (e *Engine) captureQualityBaseline(ctx context.Context, p model.Project, t 
 	if err != nil {
 		return verification.Report{}, err
 	}
-	return verification.RunObservedWithProfile(ctx, path, checks, profile, nil)
+	return e.runOwnedChecks(ctx, path, checks, profile, runtimeCheckOwner{TaskID: t.ID, VerificationID: key, Role: "verify"})
+}
+
+func (e *Engine) runOwnedChecks(ctx context.Context, cwd string, checks []model.Check, profile execution.Profile, owner runtimeCheckOwner) (verification.Report, error) {
+	report := verification.Report{Passed: len(checks) > 0, Results: []verification.Result{}}
+	for _, check := range checks {
+		result, err := e.runOwnedCheck(ctx, cwd, check, profile, owner)
+		if err != nil {
+			return report, err
+		}
+		report.Results = append(report.Results, result)
+		report.Passed = report.Passed && result.Passed
+	}
+	return report, nil
 }
 
 func (e *Engine) persistQualityBaseline(ctx context.Context, key string, report verification.Report) error {

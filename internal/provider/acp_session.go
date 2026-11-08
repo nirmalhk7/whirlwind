@@ -23,6 +23,9 @@ func (s *providerSession) runACP() error {
 	if e = s.configureACP(&session); e != nil {
 		return e
 	}
+	if s.input.ReadinessOnly {
+		return nil
+	}
 	var result struct {
 		Stop string `json:"stopReason"`
 	}
@@ -73,7 +76,7 @@ func (s *providerSession) initializeACP() (bool, error) {
 		if server, ok := raw.(map[string]any); ok {
 			kind, _ := server["type"].(string)
 			if kind == "http" && !init.Capabilities.MCP.HTTP || kind == "sse" && !init.Capabilities.MCP.SSE {
-				return false, fmt.Errorf("Cursor ACP does not expose required %s MCP transport; reconnect through supported local MCP configuration", kind)
+				return false, fmt.Errorf("cursor ACP does not expose required %s MCP transport; reconnect through supported local MCP configuration", kind)
 			}
 		}
 	}
@@ -147,8 +150,13 @@ func (s *providerSession) openACPSession() (acpSession, error) {
 }
 
 func (s *providerSession) mcpServers() []any {
-	if s.checkServers == nil && s.nativeServers == nil {
+	broker := s.brokerMCPServer()
+	if s.checkServers == nil && s.nativeServers == nil && broker == nil {
 		return []any{}
 	}
-	return append(append([]any{}, s.nativeServers...), s.checkServers...)
+	servers := append(append([]any{}, s.nativeServers...), s.checkServers...)
+	if broker != nil {
+		servers = append(servers, broker)
+	}
+	return servers
 }

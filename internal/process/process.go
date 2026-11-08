@@ -7,19 +7,27 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
 const processTokenPrefix = "WHIRLWIND_PROCESS_TOKEN="
 
+var commandCleanupMu sync.Mutex
+var commandCleanups = make(map[*exec.Cmd][]func())
+var commandStarts = make(map[*exec.Cmd][]func() error)
+
 type registration struct {
-	PID   int    `json:"pid"`
-	Token string `json:"token"`
+	PID     int    `json:"pid"`
+	Token   string `json:"token"`
+	Started string `json:"started,omitempty"`
 }
 
 // Configure isolates a child in its own process group so cancellation kills its descendants and bounds pipe cleanup.
@@ -32,6 +40,66 @@ func Configure(cmd *exec.Cmd) {
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 5 * time.Second
+}
+
+// OnCleanup releases process-scoped resources only after Forget confirms that
+// the owned process group has drained. Failed cleanup leaves callbacks pending.
+func OnCleanup(cmd *exec.Cmd, callback func()) error {
+	if cmd == nil || callback == nil {
+		return errors.New("process cleanup callback requires a command and function")
+	}
+	if cmd.Process != nil {
+		return errors.New("process cleanup callback must be registered before start")
+	}
+	commandCleanupMu.Lock()
+	commandCleanups[cmd] = append(commandCleanups[cmd], callback)
+	commandCleanupMu.Unlock()
+	return nil
+}
+
+// OnStart promotes resources after the managed child starts; a failure stops
+// the child and uses its normal verified cleanup path.
+func OnStart(cmd *exec.Cmd, callback func() error) error {
+	if cmd == nil || callback == nil {
+		return errors.New("process start callback requires a command and function")
+	}
+	if cmd.Process != nil {
+		return errors.New("process start callback must be registered before start")
+	}
+	commandCleanupMu.Lock()
+	commandStarts[cmd] = append(commandStarts[cmd], callback)
+	commandCleanupMu.Unlock()
+	return nil
+}
+
+func runStartCallbacks(cmd *exec.Cmd) error {
+	commandCleanupMu.Lock()
+	callbacks := commandStarts[cmd]
+	delete(commandStarts, cmd)
+	commandCleanupMu.Unlock()
+	for _, callback := range callbacks {
+		if err := callback(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runCleanupCallbacks(cmd *exec.Cmd) {
+	commandCleanupMu.Lock()
+	callbacks := commandCleanups[cmd]
+	delete(commandCleanups, cmd)
+	delete(commandStarts, cmd)
+	commandCleanupMu.Unlock()
+	for _, callback := range callbacks {
+		callback()
+	}
+}
+
+func hasCleanupCallbacks(cmd *exec.Cmd) bool {
+	commandCleanupMu.Lock()
+	defer commandCleanupMu.Unlock()
+	return len(commandCleanups[cmd]) > 0
 }
 
 // Command creates a cancellable process-group command with a unique environment token for restart recovery.
@@ -84,39 +152,78 @@ func writeRegistration(root string, v registration) error {
 
 // Start registers a token before launch and its PID afterward; registration failure cancels and waits for the child.
 func Start(cmd *exec.Cmd) error {
-	root := os.Getenv("WHIRLWIND_PROCESS_REGISTRY")
+	if !validToken(token(cmd)) {
+		runCleanupCallbacks(cmd)
+		return errors.New("managed process requires an ownership token")
+	}
+	root := os.Getenv(registryEnvironment)
+	setCommandRegistry(cmd, root)
+	state, err := prepareCommandRegistration(cmd, root)
+	if err != nil {
+		runCleanupCallbacks(cmd)
+		return err
+	}
+	managedCommands.Store(cmd, state)
+	if err := startRegisteredCommand(cmd, state, root); err != nil {
+		return err
+	}
+	if err := runStartCallbacks(cmd); err != nil {
+		_ = cmd.Cancel()
+		return errors.Join(err, cmd.Wait(), Forget(cmd))
+	}
+	return nil
+}
+
+func prepareCommandRegistration(cmd *exec.Cmd, root string) (*managedCommand, error) {
+	state := &managedCommand{record: registration{Token: token(cmd)}, root: root}
 	if root != "" {
 		if err := os.MkdirAll(root, 0700); err != nil {
-			return err
+			return nil, err
 		}
 		if err := writeRegistration(root, registration{Token: token(cmd)}); err != nil {
-			return err
+			return nil, err
 		}
 	}
+	return state, nil
+}
+
+func startRegisteredCommand(cmd *exec.Cmd, state *managedCommand, root string) error {
 	if err := cmd.Start(); err != nil {
+		managedCommands.Delete(cmd)
 		if root != "" {
 			_ = os.Remove(filepath.Join(root, token(cmd)+".json"))
 		}
+		runCleanupCallbacks(cmd)
 		return err
 	}
+	state.record.PID = cmd.Process.Pid
+	identity, err := kernelIdentity(cmd.Process.Pid)
+	if err != nil {
+		_ = cmd.Cancel()
+		return errors.Join(err, cmd.Wait(), Forget(cmd))
+	}
+	state.record.Started = identity.Started
 	if root != "" {
-		if err := writeRegistration(root, registration{PID: cmd.Process.Pid, Token: token(cmd)}); err != nil {
+		if err := writeRegistration(root, state.record); err != nil {
 			_ = cmd.Cancel()
-			_ = cmd.Wait()
-			return err
+			return errors.Join(err, cmd.Wait(), Forget(cmd))
 		}
 	}
 	return nil
 }
 
 // Forget kills any remaining descendants and removes the command registration after execution.
-func Forget(cmd *exec.Cmd) {
-	if cmd.Process != nil {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+func Forget(cmd *exec.Cmd) error {
+	_, managed := managedCommands.Load(cmd)
+	err := forgetCommand(cmd)
+	if err != nil {
+		return err
 	}
-	if root := os.Getenv("WHIRLWIND_PROCESS_REGISTRY"); root != "" {
-		_ = os.Remove(filepath.Join(root, token(cmd)+".json"))
+	if cmd != nil && cmd.Process != nil && !managed && hasCleanupCallbacks(cmd) {
+		return fmt.Errorf("%w: sensitive process was not started through process.Start", ErrCleanup)
 	}
+	runCleanupCallbacks(cmd)
+	return nil
 }
 
 // Run starts a registered command, waits for its exit, and cleans up its process group and registration.
@@ -124,8 +231,32 @@ func Run(cmd *exec.Cmd) error {
 	if e := Start(cmd); e != nil {
 		return e
 	}
-	defer Forget(cmd)
-	return cmd.Wait()
+	return Wait(cmd)
+}
+
+// WaitForDrain reaps the child and verifies process-group cleanup, but leaves
+// registered callbacks pending so callers can drain their output first.
+func WaitForDrain(cmd *exec.Cmd) (func(), error) {
+	waitErr := cmd.Wait()
+	_, managed := managedCommands.Load(cmd)
+	cleanupErr := forgetCommand(cmd)
+	if cleanupErr != nil {
+		return nil, errors.Join(waitErr, cleanupErr)
+	}
+	if cmd != nil && cmd.Process != nil && !managed && hasCleanupCallbacks(cmd) {
+		return nil, errors.Join(waitErr, fmt.Errorf("%w: sensitive process was not started through process.Start", ErrCleanup))
+	}
+	var once sync.Once
+	return func() { once.Do(func() { runCleanupCallbacks(cmd) }) }, waitErr
+}
+
+// Wait reaps the direct child, verifies descendant cleanup, and then releases cleanup callbacks.
+func Wait(cmd *exec.Cmd) error {
+	release, err := WaitForDrain(cmd)
+	if release != nil {
+		release()
+	}
+	return err
 }
 
 // Lock takes a nonblocking exclusive file lock to prevent multiple servers from owning one data directory.

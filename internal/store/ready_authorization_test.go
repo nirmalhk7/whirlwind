@@ -7,13 +7,24 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	authorizationStateDB    = "state.db"
+	authorizationRepository = "owner/repo"
+	readyIssueLabel         = "whirlwind:ready"
+	storeCloseError         = "close store: %v"
+)
+
 func TestReadyLabelAuthorizesWithoutInboxSelection(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := Open(filepath.Join(t.TempDir(), authorizationStateDB))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
-	task, err := s.IngestIssue(context.Background(), model.Project{ID: "p", Repo: "owner/repo", PolicyHash: "policy"}, model.Issue{Number: 7, Title: "Fix search", Body: "Guard stale responses", State: "OPEN", Labels: []string{"whirlwind:ready"}})
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf(storeCloseError, err)
+		}
+	})
+	task, err := s.IngestIssue(context.Background(), model.Project{ID: "p", Repo: authorizationRepository, PolicyHash: "policy"}, model.Issue{Number: 7, Title: "Fix search", Body: "Guard stale responses", State: "OPEN", Labels: []string{readyIssueLabel}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -23,14 +34,18 @@ func TestReadyLabelAuthorizesWithoutInboxSelection(t *testing.T) {
 }
 
 func TestReadyIssueRevisionKeepsAuthorizationAndReplacesPlan(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := Open(filepath.Join(t.TempDir(), authorizationStateDB))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf(storeCloseError, err)
+		}
+	})
 	ctx := context.Background()
-	p := model.Project{ID: "p", Repo: "owner/repo", PolicyHash: "policy"}
-	issue := model.Issue{Number: 7, Title: "Fix search", Body: "Old behavior", State: "OPEN", Labels: []string{"whirlwind:ready"}}
+	p := model.Project{ID: "p", Repo: authorizationRepository, PolicyHash: "policy"}
+	issue := model.Issue{Number: 7, Title: "Fix search", Body: "Old behavior", State: "OPEN", Labels: []string{readyIssueLabel}}
 	first, err := s.IngestIssue(ctx, p, issue)
 	if err != nil {
 		t.Fatal(err)
@@ -46,14 +61,18 @@ func TestReadyIssueRevisionKeepsAuthorizationAndReplacesPlan(t *testing.T) {
 }
 
 func TestCancelledIssueCannotRestartFromOlderChangedWebhook(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "state.db"))
+	s, err := Open(filepath.Join(t.TempDir(), authorizationStateDB))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf(storeCloseError, err)
+		}
+	})
 	ctx := context.Background()
-	p := model.Project{ID: "p", Repo: "owner/repo"}
-	issue := model.Issue{Number: 7, Title: "Fix", Body: "Current", UpdatedAt: "2026-10-22T20:00:00Z", State: "OPEN", Labels: []string{"whirlwind:ready"}}
+	p := model.Project{ID: "p", Repo: authorizationRepository}
+	issue := model.Issue{Number: 7, Title: "Fix", Body: "Current", UpdatedAt: "2026-10-22T20:00:00Z", State: "OPEN", Labels: []string{readyIssueLabel}}
 	task, err := s.IngestIssue(ctx, p, issue)
 	if err != nil {
 		t.Fatal(err)

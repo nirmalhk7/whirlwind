@@ -114,8 +114,8 @@ func TestReplayUsageDoesNotIncreaseLedger(t *testing.T) {
 	}
 }
 
-// An unattended discovery run must not borrow the selected-task allowance.
-func TestDiscoveryRequiresSeparateAllowance(t *testing.T) {
+// Discovery now uses its job deadline without requiring a separate budget.
+func TestDiscoveryRunsWithoutSeparateAllowance(t *testing.T) {
 	h := newRetryHarness(t)
 	ctx := context.Background()
 	pr, _ := h.engine.Store.Get(ctx, "providers", "fake")
@@ -131,12 +131,12 @@ func TestDiscoveryRequiresSeparateAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := h.engine.agent(ctx, h.project, h.task, provider.Input{Role: "ideate", CWD: h.cwd, ReadOnly: true, Prompt: "find a candidate"})
-	if !errors.Is(err, store.ErrBudgetExceeded) {
-		t.Fatalf("discovery borrowed task allowance: %v", err)
+	if err != nil {
+		t.Fatalf("discovery requires an obsolete allowance: %v", err)
 	}
 	attempts, _ := h.engine.Store.List(ctx, "sessions")
-	if len(attempts) != 0 {
-		t.Fatal("discovery spent inference before configured allowance")
+	if len(attempts) != 1 {
+		t.Fatalf("expected one discovery attempt, got %d", len(attempts))
 	}
 }
 

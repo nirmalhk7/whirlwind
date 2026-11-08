@@ -2,17 +2,21 @@ package provider
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"strings"
 
 	"whirlwind/internal/process"
 )
 
 type processPipes struct {
-	input  io.WriteCloser
-	output io.ReadCloser
-	stderr io.ReadCloser
+	input   io.WriteCloser
+	output  io.ReadCloser
+	stderr  io.ReadCloser
+	writers []io.Closer
 }
 
 func rpcPipes(cmd *exec.Cmd) (processPipes, error) {
@@ -20,12 +24,43 @@ func rpcPipes(cmd *exec.Cmd) (processPipes, error) {
 	if err != nil {
 		return processPipes{}, err
 	}
-	output, err := cmd.StdoutPipe()
+	pipes := processPipes{input: input}
+	if cmd.Stdout != nil || cmd.Stderr != nil {
+		pipes.close()
+		return processPipes{}, errors.New("provider output is already configured")
+	}
+	// Cmd.Wait closes StdoutPipe/StderrPipe readers. Own these readers instead,
+	// so process cleanup cannot discard bytes before RPC diagnostics drain.
+	output, outputWriter, err := os.Pipe()
 	if err != nil {
+		pipes.close()
 		return processPipes{}, err
 	}
-	stderr, err := cmd.StderrPipe()
-	return processPipes{input: input, output: output, stderr: stderr}, err
+	pipes.output, pipes.writers = output, []io.Closer{outputWriter}
+	stderr, stderrWriter, err := os.Pipe()
+	if err != nil {
+		pipes.close()
+		return processPipes{}, err
+	}
+	pipes.stderr = stderr
+	pipes.writers = append(pipes.writers, stderrWriter)
+	cmd.Stdout, cmd.Stderr = outputWriter, stderrWriter
+	return pipes, nil
+}
+
+func (p processPipes) closeWriters() {
+	for _, writer := range p.writers {
+		_ = writer.Close()
+	}
+}
+
+func (p processPipes) close() {
+	p.closeWriters()
+	for _, pipe := range []io.Closer{p.input, p.output, p.stderr} {
+		if pipe != nil {
+			_ = pipe.Close()
+		}
+	}
 }
 
 func (r *RPC) dispatchFrame(m Message) {
@@ -57,15 +92,31 @@ func (r *RPC) finishRead(e error) {
 	r.mu.Unlock()
 	r.cancel()
 	r.callbacks.Wait()
-	exitErr := r.cmd.Wait()
+	release, exitErr := process.WaitForDrain(r.cmd)
+	if release != nil && r.afterDrain != nil {
+		if cleanupErr := r.afterDrain(); cleanupErr != nil {
+			cleanupErr = errors.Join(process.ErrCleanup, fmt.Errorf("OpenShell sandbox cleanup failed: %w", cleanupErr))
+			exitErr = errors.Join(exitErr, cleanupErr)
+			release = nil
+		}
+	}
 	r.mu.Lock()
+	if errors.Is(exitErr, process.ErrCleanup) {
+		r.cleanupErr = exitErr
+	}
 	if r.err == nil {
 		r.err = exitErr
 	}
 	r.mu.Unlock()
 	r.diagnostics.Wait()
+	if release != nil {
+		release()
+	}
 	if r.observe != nil {
-		exit := map[string]any{"exit_code": r.cmd.ProcessState.ExitCode()}
+		exit := map[string]any{"exit_code": r.cmd.ProcessState.ExitCode(), "cleanup_verified": r.cleanupErr == nil}
+		if r.cleanupErr != nil {
+			exit["cleanup_error"] = r.cleanupErr.Error()
+		}
 		if exitErr != nil {
 			exit["error"] = exitErr.Error()
 		}
@@ -74,7 +125,6 @@ func (r *RPC) finishRead(e error) {
 		}
 		r.observe("whirlwind/process_exit", exit)
 	}
-	process.Forget(r.cmd)
 	close(r.done)
 }
 
@@ -90,15 +140,32 @@ func (r *RPC) decodeResponse(method string, m Message, out any) error {
 		return &failure
 	}
 	if out == nil {
+		r.markReady(method)
 		return nil
 	}
-	return json.Unmarshal(m.Result, out)
+	err := json.Unmarshal(m.Result, out)
+	if err == nil {
+		r.markReady(method)
+	}
+	return err
+}
+
+func (r *RPC) markReady(method string) {
+	if method == "initialize" {
+		r.mu.Lock()
+		r.ready = true
+		r.mu.Unlock()
+	}
 }
 
 func (r *RPC) closedError() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.err != nil {
+		var exit *exec.ExitError
+		if !r.ready && errors.As(r.err, &exit) && (exit.ExitCode() == 126 || exit.ExitCode() == 127 || strings.Contains(r.stderrTail, "host is not on the allow list")) {
+			return &TransportError{Cause: &StartupError{Cause: r.err, Diagnostic: r.stderrTail}}
+		}
 		return &TransportError{Cause: fmt.Errorf("provider exited before response: %w", r.err)}
 	}
 	return &TransportError{Cause: fmt.Errorf("provider exited before response: %w", io.ErrUnexpectedEOF)}

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"whirlwind/internal/model"
+	"whirlwind/internal/provider"
 	"whirlwind/internal/workflow"
 )
 
@@ -42,19 +43,16 @@ func validateProviders(values []Provider) (map[string]Provider, error) {
 }
 
 func validateIntegrations(settings model.IntegrationSettings, providers map[string]Provider) error {
-	validTarget := func(provider, ref string) error {
-		p, ok := providers[provider]
-		if !ok || p.Kind == "unavailable" {
-			return fmt.Errorf("integration references unconfigured provider %q", provider)
-		}
-		if strings.TrimSpace(ref) == "" || ref != strings.TrimSpace(ref) {
-			return errors.New("integration needs an exact native ref")
-		}
-		return nil
+	if err := validateIntegrationSources(settings.Sources, providers); err != nil {
+		return err
 	}
+	return validatePublicationTargets(settings.Publication, providers)
+}
+
+func validateIntegrationSources(sources []model.IntegrationSource, providers map[string]Provider) error {
 	seen := map[[2]string]bool{}
-	for _, source := range settings.Sources {
-		if err := validTarget(source.Provider, source.Ref); err != nil {
+	for _, source := range sources {
+		if err := validateIntegrationTarget(source.Provider, source.Ref, providers); err != nil {
 			return err
 		}
 		key := [2]string{source.Provider, source.Ref}
@@ -68,21 +66,45 @@ func validateIntegrations(settings model.IntegrationSettings, providers map[stri
 			}
 		}
 	}
-	for repository, target := range settings.Publication {
+	return nil
+}
+
+func validatePublicationTargets(publication map[string]model.IntegrationTarget, providers map[string]Provider) error {
+	for repository, target := range publication {
 		canonical, err := workflow.CanonicalRemote(repository)
 		if err != nil || canonical != repository {
 			return fmt.Errorf("integration publication key must be canonical HTTPS repository URL: %q", repository)
 		}
-		if err := validTarget(target.Provider, target.Ref); err != nil {
+		if err := validateIntegrationTarget(target.Provider, target.Ref, providers); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func validateIntegrationTarget(provider, ref string, providers map[string]Provider) error {
+	p, ok := providers[provider]
+	if !ok || p.Kind == "unavailable" {
+		return fmt.Errorf("integration references unconfigured provider %q", provider)
+	}
+	if strings.TrimSpace(ref) == "" || ref != strings.TrimSpace(ref) {
+		return errors.New("integration needs an exact native ref")
+	}
+	return nil
+}
+
 func validateProviderCommand(p Provider) error {
 	switch p.Kind {
-	case "acp", "codex", "claude":
+	case "acp":
+		if p.ACPProfile != "" {
+			if _, ok := provider.ACPProfileByID(p.ACPProfile); !ok {
+				return fmt.Errorf("provider %s references unknown ACP profile %q", p.ID, p.ACPProfile)
+			}
+		}
+		if len(p.Command) == 0 && p.ACPProfile == "" {
+			return fmt.Errorf("provider %s needs command or bundled acp_profile", p.ID)
+		}
+	case "codex", "claude":
 		if len(p.Command) == 0 {
 			return fmt.Errorf("provider %s needs command", p.ID)
 		}
@@ -94,7 +116,7 @@ func validateProviderCommand(p Provider) error {
 }
 
 func validateChain(role string, chain []model.AgentChoice, providers map[string]Provider) error {
-	if !slices.Contains(model.AgentRoles(), role) {
+	if !slices.Contains(model.AgentRoles(), role) && role != "submit" {
 		return fmt.Errorf("unknown agent role %s", role)
 	}
 	if len(chain) == 0 {

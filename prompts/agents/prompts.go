@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"io/fs"
 	"strings"
 	"text/template"
 )
@@ -31,4 +32,13 @@ func Render(name string, data map[string]string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSuffix(output.String(), "\n"), nil
+}
+
+// Source returns the trusted bundled Markdown before any repository or issue text is inserted.
+func Source(name string) (string, error) {
+	data, err := fs.ReadFile(files, name)
+	if err != nil {
+		return "", fmt.Errorf("read trusted agent prompt %q: %w", name, err)
+	}
+	return string(data), nil
 }

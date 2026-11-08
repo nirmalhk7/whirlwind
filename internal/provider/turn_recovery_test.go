@@ -1,20 +1,15 @@
 package provider
 
-import (
-	"context"
-	"testing"
-)
+import "testing"
 
-func TestCodexTurnFailurePreservesHTTPStatus(t *testing.T) {
+func TestACPRPCStatusPreservesRetryCategories(t *testing.T) {
 	for _, tc := range []struct {
 		status int
 		want   FailureKind
 	}{{429, FailureRateLimit}, {503, FailureTransient}, {401, FailureAuth}} {
-		s := providerSession{ctx: context.Background(), rpc: &RPC{done: make(chan struct{})}, completed: make(chan string, 1)}
-		s.turnCompleted(map[string]any{"turn": map[string]any{"status": "failed", "error": map[string]any{"message": "upstream rejected request", "codexErrorInfo": map[string]any{"httpConnectionFailed": map[string]any{"httpStatusCode": tc.status}}}}})
-		err := s.waitCodexTurn()
-		if ClassifyFailure(err) != tc.want {
-			t.Errorf("status=%d kind=%s error=%v", tc.status, ClassifyFailure(err), err)
+		err := &RPCError{Code: tc.status, Message: "ACP request failed"}
+		if got := ClassifyFailure(err); got != tc.want {
+			t.Errorf("status=%d kind=%s want=%s", tc.status, got, tc.want)
 		}
 	}
 }

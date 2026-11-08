@@ -16,7 +16,13 @@ func (e *Engine) runnerContext(parent context.Context) (context.Context, func())
 	if e.runners == nil {
 		e.runners = map[string]context.CancelFunc{}
 	}
+	if e.closing {
+		e.mu.Unlock()
+		cancel()
+		return ctx, cancel
+	}
 	e.runners[id] = cancel
+	e.runnerWait.Add(1)
 	e.mu.Unlock()
 	if e.settings(parent).Stopped {
 		cancel()
@@ -26,7 +32,20 @@ func (e *Engine) runnerContext(parent context.Context) (context.Context, func())
 		e.mu.Lock()
 		delete(e.runners, id)
 		e.mu.Unlock()
+		e.runnerWait.Done()
 	}
+}
+
+func (e *Engine) stopRunners() {
+	e.mu.Lock()
+	e.closing = true
+	for _, cancel := range e.running {
+		cancel()
+	}
+	for _, cancel := range e.runners {
+		cancel()
+	}
+	e.mu.Unlock()
 }
 
 // StopAll cancels current runners. The persisted workers.stopped flag controls new work.

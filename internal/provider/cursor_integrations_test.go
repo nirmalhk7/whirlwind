@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
+	"whirlwind/internal/testutil/openshell"
 )
 
 func TestCursorMCPServerPreservesTransportAndCredentials(t *testing.T) {
@@ -94,21 +96,32 @@ func TestCursorIntegrationsMissingConnectionHasNativeSetupGuidance(t *testing.T)
 }
 
 func TestCursorIntegrationsProbeRunsNativeCLIInsideSandbox(t *testing.T) {
-	home, project := t.TempDir(), t.TempDir()
-	t.Setenv("HOME", home)
+	fixture := installProtocolOpenShell(t)
+	fixture.EnableCommandExecution()
+	project := t.TempDir()
+	provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
+	home := os.Getenv("HOME")
 	writeNativeFixture(t, filepath.Join(home, ".cursor/mcp.json"), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
 	command := filepath.Join(project, "agent-fixture")
-	writeNativeFixture(t, command, "#!/bin/sh\nif [ \"$1\" != mcp ] || [ \"$2\" != list-tools ] || [ \"$3\" != ci ]; then exit 12; fi\nprintf '%s' '{\"tools\":[{\"name\":\"read_ci\",\"annotations\":{\"readOnlyHint\":true}}]}'\n")
+	writeNativeFixture(t, command, `#!/bin/sh
+if [ "$(cat "$HOME/.cursor/cli-config.json")" != 'synthetic test credential' ]; then exit 13; fi
+if [ -e "$HOME/.codex/auth.json" ] || [ -e "$CLAUDE_CONFIG_DIR/.credentials.json" ]; then exit 14; fi
+if [ "$1" = mcp ] && [ "$2" = list-tools ] && [ "$3" = ci ]; then
+  printf '%s' '{"tools":[{"name":"read_ci","annotations":{"readOnlyHint":true}}]}'
+  exit 0
+fi
+if [ "$1" = acp ]; then
+  exec node -e 'const readline=require("node:readline");readline.createInterface({input:process.stdin}).on("line",line=>{const request=JSON.parse(line);if(request.id===undefined)return;const result=request.method==="initialize"?{protocolVersion:1,agentCapabilities:{loadSession:false},authMethods:[]}:request.method==="session/new"?{sessionId:"cursor-session"}:{};process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:request.id,result})+"\n")});'
+fi
+exit 12
+`)
 	if err := os.Chmod(command, 0700); err != nil {
 		t.Fatal(err)
 	}
-	p := model.Provider{ID: "cursor", Kind: "acp", Command: []string{command, "acp"}}
-	profile, err := execution.ForProvider(project, true, "", nil, p.Command)
-	if err != nil {
-		t.Fatal(err)
-	}
+	provider.Command = []string{command, "acp"}
+	profile, registryDir := cursorIntegrationTestProfile(t, project, provider)
 	s := &providerSession{ctx: context.Background(), input: Input{ProviderID: "cursor", CWD: project, DiscoverConnected: true}}
-	if err := s.prepareCursorIntegrations(p, profile); err != nil {
+	if err := s.prepareCursorIntegrations(provider, profile); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.output.Integrations) != 1 || !s.output.Integrations[0].Callable || len(s.output.Integrations[0].Tools) != 1 || !s.output.Integrations[0].Tools[0].ReadOnly {
@@ -117,23 +130,206 @@ func TestCursorIntegrationsProbeRunsNativeCLIInsideSandbox(t *testing.T) {
 	if len(s.nativeServers) != 1 {
 		t.Fatalf("native transport missing: %+v", s.nativeServers)
 	}
-}
-
-func TestCursorIntegrationProbeFailureRedactsBothOutputStreams(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	project := t.TempDir()
-	command := filepath.Join(project, "agent-fixture")
-	writeNativeFixture(t, command, "#!/bin/sh\nprintf '%s' 'stdout-private-token'\nprintf '%s' 'stderr-private-token' >&2\nexit 9\n")
-	if err := os.Chmod(command, 0700); err != nil {
-		t.Fatal(err)
-	}
-	profile, err := execution.ForProvider(project, true, "", nil, []string{command, "acp"})
+	rpc, err := StartWithProfile(context.Background(), provider.Command, profile, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := checkACPSession(context.Background(), rpc, profile.CWD); err != nil {
+		t.Fatal(err)
+	}
+	if err := rpc.Close(); err != nil {
+		t.Fatal(err)
+	}
+	assertCursorProbeCleanup(t, registryDir)
+}
+
+func TestCursorProbeUsesDistinctSandboxAndPreservesMainRuntime(t *testing.T) {
+	fixture := installProtocolOpenShell(t)
+	makeCursorSandboxIDsDistinct(t, fixture)
+	project := t.TempDir()
+	provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
+	writeNativeFixture(t, filepath.Join(os.Getenv("HOME"), ".cursor/mcp.json"), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
+	command := filepath.Join(project, "agent-fixture")
+	writeNativeFixture(t, command, `#!/bin/sh
+if [ "$1" = mcp ] && [ "$2" = list-tools ]; then
+  printf '%s' '{"tools":[{"name":"read_ci","annotations":{"readOnlyHint":true}}]}'
+  exit 0
+fi
+if [ "$1" = acp ]; then
+  exec node -e 'const readline=require("node:readline");readline.createInterface({input:process.stdin}).on("line",line=>{const request=JSON.parse(line);if(request.id===undefined)return;const result=request.method==="initialize"?{protocolVersion:1,agentCapabilities:{loadSession:false},authMethods:[]}:request.method==="session/new"?{sessionId:"cursor-session"}:{};process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:request.id,result})+"\n")});'
+fi
+exit 12
+`)
+	if err := os.Chmod(command, 0700); err != nil {
+		t.Fatal(err)
+	}
+	provider.Command = []string{command, "acp"}
+	profile, registryDir := cursorIntegrationTestProfile(t, project, provider)
+	parentBefore, err := execution.ReadStandaloneRuntimes(registryDir)
+	if err != nil || len(parentBefore) != 1 || parentBefore[0].ExecutionID != profile.ExecutionID || parentBefore[0].SandboxID != "" {
+		t.Fatalf("main runtime was not initially registered without a sandbox ID: %+v %v", parentBefore, err)
+	}
+	session := &providerSession{ctx: context.Background(), input: Input{ProviderID: "cursor", CWD: project}}
+	if err := session.prepareCursorIntegrations(provider, profile); err != nil {
+		t.Fatal(err)
+	}
+	afterProbe, err := execution.ReadStandaloneRuntimes(registryDir)
+	if err != nil || len(afterProbe) != 1 || afterProbe[0] != parentBefore[0] {
+		t.Errorf("probe changed the main runtime locator: before=%+v after=%+v err=%v", parentBefore, afterProbe, err)
+	}
+	rpc, err := StartWithProfile(context.Background(), provider.Command, profile, nil)
+	if err != nil {
+		t.Fatalf("main ACP sandbox did not start after Cursor probe cleanup: %v", err)
+	}
+	if _, err := checkACPSession(context.Background(), rpc, profile.CWD); err != nil {
+		t.Fatal(err)
+	}
+	if err := rpc.Close(); err != nil {
+		_, _ = fixture.RunCLI(t, "sandbox", "stop", profile.SandboxName, "--gateway", profile.GatewayName, "--gateway-endpoint", profile.GatewayEndpoint, "--workspace", profile.Workspace)
+		_, _ = fixture.RunCLI(t, "sandbox", "delete", profile.SandboxName, "--gateway", profile.GatewayName, "--gateway-endpoint", profile.GatewayEndpoint, "--workspace", profile.Workspace)
+		_ = completeStandaloneProfile(profile)
+		t.Fatalf("main ACP sandbox cleanup failed after distinct probe resource: %v", err)
+	}
+	createdIDs := readCursorCreatedSandboxIDs(t, fixture)
+	if len(createdIDs) != 2 || createdIDs[0] == createdIDs[1] {
+		t.Fatalf("probe and main ACP must use distinct sandbox resource IDs: %v", createdIDs)
+	}
+	assertCursorProbeCleanup(t, registryDir)
+	listed, err := fixture.RunCLI(t, "sandbox", "list", "--output", "json", "--gateway", "whirlwind-test-local", "--gateway-endpoint", "http://127.0.0.1:8080", "--workspace", "default")
+	if err != nil || strings.Contains(string(listed), `"sandboxes":[{`) {
+		t.Fatalf("Cursor probe or ACP sandbox remains after caller cleanup: %s %v", listed, err)
+	}
+}
+
+func makeCursorSandboxIDsDistinct(t *testing.T, fixture *openshell.Fixture) {
+	t.Helper()
+	contents, err := os.ReadFile(fixture.Binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := strings.Replace(string(contents), "id:'test-sandbox-' + name,", "id:'test-sandbox-' + name + '-' + process.pid,", 1)
+	marker := "state.sandboxes[name] = sandboxValue(name);"
+	if script == string(contents) || !strings.Contains(script, marker) {
+		t.Fatal("fake OpenShell CLI resource identity markers are missing")
+	}
+	trace := "state.sandboxes[name] = sandboxValue(name);\n  fs.appendFileSync(statePath + '.created-ids', state.sandboxes[name].id + '\\n');"
+	script = strings.Replace(script, marker, trace, 1)
+	deleteMarker := "delete state.sandboxes[args[2]];"
+	deleteFault := "state.delete_count=(state.delete_count??0)+1;\n  if(state.delete_count===1){writeState(state);process.stderr.write('controlled first-pass deletion fault\\n');process.exit(73);}\n  delete state.sandboxes[args[2]];"
+	if !strings.Contains(script, deleteMarker) {
+		t.Fatal("fake OpenShell delete marker is missing")
+	}
+	script = strings.Replace(script, deleteMarker, deleteFault, 1)
+	if err := os.WriteFile(fixture.Binary, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readCursorCreatedSandboxIDs(t *testing.T, fixture *openshell.Fixture) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(fixture.Directory, "state.json.created-ids"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := strings.Fields(string(data))
+	return ids
+}
+
+func TestCursorIntegrationProbeFailureRedactsBothOutputStreams(t *testing.T) {
+	fixture := installProtocolOpenShell(t)
+	fixture.EnableCommandExecution()
+	project := t.TempDir()
+	provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
+	command := filepath.Join(project, "agent-fixture")
+	writeNativeFixture(t, command, "#!/bin/sh\nif [ \"$(cat \"$HOME/.cursor/cli-config.json\")\" != 'synthetic test credential' ]; then exit 13; fi\nprintf '%s' 'stdout-private-token'\nprintf '%s' 'stderr-private-token' >&2\nexit 9\n")
+	if err := os.Chmod(command, 0700); err != nil {
+		t.Fatal(err)
+	}
+	provider.Command = []string{command, "acp"}
+	profile, registryDir := cursorIntegrationTestProfile(t, project, provider)
 	s := &providerSession{ctx: context.Background()}
-	_, err = s.cursorIntegrationTools([]string{command, "acp"}, "ci", profile)
+	_, err := s.cursorIntegrationTools([]string{command, "acp"}, "ci", profile)
 	if err == nil || strings.Contains(err.Error(), "private-token") || !strings.Contains(err.Error(), "authentication") {
 		t.Fatalf("expected redacted native setup error: %v", err)
+	}
+	if err := completeStandaloneProfile(profile); err != nil {
+		t.Fatal(err)
+	}
+	assertCursorProbeCleanup(t, registryDir)
+
+	t.Run("unverified cleanup blocks catalog", func(t *testing.T) {
+		fixture := installProtocolOpenShell(t)
+		fixture.EnableCommandExecution()
+		fixture.FailList(t)
+		project := t.TempDir()
+		provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
+		writeNativeFixture(t, filepath.Join(os.Getenv("HOME"), ".cursor/mcp.json"), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
+		command := filepath.Join(project, "agent-fixture")
+		writeNativeFixture(t, command, "#!/bin/sh\nexit 0\n")
+		if err := os.Chmod(command, 0700); err != nil {
+			t.Fatal(err)
+		}
+		provider.Command = []string{command, "acp"}
+		profile, registryDir := cursorIntegrationTestProfile(t, project, provider)
+		session := &providerSession{ctx: context.Background(), input: Input{ProviderID: "cursor", CWD: project}}
+		err := session.prepareCursorIntegrations(provider, profile)
+		if !errors.Is(err, execution.ErrIsolationUnverified) {
+			t.Fatalf("unverified sandbox cleanup did not block integration setup: %v", err)
+		}
+		if len(session.nativeServers) != 0 || len(session.output.Integrations) != 0 {
+			t.Fatalf("uncertain probe cleanup published integrations: %+v %+v", session.output.Integrations, session.nativeServers)
+		}
+		remaining, err := execution.ReadStandaloneRuntimes(registryDir)
+		if err != nil || len(remaining) != 2 || !cursorRegistryHasState(remaining, profile.ExecutionID, "active") || !cursorRegistryHasOtherState(remaining, profile.ExecutionID, "cleanup_pending") {
+			t.Fatalf("uncertain Cursor runtime was not retained for recovery: %+v %v", remaining, err)
+		}
+	})
+}
+
+func cursorRegistryHasState(entries []execution.StandaloneRuntimeLocator, executionID, state string) bool {
+	for _, entry := range entries {
+		if entry.ExecutionID == executionID && entry.State == state {
+			return true
+		}
+	}
+	return false
+}
+
+func cursorRegistryHasOtherState(entries []execution.StandaloneRuntimeLocator, executionID, state string) bool {
+	for _, entry := range entries {
+		if entry.ExecutionID != executionID && entry.State == state {
+			return true
+		}
+	}
+	return false
+}
+
+func cursorIntegrationTestProfile(t *testing.T, project string, provider model.Provider) (execution.Profile, string) {
+	t.Helper()
+	dataDir := t.TempDir()
+	t.Setenv("WHIRLWIND_DATA_DIR", dataDir)
+	profile, err := execution.ForProvider(project, true, "", provider.Sandbox, provider.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ProvisionNativeIntegrations(&profile, provider); err != nil {
+		t.Fatal(err)
+	}
+	if err := provisionACPAuth(&profile, provider); err != nil {
+		t.Fatal(err)
+	}
+	registryDir := filepath.Join(dataDir, "supervisor", "standalone")
+	profile, err = pinStandaloneProfile(context.Background(), profile, registryDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return profile, registryDir
+}
+
+func assertCursorProbeCleanup(t *testing.T, registryDir string) {
+	t.Helper()
+	remaining, err := execution.ReadStandaloneRuntimes(registryDir)
+	if err != nil || len(remaining) != 0 {
+		t.Fatalf("Cursor probe runtime was not verified and removed: %+v %v", remaining, err)
 	}
 }

@@ -48,10 +48,13 @@ func (p *protocolPeer) readFixturePrompt(f protocolFixture) {
 	params := p.read(method)
 	p.require(params[idKey] == testSessionID, "prompt session ID missing")
 	p.require(reflect.DeepEqual(params[promptKey], []any{map[string]any{"type": "text", "text": contractPrompt}}), "outgoing prompt text lost")
+	if f.Scenario == "failed" {
+		p.emit(map[string]any{"jsonrpc": "2.0", "id": p.message.ID, "error": map[string]any{"code": -32000, "message": "fixture turn failed"}})
+	}
 }
 
 func (p *protocolPeer) stopFixturePrompt(f protocolFixture) bool {
-	if f.Scenario == "malformed" {
+	if f.Scenario == "malformed" || f.Scenario == "failed" {
 		fmt.Println("not JSON")
 		for p.scanner.Scan() {
 		}
@@ -92,35 +95,22 @@ func (p *protocolPeer) fixtureCallbacks(f protocolFixture, cwd string) {
 }
 
 func (p *protocolPeer) finishFixtureTurn(f protocolFixture) {
-	if f.Kind == "acp" {
-		stop := "end_turn"
-		if f.Scenario == "refusal" {
-			stop = "refusal"
-		}
-		p.reply(map[string]any{"stopReason": stop})
-	} else {
-		status := "completed"
-		var failure any
-		switch f.Scenario {
-		case "failed":
-			status = "failed"
-			failure = map[string]any{"message": "fixture turn failed", "codexErrorInfo": "unauthorized"}
-		case "interrupted":
-			status = "interrupted"
-		}
-		p.notify("turn/completed", map[string]any{"threadId": testSessionID, "turn": map[string]any{"id": contractTurnID, "items": []any{}, "status": status, "error": failure}})
+	stop := "end_turn"
+	if f.Scenario == "refusal" {
+		stop = "refusal"
+	} else if f.Scenario == "interrupted" {
+		stop = "interrupted"
 	}
+	p.reply(map[string]any{"stopReason": stop})
 }
 
 func TestNativeThinkingUsesDiscoveryACPCommand(t *testing.T) {
-	for _, kind := range []string{"codex", "claude"} {
-		t.Run(kind, func(t *testing.T) {
+	for _, profile := range []string{"codex", "claude"} {
+		t.Run(profile, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			adapter := contractAdapter(t, protocolFixture{Kind: "acp", Scenario: "thinking", Model: contractSelectedModel})
-			adapter.Provider.ModelCommand = adapter.Provider.Command
-			adapter.Provider.Command = []string{"must-not-execute-native-command"}
-			adapter.Provider.Kind = kind
+			adapter := contractAdapter(t, protocolFixture{Kind: "acp", ACPProfile: profile, Scenario: "thinking", Model: contractSelectedModel})
+			adapter.Provider.ModelCommand = []string{"must-not-execute-native-command"}
 			out, err := adapter.Run(ctx, Input{CWD: t.TempDir(), Prompt: contractPrompt, Model: contractSelectedModel, Thinking: &model.ThinkingChoice{ConfigID: "effort", Value: "high"}}, Hooks{})
 			if err != nil || out.Text != contractReply || out.ResolvedModel != contractSelectedModel {
 				t.Fatalf("model response: %+v %v", out, err)

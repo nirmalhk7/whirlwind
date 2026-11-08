@@ -31,7 +31,11 @@ func TestJSONRPCProcessAndCancellation(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer rpc.Close()
+	t.Cleanup(func() {
+		if err := rpc.Close(); err != nil {
+			t.Errorf("close provider RPC: %v", err)
+		}
+	})
 	var out struct {
 		OK bool `json:"ok"`
 	}
@@ -40,26 +44,18 @@ func TestJSONRPCProcessAndCancellation(t *testing.T) {
 	}
 }
 
-// TestNativeProtocolsStreamBeforeCompletion verifies ACP and Codex adapters collect streamed message chunks and session IDs.
-func TestNativeProtocolsStreamBeforeCompletion(t *testing.T) {
-	for _, kind := range []string{"acp", "codex"} {
-		t.Run(kind, func(t *testing.T) {
-			exe, e := os.Executable()
-			if e != nil {
-				t.Fatal(e)
-			}
-			a := ProcessAdapter{Provider: model.Provider{Kind: kind, Command: []string{exe, "-test.run=TestHelperProvider", "--", kind}}}
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			out, e := a.Run(ctx, Input{CWD: t.TempDir(), Prompt: "test", ReadOnly: true}, Hooks{Event: func(kind string, value any) {
-				if kind == "whirlwind/stderr" {
-					t.Logf("provider diagnostics: %v", value)
-				}
-			}})
-			if e != nil || out.Text != "first second" || out.SessionID != testSessionID {
-				t.Fatalf(valueErrorFormat, out, e)
-			}
-		})
+// TestACPProtocolStreamsBeforeCompletion verifies the supported ACP adapter collects streamed chunks and session IDs.
+func TestACPProtocolStreamsBeforeCompletion(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	a := contractAdapter(t, protocolFixture{Kind: "acp", Scenario: "stream", ReadOnly: true, Chunks: []string{"first ", "second"}})
+	out, err := a.Run(ctx, Input{CWD: t.TempDir(), Prompt: contractPrompt, ReadOnly: true}, Hooks{Event: func(kind string, value any) {
+		if kind == "whirlwind/stderr" {
+			t.Logf("provider diagnostics: %v", value)
+		}
+	}})
+	if err != nil || out.Text != "first second" || out.SessionID != testSessionID {
+		t.Fatalf(valueErrorFormat, out, err)
 	}
 }
 
@@ -115,20 +111,11 @@ func helperProviderReply(t *testing.T, m Message) {
 		result = map[string]any{"protocolVersion": 1, "agentCapabilities": map[string]any{"loadSession": true}}
 	case "session/new":
 		result = map[string]any{"sessionId": testSessionID, "modes": map[string]any{"availableModes": []any{map[string]any{"id": "ask"}}}}
-	case "thread/start":
-		result = map[string]any{"thread": map[string]any{"id": testSessionID}}
 	case "session/prompt":
 		for _, text := range []string{"first ", "second"} {
 			emit(map[string]any{"method": "session/update", "params": map[string]any{"update": map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": text}}}})
 		}
 		result = map[string]any{"stopReason": "end_turn"}
-	case "turn/start":
-		emit(map[string]any{"id": m.ID, "result": map[string]any{}})
-		for _, text := range []string{"first ", "second"} {
-			emit(map[string]any{"method": "item/agentMessage/delta", "params": map[string]any{"delta": text}})
-		}
-		emit(map[string]any{"method": "turn/completed", "params": map[string]any{"turn": map[string]any{"status": "completed"}}})
-		return
 	}
 	emit(map[string]any{"jsonrpc": "2.0", "id": m.ID, "result": result})
 }

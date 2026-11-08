@@ -13,6 +13,11 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	tddFirstSourceFile  = "one.go"
+	tddSecondSourceFile = "two.go"
+)
+
 func TestTDDCannotStartRedAfterProductionAlreadyChanged(t *testing.T) {
 	exit := 1
 	result := verification.Result{Name: "tests", Command: []string{"go", "test", "-json", "./..."}, ExitCode: &exit, Output: "{\"Action\":\"fail\",\"Package\":\"sample\",\"Test\":\"TestRegression\"}\n{\"Action\":\"fail\",\"Package\":\"sample\"}\n"}
@@ -54,8 +59,8 @@ func tddCommit(t *testing.T, path string) string {
 func tddEvidenceFixture(t *testing.T) (*Engine, model.Task, string) {
 	t.Helper()
 	e, task, path := testEngine(t)
-	tddWrite(t, path, "one.go", "package sample\nvar One = false\n")
-	tddWrite(t, path, "two.go", "package sample\nvar Two = false\n")
+	tddWrite(t, path, tddFirstSourceFile, "package sample\nvar One = false\n")
+	tddWrite(t, path, tddSecondSourceFile, "package sample\nvar Two = false\n")
 	task.Base = tddCommit(t, path)
 	task.Worktree = path
 	task.Plan = &model.Plan{Units: []model.Unit{{ID: "one", Base: task.Base}}}
@@ -78,13 +83,13 @@ func tddCompleteOne(t *testing.T, e *Engine, task *model.Task, path string) {
 	t.Helper()
 	tddWrite(t, path, "one_test.go", "package sample\n// one regression\n")
 	tddSaveCheck(t, e, *task, path, "one", "red")
-	tddWrite(t, path, "one.go", "package sample\nvar One = true\n")
+	tddWrite(t, path, tddFirstSourceFile, "package sample\nvar One = true\n")
 	tddSaveCheck(t, e, *task, path, "one", "green")
 	task.Plan.Units[0].Commit = tddCommit(t, path)
 }
 
 func TestTDDEvidenceRejectsProductionOrTestsEditedAfterGreen(t *testing.T) {
-	for _, file := range []string{"one.go", "one_test.go"} {
+	for _, file := range []string{tddFirstSourceFile, "one_test.go"} {
 		t.Run(file, func(t *testing.T) {
 			e, task, path := tddEvidenceFixture(t)
 			tddCompleteOne(t, e, &task, path)
@@ -115,7 +120,7 @@ func TestTDDEvidenceCoversIndependentParallelUnitSnapshots(t *testing.T) {
 	tddGit(t, path, "checkout", "-b", "unit-two", task.Base)
 	tddWrite(t, path, "two_test.go", "package sample\n// two regression\n")
 	tddSaveCheck(t, e, task, path, "two", "red")
-	tddWrite(t, path, "two.go", "package sample\nvar Two = true\n")
+	tddWrite(t, path, tddSecondSourceFile, "package sample\nvar Two = true\n")
 	tddSaveCheck(t, e, task, path, "two", "green")
 	second := tddCommit(t, path)
 	tddGit(t, path, "checkout", "main")
@@ -125,7 +130,7 @@ func TestTDDEvidenceCoversIndependentParallelUnitSnapshots(t *testing.T) {
 		t.Fatalf("independent complete coverage rejected: %v", err)
 	}
 	// Unit two's complete snapshot must not bless an unrelated post-green edit.
-	tddWrite(t, path, "one.go", "package sample\nvar One = 99\n")
+	tddWrite(t, path, tddFirstSourceFile, "package sample\nvar One = 99\n")
 	tddCommit(t, path)
 	if err := e.requireTDDEvidence(context.Background(), task); err == nil {
 		t.Fatal("parallel evidence authorized later source edit")
@@ -145,10 +150,10 @@ func TestTDDEvidenceUnrelatedPairCannotCoverAnEarlierUntestedEdit(t *testing.T) 
 	e, task, path := tddEvidenceFixture(t)
 	tddCompleteOne(t, e, &task, path)
 	first := task.Plan.Units[0].Commit
-	tddWrite(t, path, "one.go", "package sample\nvar One = 99\n")
+	tddWrite(t, path, tddFirstSourceFile, "package sample\nvar One = 99\n")
 	tddWrite(t, path, "two_test.go", "package sample\n// two regression\n")
 	tddSaveCheck(t, e, task, path, "two", "red")
-	tddWrite(t, path, "two.go", "package sample\nvar Two = true\n")
+	tddWrite(t, path, tddSecondSourceFile, "package sample\nvar Two = true\n")
 	tddSaveCheck(t, e, task, path, "two", "green")
 	second := tddCommit(t, path)
 	task.Plan.Units = append(task.Plan.Units, model.Unit{ID: "two", Base: first, Commit: second})
@@ -160,7 +165,7 @@ func TestTDDEvidenceUnrelatedPairCannotCoverAnEarlierUntestedEdit(t *testing.T) 
 func TestTDDEvidenceRejectsExecutableModeChangesAfterGreen(t *testing.T) {
 	e, task, path := tddEvidenceFixture(t)
 	tddCompleteOne(t, e, &task, path)
-	if err := os.Chmod(filepath.Join(path, "one.go"), 0700); err != nil {
+	if err := os.Chmod(filepath.Join(path, tddFirstSourceFile), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.requireTDDEvidence(context.Background(), task); err == nil {

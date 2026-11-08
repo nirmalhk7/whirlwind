@@ -11,6 +11,7 @@ import (
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/policy"
+	"whirlwind/internal/projectregistry"
 	"whirlwind/internal/workflow"
 )
 
@@ -46,15 +47,7 @@ func (q apiRequest) createProject() error {
 }
 
 func repositoryRoot(ctx context.Context, path string) (string, error) {
-	canonical, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return "", err
-	}
-	topLevel, err := github.Run(ctx, canonical, "git", "rev-parse", "--show-toplevel")
-	if err != nil {
-		return "", err
-	}
-	return filepath.EvalSymlinks(topLevel)
+	return projectregistry.Root(ctx, path)
 }
 
 func (input projectInput) project(ctx context.Context) (model.Project, error) {
@@ -90,48 +83,63 @@ func checkedRepository(ctx context.Context, path string) (string, string, error)
 
 func (q apiRequest) registerProjectWebhook(p model.Project) error {
 	if q.Engine.Agentic(q.r.Context()) {
-		if p.WebhookURL != "" {
-			return &apiError{422, "agentic_webhook_disabled", "Agentic mode uses integration context; GitHub ready-issue webhook is unavailable"}
-		}
-		return nil
+		return q.registerAgenticWebhook(p)
 	}
 	if p.WebhookURL == "" {
 		return nil
 	}
-	u, err := url.Parse(p.WebhookURL)
+	if err := validateProjectWebhookURL(p.WebhookURL); err != nil {
+		return err
+	}
+	return q.Engine.GitHub.RegisterWebhook(q.r.Context(), p.Repo, p.WebhookURL, q.Secret)
+}
+
+func validateProjectWebhookURL(webhookURL string) error {
+	u, err := url.Parse(webhookURL)
 	if err != nil {
 		return &apiError{422, "invalid_input", "Webhook URL must be HTTPS ending /webhooks/github"}
 	}
 	if u.Scheme != "https" || u.Host == "" || u.Path != "/webhooks/github" {
 		return &apiError{422, "invalid_input", "Webhook URL must be HTTPS ending /webhooks/github"}
 	}
-	return q.Engine.GitHub.RegisterWebhook(q.r.Context(), p.Repo, p.WebhookURL, q.Secret)
+	return nil
+}
+
+func (q apiRequest) registerAgenticWebhook(p model.Project) error {
+	if p.WebhookURL == "" {
+		return nil
+	}
+	return &apiError{422, "agentic_webhook_disabled", "Agentic mode uses integration context; GitHub ready-issue webhook is unavailable"}
 }
 
 func (q apiRequest) agenticProject(input projectInput) (model.Project, error) {
 	ctx := q.r.Context()
-	var p model.Project
-	path, err := repositoryRoot(ctx, input.Path)
+	path, canonical, err := agenticRepository(ctx, input.Path)
 	if err != nil {
-		return p, err
-	}
-	remote, err := github.Run(ctx, path, "git", "remote", "get-url", "origin")
-	if err != nil {
-		return p, err
-	}
-	canonical, err := workflow.CanonicalRemote(remote)
-	if err != nil {
-		return p, err
+		return model.Project{}, err
 	}
 	if err = initializeProject(ctx, path); err != nil {
-		return p, err
+		return model.Project{}, err
 	}
 	rules, hash, err := policy.LoadForOnboarding(path)
 	if err != nil {
-		return p, err
+		return model.Project{}, err
 	}
 	sum := sha256.Sum256([]byte(canonical))
-	p = model.Project{ID: hex.EncodeToString(sum[:8]), Name: input.Name, Path: path, Repo: canonical, RemoteURL: canonical, Policy: rules, PolicyHash: hash, WebhookURL: input.WebhookURL}
+	p := model.Project{ID: hex.EncodeToString(sum[:8]), Name: input.Name, Path: path, Repo: canonical, RemoteURL: canonical, Policy: rules, PolicyHash: hash, WebhookURL: input.WebhookURL}
 	p.DefaultBranch, err = q.Engine.InspectIntegrationRepository(ctx, p)
 	return p, err
+}
+
+func agenticRepository(ctx context.Context, inputPath string) (string, string, error) {
+	path, err := repositoryRoot(ctx, inputPath)
+	if err != nil {
+		return "", "", err
+	}
+	remote, err := github.Run(ctx, path, "git", "remote", "get-url", "origin")
+	if err != nil {
+		return "", "", err
+	}
+	canonical, err := workflow.CanonicalRemote(remote)
+	return path, canonical, err
 }

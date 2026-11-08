@@ -99,28 +99,32 @@ func prepareNativeFixtureCapabilities(t *testing.T, e *Engine, project model.Pro
 }
 
 func TestPublicationPreflightChecksNativeCapabilitiesAndReadEvidence(t *testing.T) {
-	for _, tc := range []struct{ name, defect string }{
-		{"valid", ""}, {"missing lookup", "lookup"}, {"missing create", "create"}, {"lookup writes", "lookup-write"}, {"create read-only", "create-read"}, {"disabled", "disabled"}, {"disconnected", "disconnected"}, {"missing names", "names"}, {"wrong repository", "repository"}, {"write during preflight", "write-evidence"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			e, p, task := nativePublicationFixture(t)
-			output := nativePreflightResponse(p, tc.defect)
-			e.Adapter = func(model.Provider) provider.Adapter {
-				return connectionAdapterFunc(func(_ context.Context, input provider.Input, _ provider.Hooks) (provider.Output, error) {
-					if input.Role != "submit" || input.Purpose != "integration:repository_metadata" || !input.ReadOnly || len(input.RequiredIntegrations) != 1 || input.RequiredIntegrations[0].Ref != agenticFixtureConnection {
-						t.Fatalf("unsafe publication preflight: %+v", input)
-					}
-					return output, nil
-				})
-			}
-			err := e.PreflightPublication(context.Background(), p, task)
-			if tc.defect == "" && err != nil {
-				t.Fatal(err)
-			}
-			if tc.defect != "" && err == nil {
-				t.Fatal("unusable publication destination passed preflight")
-			}
+	e, task, project, record := acceptedDeliveryFixture(t)
+	var finalizerInput provider.Input
+	e.Adapter = func(model.Provider) provider.Adapter {
+		return connectionAdapterFunc(func(_ context.Context, input provider.Input, _ provider.Hooks) (provider.Output, error) {
+			finalizerInput = input
+			return provider.Output{Text: "The accepted candidate is ready on its local branch."}, nil
 		})
+	}
+	step := &taskStep{Engine: e, ctx: context.Background(), project: project, task: task, record: record}
+	if !runLocalDeliveryToCompletion(t, step) {
+		t.Fatal("accepted candidate did not complete local delivery")
+	}
+	if finalizerInput.Role != "finalizer" || finalizerInput.Purpose != "local_delivery_summary" || !finalizerInput.ReadOnly || len(finalizerInput.RequiredIntegrations) != 0 {
+		t.Fatalf("finalizer received authority outside read-only local review: %+v", finalizerInput)
+	}
+	for _, evidence := range []string{task.Plan.Objective, task.ReviewedCommit, task.VerificationID, "reviewed candidate", "candidate.txt"} {
+		if !strings.Contains(finalizerInput.Prompt, evidence) {
+			t.Errorf("finalizer input omitted accepted-plan or candidate evidence %q", evidence)
+		}
+	}
+	if step.task.Delivery == nil || step.task.Delivery.ReviewedCommit != task.ReviewedCommit || step.task.PR != "" {
+		t.Fatalf("local delivery lost accepted snapshot or recorded a remote PR: %+v", step.task)
+	}
+	publications, err := e.Store.List(context.Background(), "publications")
+	if err != nil || len(publications) != 0 {
+		t.Fatalf("finalization produced remote publication state: count=%d err=%v", len(publications), err)
 	}
 }
 

@@ -3,56 +3,55 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 )
 
-// CheckConnection verifies the configured protocol without sending a model prompt.
-// It uses native commands only: status checks never install discovery adapters.
-func CheckConnection(ctx context.Context, p model.Provider, cwd string) (string, error) {
-	if p.Kind == "codex" {
-		return checkCodexAccount(ctx, p, cwd)
+// CheckConnection verifies the configured ACP protocol without sending a model prompt.
+func CheckConnection(ctx context.Context, p model.Provider, cwd string) (result string, err error) {
+	return CheckConnectionWithSupervisorDir(ctx, p, cwd, "")
+}
+
+// CheckConnectionWithSupervisorDir keeps OpenShell's standalone recovery registry
+// alongside the configured supervisor data, without mounting it into the sandbox.
+func CheckConnectionWithSupervisorDir(ctx context.Context, p model.Provider, cwd, supervisorDir string) (result string, err error) {
+	resolved, err := ResolveExecutionProvider(p)
+	if err != nil {
+		return "", err
 	}
-	if p.Kind != "acp" && p.Kind != "claude" {
-		return "", fmt.Errorf("unsupported provider kind: %s", p.Kind)
-	}
+	return checkProtocolConnection(ctx, resolved, cwd, supervisorDir)
+}
+
+func checkProtocolConnection(ctx context.Context, p model.Provider, cwd, supervisorDir string) (result string, err error) {
 	profile, err := execution.ForProvider(cwd, true, "", p.Sandbox, p.Command)
 	if err != nil {
 		return "", err
 	}
+	if p.ACPProfile != "" {
+		if err := provisionACPAuth(&profile, p); err != nil {
+			return "", err
+		}
+	}
+	profile, err = pinStandaloneProfile(ctx, profile, supervisorDir)
+	if err != nil {
+		return "", err
+	}
+	standalone := profile.StandaloneRuntime
+	transferred := false
+	defer func() {
+		if standalone && !transferred {
+			err = errors.Join(err, completeStandaloneProfile(profile))
+		}
+	}()
 	cwd = profile.CWD
 	rpc, err := StartWithProfile(ctx, p.Command, profile, nil)
 	if err != nil {
-		return "", err
+		return "", actionableACPError(p, err)
 	}
-	defer rpc.Close()
-	if p.Kind == "claude" {
-		return checkBridgeCatalog(ctx, rpc, cwd)
-	}
-	return checkACPSession(ctx, rpc, cwd)
-}
-
-func checkCodexAccount(ctx context.Context, p model.Provider, cwd string) (string, error) {
-	quota, _, err := (ProcessAdapter{Provider: p}).ReadQuota(ctx, cwd)
-	if err != nil {
-		return "", err
-	}
-	if quota == "exhausted" {
-		return "", errors.New("provider quota exhausted")
-	}
-	return "Account connection verified; no inference requested.", nil
-}
-
-func checkBridgeCatalog(ctx context.Context, rpc *RPC, cwd string) (string, error) {
-	var catalog ModelCatalog
-	if err := rpc.Call(ctx, "models", map[string]any{"cwd": cwd}, &catalog); err != nil {
-		return "", err
-	}
-	if len(catalog.Models) == 0 {
-		return "", errors.New("provider returned no models")
-	}
-	return "Bridge and model catalog responding; inference not tested.", nil
+	transferred = standalone
+	defer func() { err = errors.Join(err, rpc.Close()) }()
+	result, err = checkACPSession(ctx, rpc, cwd)
+	return result, authenticationACPError(p, err)
 }
 
 func checkACPSession(ctx context.Context, rpc *RPC, cwd string) (string, error) {

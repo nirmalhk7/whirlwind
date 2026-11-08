@@ -7,93 +7,108 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strconv"
+	"sort"
 	"strings"
-	"syscall"
 )
 
-// Reap kills registered orphan process groups before removing their recovery records.
+// Reap verifies registered and tagged orphan exit before discarding recovery
+// evidence. Call only while dispatch is stopped and the state-directory lock is held.
 func Reap(root string) error {
-	files, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		return nil
-	}
+	records, err := registryRecords(root)
 	if err != nil {
 		return err
 	}
-	for _, file := range files {
-		if !strings.HasSuffix(file.Name(), ".json") {
-			continue
+	processes, err := processSnapshot()
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrCleanup, err)
+	}
+	for _, process := range processes {
+		if process.Registry == root && validToken(process.Token) {
+			if _, exists := records[process.Token]; !exists {
+				records[process.Token] = registration{Token: process.Token}
+			}
 		}
-		if err = reapRegistration(filepath.Join(root, file.Name())); err != nil {
+	}
+	for _, record := range records {
+		if err := cleanupRegistration(record); err != nil {
+			return err
+		}
+		if err := os.Remove(filepath.Join(root, record.Token+".json")); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}
 	return nil
 }
-func reapRegistration(path string) error {
-	registration, err := readRegistration(path)
+
+func registryRecords(root string) (map[string]registration, error) {
+	files, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return map[string]registration{}, nil
+	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	groups, err := registeredGroups(registration.Token)
-	if err != nil {
-		return err
+	records := map[string]registration{}
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".json") {
+			continue
+		}
+		record, err := readRegistration(filepath.Join(root, file.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if file.Name() != record.Token+".json" {
+			return nil, errors.New("process registration filename does not match ownership token")
+		}
+		records[record.Token] = record
 	}
-	if err = killGroups(groups); err != nil {
-		return err
-	}
-	return os.Remove(path)
+	return records, nil
 }
+
 func readRegistration(path string) (registration, error) {
 	var record registration
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return record, err
 	}
-	if json.Unmarshal(body, &record) != nil || record.PID < 0 || record.PID == 1 || len(record.Token) != 32 {
+	if json.Unmarshal(body, &record) != nil || record.PID < 0 || record.PID == 1 || !validToken(record.Token) {
 		return record, errors.New("invalid orphan process registration")
 	}
 	return record, nil
 }
-func registeredGroups(token string) (map[int]bool, error) {
-	output, err := exec.Command("ps", "eww", "-A", "-o", "pid=", "-o", "pgid=", "-o", "command=").Output()
+
+// Inspect is read-only. Clean means no recovery records and no tagged live
+// processes for this registry; unavailable kernel evidence returns an error.
+func Inspect(root string) (Report, error) {
+	report := Report{Processes: []Identity{}}
+	if root == "" {
+		return report, errors.New("process registry is not configured")
+	}
+	records, err := registryRecords(root)
 	if err != nil {
-		return nil, fmt.Errorf("cannot reconcile process registry: %w", err)
+		return report, err
 	}
-	groups := map[int]bool{}
-	for _, line := range strings.Split(string(output), "\n") {
-		group, err := registeredGroup(line, token)
-		if err != nil {
-			return nil, err
-		}
-		if group != 0 {
-			groups[group] = true
-		}
+	report.Registrations = len(records)
+	processes, err := processSnapshot()
+	if err != nil {
+		return report, err
 	}
-	return groups, nil
-}
-func registeredGroup(line, token string) (int, error) {
-	if !strings.Contains(line, processTokenPrefix+token) {
-		return 0, nil
-	}
-	fields := strings.Fields(line)
-	if len(fields) < 3 {
-		return 0, nil
-	}
-	group, err := strconv.Atoi(fields[1])
-	if err != nil || group <= 1 {
-		return 0, errors.New("invalid orphan process group")
-	}
-	return group, nil
-}
-func killGroups(groups map[int]bool) error {
-	for group := range groups {
-		if err := syscall.Kill(-group, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
-			return err
+	owned := map[int]Identity{}
+	for _, record := range records {
+		for _, identity := range liveProcesses(record, processes) {
+			owned[identity.PID] = identity
 		}
 	}
-	return nil
+	for _, process := range processes {
+		if process.Registry == root && validToken(process.Token) && !process.Zombie {
+			owned[process.PID] = process.Identity
+		}
+	}
+	for _, identity := range owned {
+		report.Processes = append(report.Processes, identity)
+	}
+	sort.Slice(report.Processes, func(i, j int) bool { return report.Processes[i].PID < report.Processes[j].PID })
+	report.Clean = report.Registrations == 0 && len(report.Processes) == 0
+	return report, nil
 }

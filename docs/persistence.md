@@ -1,9 +1,9 @@
 # Durable execution evidence
 
 Whirlwind keeps workflow aggregates in SQLite `resources`, with version-checked
-writes and ordered SSE events. Schema migrations add `artifacts` and
-`attempt_events` without rewriting historical payloads or inventing missing
-outcomes, usage, timestamps, or links.
+writes and ordered SSE events. A single current schema creates `artifacts` and
+`attempt_events` directly. Schema versions and old-database upgrades are not
+supported. Reopening current state preserves saved payloads and events.
 
 ## Attempts and inspection
 

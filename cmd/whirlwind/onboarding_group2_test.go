@@ -24,8 +24,8 @@ func (f onboardingFixture) verifyIdeation(t *testing.T, project model.Project, c
 		t.Fatalf("agent reply not applied: %d directions, %v", len(directions), err)
 	}
 	var sessions []model.Record
-	if err := json.Unmarshal(f.request(t, "GET", "/sessions", nil, 200), &sessions); err != nil || len(sessions) != 1 {
-		t.Fatalf("agent session not persisted: %d sessions, %v", len(sessions), err)
+	if err := json.Unmarshal(f.request(t, "GET", "/sessions", nil, 200), &sessions); err != nil || len(sessions) < 2 {
+		t.Fatalf("generation and read-only novelty sessions not persisted: %d sessions, %v", len(sessions), err)
 	}
 	var result struct {
 		Provider  string `json:"provider"`
@@ -40,8 +40,8 @@ func (f onboardingFixture) verifyIdeation(t *testing.T, project model.Project, c
 		}
 		summaries[result.Summary] = true
 	}
-	if !summaries[onboardingReply] {
-		t.Fatalf("generation missing: %v", summaries)
+	if !summaries[onboardingReply] || !summaries[`{"unique":true}`] {
+		t.Fatalf("generation or novelty result missing: %v", summaries)
 	}
 }
 

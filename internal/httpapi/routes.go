@@ -103,6 +103,7 @@ func (q apiRequest) dispatch() error {
 		{"POST", "directions", "dismiss", false, q.candidateLifecycle},
 		{"POST", "directions", "defer", false, q.candidateLifecycle},
 		{"POST", "directions", "reopen", false, q.candidateLifecycle},
+		{"POST", "directions", "reconsider", false, q.candidateLifecycle},
 		{"POST", "tasks", "+", false, q.taskAction},
 		{"POST", "questions", "answers", false, q.answerQuestions},
 		{"POST", "permissions", "decisions", false, q.decidePermission},

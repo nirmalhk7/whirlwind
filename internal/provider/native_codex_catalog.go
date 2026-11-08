@@ -103,7 +103,7 @@ func (s *providerSession) codexAppConnections(thread string) ([]model.Integratio
 	}{apps})
 	var installed json.RawMessage
 	if err := s.rpc.Call(s.ctx, "app/installed", map[string]any{codexCatalogThreadID: thread, "forceRefresh": true}, &installed); err != nil {
-		return nil, fmt.Errorf("Codex callable state: %w", err)
+		return nil, fmt.Errorf("codex callable state: %w", err)
 	}
 	return codexAppCatalog(s.input.ProviderID, raw, installed)
 }
@@ -186,7 +186,7 @@ func (s *providerSession) discoverCodexAppTools(thread string, catalog []model.I
 		var response codexAppReadResponse
 		params := map[string]any{codexCatalogThreadID: thread, "appIds": codexAppIDs(batch), "includeTools": true}
 		if err := s.rpc.Call(s.ctx, "app/read", params, &response); err != nil {
-			return fmt.Errorf("Codex app metadata unavailable: %w", err)
+			return fmt.Errorf("codex app metadata unavailable: %w", err)
 		}
 		response.apply(batch)
 	}
