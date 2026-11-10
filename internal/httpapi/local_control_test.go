@@ -177,3 +177,23 @@ func mustCommand(t *testing.T, directory string, name string, args ...string) st
 	}
 	return string(output)
 }
+
+func TestLocalDirectionRejectionRecordsHumanReason(t *testing.T) {
+	server := setup(t)
+	ctx := context.Background()
+	if err := server.Store.Put(ctx, "directions", "proposal", model.Direction{ID: "proposal", ProjectID: "p", Status: "proposed"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	_, err := server.ExecuteLocal(ctx, LocalCommand{Operation: "direction.reject", ResourceID: "proposal", ExpectedVersion: 1, IdempotencyKey: "vim-reject", Payload: json.RawMessage(`{"reason":"Already covered.\nKeep existing tests."}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := server.Store.Get(ctx, "directions", "proposal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.Decode[model.Direction](record)
+	if err != nil || saved.Status != "dismissed" || saved.RejectionReason != "Already covered.\nKeep existing tests." {
+		t.Fatalf("decision reason not recorded: %+v (%v)", saved, err)
+	}
+}

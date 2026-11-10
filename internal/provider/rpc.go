@@ -68,11 +68,16 @@ func StartWithProfile(ctx context.Context, command []string, profile execution.P
 		return nil, err
 	}
 	var cleanup func() error
-	if execution.IsOpenShellLauncher(profile.Launcher) {
+	if execution.IsNonoLauncher(profile.Launcher) {
+		// RPC invokes this only after WaitForDrain has verified this process tree.
+		// Native nono has no detached VM resource; lifecycle callbacks run after
+		// stderr drains, together with capability release.
+		cleanup = func() error { return completeStandaloneProfile(profile) }
+	} else if execution.IsOpenShellLauncher(profile.Launcher) {
 		cleanup = func() error {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cleanupCancel()
-			if err := execution.ReconcileOpenShellRuntime(cleanupCtx, profile); err != nil {
+			if err := execution.ReconcileRuntime(cleanupCtx, profile); err != nil {
 				return retainStandaloneProfile(profile, err)
 			}
 			return completeStandaloneProfile(profile)

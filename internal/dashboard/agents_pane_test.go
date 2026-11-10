@@ -10,13 +10,18 @@ import (
 	"whirlwind/internal/workflow"
 )
 
-func TestConfiguredAgentsRenderModelsEffortAndConnectionColors(t *testing.T) {
+func TestConfiguredAgentsRenderRegistryAndConnectionColors(t *testing.T) {
 	d := New()
 	screen := tcell.NewSimulationScreen("UTF-8")
 	d.SetScreen(screen)
 	t.Cleanup(screen.Fini)
 	screen.SetSize(180, 50)
 	d.Present(control.Snapshot{
+		"providers": {
+			record("online", model.Provider{ID: "online", Name: "Online Agent", Kind: "acp"}),
+			record("offline", model.Provider{ID: "offline", Name: "Offline Agent", Kind: "claude"}),
+			record("unused", model.Provider{ID: "unused", Name: "Unused Agent", Kind: "codex"}),
+		},
 		"agents": {
 			record("code", model.AgentConfig{Role: "code", Chain: []model.AgentChoice{
 				{Provider: "online", Model: "model-one", Thinking: &model.ThinkingChoice{ConfigID: "reasoning_effort", Value: "high"}},
@@ -30,9 +35,14 @@ func TestConfiguredAgentsRenderModelsEffortAndConnectionColors(t *testing.T) {
 	})
 	d.ForceDraw()
 	view := screenText(screen)
-	for _, want := range []string{" Agents ", "model-one", "high", "model-two", "default", "up", "down"} {
+	for _, want := range []string{" Agents ", "Online Agent", "Offline Agent", "Unused Agent", "up", "down", "unverified"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("configured agent information missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"code ·", "model-one", "model-two", "Reasoning:"} {
+		if strings.Contains(view, unwanted) {
+			t.Errorf("role configuration leaked into Agents: %q", unwanted)
 		}
 	}
 	assertStatusColor(t, screen, "up", tcell.ColorGreen)
@@ -75,5 +85,32 @@ func TestInboxKeepsDirectionApprovalsAccessible(t *testing.T) {
 	d.ForceDraw()
 	if d.modal == nil || !strings.Contains(screenText(screen), "Review this direction") {
 		t.Fatal("Inbox direction approval unavailable through keyboard navigation")
+	}
+}
+
+func TestAgentsPanelDoesNotTreatRoleQueuesAsAgents(t *testing.T) {
+	d := New()
+	d.Present(control.Snapshot{"agents": {record("code", model.AgentConfig{Role: "code", Chain: []model.AgentChoice{{Provider: "removed", Model: "old-model"}}})}})
+	if got := d.agents.GetText(true); got != "No configured agents" {
+		t.Fatalf("roles rendered as agents: %s", got)
+	}
+}
+
+func TestAgentHeadingShowsProviderNameOnce(t *testing.T) {
+	for _, name := range []string{"Codex", ""} {
+		t.Run(name, func(t *testing.T) {
+			d := New()
+			d.Present(control.Snapshot{
+				"providers":       {record("codex", model.Provider{ID: "codex", Name: name, Kind: "codex"})},
+				"provider_status": {record("codex", workflow.ProviderStatus{ID: "codex", Status: "working"})},
+			})
+			text := d.agents.GetText(true)
+			if strings.Count(strings.ToLower(text), "codex") != 1 {
+				t.Fatalf("agent name repeated: %q", text)
+			}
+			if !strings.Contains(text, "up") {
+				t.Fatalf("connection status missing: %q", text)
+			}
+		})
 	}
 }

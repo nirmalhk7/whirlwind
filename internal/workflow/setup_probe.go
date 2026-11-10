@@ -112,7 +112,7 @@ func (e *Engine) setupProbeInput(ctx context.Context, p model.Project, b setupBl
 }
 
 func (e *Engine) pinSetupProbeRuntime(ctx context.Context, input provider.Input) (provider.Input, *execution.Profile, error) {
-	if input.Execution == nil || !execution.IsOpenShellLauncher(input.Execution.Launcher) {
+	if input.Execution == nil || !execution.IsManagedLauncher(input.Execution.Launcher) {
 		return input, nil, nil
 	}
 	deadline, ok := ctx.Deadline()
@@ -122,7 +122,7 @@ func (e *Engine) pinSetupProbeRuntime(ctx context.Context, input provider.Input)
 	supervisorDir := filepath.Join(e.Root, "supervisor", "standalone")
 	profile := *input.Execution
 	profile.SupervisorDir = supervisorDir
-	pinned, err := execution.PinOpenShellRuntime(ctx, profile, "setup-probe-"+store.ID(), 1, deadline.UTC().Format(time.RFC3339Nano), supervisorDir)
+	pinned, err := execution.PinRuntime(ctx, profile, "setup-probe-"+store.ID(), 1, deadline.UTC().Format(time.RFC3339Nano), supervisorDir)
 	if err != nil {
 		return input, nil, err
 	}
@@ -157,7 +157,7 @@ func (e *Engine) reconcileSetupProbeRuntime(ctx context.Context, pinned *executi
 		if err != nil {
 			return err
 		}
-		if err := execution.ReconcileOpenShellRuntime(ctx, profile); err != nil {
+		if err := execution.ReconcileRuntime(ctx, profile); err != nil {
 			return errors.Join(err, execution.MarkStandaloneCleanupPending(profile))
 		}
 		return execution.CompleteStandaloneRuntime(profile)

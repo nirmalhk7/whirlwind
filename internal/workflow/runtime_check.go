@@ -47,7 +47,7 @@ type runtimeCheckJob struct {
 }
 
 func (e *Engine) runOwnedCheck(ctx context.Context, cwd string, check model.Check, profile execution.Profile, owner runtimeCheckOwner) (verification.Result, error) {
-	if !execution.IsOpenShellLauncher(profile.Launcher) {
+	if !execution.IsManagedLauncher(profile.Launcher) {
 		report, err := verification.RunObservedWithProfile(ctx, cwd, []model.Check{check}, profile, nil)
 		if err != nil || len(report.Results) != 1 {
 			return verification.Result{}, fmt.Errorf("check %s returned no complete result: %w", check.Name, err)
@@ -65,7 +65,7 @@ func (e *Engine) runOwnedCheck(ctx context.Context, cwd string, check model.Chec
 	profile.ExecutionID = job.ExecutionID
 	profile.ExecutionGeneration = job.ExecutionGeneration
 	profile.DeadlineAt = job.DeadlineAt
-	pinned, err := execution.PinOpenShellRuntime(ctx, profile, job.ExecutionID, job.ExecutionGeneration, job.DeadlineAt, job.SupervisorDir)
+	pinned, err := execution.PinRuntime(ctx, profile, job.ExecutionID, job.ExecutionGeneration, job.DeadlineAt, job.SupervisorDir)
 	if err != nil {
 		return verification.Result{}, e.finishRuntimeCheck(ctx, job, version, err, verification.RuntimeIdentity{})
 	}
@@ -160,17 +160,7 @@ func reconcileInterruptedRuntimeJob(ctx context.Context, job runtimeCheckJob) er
 		GatewayEndpoint: lifecycle.GatewayEndpoint, Workspace: lifecycle.Workspace}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	return execution.ReconcileOpenShellRuntime(cleanupCtx, profile)
-}
-
-func runtimeJobLifecycleMatches(job runtimeCheckJob, lifecycle execution.SandboxLifecycle) bool {
-	return lifecycle.ExecutionID == job.ExecutionID && lifecycle.ExecutionGeneration == job.ExecutionGeneration &&
-		lifecycle.ExecutionLabelValue == job.ExecutionLabelValue && lifecycle.DeadlineAt == job.DeadlineAt &&
-		lifecycle.SandboxName == job.SandboxName && lifecycle.GatewayName != "" && lifecycle.GatewayEndpoint != "" && lifecycle.Workspace != "" &&
-		(job.GatewayName == "" || job.GatewayName == lifecycle.GatewayName) &&
-		(job.GatewayEndpoint == "" || job.GatewayEndpoint == lifecycle.GatewayEndpoint) &&
-		(job.Workspace == "" || job.Workspace == lifecycle.Workspace) &&
-		(job.SandboxID == "" || job.SandboxID == lifecycle.SandboxID)
+	return execution.ReconcileRuntime(cleanupCtx, profile)
 }
 
 func (e *Engine) pauseRuntimeCheckTask(ctx context.Context, job runtimeCheckJob, failure error) error {
@@ -205,20 +195,6 @@ func (e *Engine) beginRuntimeCheck(ctx context.Context, check model.Check, owner
 		return runtimeCheckJob{}, 0, fmt.Errorf("persist check runtime locator: %w", err)
 	}
 	return job, 1, nil
-}
-
-func runtimeCheckDeadline(ctx context.Context, check model.Check) time.Duration {
-	timeout := time.Duration(check.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 10 * time.Minute
-	}
-	if parentDeadline, ok := ctx.Deadline(); ok {
-		remaining := time.Until(parentDeadline)
-		if remaining < timeout {
-			return remaining
-		}
-	}
-	return timeout
 }
 
 func runtimeCheckJobForProfile(job runtimeCheckJob, profile execution.Profile) runtimeCheckJob {
@@ -259,11 +235,4 @@ func (e *Engine) finishRuntimeCheck(ctx context.Context, job runtimeCheckJob, ve
 		return errors.Join(runErr, execution.ErrIsolationUnverified)
 	}
 	return nil
-}
-
-func resultError(result verification.Result) error {
-	if result.Error == "" {
-		return nil
-	}
-	return errors.New(result.Error)
 }

@@ -10,18 +10,22 @@ import (
 const globalStopReason = "Paused by global runner stop"
 
 func (q apiRequest) stopRunners() error {
-	if q.id != "stop" && q.id != "resume" {
+	if q.id != "stop" && q.id != "resume" && q.id != "toggle" {
 		return &apiError{404, "route_not_found", "Unsupported route"}
 	}
 	settings, version, err := q.runnerSettings()
 	if err != nil {
 		return err
 	}
-	settings.Stopped = q.id == "stop"
+	if q.id == "toggle" {
+		settings.Stopped = !settings.Stopped
+	} else {
+		settings.Stopped = q.id == "stop"
+	}
 	if err := q.Store.Put(q.r.Context(), "settings", "global", settings, version); err != nil {
 		return err
 	}
-	if q.id == "resume" {
+	if !settings.Stopped {
 		return q.resumeRunners()
 	}
 	return q.pauseRunners()

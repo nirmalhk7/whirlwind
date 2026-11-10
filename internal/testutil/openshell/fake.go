@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -34,6 +35,8 @@ type EnvironmentCall struct {
 // The fake never executes an ACP command unless EnableCommandExecution is called.
 func Install(t testing.TB) *Fixture {
 	t.Helper()
+	_, source, _, _ := runtime.Caller(0)
+	t.Setenv("WHIRLWIND_EXECUTION_LAUNCHER", filepath.Join(filepath.Dir(source), "..", "..", "..", "bridges", "openshell", "launch.mjs"))
 	directory := t.TempDir()
 	fixture := &Fixture{
 		Directory: directory,

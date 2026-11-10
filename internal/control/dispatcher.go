@@ -21,7 +21,7 @@ const (
 var inspectableKinds = map[string]bool{
 	"projects": true, "tasks": true, "directions": true, "sessions": true,
 	"questions": true, "permissions": true, "verification": true,
-	"reviews": true, "inbox": true, "plans": true, "artifacts": true, "agents": true, "project_status": true,
+	"reviews": true, "inbox": true, "plans": true, "artifacts": true, "agents": true, "providers": true, "project_status": true,
 }
 
 type CommandExecutor interface {
@@ -181,7 +181,7 @@ func (d SupervisorDispatcher) snapshot(ctx context.Context, request Request) (Sn
 		return nil, errors.New("supervisor state database unavailable")
 	}
 	snapshot := Snapshot{}
-	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "project_status"} {
+	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "providers", "project_status"} {
 		page, err := d.records(ctx, Request{ResourceID: kind, ProjectID: request.ProjectID, Limit: 100})
 		if err != nil {
 			return nil, err
@@ -208,7 +208,7 @@ func (d SupervisorDispatcher) Snapshot(ctx context.Context, limit int) (Snapshot
 		return nil, errors.New("snapshot limit must be between 1 and 100")
 	}
 	snapshot := Snapshot{}
-	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "project_status"} {
+	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "providers", "project_status"} {
 		records, err := d.allRecords(ctx, kind, limit)
 		if err != nil {
 			return nil, err

@@ -18,6 +18,11 @@ func (s *providerSession) sessionUpdate(p map[string]any) {
 		content, _ := u["content"].(map[string]any)
 		txt, _ := content["text"].(string)
 		s.mu.Lock()
+		messageID, _ := u["messageId"].(string)
+		if messageID != "" && messageID != s.messageID {
+			s.output.Text = ""
+			s.messageID = messageID
+		}
 		s.output.Text += txt
 		s.mu.Unlock()
 	}

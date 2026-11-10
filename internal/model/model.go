@@ -243,6 +243,7 @@ type Record struct {
 	UpdatedAt    string          `json:"updated_at"`
 }
 type Notification struct {
+	Role        string       `json:"role,omitempty"`
 	Usage       *UsageReport `json:"usage,omitempty"`
 	Occurrences int          `json:"occurrences,omitempty"`
 	FirstAt     string       `json:"first_at,omitempty"`

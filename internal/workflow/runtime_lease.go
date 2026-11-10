@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -14,26 +13,8 @@ import (
 const runtimeHeartbeatInterval = 5 * time.Second
 const runtimeLeaseLifetime = 20 * time.Second
 
-var ErrRuntimeHealthLost = errors.New("OpenShell runtime health lost")
+var ErrRuntimeHealthLost = errors.New("sandbox runtime health lost")
 var ErrMalformedRoleOutput = errors.New("malformed or missing role output")
-
-func nextExecutionGeneration(ctx context.Context, database *store.Store, episodeID string) (int, error) {
-	records, err := database.List(ctx, "sessions")
-	if err != nil {
-		return 0, err
-	}
-	generation := 0
-	for _, record := range records {
-		attempt, err := store.Decode[model.Attempt](record)
-		if err != nil {
-			return 0, err
-		}
-		if attempt.RecoveryEpisodeID == episodeID && attempt.ExecutionGeneration > generation {
-			generation = attempt.ExecutionGeneration
-		}
-	}
-	return generation + 1, nil
-}
 
 func (a *agentAttempt) recordWorkerHeartbeat(ctx context.Context, at time.Time) error {
 	a.mu.Lock()
@@ -77,33 +58,11 @@ func (a *agentAttempt) updateRuntimeState(ctx context.Context, at time.Time, pro
 	stored.LeaseExpiresAt = now.Add(runtimeLeaseLifetime).Format(time.RFC3339Nano)
 	stored.ProviderProgressAt = a.state.ProviderProgressAt
 	stored.ActiveTool = a.state.ActiveTool
-	healthLost := false
-	if stored.LifecycleFile != "" {
-		lifecycle, exists, err := execution.ReadOpenShellLifecycle(execution.Profile{
-			ExecutionID: stored.ExecutionID, ExecutionGeneration: stored.ExecutionGeneration,
-			DeadlineAt: stored.DeadlineAt, ExecutionLabelValue: stored.ExecutionLabelValue,
-			SandboxName: stored.SandboxName, LifecycleFile: stored.LifecycleFile,
-			GatewayName: stored.GatewayName, GatewayEndpoint: stored.GatewayEndpoint,
-			Workspace: stored.Workspace,
-		})
-		if err != nil {
-			return err
-		}
-		if exists {
-			stored.SandboxID = lifecycle.SandboxID
-			stored.SandboxPhase = lifecycle.SandboxPhase
-			observedAt, parseErr := time.Parse(time.RFC3339Nano, lifecycle.UpdatedAt)
-			if parseErr == nil && now.Sub(observedAt) >= 0 && now.Sub(observedAt) <= 2*runtimeHeartbeatInterval {
-				stored.SandboxHealth = lifecycle.SandboxHealth
-			} else {
-				stored.SandboxHealth = "stale"
-			}
-		} else {
-			stored.SandboxHealth = "unknown"
-		}
-		shuttingDown := stored.SandboxHealth == "stopping" || stored.SandboxHealth == "stopped"
-		healthLost = stored.SandboxID != "" && !shuttingDown && (stored.SandboxPhase != "Ready" || stored.SandboxHealth != "healthy")
+	healthLost, err := updateSandboxState(&stored, now)
+	if err != nil {
+		return err
 	}
+
 	if processState != "" {
 		stored.ProcessState = processState
 	}
@@ -137,15 +96,6 @@ func (a *agentAttempt) verifyLiveOwner(ctx context.Context) error {
 		return store.ErrConflict
 	}
 	return nil
-}
-
-func sameRuntimeOwner(current, expected model.Attempt) bool {
-	return !current.Finished && current.Status == "running" && current.AttemptID == expected.AttemptID && current.ExecutionID == expected.ExecutionID && current.Owner == expected.Owner && current.ExecutionGeneration == expected.ExecutionGeneration
-}
-
-func runtimeLeaseActive(current model.Attempt, at time.Time) bool {
-	expires, err := time.Parse(time.RFC3339Nano, current.LeaseExpiresAt)
-	return err == nil && at.Before(expires)
 }
 
 func (a *agentAttempt) startWorkerHeartbeat(ctx context.Context) func() {

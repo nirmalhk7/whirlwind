@@ -108,7 +108,7 @@ func pinCursorProbeProfile(ctx context.Context, parent execution.Profile) (execu
 	probe.AllowedPaths = nil
 	probe.WriteRoots = nil
 	probe.SupervisorDir = registryDir
-	pinned, err := execution.PinOpenShellRuntime(ctx, probe, store.ID(), 1, probeDeadline.UTC().Format(time.RFC3339Nano), registryDir)
+	pinned, err := execution.PinRuntime(ctx, probe, store.ID(), 1, probeDeadline.UTC().Format(time.RFC3339Nano), registryDir)
 	if err != nil {
 		return execution.Profile{}, err
 	}
@@ -202,7 +202,7 @@ func cursorNativeToolProbe(ctx context.Context, args []string, profile execution
 func reconcileCursorProbe(profile execution.Profile) error {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return execution.ReconcileOpenShellRuntime(cleanupCtx, profile)
+	return execution.ReconcileRuntime(cleanupCtx, profile)
 }
 
 func cursorProbeFailure(ctx context.Context) error {

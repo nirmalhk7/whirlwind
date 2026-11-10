@@ -166,3 +166,24 @@ func TestRuntimeOwnershipUsesDurableOperationForTasklessRuns(t *testing.T) {
 		t.Fatal("taskless recovery matched without a durable operation identity")
 	}
 }
+
+// Persisted native attempts require a clean process registry, never a gateway.
+func TestPriorNonoAttemptReconcilesLocalProcessOwnership(t *testing.T) {
+	e, task, cwd := testEngine(t)
+	project, err := e.Project(context.Background(), task.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "ideate", CWD: cwd, Execution: &execution.Profile{Launcher: "/app/bridges/nono/launch.mjs"}}}
+	prior := model.Attempt{AttemptID: "prior-nono", ExecutionID: "prior-nono", ExecutionGeneration: 1, RuntimeKind: "nono", Task: task.ID, ProjectID: project.ID, PlanVersion: task.PlanVersion, Role: "ideate", Status: "interrupted", Transport: "acp"}
+	if err := e.Store.Put(context.Background(), "sessions", prior.AttemptID, prior, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.reconcileOpenShellAttempts(context.Background()); err != nil {
+		t.Fatalf("native retry tried gateway reconciliation: %v", err)
+	}
+	kind, _ := attemptRuntimeKind(run.input.Execution)
+	if kind != "nono" {
+		t.Fatalf("native attempt mislabeled %q", kind)
+	}
+}

@@ -13,7 +13,7 @@ import (
 // Reconcile leases GitHub reconciliation, ingests eligible or withdrawn issues, and records terminal PR decisions.
 func (e *Engine) Reconcile(ctx context.Context) {
 	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
-		log.Printf("reconcile standalone OpenShell runtimes: %v", err)
+		log.Printf("reconcile standalone sandbox runtimes: %v", err)
 		return
 	}
 	if err := e.reconcileRuntimeJobs(ctx, runtimeCheckOwner{}); err != nil {

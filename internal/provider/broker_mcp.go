@@ -15,7 +15,7 @@ func (s *providerSession) prepareBrokerMCP(profile *execution.Profile) error {
 	if profile == nil || profile.MCPBroker == nil {
 		return errors.New("selected MCP broker execution profile required")
 	}
-	if !execution.IsOpenShellLauncher(profile.Launcher) {
+	if !execution.IsManagedLauncher(profile.Launcher) {
 		return errors.New("selected MCP broker requires the OpenShell host proxy and Linux guest shim")
 	}
 	script := filepath.Join(filepath.Dir(profile.Launcher), "mcp-stdio.mjs")

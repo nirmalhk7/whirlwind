@@ -2,7 +2,7 @@
 
 The Go backend owns `/api/v1` compatibility and integration handlers. The human interface is `./bin/whirlwind dashboard`, using the supervisor's private Unix command/event interface. There is no browser frontend or Next.js proxy. See [local supervisor setup](docs/local-supervisor.md) and the [OpenAPI contract](docs/openapi.json).
 
-Historical task/publication terminology below does not authorize remote publication or alternate model transports. The current local workflow requires explicit plan approval, ACP in OpenShell, a requirement score strictly greater than 80%, every mandatory verification gate, and local delivery only; see [workflow details](docs/workflow-modes.md).
+Historical task/publication terminology below does not authorize remote publication or alternate model transports. The current local workflow requires explicit plan approval, ACP in nono, a requirement score strictly greater than 80%, every mandatory verification gate, and local delivery only; see [workflow details](docs/workflow-modes.md).
 
 ## Contracts
 

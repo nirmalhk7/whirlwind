@@ -54,6 +54,7 @@ func TestRPCCleanupFailureIsReportedBeforeProcessExit(t *testing.T) {
 }
 
 func TestRPCPipeSetupFailureReleasesOpenShellRedactionState(t *testing.T) {
+	t.Setenv("WHIRLWIND_EXECUTION_LAUNCHER", filepath.Join("..", "..", "bridges", "openshell", "launch.mjs"))
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "openshell"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)

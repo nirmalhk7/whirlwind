@@ -30,7 +30,7 @@ func defaultStandaloneSupervisorDir() (string, error) {
 }
 
 func pinStandaloneProfile(ctx context.Context, profile execution.Profile, supervisorDir string) (execution.Profile, error) {
-	if !execution.IsOpenShellLauncher(profile.Launcher) {
+	if !execution.IsManagedLauncher(profile.Launcher) {
 		return profile, nil
 	}
 	if supervisorDir == "" {
@@ -48,7 +48,7 @@ func pinStandaloneProfile(ctx context.Context, profile execution.Profile, superv
 	if !deadline.After(time.Now()) {
 		return execution.Profile{}, context.DeadlineExceeded
 	}
-	pinned, err := execution.PinOpenShellRuntime(ctx, profile, store.ID(), 1, deadline.UTC().Format(time.RFC3339Nano), supervisorDir)
+	pinned, err := execution.PinRuntime(ctx, profile, store.ID(), 1, deadline.UTC().Format(time.RFC3339Nano), supervisorDir)
 	if err != nil {
 		return execution.Profile{}, err
 	}

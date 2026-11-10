@@ -65,8 +65,8 @@ func (execution *agentAttempt) launch() error {
 		return err
 	}
 	deadline := started.Add(a.attemptTimeoutLimit())
-	if profile := a.input.Execution; profile != nil && execprofile.IsOpenShellLauncher(profile.Launcher) {
-		pinned, err := execprofile.PinOpenShellRuntime(a.ctx, *profile, execution.id, generation, deadline.Format(time.RFC3339Nano), filepath.Join(a.Root, "supervisor", "executions"))
+	if profile := a.input.Execution; profile != nil && execprofile.IsManagedLauncher(profile.Launcher) {
+		pinned, err := execprofile.PinRuntime(a.ctx, *profile, execution.id, generation, deadline.Format(time.RFC3339Nano), filepath.Join(a.Root, "supervisor", "executions"))
 		if err != nil {
 			return err
 		}

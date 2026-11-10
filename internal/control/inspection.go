@@ -15,7 +15,7 @@ type Records interface {
 
 func Inspect(ctx context.Context, records Records) (Snapshot, error) {
 	snapshot := Snapshot{}
-	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "project_status"} {
+	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "providers", "project_status"} {
 		values, err := records.List(ctx, kind)
 		if err != nil {
 			return nil, err

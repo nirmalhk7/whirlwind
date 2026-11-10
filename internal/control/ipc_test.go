@@ -91,3 +91,19 @@ func TestFinalizationDiffCursorIsBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestSingleProposalDeleteRequiresVersionAndRetryIdentity(t *testing.T) {
+	request := Request{RequestID: "delete-proposal", Operation: "direction.delete", ResourceID: "proposal", ExpectedVersion: 3, IdempotencyKey: "delete-once"}
+	if err := validateRequest(request); err != nil {
+		t.Fatalf("versioned proposal delete unavailable: %v", err)
+	}
+	request.ExpectedVersion = 0
+	if err := validateRequest(request); err == nil {
+		t.Fatal("unversioned delete accepted")
+	}
+	request.ExpectedVersion = 3
+	request.IdempotencyKey = ""
+	if err := validateRequest(request); err == nil {
+		t.Fatal("delete without retry identity accepted")
+	}
+}

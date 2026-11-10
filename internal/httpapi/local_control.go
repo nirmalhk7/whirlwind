@@ -24,7 +24,10 @@ type LocalCommand struct {
 	Payload         json.RawMessage
 }
 
-const localTaskRoutePrefix = "/api/v1/tasks/"
+const (
+	localTaskRoutePrefix     = "/api/v1/tasks/"
+	projectRegisterOperation = "project.register"
+)
 
 func localPayload(payload json.RawMessage) json.RawMessage {
 	if len(payload) == 0 {
@@ -37,7 +40,7 @@ func localPayload(payload json.RawMessage) json.RawMessage {
 // versioned and idempotent domain handlers. It starts no HTTP listener.
 func (s *Server) ExecuteLocal(ctx context.Context, command LocalCommand) (json.RawMessage, error) {
 	switch command.Operation {
-	case "project.register":
+	case projectRegisterOperation:
 		return s.registerLocalProject(ctx, command)
 	case "finalization.inspect":
 		return s.inspectFinalization(ctx, command)
@@ -83,12 +86,19 @@ func localRoute(command LocalCommand) (string, string, []byte, error) {
 	switch command.Operation {
 	case "inspect.plan":
 		return localTaskRoute(command.PlanID, "plan-document", http.MethodGet, nil)
-	case "project.register":
-		return http.MethodPost, "/api/v1/projects", payload, nil
+	case projectRegisterOperation, "runners.toggle":
+		paths := map[string]string{projectRegisterOperation: "/api/v1/projects", "runners.toggle": "/api/v1/runners/toggle"}
+		return http.MethodPost, paths[command.Operation], payload, nil
 	case "ideation.start":
 		return localProjectRoute(command.ProjectID, "ideation", payload)
 	case "direction.select", "direction.approve":
 		return localDirectionRoute(command.ResourceID, "select", payload)
+	case "direction.delete":
+		direction, err := localID(command.ResourceID)
+		if err != nil {
+			return "", "", nil, err
+		}
+		return http.MethodDelete, "/api/v1/directions/" + direction, payload, nil
 	case "direction.reject":
 		return localDirectionRoute(command.ResourceID, "dismiss", payload)
 	case "direction.reconsider":

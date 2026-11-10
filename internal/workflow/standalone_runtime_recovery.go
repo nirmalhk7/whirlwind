@@ -38,7 +38,7 @@ func (e *Engine) reconcileStandaloneRuntimes(ctx context.Context) error {
 		if currentOwner && locator.State == "cleanup_pending" && deadline.After(time.Now()) {
 			return fmt.Errorf("%w: current standalone runtime has unverified cleanup", execution.ErrIsolationUnverified)
 		}
-		lifecycle, exists, err := execution.ReadOpenShellLifecycle(profile)
+		lifecycle, exists, err := execution.ReadRuntimeLifecycle(profile)
 		if err != nil {
 			return errors.Join(execution.ErrIsolationUnverified, fmt.Errorf("read standalone runtime lifecycle: %w", err))
 		}
@@ -50,7 +50,7 @@ func (e *Engine) reconcileStandaloneRuntimes(ctx context.Context) error {
 				profile.SandboxID = lifecycle.SandboxID
 			}
 		}
-		if err := execution.ReconcileOpenShellRuntime(ctx, profile); err != nil {
+		if err := execution.ReconcileRuntime(ctx, profile); err != nil {
 			return fmt.Errorf("reconcile standalone runtime %s before replacement: %w", locator.ExecutionID, err)
 		}
 		locator, err = reconciledStandaloneLocator(root, locator)

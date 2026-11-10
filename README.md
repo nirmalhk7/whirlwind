@@ -16,7 +16,7 @@ Whirlwind's identity rests on velocity, control, and correctness: maximize verif
 
 ## Run locally
 
-Requirements: Go version specified in `go.mod` or newer, Git, and a local NVIDIA OpenShell gateway configured before agent execution. The terminal dashboard and supervisor can open without OpenShell; model work fails closed until the gateway and compatible Linux agent image are ready. Node.js 20.9+ is required by the launcher and OpenShell bridge.
+Requirements: Go version specified in `go.mod` or newer, Git, Node.js 20.9+, nono 0.81.0, and an installed, authenticated ACP agent. The terminal dashboard and supervisor can open without nono; agent execution fails closed until the native sandbox is ready.
 
 ```sh
 go mod download
@@ -48,14 +48,14 @@ Valid repositories appear in Projects with green `OK`; invalid paths remain visi
 
 The Go/tview TUI displays saved plans, questions, permission requests, attempts, review and verification evidence, and local completion data. Inbox occupies the right pane; focus it and press `a` to choose a direction for approval or `h` for direction history. Direction approval and plan approval are separate. Decisions carry expected record versions and idempotency keys over a user-private Unix socket; the supervisor rechecks them before saving. Whirlwind has no browser frontend or UI server.
 
-See [local supervisor and terminal setup](docs/local-supervisor.md), [OpenShell setup](docs/openshell-setup.md), [project policy](docs/go-backend.md), and the [HTTP API contract](API.md) for integration and webhook interfaces.
+See [local supervisor and terminal setup](docs/local-supervisor.md), [nono setup](docs/nono-setup.md), [project policy](docs/go-backend.md), and the [HTTP API contract](API.md) for integration and webhook interfaces.
 
 ## Engineering loops
 
 - Onboard a local Git repository without replacing its files or existing state. Each ideation run handles one project and proposes Expand, Optimize, Harden, and Simplify directions, backed by current evidence and checked against durable proposal history. An exhausted novelty budget produces an incomplete result rather than fabricated directions.
 - Select and approve a direction, then review and separately approve its detailed plan. Plans live at `~/.whirlwind/plans/<Repo Name>_<Timestamp>.md`. Approval freezes the requirements and version; later specification changes require another approval.
 - Configure independent ordered ACP agent/model/thinking queues for Ideation, Planner, Coding, Reviewer, and Finalizer in YAML. Bundled Claude, Codex, and Cursor profiles still require compatible installed, authenticated runtimes. Unsupported selections produce errors rather than silent substitutions.
-- Every agent runs inside NVIDIA OpenShell in its own Git worktree. Trusted annotations in `prompts/agents/*.md` select already authorized connections; inserted issue or repository text cannot grant access. General public web access does not authorize additional integrations.
+- Every agent runs inside nono in its own Git worktree. Trusted annotations in `prompts/agents/*.md` select already authorized connections; inserted issue or repository text cannot grant access. General public web access does not authorize additional integrations.
 - Coding and review repeat until the unrounded requirement score is strictly greater than 80% and every mandatory gate passes. Exactly 80% fails. Gates include the frozen plan checks, configured tests and build, and no new Qlty findings. Existing Qlty debt stays visible; failed repository tests cannot be grandfathered into acceptance.
 - Questions and permissions pause the affected plan. Ordinary answers preserve recovery history; an answer that changes scope returns through planning and human approval. Each active agent attempt has a fixed five-minute deadline; human waiting time is outside that attempt.
 - Finalization preserves the exact reviewed snapshot on the plan's local delivery branch. The dashboard shows its commit, diff, review score, unmet requirements, and verification evidence. Agents cannot push, open PRs, or merge; the human decides whether to publish.
@@ -87,15 +87,15 @@ Whirlwind creates one current SQLite schema directly, without schema versions or
 ## Verify
 
 ```sh
-node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs
-go test -race ./... -skip '^TestACPTerminalCannotWriteOutsideSandbox$'
+node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs bridges/nono/*.test.mjs
+go test -race ./...
 go vet ./...
 go build ./cmd/whirlwind ./cmd/whirlwind-dashboard
 qlty smells --all
 qlty check --all
 ```
 
-The Go command above runs the controlled-fixture suite. Complete acceptance also requires the real OpenShell commands in [OpenShell setup](docs/openshell-setup.md), including the separately selected terminal filesystem-boundary test. Run those with the disposable gateway environment; do not export its gateway selection into controlled-fixture runs. Excluding or skipping a physical test does not establish isolation.
+The native tests run real nono filesystem, network and ACP terminal boundary checks. Controlled OpenShell fixtures remain for legacy recovery regressions; they do not establish physical isolation. See [nono setup](docs/nono-setup.md) for runtime and platform details.
 
 ## Repository
 
@@ -103,7 +103,8 @@ The Go command above runs the controlled-fixture suite. Complete acceptance also
 - `cmd/whirlwind-dashboard/` and `internal/dashboard/`: Go/tview terminal interface.
 - `internal/control/`: named command/event protocol over a private Unix socket.
 - `internal/`: orchestration, ACP providers, persistence, Git, policy, and verification.
-- `bridges/openshell/`: guest launch, controlled egress, and scoped MCP transport.
+- `bridges/nono/`: native sandbox launch and coding scope.
+- `bridges/openshell/`: legacy recovery bridge and shared controlled egress/MCP transport.
 - `prompts/agents/`: trusted base prompts and connection annotations.
 
 ## Settings and recovery

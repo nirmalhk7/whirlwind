@@ -205,6 +205,7 @@ func TestMissingSandboxNeverRunsTarget(t *testing.T) {
 }
 
 func TestMissingOpenShellNeverRunsTarget(t *testing.T) {
+	useLegacyExecutionLauncher(t)
 	profile, err := ForPolicy(t.TempDir(), false, "policy", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -232,6 +233,7 @@ func TestMissingOpenShellNeverRunsTarget(t *testing.T) {
 }
 
 func TestOpenShellRuntimeHonorsValidatedExplicitCLIPath(t *testing.T) {
+	useLegacyExecutionLauncher(t)
 	bin := filepath.Join(t.TempDir(), "openshell")
 	if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
 		t.Fatal(err)
@@ -247,6 +249,7 @@ func TestOpenShellRuntimeHonorsValidatedExplicitCLIPath(t *testing.T) {
 }
 
 func TestOpenShellProxyTokenIsRegisteredForTraceRedaction(t *testing.T) {
+	useLegacyExecutionLauncher(t)
 	bin := t.TempDir()
 	if err := os.WriteFile(filepath.Join(bin, "openshell"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
 		t.Fatal(err)
@@ -309,18 +312,19 @@ func TestOpenShellProxyTokenIsRegisteredForTraceRedaction(t *testing.T) {
 	}
 }
 
-func TestExecutionProfileSelectsOpenShellBoundary(t *testing.T) {
+func TestExecutionProfileSelectsNonoBoundary(t *testing.T) {
 	profile, err := ForPolicy(t.TempDir(), false, "policy", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join("bridges", "openshell", "launch.mjs")
+	want := filepath.Join("bridges", "nono", "launch.mjs")
 	if !strings.HasSuffix(profile.Launcher, want) {
-		t.Fatalf("execution selected %q, want NVIDIA OpenShell launcher ending in %q", profile.Launcher, want)
+		t.Fatalf("execution selected %q, want nono launcher ending in %q", profile.Launcher, want)
 	}
 }
 
 func TestOpenShellReceivesConfiguredCommandForLinuxImage(t *testing.T) {
+	useLegacyExecutionLauncher(t)
 	profile, err := ForPolicy(t.TempDir(), false, "policy", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -350,6 +354,7 @@ func TestOpenShellReceivesConfiguredCommandForLinuxImage(t *testing.T) {
 }
 
 func TestOpenShellProviderProfileDoesNotMountHostProviderRuntime(t *testing.T) {
+	useLegacyExecutionLauncher(t)
 	profile, err := ForProvider(t.TempDir(), false, "policy", nil, []string{"sh", "--stdio"})
 	if err != nil {
 		t.Fatal(err)
@@ -367,4 +372,9 @@ func TestOpenShellProviderProfileDoesNotMountHostProviderRuntime(t *testing.T) {
 			t.Fatalf("host provider runtime leaked into image-scoped read grants: %q", root)
 		}
 	}
+}
+
+func useLegacyExecutionLauncher(t *testing.T) {
+	t.Helper()
+	t.Setenv("WHIRLWIND_EXECUTION_LAUNCHER", filepath.Join("..", "..", "bridges", "openshell", "launch.mjs"))
 }

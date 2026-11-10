@@ -83,22 +83,6 @@ func (s *providerSession) initializeACP() (bool, error) {
 	return init.Capabilities.Load, nil
 }
 
-func (s *providerSession) setACPModes(sessionID string, modes []struct {
-	ID string `json:"id"`
-}) error {
-	var e error
-	if s.input.ReadOnly {
-		for _, mode := range modes {
-			if mode.ID == "ask" {
-				if e = s.rpc.Call(s.ctx, "session/set_mode", map[string]any{"sessionId": sessionID, "modeId": "ask"}, nil); e != nil {
-					return e
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func (s *providerSession) recordACPConfig(options []acpConfigOption, legacyModel string) {
 	session := acpSession{ConfigOptions: options}
 	session.Models.Current = legacyModel

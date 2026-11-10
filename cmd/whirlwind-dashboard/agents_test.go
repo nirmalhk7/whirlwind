@@ -18,7 +18,7 @@ func (e statusExecutor) Execute(ctx context.Context, request control.Request) (a
 	return e.api.ExecuteLocal(ctx, httpapi.LocalCommand{Operation: request.Operation})
 }
 
-func TestOnlineDashboardLoadsAgentQueuesAndConnectionResults(t *testing.T) {
+func TestOnlineDashboardLoadsConfiguredAgentsAndConnectionResults(t *testing.T) {
 	ctx := context.Background()
 	data := t.TempDir()
 	db, err := store.Open(filepath.Join(data, "whirlwind.db"))
@@ -42,8 +42,8 @@ func TestOnlineDashboardLoadsAgentQueuesAndConnectionResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot["agents"]) != 1 {
-		t.Fatal("online dashboard omitted configured agent queue")
+	if len(snapshot["providers"]) != 1 || snapshot["providers"][0].ID != "offline" {
+		t.Fatal("online dashboard omitted configured agent")
 	}
 	if len(snapshot["provider_status"]) != 1 {
 		t.Fatal("online dashboard omitted connection results")

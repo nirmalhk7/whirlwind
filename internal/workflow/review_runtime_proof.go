@@ -40,7 +40,7 @@ func (e *Engine) validateApprovedCheckRuntime(ctx context.Context, input runtime
 func (e *Engine) loadRuntimeCheckProof(ctx context.Context, input runtimeProofInput) (runtimeCheckProof, error) {
 	identity := input.result.Runtime
 	if !runtimeIdentityComplete(identity) {
-		return runtimeCheckProof{}, fmt.Errorf("verification check %q lacks a complete, cleaned OpenShell runtime proof", input.check.Name)
+		return runtimeCheckProof{}, fmt.Errorf("verification check %q lacks a complete, cleaned sandbox runtime proof", input.check.Name)
 	}
 	job, err := e.loadRuntimeCheckJob(ctx, input.check, identity)
 	if err != nil {
@@ -61,7 +61,7 @@ func runtimeIdentityExecutable(identity verification.RuntimeIdentity) bool {
 }
 
 func hasOpenShellKind(identity verification.RuntimeIdentity) bool {
-	return identity.Kind == "openshell"
+	return identity.Kind == "openshell" || identity.Kind == "nono"
 }
 
 func hasLaunchIdentity(identity verification.RuntimeIdentity) bool { return identity.Launcher != "" }
@@ -71,6 +71,9 @@ func hasExecutionIdentity(identity verification.RuntimeIdentity) bool {
 }
 
 func runtimeIdentitySandboxed(identity verification.RuntimeIdentity) bool {
+	if identity.Kind == "nono" {
+		return hasSandboxIdentity(identity) && identity.LifecycleFile != ""
+	}
 	return hasSandboxIdentity(identity) && hasGatewayIdentity(identity) && hasLifecycleIdentity(identity)
 }
 

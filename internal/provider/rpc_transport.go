@@ -95,7 +95,7 @@ func (r *RPC) finishRead(e error) {
 	release, exitErr := process.WaitForDrain(r.cmd)
 	if release != nil && r.afterDrain != nil {
 		if cleanupErr := r.afterDrain(); cleanupErr != nil {
-			cleanupErr = errors.Join(process.ErrCleanup, fmt.Errorf("OpenShell sandbox cleanup failed: %w", cleanupErr))
+			cleanupErr = errors.Join(process.ErrCleanup, fmt.Errorf("sandbox runtime cleanup failed: %w", cleanupErr))
 			exitErr = errors.Join(exitErr, cleanupErr)
 			release = nil
 		}

@@ -70,7 +70,7 @@ func ForPolicy(cwd string, readOnly bool, hash string, policy *model.SandboxPoli
 	if err != nil {
 		return Profile{}, err
 	}
-	p := Profile{Version: "srt-0.0.81-checks-v1", CWD: root, ReadOnly: readOnly, PolicyHash: hash, ReadRoots: []string{}, Domains: []string{}, Environment: []string{}}
+	p := Profile{Version: "nono-0.81.0-v1", CWD: root, ReadOnly: readOnly, PolicyHash: hash, ReadRoots: []string{}, Domains: []string{}, Environment: []string{}}
 	if err := applyPolicy(&p, policy); err != nil {
 		return Profile{}, err
 	}
@@ -237,18 +237,21 @@ func ForCommand(p Profile, command []string) (Profile, error) {
 
 // ForProvider adds only the configured program's installed code roots, never implicit auth/network grants.
 func defaultLauncher() string {
+	if launcher := os.Getenv("WHIRLWIND_EXECUTION_LAUNCHER"); launcher != "" {
+		return launcher
+	}
 	if binary, err := os.Executable(); err == nil {
-		path := filepath.Join(filepath.Dir(binary), "bridges", "openshell", "launch.mjs")
+		path := filepath.Join(filepath.Dir(binary), "bridges", "nono", "launch.mjs")
 		if _, err := os.Stat(path); err == nil {
 			return path
 		}
 	}
 	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "bridges", "openshell", "launch.mjs")
+	return filepath.Join(filepath.Dir(file), "..", "..", "bridges", "nono", "launch.mjs")
 }
 
 func unsafeEnvironment(name string) bool {
-	if strings.HasPrefix(name, "WHIRLWIND_") || strings.HasPrefix(name, "OPENSHELL_") || strings.HasPrefix(name, "DYLD_") || strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "XDG_") {
+	if strings.HasPrefix(name, "WHIRLWIND_") || strings.HasPrefix(name, "OPENSHELL_") || strings.HasPrefix(name, "NONO_") || strings.HasPrefix(name, "DYLD_") || strings.HasPrefix(name, "LD_") || strings.HasPrefix(name, "XDG_") {
 		return true
 	}
 	return slices.Contains([]string{"PATH", "HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "PWD", "TMPDIR", "TMP", "TEMP", "OPENSSL_CONF", "OPENSSL_MODULES", "SSLKEYLOGFILE", "NODE_OPTIONS", "NODE_PATH", "BASH_ENV", "ENV", "SHELLOPTS", "PYTHONPATH", "PYTHONSTARTUP", "GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"}, name)

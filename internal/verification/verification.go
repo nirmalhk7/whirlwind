@@ -95,7 +95,7 @@ func runObservedCheck(ctx context.Context, cwd string, check model.Check, profil
 		return failedCheck(check, err), true
 	}
 	result := runCheckProfile(ctx, cwd, check, checkProfile)
-	if execution.IsOpenShellLauncher(checkProfile.Launcher) {
+	if execution.IsManagedLauncher(checkProfile.Launcher) {
 		result = reconcileCheckRuntime(result, checkProfile)
 	}
 	return result, false
@@ -107,19 +107,19 @@ func failedCheck(check model.Check, err error) Result {
 }
 
 func checkRuntimeProfile(ctx context.Context, profile execution.Profile, index, count int, check model.Check) (execution.Profile, error) {
-	if !execution.IsOpenShellLauncher(profile.Launcher) {
+	if !execution.IsManagedLauncher(profile.Launcher) {
 		return profile, nil
 	}
 	profile, err := checkProfileIdentity(ctx, profile, index, count, check)
 	if err != nil {
 		return profile, err
 	}
-	if _, exists, err := execution.ReadOpenShellLifecycle(profile); err != nil {
+	if _, exists, err := execution.ReadRuntimeLifecycle(profile); err != nil {
 		return profile, err
 	} else if exists {
 		return profile, nil
 	}
-	return execution.PinOpenShellRuntime(ctx, profile, profile.ExecutionID, profile.ExecutionGeneration, profile.DeadlineAt, profile.SupervisorDir)
+	return execution.PinRuntime(ctx, profile, profile.ExecutionID, profile.ExecutionGeneration, profile.DeadlineAt, profile.SupervisorDir)
 }
 
 func checkProfileIdentity(ctx context.Context, profile execution.Profile, index, count int, check model.Check) (execution.Profile, error) {
@@ -190,13 +190,16 @@ func randomExecutionID() (string, error) {
 func reconcileCheckRuntime(result Result, profile execution.Profile) Result {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	cleanupErr := execution.ReconcileOpenShellRuntime(cleanupCtx, profile)
+	cleanupErr := execution.ReconcileRuntime(cleanupCtx, profile)
 	identity := RuntimeIdentity{ExecutionID: profile.ExecutionID, Generation: profile.ExecutionGeneration,
 		Kind: "openshell", Launcher: profile.Launcher, SandboxName: profile.SandboxName,
 		LifecycleFile: profile.LifecycleFile, GatewayName: profile.GatewayName,
 		GatewayEndpoint: profile.GatewayEndpoint, Workspace: profile.Workspace}
-	if lifecycle, exists, err := execution.ReadOpenShellLifecycle(profile); err == nil && exists {
+	if lifecycle, exists, err := execution.ReadRuntimeLifecycle(profile); err == nil && exists {
 		identity.SandboxID = lifecycle.SandboxID
+	}
+	if execution.IsNonoLauncher(profile.Launcher) {
+		identity.Kind = "nono"
 	}
 	identity.CleanupVerified = cleanupErr == nil
 	result.Runtime = identity

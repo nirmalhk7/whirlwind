@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
@@ -18,17 +19,22 @@ func (d *Dashboard) confirmDirection() {
 	}
 	direction := d.directionRows[index]
 	version := d.directionRecordVersion(direction.ID)
-	modal := tview.NewModal().SetText("Approve this direction and start planning?\n\n" + tview.Escape(direction.Title)).AddButtons([]string{"Approve direction", "Cancel"})
-	modal.SetDoneFunc(func(button int, _ string) {
-		d.closeModal()
-		if button == 0 {
-			request := directionApprovalRequest(direction, version)
-			request.IdempotencyKey = store.ID()
-			d.submit(request)
-		}
-	})
-	d.modal = modal
-	d.SetRoot(modal, true).SetFocus(modal)
+
+	action, reason, ok := d.editDecision("# Proposal: "+direction.Title+"\n\n"+messageText(direction), []string{"approve", "reject"})
+	if !ok || action == "cancel" {
+		return
+	}
+	if action == "approve" && reason != "" {
+		d.status.SetText("Whirlwind | invalid decision: proposal reason applies to reject only")
+		return
+	}
+	request := directionApprovalRequest(direction, version)
+	if action == "reject" {
+		request.Operation = "direction.reject"
+		request.Payload, _ = json.Marshal(map[string]string{"reason": reason})
+	}
+	d.closeModal()
+	d.submit(request)
 }
 
 func (d *Dashboard) directionRecordVersion(id string) int {
@@ -88,25 +94,18 @@ func (d *Dashboard) openPlanContentReview(plan model.Task, version int, hash str
 }
 
 func (d *Dashboard) showPlanReview(plan model.Task, content, hash string, expectedVersion int) {
-	form := tview.NewForm()
-	form.AddTextView("Exact plan · "+plan.PlanDocument.Path, content, 0, 18, false, true)
-	var action, feedback string
-	action = "approve"
-	form.AddDropDown("Decision", []string{"approve", "revise", "reject"}, 0, func(_ string, selected int) { action = []string{"approve", "revise", "reject"}[selected] })
-	form.AddInputField("Revision feedback", "", 48, nil, func(value string) { feedback = value })
-	form.AddButton("Submit", func() {
-		payload, _ := json.Marshal(map[string]string{"action": action, "hash": hash, "feedback": feedback})
-		d.closeModal()
-		request := planReviewRequest(plan, expectedVersion, hash, payload)
-		request.IdempotencyKey = store.ID()
-		d.submit(request)
-	})
-	d.showForm(form)
+	action, feedback, ok := d.editDecision("# Plan: "+plan.PlanDocument.Path+"\nHash: "+hash+"\nVersion: "+fmt.Sprint(expectedVersion)+"\n\n"+content, []string{"approve", "revise", "reject"})
+	if !ok || action == "cancel" {
+		return
+	}
+	payload, _ := json.Marshal(map[string]string{"action": action, "hash": hash, "feedback": feedback})
+	d.closeModal()
+	d.submit(planReviewRequest(plan, expectedVersion, hash, payload))
 }
 
 func (d *Dashboard) answerQuestionsForm() {
 	index := d.plans.GetCurrentItem()
-	if index < 0 || index >= len(d.planRows) {
+	if d.planID == "" || index < 0 || index >= len(d.planRows) {
 		return
 	}
 	plan := d.planRows[index]
@@ -146,7 +145,7 @@ func (d *Dashboard) answerQuestionsForm() {
 
 func (d *Dashboard) permissionForm() {
 	index := d.plans.GetCurrentItem()
-	if index < 0 || index >= len(d.planRows) {
+	if d.planID == "" || index < 0 || index >= len(d.planRows) {
 		return
 	}
 	plan := d.planRows[index]
@@ -257,7 +256,7 @@ func (d *Dashboard) fetchArtifact(planID string, version int, artifactID string)
 
 func (d *Dashboard) selectedPlanRecord() (model.Task, int, bool) {
 	index := d.plans.GetCurrentItem()
-	if index < 0 || index >= len(d.planRows) {
+	if d.planID == "" || index < 0 || index >= len(d.planRows) {
 		return model.Task{}, 0, false
 	}
 	plan := d.planRows[index]

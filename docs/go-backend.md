@@ -4,7 +4,7 @@ Whirlwind runs locally on macOS or Linux. Go owns scheduling, worktrees, verific
 
 ## Run
 
-Requirements: Go version specified in `go.mod`, Git, and Node.js 20.9+ for the launcher and OpenShell bridge. Install an agent separately and authenticate using its own documented setup. npm is needed only when installing optional bridge dependencies such as the Claude SDK.
+Requirements: Go version specified in `go.mod`, Git, Node.js 20.9+ for the launcher, and nono 0.81.0 for native execution. Install an agent separately and authenticate using its own documented setup. npm is needed only when installing optional bridge dependencies such as the Claude SDK.
 
 ```sh
 go mod download
@@ -103,7 +103,7 @@ See [Go adapter and onboarding verification](acp-codex-verification.md) for real
 ```sh
 go test -race ./...
 go vet ./...
-node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs
+node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs bridges/nono/*.test.mjs
 ```
 
 Go tests use real SQLite and Git worktrees, fake provider processes, and fake external GitHub boundaries. Node tests cover launchers and provider bridges. Workflow and planner/approval interactions also have focused HTTP fixtures.

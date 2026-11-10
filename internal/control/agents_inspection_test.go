@@ -33,3 +33,32 @@ func TestOfflineInspectionIncludesConfiguredAgentQueues(t *testing.T) {
 		t.Fatal("configured project health missing from dashboard inspection")
 	}
 }
+
+func TestInspectionIncludesConfiguredProviders(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	if err := db.Put(ctx, "providers", "cursor", model.Provider{ID: "cursor", Name: "Cursor", Kind: "acp"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	dispatcher := SupervisorDispatcher{DB: db.DB}
+	checks := map[string]func() (Snapshot, error){
+		"offline": func() (Snapshot, error) { return dispatcher.Snapshot(ctx, 100) },
+		"online":  func() (Snapshot, error) { return dispatcher.snapshot(ctx, Request{}) },
+		"store":   func() (Snapshot, error) { return Inspect(ctx, db) },
+	}
+	for name, check := range checks {
+		t.Run(name, func(t *testing.T) {
+			snapshot, err := check()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(snapshot["providers"]) != 1 || snapshot["providers"][0].ID != "cursor" {
+				t.Fatal("configured agent missing from inspection")
+			}
+		})
+	}
+}

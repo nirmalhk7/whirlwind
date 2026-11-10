@@ -26,6 +26,17 @@ func (q apiRequest) updateCandidateLifecycle(d model.Direction, record model.Rec
 	case "reconsider":
 		return q.requestCandidateReconsideration(d, record)
 	case "dismiss":
+		var decision struct {
+			Reason *string `json:"reason"`
+		}
+		if len(q.body) > 0 {
+			if err := json.Unmarshal(q.body, &decision); err != nil {
+				return nil, &apiError{422, "invalid_input", "Rejection reason must be a string"}
+			}
+		}
+		if decision.Reason != nil {
+			d.RejectionReason = strings.TrimSpace(*decision.Reason)
+		}
 		d.Status = "dismissed"
 	case "defer":
 		d.Status = "deferred"

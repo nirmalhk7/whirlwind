@@ -69,7 +69,7 @@ func providerPackageRoot(path string) (string, bool) {
 		dir := filepath.Dir(path)
 		for depth := 0; depth < 4; depth++ {
 			if _, err := os.Stat(filepath.Join(dir, "package.json")); err == nil {
-				return dir, true
+				return nodeModuleRoot(dir), true
 			}
 			parent := filepath.Dir(dir)
 			if parent == dir {
@@ -79,4 +79,15 @@ func providerPackageRoot(path string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// Node resolves transitive dependencies through the containing installation's
+// node_modules tree. Grant installed code, never the installation's parent.
+func nodeModuleRoot(packageRoot string) string {
+	for directory := packageRoot; directory != filepath.Dir(directory); directory = filepath.Dir(directory) {
+		if filepath.Base(directory) == "node_modules" {
+			return directory
+		}
+	}
+	return packageRoot
 }

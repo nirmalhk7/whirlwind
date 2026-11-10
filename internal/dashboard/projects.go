@@ -40,7 +40,7 @@ func (d *Dashboard) projectLabel(project model.Project) string {
 }
 
 func (d *Dashboard) showProjectHealth() {
-	if len(d.planRows) != 0 {
+	if len(d.planRows) != 0 || len(d.runRows) != 0 {
 		return
 	}
 	if status, ok := d.projectHealth[d.projectID]; ok {
@@ -48,6 +48,6 @@ func (d *Dashboard) showProjectHealth() {
 		if status.Detail != "" {
 			text += "\n" + status.Detail
 		}
-		d.detail.SetText(text + "\n\nNo saved plans for this project.")
+		d.detail.SetText(text + "\n\nNo runs for this project.")
 	}
 }

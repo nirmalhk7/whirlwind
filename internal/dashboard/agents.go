@@ -11,7 +11,7 @@ import (
 )
 
 func (d *Dashboard) refreshAgents() {
-	agents, err := decodeRecords[model.AgentConfig](d.snapshot["agents"])
+	agents, err := decodeRecords[model.Provider](d.snapshot["providers"])
 	if err != nil {
 		d.agents.SetText("Cannot read configured agents: " + tview.Escape(err.Error()))
 		return
@@ -25,16 +25,14 @@ func (d *Dashboard) refreshAgents() {
 	for _, status := range statuses {
 		health[status.ID] = status.Status
 	}
-	sort.SliceStable(agents, func(i, j int) bool { return agents[i].Role < agents[j].Role })
+	sort.SliceStable(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
 	var text strings.Builder
 	for _, agent := range agents {
-		for _, choice := range agent.Chain {
-			effort := "default"
-			if choice.Thinking != nil {
-				effort = choice.Thinking.Value
-			}
-			fmt.Fprintf(&text, "%s · %s\n%s\nReasoning: %s · %s\n\n", tview.Escape(agent.Role), tview.Escape(choice.Provider), tview.Escape(choice.Model), tview.Escape(effort), connectionLabel(health[choice.Provider]))
+		name := agent.Name
+		if name == "" {
+			name = agent.ID
 		}
+		fmt.Fprintf(&text, "%s · %s\n", tview.Escape(name), connectionLabel(health[agent.ID]))
 	}
 	if text.Len() == 0 {
 		text.WriteString("No configured agents")
@@ -45,12 +43,12 @@ func (d *Dashboard) refreshAgents() {
 func connectionLabel(status string) string {
 	switch status {
 	case "working":
-		return "[green]up[-]"
+		return "[green]■ up[-]"
 	case "failed", "unavailable":
-		return "[red]down[-]"
+		return "[red]■ down[-]"
 	case "paused":
-		return "[yellow]paused[-]"
+		return "[yellow]■ paused[-] (runners stopped)"
 	default:
-		return "[yellow]unverified[-]"
+		return "[yellow]■ unverified[-]"
 	}
 }

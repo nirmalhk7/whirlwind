@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"github.com/rivo/tview"
+	"strings"
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
@@ -40,6 +41,8 @@ func (d *Dashboard) Present(snapshot control.Snapshot) {
 	d.updating = false
 	d.refreshDirections()
 	d.refreshPlans()
+	d.refreshRuns()
+	d.refreshInbox()
 	d.showProjectHealth()
 }
 
@@ -59,9 +62,12 @@ func (d *Dashboard) selectProject(index int, _, _ string, _ rune) {
 	if d.updating || index < 0 || index >= len(d.projectRows) {
 		return
 	}
-	d.projectID, d.directionID, d.planID = d.projectRows[index].ID, "", ""
+	d.taskView = false
+	d.projectID, d.directionID, d.planID, d.runID = d.projectRows[index].ID, "", "", ""
 	d.refreshDirections()
 	d.refreshPlans()
+	d.refreshRuns()
+	d.refreshInbox()
 	d.showProjectHealth()
 }
 
@@ -83,11 +89,18 @@ func (d *Dashboard) refreshDirections() {
 			selected = len(d.directionRows)
 		}
 		d.directionRows = append(d.directionRows, direction)
-		status := direction.Status
-		d.directions.AddItem(tview.Escape(direction.Title+" · "+status), "", 0, nil)
+		label := "Ideation"
+		if direction.Category != "" {
+			label += " (" + strings.ToUpper(direction.Category[:1]) + direction.Category[1:] + ")"
+		}
+		label += " - " + direction.Title
+		if direction.Status == "selected" {
+			label += " · selected"
+		}
+		d.directions.AddItem(tview.Escape(label), "", 0, nil)
 	}
 	if len(d.directionRows) == 0 {
-		d.directions.AddItem("No directions", "", 0, nil)
+		d.directions.AddItem("No inbox items", "", 0, nil)
 		d.directionID = ""
 	} else {
 		d.directionID = d.directionRows[selected].ID
@@ -125,7 +138,7 @@ func (d *Dashboard) refreshPlans() {
 	}
 	if len(d.planRows) == 0 {
 		d.plans.AddItem("No plans", "", 0, nil)
-		d.detail.SetText("No saved plans for this project.")
+		d.detail.SetText("No runs for this project.")
 	} else {
 		d.plans.SetCurrentItem(selected)
 	}

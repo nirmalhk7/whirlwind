@@ -218,7 +218,7 @@ func (a *agentAttempt) requestPermission(ctx context.Context, perm provider.Perm
 	}
 	id := store.ID()
 	value := map[string]any{"id": id, "attempt_id": a.id, "task": a.task.ID, "provider": a.chosen.ID, "request": json.RawMessage(snapshot), "decision": "pending", "plan_version": a.task.PlanVersion}
-	notification := model.Notification{ID: store.ID(), TaskID: a.task.ID, Kind: "permission", Message: "Tool permission awaits decision: " + id}
+	notification := model.Notification{Role: a.input.Role, ID: store.ID(), TaskID: a.task.ID, Kind: "permission", Message: "Tool permission awaits decision: " + id}
 	persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := a.Store.Write(persistCtx, []store.Change{{Kind: "permissions", ID: id, Value: value}, {Kind: "inbox", ID: notification.ID, Value: notification}}, nil); err != nil {

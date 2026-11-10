@@ -3,19 +3,13 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/testutil/openshell"
 )
-
-const providerLiveAcceptanceVariable = "WHIRLWIND_OPENSHELL_LIVE_ACCEPTANCE"
 
 func newTerminalTestClient(t *testing.T, cwd string, live bool, hooks Hooks) (*Client, execution.Profile, func() error) {
 	t.Helper()
@@ -63,22 +57,4 @@ func newTerminalTestClient(t *testing.T, cwd string, live bool, hooks Hooks) (*C
 		}
 	})
 	return client, profile, finish
-}
-
-func requireImagePathWritableBeforePolicy(t *testing.T, path string) {
-	t.Helper()
-	image := os.Getenv("WHIRLWIND_OPENSHELL_IMAGE")
-	if image == "" {
-		t.Fatal("WHIRLWIND_OPENSHELL_IMAGE is required for the live terminal boundary test")
-	}
-	command := exec.Command("docker", "run", "--rm", "--entrypoint", "/bin/sh", image,
-		"-c", `test "$(id -u)" = 502 && test -w /home/whirlwind && touch "$1" && rm "$1"`, "probe", path)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("image-owned outside-worktree path is not writable without policy: %v: %s", err, output)
-	}
-}
-
-func terminalProbePath() string {
-	return fmt.Sprintf("/home/whirlwind/whirlwind-terminal-boundary-%d", time.Now().UnixNano())
 }

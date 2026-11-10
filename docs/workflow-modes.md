@@ -1,6 +1,6 @@
 # Local workflow and compatibility modes
 
-Both `personal` and `agentic` use local direction approval, local plan approval, ACP execution in NVIDIA OpenShell, verification, review, and local finalization. Missing `mode` means `personal`. A GitHub issue or label does not replace human plan approval.
+Both `personal` and `agentic` use local direction approval, local plan approval, ACP execution in nono, verification, review, and local finalization. Missing `mode` means `personal`. A GitHub issue or label does not replace human plan approval.
 
 ```sh
 ./bin/whirlwind dashboard
@@ -14,7 +14,7 @@ Edit the authoritative `settings.yaml` selected by `WHIRLWIND_SETTINGS_FILE` or 
 
 Mode changes require editing YAML on disk and restarting the supervisor. Other supported settings reload normally. A deliberate change between compatibility modes cancels incomplete work while retaining records and worktrees; restarting in the same mode preserves recovery state. Do not change mode or replace the database as a recovery workaround.
 
-Every agent executes in OpenShell in its own Git worktree. Read-only roles remain read-only. Missing runtime setup, credentials, unsupported model/thinking selections, or policy denials produce actionable errors. Whirlwind does not substitute native inference or run agents outside the sandbox. [OpenShell setup](openshell-setup.md) describes gateway, image, authentication, and physical acceptance checks.
+Every agent executes in nono in its own Git worktree. Read-only roles remain read-only. Missing runtime setup, credentials, unsupported model/thinking selections, or policy denials produce actionable errors. Whirlwind does not substitute native inference or run agents outside the sandbox. [nono setup](nono-setup.md) describes native execution, authentication, platform limits, and physical boundary checks.
 
 ## Directions, plans, and approval
 
@@ -60,4 +60,4 @@ After accepted review and all gates, the finalizer preserves the exact reviewed 
 
 Agents cannot push, open PRs, or merge. The human decides whether to publish the local result. No publication connection or remote PR destination is required for this workflow.
 
-See [verification commands](../README.md#verify) and [real OpenShell acceptance](openshell-setup.md) for regression and physical boundary checks. Default fixture tests do not prove physical isolation; explicitly enabled live checks must actually run.
+See [verification commands](../README.md#verify) and [nono setup](nono-setup.md) for regression and physical boundary checks. Native boundary tests run real sandboxed processes; controlled legacy OpenShell fixtures verify recovery contracts.

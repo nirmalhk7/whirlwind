@@ -37,7 +37,7 @@ func run() error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	app := dashboard.New()
+	app := dashboard.New(data)
 	client := control.NewClient(control.SocketPath(data))
 	app.SetCommandHandler(func(ctx context.Context, request control.Request) (json.RawMessage, error) {
 		response, err := client.Call(ctx, request)
@@ -97,7 +97,7 @@ func loadOnlineSnapshot(ctx context.Context, client *control.Client) (control.Sn
 
 func completeOnlineSnapshot(ctx context.Context, client *control.Client, snapshot control.Snapshot) (bool, error) {
 	started := false
-	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "project_status"} {
+	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "providers", "project_status"} {
 		var cursor int64
 		for {
 			request := control.Request{RequestID: fmt.Sprintf("dashboard-records-%s-%d", kind, cursor), Operation: "inspect.records", ResourceID: kind, EventCursor: cursor, Limit: 100}

@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"whirlwind/internal/model"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 )
 
 const (
@@ -74,27 +74,6 @@ func record(id string, value any) model.Record {
 	return model.Record{ID: id, Version: 1, Data: data}
 }
 
-func TestDashboardInspectsSavedPlansAndPendingQuestions(t *testing.T) {
-	d := New()
-	screen := tcell.NewSimulationScreen("UTF-8")
-	d.SetScreen(screen)
-	t.Cleanup(screen.Fini)
-	screen.SetSize(140, 45)
-	d.Present(control.Snapshot{
-		"projects":  {record("p", model.Project{ID: "p", Name: "Saved repository"})},
-		"tasks":     {record("plan", model.Task{ID: "plan", ProjectID: "p", Stage: "plan_approval", PlanVersion: 2, Branch: "delivery/saved", Plan: &model.Plan{Objective: "Preserve operator choices", AcceptanceCriteria: []string{"Pending question remains answerable"}}})},
-		"questions": {record("q", model.QuestionSet{TaskID: "plan", Status: "pending", Questions: []model.Question{{Text: "Which directory should receive output?"}}})},
-		"sessions":  {record("a", model.Attempt{Task: "plan", Role: "plan", Provider: "cursor", ResolvedModel: "chosen-model", Status: "paused"})},
-	})
-	d.ForceDraw()
-	text := screenText(screen)
-	for _, expected := range []string{"Saved repository", "Preserve operator choices", "plan_approval", "delivery/saved", "Which directory", "cursor", "chosen-model", "paused"} {
-		if !strings.Contains(text, expected) {
-			t.Errorf("saved state missing %q", expected)
-		}
-	}
-}
-
 func TestAttemptInspectionRendersPersistedHealthQueueAndEffectiveSettings(t *testing.T) {
 	now := time.Now().UTC()
 	heartbeat := now.Add(-2 * time.Second).Format(time.RFC3339Nano)
@@ -139,38 +118,8 @@ func TestAttemptInspectionRendersPersistedHealthQueueAndEffectiveSettings(t *tes
 	}
 }
 
-func TestRefreshPreservesSelectedProjectAndPlan(t *testing.T) {
-	d := New()
-	snapshot := control.Snapshot{
-		"projects": {record("first", model.Project{ID: "first", Name: "First"}), record("second", model.Project{ID: "second", Name: "Second"})},
-		"tasks":    {record("one", model.Task{ID: "one", ProjectID: "second", Plan: &model.Plan{Objective: "One"}}), record("two", model.Task{ID: "two", ProjectID: "second", Plan: &model.Plan{Objective: "Two"}})},
-	}
-	d.Present(snapshot)
-	d.projects.SetCurrentItem(1)
-	d.plans.SetCurrentItem(1)
-	d.Present(snapshot)
-	project, _ := d.projects.GetItemText(d.projects.GetCurrentItem())
-	plan, _ := d.plans.GetItemText(d.plans.GetCurrentItem())
-	if project != "Second" || !strings.Contains(plan, "Two") {
-		t.Fatalf("refresh lost selection: %q / %q", project, plan)
-	}
-}
-
-func TestDashboardOpensProjectAndPlanNavigation(t *testing.T) {
-	screen := tcell.NewSimulationScreen("UTF-8")
-	app := New().SetScreen(screen)
-	t.Cleanup(screen.Fini)
-	screen.SetSize(120, 32)
-	app.ForceDraw()
-	text := screenText(screen)
-	for _, expected := range []string{"Whirlwind", "Projects", "Plans", "No projects", "Tab", "quit"} {
-		if !strings.Contains(text, expected) {
-			t.Errorf("dashboard missing %q:\n%s", expected, text)
-		}
-	}
-}
-
-func TestFourDirectionsAreNavigableAndApprovalRequiresSeparateConfirmation(t *testing.T) {
+func TestFourDirectionsAreNavigableAndUnchangedVimDoesNotApprove(t *testing.T) {
+	decisionVim(t, "cancel", "")
 	d := New()
 	screen := tcell.NewSimulationScreen("UTF-8")
 	d.SetScreen(screen)
@@ -189,21 +138,16 @@ func TestFourDirectionsAreNavigableAndApprovalRequiresSeparateConfirmation(t *te
 	}
 	d.focus = 1
 	d.input(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone))
-	if d.modal == nil {
-		t.Fatal("direction approval did not require an explicit confirmation")
+	if d.modal != nil || !strings.Contains(d.status.GetText(false), "cancelled") {
+		t.Fatal("unchanged decision did not cancel approval")
 	}
-	q := tcell.NewEventKey(tcell.KeyRune, 'q', tcell.ModNone)
-	if got := d.input(q); got != q || d.modal == nil {
-		t.Fatal("q quit while a decision form was active")
-	}
-	d.input(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
-	if d.modal != nil {
-		t.Fatal("escape did not cancel the decision form")
-	}
+
 }
 
-func TestApprovalRequestsRetainVersionsReviewedWhenFormsOpened(t *testing.T) {
+func TestApprovalRequestsRetainVersionsReviewedInVim(t *testing.T) {
+	decisionVim(t, "approve", "")
 	d := New()
+	dashboardScreen(t, d)
 	requests := make(chan control.Request, 2)
 	d.SetCommandHandler(func(_ context.Context, request control.Request) (json.RawMessage, error) {
 		requests <- request
@@ -219,10 +163,6 @@ func TestApprovalRequestsRetainVersionsReviewedWhenFormsOpened(t *testing.T) {
 	d.Present(snapshot)
 	d.focus = 1
 	d.confirmDirection()
-	modal := d.modal.(*tview.Modal)
-	modal.SetFocus(0)
-	modal.Focus(func(primitive tview.Primitive) { primitive.Focus(func(tview.Primitive) {}) })
-	modal.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
 	snapshot["directions"][0].Version = 4
 	d.Present(snapshot)
 	approved := <-requests
@@ -233,8 +173,6 @@ func TestApprovalRequestsRetainVersionsReviewedWhenFormsOpened(t *testing.T) {
 	d.showPlanReview(plan, "reviewed text", dashboardReviewHash, 1)
 	snapshot["tasks"][0].Version = 2
 	d.Present(snapshot)
-	form := d.modal.(*tview.Form)
-	form.GetButton(0).InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), nil)
 	review := <-requests
 	if review.ExpectedVersion != 1 || review.ContentHash != dashboardReviewHash {
 		t.Fatalf("plan review adopted a refreshed record version: %+v", review)
@@ -266,18 +204,17 @@ func TestPermissionConfirmationShowsSavedActionAndScope(t *testing.T) {
 }
 
 func TestPlanReviewKeepsExactUntrustedContentAndCapturedVersion(t *testing.T) {
+	capture := decisionVim(t, "cancel", "")
 	d := New()
+	dashboardScreen(t, d)
 	plan := model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Path: "PLAN.md", Hash: dashboardHashOne}}
 	content := "# Exact heading [red] literal\n\nSecond line"
 	d.showPlanReview(plan, content, dashboardHashOne, 6)
-	form, ok := d.modal.(*tview.Form)
-	if !ok {
-		t.Fatalf("expected review form, got %T", d.modal)
+	body, err := os.ReadFile(capture)
+	if err != nil || !strings.Contains(string(body), content) {
+		t.Fatalf("plan review changed exact content: %v", err)
 	}
-	text, ok := form.GetFormItem(0).(*tview.TextView)
-	if !ok || text.GetText(false) != content {
-		t.Fatalf("plan review changed displayed content: %#v", form.GetFormItem(0))
-	}
+
 	if request := planReviewRequest(plan, 6, dashboardHashOne, json.RawMessage(`{"action":"approve"}`)); request.ExpectedVersion != 6 {
 		t.Fatalf("review request adopted a newer snapshot version: %+v", request)
 	}

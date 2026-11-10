@@ -65,10 +65,11 @@ var allowedOperations = map[string]bool{
 	"inspect.snapshot": true, "inspect.records": true, "inspect.events": true, "inspect.plan": true, "inspect.artifact": true, "supervisor.stop": true,
 	"project.register": true, "ideation.start": true,
 	"provider.status":  true,
+	"runners.toggle":   true,
 	"direction.select": true, "direction.approve": true,
 	"direction.reject": true, "plan.review": true,
-	"direction.reconsider": true,
-	"question.answer":      true, "permission.decide": true,
+	"direction.reconsider": true, "direction.delete": true,
+	"question.answer": true, "permission.decide": true,
 	"plan.pause": true, "plan.resume": true,
 	"finalization.inspect": true, "finalization.approve": true,
 }
@@ -231,7 +232,7 @@ func validateRequest(request Request) error {
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {
 		return errors.New("idempotency_key is required for supervisor commands")
 	}
-	if request.Operation != "project.register" && request.Operation != "supervisor.stop" && request.ExpectedVersion < 1 {
+	if request.Operation != "project.register" && request.Operation != "supervisor.stop" && request.Operation != "runners.toggle" && request.ExpectedVersion < 1 {
 		return errors.New("expected_version must be positive for this supervisor command")
 	}
 	if request.Operation == "plan.review" && request.ContentHash == "" {

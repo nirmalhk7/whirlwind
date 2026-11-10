@@ -2,9 +2,6 @@ package execution
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -12,9 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 	"whirlwind/internal/process"
-	"whirlwind/internal/redaction"
 )
 
 // Command never starts the target directly. Missing runtime or unsupported hosts fail closed.
@@ -28,84 +23,14 @@ func Command(ctx context.Context, command []string, p Profile) (*exec.Cmd, error
 	// Preserve process recovery token, but not ambient credentials or loader injection.
 	cmd.Env = filteredEnvironment(cmd.Env, p)
 	cmd.Env = append(cmd.Env, "PWD="+p.CWD)
-	if openShellLauncher(p.Launcher) {
-		var raw [32]byte
-		if _, err := rand.Read(raw[:]); err != nil {
-			return nil, fmt.Errorf("%w: cannot create per-sandbox proxy capability", ErrSandbox)
+	if proxyLauncher(p.Launcher) {
+		if err := registerProxyCapabilities(cmd, p); err != nil {
+			return nil, err
 		}
-		token := hex.EncodeToString(raw[:])
-		var releases []func()
-		var secrets []string
-		register := func(secret string) error {
-			release, err := redaction.RegisterSecret(secret, 365*24*time.Hour)
-			if err != nil {
-				return err
-			}
-			releases = append(releases, release)
-			secrets = append(secrets, secret)
-			return nil
-		}
-		if err := register(token); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrSandbox, err)
-		}
-		if err := register(base64.StdEncoding.EncodeToString([]byte("whirlwind:" + token))); err != nil {
-			for _, release := range releases {
-				release()
-			}
-			return nil, fmt.Errorf("%w: %v", ErrSandbox, err)
-		}
-		if p.MCPBroker != nil {
-			if err := register(p.MCPBrokerToken); err != nil {
-				for _, release := range releases {
-					release()
-				}
-				return nil, fmt.Errorf("%w: cannot register MCP broker capability for trace redaction: %v", ErrSandbox, err)
-			}
-		}
-		for _, entry := range cmd.Env {
-			name, value, _ := strings.Cut(entry, "=")
-			if slices.Contains(p.Environment, name) && secretEnvironmentName(name) && value != "" {
-				if len(value) < 16 {
-					for _, release := range releases {
-						release()
-					}
-					return nil, fmt.Errorf("%w: credential environment reference %s is too short to register safely", ErrSandbox, name)
-				}
-				if err := register(value); err != nil {
-					for _, release := range releases {
-						release()
-					}
-					return nil, fmt.Errorf("%w: %v", ErrSandbox, err)
-				}
-			}
-		}
-		if err := process.OnCleanup(cmd, func() {
-			for _, release := range releases {
-				release()
-			}
-		}); err != nil {
-			for _, release := range releases {
-				release()
-			}
-			return nil, fmt.Errorf("%w: %v", ErrSandbox, err)
-		}
-		if err := process.OnStart(cmd, func() error {
-			for _, secret := range secrets {
-				if err := redaction.KeepSecretUntilReleased(secret); err != nil {
-					return fmt.Errorf("cannot retain runtime credential redaction: %w", err)
-				}
-			}
-			return nil
-		}); err != nil {
-			for _, release := range releases {
-				release()
-			}
-			return nil, fmt.Errorf("%w: %v", ErrSandbox, err)
-		}
-		cmd.Env = append(cmd.Env, "WHIRLWIND_OPENSHELL_PROXY_TOKEN="+token)
-		if p.MCPBroker != nil {
-			cmd.Env = append(cmd.Env, "WHIRLWIND_MCP_BROKER_TOKEN="+p.MCPBrokerToken)
-		}
+	}
+	if err := attachNonoLifecycle(cmd, p); err != nil {
+		_ = process.Forget(cmd)
+		return nil, err
 	}
 	return cmd, nil
 }
@@ -125,6 +50,14 @@ func openShellLauncher(launcher string) bool {
 }
 
 func IsOpenShellLauncher(launcher string) bool { return openShellLauncher(launcher) }
+
+func IsNonoLauncher(launcher string) bool {
+	return strings.Contains(filepath.ToSlash(launcher), "/bridges/nono/")
+}
+
+func proxyLauncher(launcher string) bool {
+	return openShellLauncher(launcher) || IsNonoLauncher(launcher)
+}
 
 func prepareSandboxCommand(command []string, profile Profile) (string, []string, error) {
 	if err := validateCommandSetup(command, profile); err != nil {
@@ -180,7 +113,7 @@ func validateMCPBroker(profile Profile) error {
 	if len(profile.MCPBrokerToken) < 32 {
 		return fmt.Errorf("%w: MCP broker capability is missing or too short", ErrSandbox)
 	}
-	if !openShellLauncher(profile.Launcher) {
+	if !proxyLauncher(profile.Launcher) {
 		return fmt.Errorf("%w: MCP broker requires the OpenShell host proxy", ErrSandbox)
 	}
 	for _, root := range append([]string{profile.CWD, profile.RuntimeDir}, append(slices.Clone(profile.ReadRoots), profile.WriteRoots...)...) {
@@ -210,8 +143,12 @@ func sandboxRuntime(profile Profile) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("%w: Node.js unavailable: %v", ErrSandbox, err)
 	}
-	if _, err := openShellCLI(); err != nil {
-		return "", "", fmt.Errorf("%w: NVIDIA OpenShell CLI unavailable: install and configure a healthy local gateway", ErrSandbox)
+	if openShellLauncher(launcher) {
+		if _, err := openShellCLI(); err != nil {
+			return "", "", fmt.Errorf("%w: NVIDIA OpenShell CLI unavailable: install and configure a healthy local gateway", ErrSandbox)
+		}
+	} else if _, err := nonoCLI(); err != nil {
+		return "", "", err
 	}
 	return node, launcher, nil
 }
@@ -239,20 +176,4 @@ func commandArguments(launcher string, profile Profile, command []string) ([]str
 		return nil, err
 	}
 	return sandboxArguments(launcher, profile, command)
-}
-
-func filteredEnvironment(environment []string, profile Profile) []string {
-	var filtered []string
-	openShell := openShellLauncher(profile.Launcher)
-	for _, entry := range environment {
-		name, _, _ := strings.Cut(entry, "=")
-		if name != "WHIRLWIND_MCP_BROKER_TOKEN" && (strings.HasPrefix(name, "WHIRLWIND_PROCESS_") || slices.Contains([]string{"PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "TMPDIR", "WHIRLWIND_OPENSHELL_IMAGE"}, name) || openShell && openShellBootstrapEnvironment(name) || slices.Contains(profile.Environment, name) && !(openShell && strings.HasPrefix(name, "OPENSHELL_"))) {
-			filtered = append(filtered, entry)
-		}
-	}
-	return filtered
-}
-
-func openShellBootstrapEnvironment(name string) bool {
-	return slices.Contains([]string{"WHIRLWIND_OPENSHELL_CLI", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "OPENSHELL_GATEWAY", "OPENSHELL_GATEWAY_ENDPOINT", "OPENSHELL_WORKSPACE"}, name)
 }

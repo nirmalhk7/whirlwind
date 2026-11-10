@@ -21,4 +21,4 @@ The supervisor initializes the current schema directly in `~/.local/share/whirlw
 
 If an older browser/HTTP instance owns the same state directory, `start` fails with an actionable message. Stop that owned instance explicitly with `./bin/whirlwind stop`, then run `start`. Process ownership uses the saved launcher token; unrelated listeners and processes are left alone.
 
-Missing OpenShell configuration does not prevent opening the TUI or inspecting SQLite. Agent execution remains blocked until OpenShell is healthy and the operator supplies a compatible Linux image. See [OpenShell setup](openshell-setup.md).
+Missing nono does not prevent opening the TUI or inspecting SQLite. Agent execution remains blocked until nono 0.81.0 and the configured host ACP runtime are available. See [nono setup](nono-setup.md).

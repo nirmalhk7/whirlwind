@@ -271,6 +271,7 @@ type providerSession struct {
 	mu             sync.Mutex
 	output         Output
 	replaying      atomic.Bool
+	messageID      string
 }
 
 // JSON extracts the outer JSON object or array from agent text and unmarshals it into the supplied destination.

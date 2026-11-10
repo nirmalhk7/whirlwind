@@ -49,7 +49,7 @@ func (e *Engine) Run(ctx context.Context) {
 	lastSettingsError := ""
 	nextReconcile := time.Now().Add(5 * time.Minute)
 	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
-		log.Printf("reconcile standalone OpenShell runtimes: %v", err)
+		log.Printf("reconcile standalone sandbox runtimes: %v", err)
 	}
 	if !e.settings(ctx).Stopped {
 		e.background.Go(func() { e.Reconcile(ctx) })
@@ -83,7 +83,7 @@ func (e *Engine) runCycle(ctx context.Context, lastSettingsError string, nextRec
 		return "", nextReconcile
 	}
 	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
-		log.Printf("standalone OpenShell runtime recovery blocks dispatch: %v", err)
+		log.Printf("standalone sandbox runtime recovery blocks dispatch: %v", err)
 		return lastSettingsError, nextReconcile
 	}
 	e.refreshLocalApprovals(ctx)

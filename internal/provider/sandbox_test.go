@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 )
 
@@ -19,12 +20,29 @@ const (
 
 // Permission allow decisions must never widen the process filesystem boundary.
 func TestACPTerminalCannotWriteOutsideSandbox(t *testing.T) {
-	if os.Getenv(providerLiveAcceptanceVariable) != "1" {
-		t.Fatalf("live OpenShell is required for this filesystem-boundary regression; set %s=1 and configure the disposable local gateway and Linux fake ACP image", providerLiveAcceptanceVariable)
+	t.Setenv("WHIRLWIND_EXECUTION_LAUNCHER", "")
+	outside := filepath.Join(t.TempDir(), "outside-terminal-write")
+	if err := os.WriteFile(outside, []byte("host-writable"), 0600); err != nil {
+		t.Fatal(err)
 	}
-	outside := terminalProbePath()
-	requireImagePathWritableBeforePolicy(t, outside)
-	c, _, finish := newTerminalTestClient(t, t.TempDir(), true, Hooks{Permission: func(context.Context, Permission) (bool, error) { return true, nil }})
+	if err := os.Remove(outside); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, err := execution.ForPolicy(root, false, "nono-terminal", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.AllowedPaths = []string{"**"}
+	c := NewClient(Input{CWD: root, Execution: &profile}, Hooks{Permission: func(context.Context, Permission) (bool, error) { return true, nil }})
+	t.Cleanup(func() {
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	ctx := context.Background()
 	command := `if touch "$1" 2>/dev/null; then echo outside-write-was-allowed; exit 31; else echo outside-write-denied; fi`
 	v, err := c.Handle(ctx, clientMessage("terminal/create", map[string]any{"command": "/bin/sh", "args": []string{"-c", command, "terminal-probe", outside}}))
@@ -47,8 +65,8 @@ func TestACPTerminalCannotWriteOutsideSandbox(t *testing.T) {
 	if !strings.Contains(output, "outside-write-denied") || strings.Contains(output, "outside-write-was-allowed") {
 		t.Fatalf("running payload did not prove the image-writable outside path was denied: %q", output)
 	}
-	if err := finish(); err != nil {
-		t.Fatalf("OpenShell did not verify terminal sandbox cleanup: %v", err)
+	if err := c.Close(); err != nil {
+		t.Fatalf("nono terminal cleanup: %v", err)
 	}
 }
 

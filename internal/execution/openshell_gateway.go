@@ -21,6 +21,7 @@ const openShellDiscoveryLimit = 10 * time.Second
 var ErrIsolationUnverified = errors.New("sandbox error: isolation could not be verified")
 
 type SandboxLifecycle struct {
+	ActiveProcesses     int    `json:"active_processes,omitempty"`
 	UpdatedAt           string `json:"updated_at"`
 	ExecutionID         string `json:"execution_id"`
 	DeadlineAt          string `json:"deadline_at"`

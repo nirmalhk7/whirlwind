@@ -24,6 +24,10 @@ func (a *agentRun) reconcileOpenShellAttempts(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("load prior runtime ownership: %w", err)
 	}
+	return a.reconcileRuntimeRecords(ctx, records)
+}
+
+func (a *agentRun) reconcileRuntimeRecords(ctx context.Context, records []model.Record) error {
 	for _, record := range records {
 		attempt, err := store.Decode[model.Attempt](record)
 		if err != nil {
@@ -32,21 +36,8 @@ func (a *agentRun) reconcileOpenShellAttempts(ctx context.Context) error {
 		if !sameRecoveryWorkItem(attempt, a) || attempt.AttemptID == a.previousAttempt || attempt.AttemptID == "" {
 			continue
 		}
-		if !hasOpenShellIdentity(attempt) {
-			if attempt.RuntimeKind == "local" && (attempt.Status == "interrupted" || attempt.Status == "failed") {
-				if err := reconcileLocalRuntimeProcessTree(filepath.Join(a.Root, "processes")); err != nil {
-					return fmt.Errorf("legacy local attempt %s needs process reconciliation: %w", record.ID, err)
-				}
-				continue
-			}
-			if attempt.Transport == "acp" && (attempt.Status == "running" || attempt.Status == "interrupted") {
-				return fmt.Errorf("%w: legacy attempt %s has no pinned sandbox identity; preserve work and resolve its runtime before retry", execution.ErrIsolationUnverified, record.ID)
-			}
-			continue
-		}
-		profile := execution.Profile{ExecutionID: attempt.ExecutionID, ExecutionGeneration: attempt.ExecutionGeneration, SandboxName: attempt.SandboxName, SandboxID: attempt.SandboxID, LifecycleFile: attempt.LifecycleFile, GatewayName: attempt.GatewayName, GatewayEndpoint: attempt.GatewayEndpoint, Workspace: attempt.Workspace, ExecutionLabelValue: attempt.ExecutionLabelValue}
-		if err := execution.ReconcileOpenShellRuntime(ctx, profile); err != nil {
-			return errors.Join(fmt.Errorf("reconcile prior attempt %s before replacement: %w", record.ID, err), execution.ErrIsolationUnverified)
+		if err := a.reconcilePriorRuntime(ctx, attempt); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -57,7 +48,10 @@ func attemptRuntimeKind(profile *execution.Profile) (string, string) {
 		return "unknown", ""
 	}
 	launcher := filepath.Clean(profile.Launcher)
-	if execution.IsOpenShellLauncher(launcher) {
+	if execution.IsNonoLauncher(launcher) {
+		return "nono", launcher
+	}
+	if execution.IsManagedLauncher(launcher) {
 		return "openshell", launcher
 	}
 	if strings.Contains(filepath.ToSlash(launcher), "/bridges/sandbox/") {
@@ -79,13 +73,13 @@ func reconcileLocalRuntimeProcessTree(registry string) error {
 
 func (a *agentAttempt) reconcileOwnedRuntime() error {
 	profile := a.input.Execution
-	if profile == nil || !execution.IsOpenShellLauncher(profile.Launcher) {
+	if profile == nil || !execution.IsManagedLauncher(profile.Launcher) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if err := execution.ReconcileOpenShellRuntime(ctx, *profile); err != nil {
-		return fmt.Errorf("provider returned before its OpenShell sandbox was isolated: %w", err)
+	if err := execution.ReconcileRuntime(ctx, *profile); err != nil {
+		return fmt.Errorf("provider returned before its sandbox runtime was isolated: %w", err)
 	}
 	return nil
 }
@@ -102,4 +96,35 @@ func sameRecoveryWorkItem(attempt model.Attempt, run *agentRun) bool {
 
 func hasOpenShellIdentity(attempt model.Attempt) bool {
 	return attempt.ExecutionID != "" || attempt.ExecutionLabelValue != "" || attempt.SandboxName != "" || attempt.SandboxID != "" || attempt.LifecycleFile != "" || attempt.GatewayName != "" || attempt.GatewayEndpoint != "" || attempt.Workspace != ""
+}
+
+func (a *agentRun) reconcilePriorRuntime(ctx context.Context, attempt model.Attempt) error {
+	if attempt.RuntimeKind == "nono" && attempt.LifecycleFile == "" {
+		if err := reconcileLocalRuntimeProcessTree(filepath.Join(a.Root, "processes")); err != nil {
+			return err
+		}
+		return nil
+	}
+	if !hasOpenShellIdentity(attempt) {
+		return a.reconcileUnpinnedRuntime(attempt)
+	}
+	profile := execution.Profile{ExecutionID: attempt.ExecutionID, ExecutionGeneration: attempt.ExecutionGeneration, SandboxName: attempt.SandboxName, SandboxID: attempt.SandboxID, LifecycleFile: attempt.LifecycleFile, DeadlineAt: attempt.DeadlineAt, GatewayName: attempt.GatewayName, GatewayEndpoint: attempt.GatewayEndpoint, Workspace: attempt.Workspace, ExecutionLabelValue: attempt.ExecutionLabelValue}
+	if err := execution.ReconcileRuntime(ctx, profile); err != nil {
+		return errors.Join(fmt.Errorf("reconcile prior attempt %s before replacement: %w", attempt.AttemptID, err), execution.ErrIsolationUnverified)
+	}
+	return nil
+}
+
+func (a *agentRun) reconcileUnpinnedRuntime(attempt model.Attempt) error {
+	if attempt.RuntimeKind == "local" && (attempt.Status == "interrupted" || attempt.Status == "failed") {
+		if err := reconcileLocalRuntimeProcessTree(filepath.Join(a.Root, "processes")); err != nil {
+			return fmt.Errorf("legacy local attempt %s needs process reconciliation: %w", attempt.AttemptID, err)
+		}
+		return nil
+	}
+	if attempt.Transport == "acp" && (attempt.Status == "running" || attempt.Status == "interrupted") {
+		return fmt.Errorf("%w: legacy attempt %s has no pinned sandbox identity; preserve work and resolve its runtime before retry", execution.ErrIsolationUnverified, attempt.AttemptID)
+	}
+	return nil
+
 }
