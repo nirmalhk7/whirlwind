@@ -113,6 +113,38 @@ func TestDuplicateProjectPathsOnboardOnce(t *testing.T) {
 	}
 }
 
+func TestYAMLOnboardingQueuesSetupAndInitialIdeationOnlyOnce(t *testing.T) {
+	source := editorSource(t)
+	repository := t.TempDir()
+	if out, err := exec.Command("git", "init", repository).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %s %v", out, err)
+	}
+	paths, _ := json.Marshal([]string{repository, repository})
+	if err := os.WriteFile(source.path, []byte(editorYAML+"projects: "+string(paths)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := source.Refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	operations, err := source.store.List(store.WithoutSettingsSource(context.Background()), "operations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, record := range operations {
+		op, err := store.Decode[model.Operation](record)
+		if err != nil || op.Stage != "queued" || op.Subject == "" {
+			t.Fatalf("invalid initial operation: %+v %v", op, err)
+		}
+		counts[op.Kind]++
+	}
+	if counts["ideation"] != 1 || counts["project_setup"] != 1 || len(operations) != 2 {
+		t.Fatalf("YAML onboarding lost or duplicated initial work: %v", counts)
+	}
+}
+
 func assertProjectStatuses(t *testing.T, source *Source, expected map[string]string) {
 	t.Helper()
 	statuses, err := source.store.List(store.WithoutSettingsSource(context.Background()), "project_status")

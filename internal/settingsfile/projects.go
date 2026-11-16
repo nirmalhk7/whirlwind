@@ -93,5 +93,10 @@ func (c *configurationChanges) registerProject(project model.Project) error {
 			return nil
 		}
 	}
-	return c.appendValue("projects", project.ID, project)
+	project.Status = "draft"
+	if err := c.appendValue("projects", project.ID, project); err != nil {
+		return err
+	}
+	c.values = append(c.values, store.InitialProjectWork(project.ID, time.Now())...)
+	return nil
 }

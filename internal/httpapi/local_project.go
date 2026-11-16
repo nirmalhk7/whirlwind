@@ -52,6 +52,7 @@ func createLocalProject(ctx context.Context, payload json.RawMessage) (model.Pro
 }
 
 func (s *Server) saveLocalProject(ctx context.Context, command LocalCommand, fingerprint string, project model.Project) (json.RawMessage, error) {
+	project.Status = "draft"
 	data, err := json.Marshal(project)
 	if err != nil {
 		return nil, err
@@ -62,8 +63,9 @@ func (s *Server) saveLocalProject(ctx context.Context, command LocalCommand, fin
 	}
 	receipt := &store.Receipt{Key: command.IdempotencyKey, Fingerprint: fingerprint, Status: 201, Body: body}
 	audit := model.Audit{Source: "local_operator", Action: "project.register", Target: project.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	run := model.Operation{Kind: "ideation", Subject: project.ID, Stage: "queued", StartedAt: audit.CreatedAt, Input: map[string]string{"project_id": project.ID, "day": time.Now().UTC().Format("2006-01-02")}}
-	if err := s.Store.Write(ctx, []store.Change{{Kind: "projects", ID: project.ID, Value: project}, {Kind: "audit", ID: store.ID(), Value: audit}, {Kind: "operations", ID: store.ID(), Value: run}}, receipt); err != nil {
+	changes := []store.Change{{Kind: "projects", ID: project.ID, Value: project}, {Kind: "audit", ID: store.ID(), Value: audit}}
+	changes = append(changes, store.InitialProjectWork(project.ID, time.Now())...)
+	if err := s.Store.Write(ctx, changes, receipt); err != nil {
 		return nil, err
 	}
 	return body, nil
