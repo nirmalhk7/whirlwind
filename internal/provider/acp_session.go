@@ -50,6 +50,9 @@ func (s *providerSession) configureACP(session *acpSession) error {
 	if err := s.setACPThinking(session); err != nil {
 		return err
 	}
+	if err := s.confirmACPModel(*session); err != nil {
+		return err
+	}
 	s.recordACPConfig(session.ConfigOptions, session.Models.Current)
 	return nil
 }

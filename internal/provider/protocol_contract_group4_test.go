@@ -71,16 +71,21 @@ func (p *protocolPeer) replyACPFixtureMetadata(f protocolFixture, id string) {
 	} else {
 		result := map[string]any{"sessionId": id, "modes": map[string]any{"currentModeId": "code", "availableModes": []any{map[string]any{"id": "ask", "name": "Ask"}, map[string]any{"id": "code", "name": "Code"}}}}
 		if f.Scenario == contractModelConfig || f.Scenario == contractCatalogConfig || strings.HasPrefix(f.Scenario, "thinking") {
-			result["configOptions"] = []any{map[string]any{"id": contractModelOptionID, "category": "model", "type": "select", "currentValue": "default-model", "options": []any{map[string]any{"value": contractSelectedModel, "name": contractSelectedModelName}}}}
+			result["configOptions"] = []any{map[string]any{"id": contractModelOptionID, "category": "model", "type": "select", "currentValue": contractDefaultModel, "options": []any{map[string]any{"value": contractSelectedModel, "name": contractSelectedModelName}}}}
 		}
 		if f.Scenario == contractModelLegacy || f.Scenario == contractCatalogLegacy {
-			result["models"] = map[string]any{"currentModelId": "default-model", "availableModels": []any{map[string]any{"modelId": contractSelectedModel, "name": contractSelectedModelName}}}
+			result["models"] = map[string]any{"currentModelId": contractDefaultModel, "availableModels": []any{map[string]any{"modelId": contractSelectedModel, "name": contractSelectedModelName}}}
 		}
+		p.addConfirmationMetadata(f, result)
 		p.reply(result)
 	}
 }
 
 func (p *protocolPeer) configureACPFixtureModel(f protocolFixture) {
+	if strings.HasPrefix(f.Scenario, "confirmation-") {
+		p.configureConfirmationModel(f)
+		return
+	}
 	var params map[string]any
 	if f.Scenario == contractModelConfig || strings.HasPrefix(f.Scenario, "thinking") {
 		params = p.read("session/set_config_option")
@@ -88,12 +93,27 @@ func (p *protocolPeer) configureACPFixtureModel(f protocolFixture) {
 		if strings.HasPrefix(f.Scenario, "thinking") {
 			p.configureACPFixtureThinking(f)
 		} else {
-			p.reply(map[string]any{})
+			p.reply(p.confirmationMetadata(protocolFixture{Scenario: "confirmation-config"}, contractSelectedModel))
 		}
 	}
 	if f.Scenario == contractModelLegacy {
 		params = p.read("session/set_model")
 		p.require(params["sessionId"] == testSessionID && params["modelId"] == f.Model, "ACP selected model missing")
-		p.reply(map[string]any{})
+		p.reply(p.confirmationMetadata(protocolFixture{Scenario: "confirmation-legacy"}, contractSelectedModel))
+	}
+}
+
+func (p *protocolPeer) addConfirmationMetadata(f protocolFixture, result map[string]any) {
+	if strings.HasPrefix(f.Scenario, "confirmation-") {
+		current := contractDefaultModel
+		if f.Selection == confirmationAlreadyCurrent {
+			current = contractSelectedModel
+		}
+		for key, value := range p.confirmationMetadata(f, current) {
+			result[key] = value
+		}
+		if f.Selection == "missing-option" && strings.HasSuffix(f.Scenario, "config") {
+			result["models"] = map[string]any{"currentModelId": contractSelectedModel}
+		}
 	}
 }

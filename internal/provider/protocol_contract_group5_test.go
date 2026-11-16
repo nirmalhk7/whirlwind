@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -21,9 +22,20 @@ func (p *protocolPeer) configureACPFixtureThinking(f protocolFixture) {
 	}
 	params := p.read("session/set_config_option")
 	p.require(params["configId"] == "effort" && params["value"] == "high" && params["sessionId"] == testSessionID, "thinking setting missing")
+	if f.Selection == "thinking-missing" {
+		p.reply(map[string]any{})
+		return
+	}
+	currentModel, currentThinking := contractSelectedModel, "high"
+	if f.Selection == "model-drift" {
+		currentModel = "wrong-model"
+	}
+	if f.Selection == "thinking-ignored" {
+		currentThinking = "low"
+	}
 	p.reply(map[string]any{"configOptions": []any{
-		map[string]any{"id": contractModelOptionID, "category": "model", "type": "select", "currentValue": contractSelectedModel, "options": []any{map[string]any{"value": contractSelectedModel, "name": contractSelectedModelName}}},
-		map[string]any{"id": "effort", "name": "Thinking", "category": "thought_level", "type": "select", "currentValue": "high", "options": []any{map[string]any{"value": "high", "name": "High"}}},
+		map[string]any{"id": contractModelOptionID, "category": "model", "type": "select", "currentValue": currentModel, "options": []any{map[string]any{"value": contractSelectedModel, "name": contractSelectedModelName}}},
+		map[string]any{"id": "effort", "name": "Thinking", "category": "thought_level", "type": "select", "currentValue": currentThinking, "options": []any{map[string]any{"value": "high", "name": "High"}}},
 	}})
 }
 
@@ -46,6 +58,11 @@ func (p *protocolPeer) readFixturePrompt(f protocolFixture) {
 		method, idKey, promptKey = "turn/start", "threadId", "input"
 	}
 	params := p.read(method)
+	if f.PromptFile != "" {
+		if err := os.WriteFile(f.PromptFile, []byte("prompted"), 0600); err != nil {
+			os.Exit(2)
+		}
+	}
 	p.require(params[idKey] == testSessionID, "prompt session ID missing")
 	p.require(reflect.DeepEqual(params[promptKey], []any{map[string]any{"type": "text", "text": contractPrompt}}), "outgoing prompt text lost")
 	if f.Scenario == "failed" {
@@ -96,9 +113,10 @@ func (p *protocolPeer) fixtureCallbacks(f protocolFixture, cwd string) {
 
 func (p *protocolPeer) finishFixtureTurn(f protocolFixture) {
 	stop := "end_turn"
-	if f.Scenario == "refusal" {
+	switch f.Scenario {
+	case "refusal":
 		stop = "refusal"
-	} else if f.Scenario == "interrupted" {
+	case "interrupted":
 		stop = "interrupted"
 	}
 	p.reply(map[string]any{"stopReason": stop})

@@ -39,19 +39,15 @@ func (s *providerSession) setACPConfig(session *acpSession, id, value string) er
 	if err := s.rpc.Call(s.ctx, "session/set_config_option", map[string]any{"sessionId": session.ID, "configId": id, "value": value}, &response); err != nil {
 		return err
 	}
-	if response.ConfigOptions != nil {
-		session.ConfigOptions = response.ConfigOptions
-	} else {
+	if response.ConfigOptions == nil {
 		if s.input.Thinking != nil && id == s.input.Thinking.ConfigID {
 			return fmt.Errorf("ACP did not confirm selected thinking level %q", value)
 		}
-		// Older model selectors returned an empty response. Retain advertised options.
-		for n := range session.ConfigOptions {
-			if session.ConfigOptions[n].ID == id {
-				session.ConfigOptions[n].Current, _ = json.Marshal(value)
-			}
-		}
+		return s.confirmACPModel(acpSession{})
 	}
+	session.ConfigOptions = response.ConfigOptions
+	// Full config metadata supersedes legacy state from before this mutation.
+	session.Models.Current = ""
 	return nil
 }
 
@@ -67,13 +63,34 @@ func (s *providerSession) setACPModel(session *acpSession) error {
 	if !found {
 		return fmt.Errorf("ACP model selection unavailable for %q; load supported models and choose an advertised model", s.input.Model)
 	}
+	// Session metadata already confirms the requested model; avoid an unverifiable mutation.
+	if catalog.Current == s.input.Model {
+		return nil
+	}
 	if configID != "" {
-		return s.setACPConfig(session, configID, s.input.Model)
+		if err := s.setACPConfig(session, configID, s.input.Model); err != nil {
+			return err
+		}
+	} else {
+		var response acpSession
+		if err := s.rpc.Call(s.ctx, "session/set_model", map[string]any{"sessionId": session.ID, "modelId": s.input.Model}, &response); err != nil {
+			return err
+		}
+		// Use only adapter-reported state, never the requested value as confirmation.
+		session.Models = response.Models
+		session.ConfigOptions = response.ConfigOptions
 	}
-	if err := s.rpc.Call(s.ctx, "session/set_model", map[string]any{"sessionId": session.ID, "modelId": s.input.Model}, nil); err != nil {
-		return err
+	return s.confirmACPModel(*session)
+}
+
+func (s *providerSession) confirmACPModel(session acpSession) error {
+	if s.input.Model == "" {
+		return nil
 	}
-	session.Models.Current = s.input.Model
+	catalog, _ := session.modelCatalog()
+	if catalog.Current != s.input.Model {
+		return fmt.Errorf("ACP did not confirm selected model %q (effective model %q); update or configure the adapter to report current model metadata, then reload supported models", s.input.Model, catalog.Current)
+	}
 	return nil
 }
 

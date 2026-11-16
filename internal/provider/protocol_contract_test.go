@@ -36,6 +36,8 @@ const (
 )
 
 type protocolFixture struct {
+	Selection  string
+	PromptFile string
 	Kind       string
 	ACPProfile string
 	Scenario   string
