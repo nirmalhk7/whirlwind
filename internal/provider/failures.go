@@ -124,7 +124,7 @@ func namedFailure(message string) FailureKind {
 }
 
 func remoteFailure(err error) FailureKind {
-	kind := namedFailure(err.Error())
+	kind := namedFailure(failureText(err))
 	if kind == FailureAuth || kind == FailureQuota || kind == FailurePolicy {
 		return kind
 	}
@@ -135,6 +135,28 @@ func remoteFailure(err error) FailureKind {
 		}
 	}
 	return kind
+}
+
+// Match the provider's evidence without interpreting suggested logins or the
+// operator's provider name as a failure cause. Preserve surrounding/joined errors.
+func failureText(err error) string {
+	if guidance, ok := err.(*metadataGuidanceError); ok {
+		return failureText(guidance.cause)
+	}
+	message := err.Error()
+	var causes []error
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		causes = wrapped.Unwrap()
+	case interface{ Unwrap() error }:
+		causes = []error{wrapped.Unwrap()}
+	}
+	for _, cause := range causes {
+		if cause != nil {
+			message = strings.ReplaceAll(message, cause.Error(), failureText(cause))
+		}
+	}
+	return message
 }
 
 func callerCancellation(err error) bool {

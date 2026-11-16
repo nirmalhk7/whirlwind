@@ -22,14 +22,32 @@ func (s *Store) ReserveBudget(ctx context.Context, r model.BudgetReservation, bu
 			return err
 		}
 		budget = effectiveBudget
-		if err := budget.Validate(); err != nil {
+		canonical := false
+		if plan, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", r.TaskID); err == nil {
+			canonical = plan.IdeaID != "" && r.Role != "ideate"
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		validation := budget.Validate
+		if canonical {
+			validation = budget.ValidateAccounting
+		}
+		if err := validation(); err != nil {
 			return fmt.Errorf("%w: %v", ErrBudgetExceeded, err)
 		}
 		report, err := taskUsageTx(ctx, tx, r.TaskID)
 		if err != nil {
 			return err
 		}
-		remaining, reserve, err := validateRuntimeBudget(r, budget, report)
+		remaining, reserve, err := 0, verificationReserve{}, error(nil)
+		if canonical {
+			remaining = r.RuntimeSeconds
+			if remaining <= 0 || (r.Kind != "verification" && remaining > 300) {
+				remaining = 300
+			}
+		} else {
+			remaining, reserve, err = validateRuntimeBudget(r, budget, report)
+		}
 		if err != nil {
 			return err
 		}
@@ -82,7 +100,7 @@ func reservationBudget(ctx context.Context, tx *sql.Tx, reservation model.Budget
 	} else if !errors.Is(err, ErrNotFound) {
 		return false, budget, err
 	}
-	if task, _, err := txResource[model.Task](ctx, tx, "tasks", reservation.TaskID); err == nil && task.Budget != nil && reservation.Role != "ideate" {
+	if task, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", reservation.TaskID); err == nil && task.Budget != nil && reservation.Role != "ideate" {
 		budget = *task.Budget
 	} else if err != nil && !errors.Is(err, ErrNotFound) {
 		return false, budget, err

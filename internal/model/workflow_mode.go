@@ -52,7 +52,7 @@ type SourceRef struct {
 	Revision   string `json:"revision,omitempty"`
 }
 
-func (t Task) Cancelled() bool { return t.Stage == "cancelled" }
+func (t ExecutionPlan) Cancelled() bool { return t.Stage == "cancelled" }
 
 type PlanDocument struct {
 	Path         string `json:"path"`
@@ -71,7 +71,7 @@ type PlanDraft struct {
 	Path        string `json:"path"`
 	ProjectID   string `json:"project_id"`
 	PlanVersion int    `json:"plan_version"`
-	TaskID      string `json:"task_id"`
+	TaskID      string `json:"plan_id"`
 }
 type Submission struct {
 	Stage            string          `json:"stage"`
@@ -86,6 +86,7 @@ type Submission struct {
 // LocalDelivery records a local-only promotion of the exact accepted candidate
 // commit. Its provenance stays tied to the reviewed commit and verification.
 type LocalDelivery struct {
+	DeliveryCommit    string     `json:"delivery_commit,omitempty"`
 	UnmetRequirements []string   `json:"unmet_requirements,omitempty"`
 	Adherence         *Adherence `json:"adherence,omitempty"`
 	VerificationID    string     `json:"verification_id,omitempty"`
@@ -108,7 +109,7 @@ type LocalDelivery struct {
 
 type ReviewerWorktree struct {
 	ID             string `json:"id"`
-	TaskID         string `json:"task_id"`
+	TaskID         string `json:"plan_id"`
 	SourceWorktree string `json:"source_worktree"`
 	Worktree       string `json:"worktree"`
 	Commit         string `json:"commit"`

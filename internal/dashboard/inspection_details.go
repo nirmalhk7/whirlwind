@@ -18,7 +18,10 @@ func (d *Dashboard) selectPlan(index int, _, _ string, _ rune) {
 	plan := d.planRows[index]
 	d.planID = plan.ID
 	var text strings.Builder
-	fmt.Fprintf(&text, "%s\n\nState: %s | Plan version: %d\nDelivery branch: %s\nWorktree: %s\nReviewed commit: %s\nStored task score (raw; not acceptance evidence): %g\n\n", planTitle(plan), plan.Stage, plan.PlanVersion, plan.Branch, plan.Worktree, plan.ReviewedCommit, plan.Score)
+	fmt.Fprintf(&text, "%s\n\nState: %s | Plan version: %d\nDelivery branch: %s\nWorktree: %s\nReviewed commit: %s\nStored plan score (raw; not acceptance evidence): %g\n\n", planTitle(plan), plan.Stage, plan.PlanVersion, plan.Branch, plan.Worktree, plan.ReviewedCommit, plan.Score)
+	if plan.PlanDocument != nil {
+		fmt.Fprintf(&text, "Plan document: %s\nApproved document hash: %s\n", plan.PlanDocument.Path, plan.PlanDocument.ApprovedHash)
+	}
 	if plan.Error != "" {
 		fmt.Fprintf(&text, "Error: %s\n\n", plan.Error)
 	}
@@ -36,7 +39,7 @@ func (d *Dashboard) selectPlan(index int, _, _ string, _ rune) {
 	d.detail.SetText(text.String())
 }
 
-func (d *Dashboard) writeReviewAdherence(text *strings.Builder, task model.Task) {
+func (d *Dashboard) writeReviewAdherence(text *strings.Builder, task model.ExecutionPlan) {
 	review, ok := d.currentReview(task)
 	if !ok {
 		return
@@ -50,7 +53,7 @@ func (d *Dashboard) writeReviewAdherence(text *strings.Builder, task model.Task)
 	}
 }
 
-func (d *Dashboard) currentReview(task model.Task) (model.Review, bool) {
+func (d *Dashboard) currentReview(task model.ExecutionPlan) (model.Review, bool) {
 	if task.ReviewID == "" || task.VerificationID == "" || task.ReviewedCommit == "" {
 		return model.Review{}, false
 	}
@@ -82,14 +85,14 @@ func (d *Dashboard) projectPolicyHash(projectID string) (string, bool) {
 	return "", false
 }
 
-func reviewAdherenceMatchesTask(review model.Review, task model.Task, policyHash string) bool {
+func reviewAdherenceMatchesTask(review model.Review, task model.ExecutionPlan, policyHash string) bool {
 	if review.Adherence == nil || review.Adherence.Total == 0 || review.Provenance == nil {
 		return false
 	}
 	return reviewProvenanceMatchesTask(*review.Provenance, task, policyHash) && reviewProvenanceMatchesTask(review.Adherence.Provenance, task, policyHash)
 }
 
-func reviewProvenanceMatchesTask(provenance model.Provenance, task model.Task, policyHash string) bool {
+func reviewProvenanceMatchesTask(provenance model.Provenance, task model.ExecutionPlan, policyHash string) bool {
 	return provenance.Task == task.ID && provenance.PlanVersion == task.PlanVersion && provenance.Head == task.ReviewedCommit && provenance.PolicyHash == policyHash && provenance.ReviewID == task.ReviewID && provenance.VerificationID == task.VerificationID
 }
 
@@ -198,14 +201,14 @@ func recordedRuntimeValue(value string) string {
 	return value
 }
 
-func (d *Dashboard) writeEvidence(text *strings.Builder, plan model.Task) {
+func (d *Dashboard) writeEvidence(text *strings.Builder, plan model.ExecutionPlan) {
 	for _, kind := range []string{"verification", "reviews", "permissions"} {
 		for _, record := range d.snapshot[kind] {
 			var value map[string]any
 			if json.Unmarshal(record.Data, &value) != nil {
 				continue
 			}
-			if value["task"] != plan.ID && value["task_id"] != plan.ID && record.ID != plan.VerificationID && record.ID != plan.ReviewID {
+			if value["task"] != plan.ID && value["plan_id"] != plan.ID && record.ID != plan.VerificationID && record.ID != plan.ReviewID {
 				continue
 			}
 			pretty, _ := json.MarshalIndent(value, "", "  ")
@@ -229,12 +232,16 @@ func remainingDeadline(value string) string {
 	return remaining.String()
 }
 
-func (d *Dashboard) writeDelivery(text *strings.Builder, plan model.Task) {
+func (d *Dashboard) writeDelivery(text *strings.Builder, plan model.ExecutionPlan) {
 	if plan.Delivery == nil {
 		return
 	}
 	delivery := plan.Delivery
-	fmt.Fprintf(text, "\nLocal delivery\nStage: %s | branch: %s | commit: %s\n", delivery.Stage, delivery.Branch, delivery.ReviewedCommit)
+	commit := delivery.DeliveryCommit
+	if commit == "" {
+		commit = delivery.ReviewedCommit
+	}
+	fmt.Fprintf(text, "\nLocal delivery\nStage: %s | branch: %s | commit: %s\nAccepted source commit: %s\nAccepted tree: %s\nVerification: %s\nReview: %s\n", delivery.Stage, delivery.Branch, commit, delivery.ReviewedCommit, delivery.Tree, delivery.VerificationID, delivery.ReviewID)
 	if delivery.Adherence != nil {
 		fmt.Fprintf(text, "Computed adherence: %g%%\n", delivery.Adherence.Score)
 	} else {

@@ -29,9 +29,9 @@ func removeProject(ctx context.Context, tx *sql.Tx, id string, expected int) err
 	var busy bool
 	prefix := "ideation:" + id + ":"
 	err := tx.QueryRowContext(ctx, `SELECT
- EXISTS(SELECT 1 FROM resources WHERE kind='tasks' AND json_extract(data,'$.project_id')=? AND json_extract(data,'$.stage') NOT IN ('paused','questions','approval','pr_created','complete')) OR
+ EXISTS(SELECT 1 FROM resources WHERE kind='execution_plans' AND json_extract(data,'$.project_id')=? AND json_extract(data,'$.stage') NOT IN ('paused','questions','approval','pr_created','complete')) OR
  EXISTS(SELECT 1 FROM resources WHERE kind='operations' AND json_extract(data,'$.kind')='ideation' AND json_extract(data,'$.subject')=? AND json_extract(data,'$.stage')='running') OR
- EXISTS(SELECT 1 FROM leases WHERE expires>? AND (id=? OR substr(id,1,length(?))=? OR id IN (SELECT 'task:'||id FROM resources WHERE kind='tasks' AND json_extract(data,'$.project_id')=?)))`, id, id, time.Now().UnixMilli(), "generation:"+id, prefix, prefix, id).Scan(&busy)
+ EXISTS(SELECT 1 FROM leases WHERE expires>? AND (id=? OR substr(id,1,length(?))=? OR id IN (SELECT 'task:'||id FROM resources WHERE kind='execution_plans' AND json_extract(data,'$.project_id')=?)))`, id, id, time.Now().UnixMilli(), "generation:"+id, prefix, prefix, id).Scan(&busy)
 	if err != nil {
 		return err
 	}

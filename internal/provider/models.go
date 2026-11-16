@@ -152,7 +152,7 @@ func ModelsWithSupervisorDir(ctx context.Context, p model.Provider, cwd, supervi
 	s.rpc = rpc
 	defer func() { err = errors.Join(err, rpc.Close()) }()
 	catalog, err = s.discoverModelCatalog(cwd)
-	return catalog, authenticationACPError(p, err)
+	return catalog, metadataACPError(p, err)
 }
 
 func (s *providerSession) discoverModelCatalog(cwd string) (ModelCatalog, error) {

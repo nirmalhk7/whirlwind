@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
+	"whirlwind/internal/verification"
 	"whirlwind/prompts/agents"
 )
 
@@ -34,7 +35,7 @@ func (step *taskStep) repair() (bool, error) {
 
 func (step *taskStep) verifyRepair() error {
 	if err := step.verify(step.ctx, step.project, &step.task); err != nil {
-		if errors.Is(err, store.ErrPersistence) {
+		if errors.Is(err, store.ErrPersistence) || errors.Is(err, verification.ErrJobSetup) {
 			return err
 		}
 		step.task.ChecksPassed = false

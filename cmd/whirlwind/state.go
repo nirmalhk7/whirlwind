@@ -17,6 +17,9 @@ func (c config) openState() (s *store.Store, lock *os.File, err error) {
 	if err = os.MkdirAll(c.data, 0700); err != nil {
 		return nil, nil, err
 	}
+	if err = prepareFreshState(c.data); err != nil {
+		return nil, nil, err
+	}
 	lock, err = process.Lock(filepath.Join(c.data, "server.lock"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("another Whirlwind process owns data directory: %w", err)

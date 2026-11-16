@@ -27,7 +27,7 @@ func (step *taskStep) prDescription() string {
 	var verified verification.Report
 	for _, record := range verificationRecords {
 		var v struct {
-			Task    string              `json:"task"`
+			Task    string              `json:"plan_id"`
 			Version int                 `json:"plan_version"`
 			Report  verification.Report `json:"report"`
 		}

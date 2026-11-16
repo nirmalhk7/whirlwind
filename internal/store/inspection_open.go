@@ -13,8 +13,11 @@ func OpenReadOnly(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	uri := url.URL{Scheme: "file", Path: absolute, RawQuery: "mode=ro"}
-	db, err := sql.Open("sqlite", uri.String())
+	dsn, err := sqliteURI(absolute, true)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
@@ -23,5 +26,24 @@ func OpenReadOnly(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	return &Store{DB: db}, nil
+	return &Store{DB: db, runLogs: newRunLogStorage(absolute)}, nil
+}
+
+// Driver pragmas apply to every connection, including pool replacements.
+func sqliteURI(path string, readOnly bool) (string, error) {
+	query := url.Values{"_pragma": []string{"foreign_keys(1)", "busy_timeout(5000)"}}
+	if readOnly {
+		query.Set("mode", "ro")
+	}
+	uri := url.URL{Scheme: "file", RawQuery: query.Encode()}
+	if path == ":memory:" && !readOnly {
+		uri.Opaque = ":memory:"
+	} else {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return "", err
+		}
+		uri.Path = absolute
+	}
+	return uri.String(), nil
 }

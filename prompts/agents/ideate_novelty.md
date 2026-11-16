@@ -12,5 +12,6 @@ Current approved plans for this project:
 {{.ApprovedPlans}}
 Trusted pending human reconsideration requests:
 {{.HumanReconsiderations}}
-Current changed repository index entries:
+Indexed source paths and candidate-linked frozen source files (captured with the repository snapshot):
 {{.Repository}}
+The path inventory covers safe indexed text files. A missing indexed path does not prove that an ignored or binary asset is absent; treat those as unknown unless the supplied source proves otherwise. Incomplete source entries are not evidence of absence.

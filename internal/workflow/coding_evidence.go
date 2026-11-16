@@ -8,7 +8,7 @@ import (
 	"whirlwind/internal/model"
 )
 
-func (e *Engine) requireTDDEvidence(ctx context.Context, t model.Task) error {
+func (e *Engine) requireTDDEvidence(ctx context.Context, t model.ExecutionPlan) error {
 	files, err := tddChangedFiles(ctx, t.Worktree, t.Base, "")
 	if err != nil {
 		return err
@@ -35,7 +35,7 @@ func hasExecutableChange(files []string) bool {
 	return false
 }
 
-func (e *Engine) loadTDDEvidence(ctx context.Context, t model.Task) ([]tddPair, map[string]string, error) {
+func (e *Engine) loadTDDEvidence(ctx context.Context, t model.ExecutionPlan) ([]tddPair, map[string]string, error) {
 	rows, err := e.Store.List(ctx, "tdd_checks")
 	if err != nil {
 		return nil, nil, err
@@ -70,7 +70,7 @@ func coveredByTDDPair(pairs []tddPair, file string, current map[string]string) b
 	return false
 }
 
-func (e *Engine) requireTDDUnitCoverage(ctx context.Context, t model.Task, pairs []tddPair) error {
+func (e *Engine) requireTDDUnitCoverage(ctx context.Context, t model.ExecutionPlan, pairs []tddPair) error {
 	if t.Plan == nil {
 		return errors.New("TDD evidence requires an implementation plan")
 	}
@@ -112,7 +112,7 @@ func coveredByTDDUnit(pairs []tddPair, unit, file string) bool {
 
 type tddPair struct{ red, green tddCheck }
 
-func currentTDDPairs(rows []model.Record, task model.Task, current map[string]string) []tddPair {
+func currentTDDPairs(rows []model.Record, task model.ExecutionPlan, current map[string]string) []tddPair {
 	type key struct{ unit, check string }
 	reds := map[key]tddCheck{}
 	var pairs []tddPair
@@ -133,7 +133,7 @@ func currentTDDPairs(rows []model.Record, task model.Task, current map[string]st
 	return pairs
 }
 
-func usableTDDCheck(row model.Record, task model.Task) (tddCheck, bool) {
+func usableTDDCheck(row model.Record, task model.ExecutionPlan) (tddCheck, bool) {
 	var check tddCheck
 	if json.Unmarshal(row.Data, &check) != nil {
 		return check, false

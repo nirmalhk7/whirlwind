@@ -49,7 +49,7 @@ func TestAttemptPersistsInputStreamsAndMetrics(t *testing.T) {
 	if metric["attempt_id"] != sessions[0].ID {
 		t.Fatalf("metrics not linked: %s", metrics[0].Data)
 	}
-	var plan model.Plan
+	var plan model.PlanSpecification
 	if err := json.Unmarshal([]byte(out.Text), &plan); err != nil || plan.Objective != "Add file" || out.SessionID != "native-s" {
 		t.Fatalf("final planner output lost: %+v %v", out, err)
 	}
@@ -98,11 +98,11 @@ func TestPublicationIntentExistsBeforeRemoteWrite(t *testing.T) {
 	if err := e.Step(ctx, task.ID); err != nil {
 		t.Fatal(err)
 	}
-	stored, err := e.Store.Get(ctx, "tasks", task.ID)
+	stored, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	persisted, err := store.Decode[model.Task](stored)
+	persisted, err := store.Decode[model.ExecutionPlan](stored)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,11 +137,11 @@ func TestVerificationEvidenceFailureBlocksProgress(t *testing.T) {
 	if task.Stage != "submitting" || task.VerificationID != previousVerification {
 		t.Fatalf("failed verification advanced the accepted task: stage=%s verification=%s", task.Stage, task.VerificationID)
 	}
-	stored, err := e.Store.Get(ctx, "tasks", task.ID)
+	stored, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	persisted, err := store.Decode[model.Task](stored)
+	persisted, err := store.Decode[model.ExecutionPlan](stored)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -35,10 +35,18 @@ const (
 )
 
 type Index struct {
-	Commit             string           `json:"commit"`
-	Version            int              `json:"version"`
-	Files              map[string]Entry `json:"files"`
-	EmbeddingValidated bool             `json:"embedding_validated"`
+	Commit              string            `json:"commit"`
+	Version             int               `json:"version"`
+	Files               map[string]Entry  `json:"files"`
+	EmbeddingValidated  bool              `json:"embedding_validated"`
+	WorkingTreeFiles    map[string]string `json:"-"`
+	WorkingTreeDeleted  map[string]bool   `json:"-"`
+	WorkingTreeExcluded map[string]bool   `json:"-"`
+}
+
+// IsSourcePath reports whether the path uses a language that the repository index parses for code structure.
+func IsSourcePath(path string) bool {
+	return slices.Contains([]string{".go", ".py", ".ts", ".tsx", ".js", ".rs", ".java", ".c", ".cpp"}, filepath.Ext(path))
 }
 
 // git runs a read-only Git query in the repository and trims its output.
@@ -121,8 +129,8 @@ func (i Index) Search(query string, limit int) []Entry {
 func (i Index) Category() string {
 	weights := map[string]int{}
 	for path, entry := range i.Files {
-		extension := filepath.Ext(path)
-		if slices.Contains([]string{".go", ".py", ".ts", ".tsx", ".js", ".rs", ".java", ".c", ".cpp"}, extension) {
+		if IsSourcePath(path) {
+			extension := filepath.Ext(path)
 			weights[extension] += len(entry.Text)
 		}
 	}

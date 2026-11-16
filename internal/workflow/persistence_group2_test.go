@@ -71,7 +71,7 @@ func TestUncertainPublicationReconcilesFrozenIntent(t *testing.T) {
 	if err != nil || finished || step.task.Delivery == nil || step.task.Delivery.Stage != "prepared" {
 		t.Fatalf("local delivery intent not prepared: finished=%v delivery=%+v err=%v", finished, step.task.Delivery, err)
 	}
-	if err := e.Store.Put(ctx, "tasks", step.task.ID, step.task, step.record.Version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", step.task.ID, step.task, step.record.Version); err != nil {
 		t.Fatal(err)
 	}
 	step.record.Version++
@@ -93,11 +93,11 @@ func TestUncertainPublicationReconcilesFrozenIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	taskRecord, err := reopened.Get(ctx, "tasks", task.ID)
+	taskRecord, err := reopened.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err = store.Decode[model.Task](taskRecord)
+	task, err = store.Decode[model.ExecutionPlan](taskRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,18 +108,18 @@ func TestUncertainPublicationReconcilesFrozenIntent(t *testing.T) {
 	if err != nil || finished || step.task.Delivery.Stage != "snapshot_ready" {
 		t.Fatalf("recovery did not recognize completed promotion: finished=%v delivery=%+v err=%v", finished, step.task.Delivery, err)
 	}
-	if err := reopened.Put(ctx, "tasks", step.task.ID, step.task, step.record.Version); err != nil {
+	if err := reopened.Put(ctx, "execution_plans", step.task.ID, step.task, step.record.Version); err != nil {
 		t.Fatal(err)
 	}
 	step.record.Version++
 	if finished, err = step.submitting(); err != nil || !finished {
 		t.Fatalf("recovered local delivery did not finish: finished=%v err=%v", finished, err)
 	}
-	completedRecord, err := reopened.Get(ctx, "tasks", task.ID)
+	completedRecord, err := reopened.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := store.Decode[model.Task](completedRecord)
+	completed, err := store.Decode[model.ExecutionPlan](completedRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestAnsweredNativeQuestionsSurviveFreshAttempt(t *testing.T) {
 
 func answeredQuestionPlan(t *testing.T) string {
 	t.Helper()
-	plan := model.Plan{
+	plan := model.PlanSpecification{
 		Objective:                "Preserve the answered database choice",
 		What:                     "Use the saved answer in planning",
 		Why:                      "A fresh attempt must retain human decisions",

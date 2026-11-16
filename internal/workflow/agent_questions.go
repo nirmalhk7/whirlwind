@@ -15,5 +15,5 @@ func (a *agentAttempt) questions(ctx context.Context, questions []model.Question
 	if err := a.Store.Write(persistCtx, []store.Change{{Kind: "questions", ID: set.ID, Value: set}, {Kind: "inbox", ID: notification.ID, Value: notification}}, nil); err != nil {
 		return nil, a.persistenceError(err)
 	}
-	return nil, ErrHumanDecisionPending
+	return nil, a.endForHumanDecision()
 }

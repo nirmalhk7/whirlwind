@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 	"whirlwind/internal/workflow"
@@ -35,16 +34,19 @@ func TestMainScreenShowsIdeasInInbox(t *testing.T) {
 }
 
 func TestRunDetailsRemainAccessibleFromRuns(t *testing.T) {
-	d := New()
-	d.Present(control.Snapshot{
+	snapshot := control.Snapshot{
 		"projects": {record("p", model.Project{ID: "p", Name: "Repo"})},
 		"sessions": {record("run", model.Attempt{ProjectID: "p", Provider: "codex", Status: "failed", Error: "connection lost"})},
-	})
-	d.focus = 2
+	}
+	capture := prepareRunTailFixture(t, snapshot)
+	d := New()
+	dashboardScreen(t, d)
+	d.Present(snapshot)
+	d.SetFocus(d.runs)
 	d.input(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
-	view, ok := d.modal.(*tview.TextView)
-	if !ok || !strings.Contains(view.GetTitle(), "Run logs") || !strings.Contains(view.GetText(false), "connection lost") {
-		t.Fatal("run detail is not available from Runs")
+	body, err := os.ReadFile(capture)
+	if err != nil || !strings.Contains(string(body), "connection lost") {
+		t.Fatalf("terminal run details unavailable: %v", err)
 	}
 }
 
@@ -63,9 +65,9 @@ func TestInboxLabelsIdeasWithCategory(t *testing.T) {
 func TestTaskInspectionOpensDetailsWhenInboxContainsIdeas(t *testing.T) {
 	d := New()
 	d.Present(control.Snapshot{
-		"projects":   {record("p", model.Project{ID: "p"})},
-		"directions": {record("idea", model.Direction{ID: "idea", ProjectID: "p", Title: "Idea"})},
-		"tasks":      {record("task", model.Task{ID: "task", ProjectID: "p", Plan: &model.Plan{Objective: "Inspect me"}})},
+		"projects":        {record("p", model.Project{ID: "p"})},
+		"directions":      {record("idea", model.Direction{ID: "idea", ProjectID: "p", Title: "Idea"})},
+		"execution_plans": {record("task", model.ExecutionPlan{ID: "task", ProjectID: "p", Plan: &model.PlanSpecification{Objective: "Inspect me"}})},
 	})
 	d.chooseTask()
 	d.plans.GetSelectedFunc()(0, "", "", 0)
@@ -83,7 +85,7 @@ func TestMainScreenUsesProportionalPanelLayout(t *testing.T) {
 	d.ForceDraw()
 	_, _, projectWidth, projectHeight := d.projects.GetRect()
 	_, _, _, agentHeight := d.agents.GetRect()
-	if projectWidth < 36 || projectWidth > 42 {
+	if projectWidth < 31 || projectWidth > 34 {
 		t.Errorf("left column width = %d", projectWidth)
 	}
 	if projectHeight < 11 || projectHeight > 16 || agentHeight < 11 || agentHeight > 16 {
@@ -175,11 +177,11 @@ func TestInboxLabelsAgentQuestionsWithTheirRoles(t *testing.T) {
 			t.Cleanup(screen.Fini)
 			screen.SetSize(140, 45)
 			d.Present(control.Snapshot{
-				"projects":  {record("p", model.Project{ID: "p"})},
-				"tasks":     {record("task", model.Task{ID: "task", ProjectID: "p"})},
-				"sessions":  {record("attempt", model.Attempt{AttemptID: "attempt", Task: "task", ProjectID: "p", Role: tc.role})},
-				"questions": {record("question", model.QuestionSet{ID: "question", TaskID: "task", AttemptID: "attempt", Status: "pending"})},
-				"inbox":     {record("notice", model.Notification{ID: "notice", TaskID: "task", Kind: "question", Message: clarificationMessage})},
+				"projects":        {record("p", model.Project{ID: "p"})},
+				"execution_plans": {record("task", model.ExecutionPlan{ID: "task", ProjectID: "p"})},
+				"sessions":        {record("attempt", model.Attempt{AttemptID: "attempt", Task: "task", ProjectID: "p", Role: tc.role})},
+				"questions":       {record("question", model.QuestionSet{ID: "question", TaskID: "task", AttemptID: "attempt", Status: "pending"})},
+				"inbox":           {record("notice", model.Notification{ID: "notice", TaskID: "task", Kind: "question", Message: clarificationMessage})},
 			})
 			d.ForceDraw()
 			if !strings.Contains(screenText(screen), tc.label+" - "+clarificationMessage) {
@@ -208,11 +210,11 @@ func TestInboxLabelsPermissionWithItsAgentRole(t *testing.T) {
 	t.Cleanup(screen.Fini)
 	screen.SetSize(140, 45)
 	d.Present(control.Snapshot{
-		"projects":    {record("p", model.Project{ID: "p"})},
-		"tasks":       {record("task", model.Task{ID: "task", ProjectID: "p"})},
-		"sessions":    {record("attempt", model.Attempt{AttemptID: "attempt", Task: "task", ProjectID: "p", Role: "plan"})},
-		"permissions": {record("permission", map[string]any{"id": "permission", "task": "task", "attempt_id": "attempt"})},
-		"inbox":       {record("notice", model.Notification{ID: "notice", TaskID: "task", Kind: "permission", Message: "Tool permission awaits decision: permission"})},
+		"projects":        {record("p", model.Project{ID: "p"})},
+		"execution_plans": {record("task", model.ExecutionPlan{ID: "task", ProjectID: "p"})},
+		"sessions":        {record("attempt", model.Attempt{AttemptID: "attempt", Task: "task", ProjectID: "p", Role: "plan"})},
+		"permissions":     {record("permission", map[string]any{"id": "permission", "plan_id": "task", "attempt_id": "attempt"})},
+		"inbox":           {record("notice", model.Notification{ID: "notice", TaskID: "task", Kind: "permission", Message: "Tool permission awaits decision: permission"})},
 	})
 	d.ForceDraw()
 	if !strings.Contains(screenText(screen), "Planner - Tool permission awaits decision: permission") {
@@ -291,11 +293,11 @@ func TestMainScreenStartsWithPanelsAndKeepsStatusAtBottom(t *testing.T) {
 func TestInboxNotificationOpensAssociatedTask(t *testing.T) {
 	d := New()
 	d.Present(control.Snapshot{
-		"projects":  {record("p", model.Project{ID: "p"})},
-		"tasks":     {record("task", model.Task{ID: "task", ProjectID: "p", Plan: &model.Plan{Objective: "Review the change"}})},
-		"sessions":  {record("attempt", model.Attempt{AttemptID: "attempt", Task: "task", ProjectID: "p", Role: "review"})},
-		"questions": {record("question", model.QuestionSet{ID: "question", TaskID: "task", AttemptID: "attempt"})},
-		"inbox":     {record("notice", model.Notification{TaskID: "task", Kind: "question", Message: clarificationMessage})},
+		"projects":        {record("p", model.Project{ID: "p"})},
+		"execution_plans": {record("task", model.ExecutionPlan{ID: "task", ProjectID: "p", Plan: &model.PlanSpecification{Objective: "Review the change"}})},
+		"sessions":        {record("attempt", model.Attempt{AttemptID: "attempt", Task: "task", ProjectID: "p", Role: "review"})},
+		"questions":       {record("question", model.QuestionSet{ID: "question", TaskID: "task", AttemptID: "attempt"})},
+		"inbox":           {record("notice", model.Notification{TaskID: "task", Kind: "question", Message: clarificationMessage})},
 	})
 	selectItem := d.inbox.GetSelectedFunc()
 	selectItem(0, "", "", 0)
@@ -305,25 +307,27 @@ func TestInboxNotificationOpensAssociatedTask(t *testing.T) {
 }
 
 func TestDashboardInspectsSavedPlansAndPendingQuestions(t *testing.T) {
+	snapshot := control.Snapshot{
+		"projects":        {record("p", model.Project{ID: "p", Name: "Saved repository"})},
+		"execution_plans": {record("plan", model.ExecutionPlan{ID: "plan", ProjectID: "p", Stage: "plan_approval", PlanVersion: 2, Branch: "delivery/saved", Plan: &model.PlanSpecification{Objective: "Preserve operator choices", AcceptanceCriteria: []string{"Pending question remains answerable"}}})},
+		"questions":       {record("q", model.QuestionSet{TaskID: "plan", Status: "pending", Questions: []model.Question{{Text: "Which directory should receive output?"}}})},
+		"sessions":        {record("a", model.Attempt{Task: "plan", Role: "plan", Provider: "cursor", ResolvedModel: "chosen-model", Status: "paused"})},
+	}
+	capture := prepareRunTailFixture(t, snapshot)
 	d := New()
-	screen := tcell.NewSimulationScreen("UTF-8")
-	d.SetScreen(screen)
-	t.Cleanup(screen.Fini)
-	screen.SetSize(140, 45)
-	d.Present(control.Snapshot{
-		"projects":  {record("p", model.Project{ID: "p", Name: "Saved repository"})},
-		"tasks":     {record("plan", model.Task{ID: "plan", ProjectID: "p", Stage: "plan_approval", PlanVersion: 2, Branch: "delivery/saved", Plan: &model.Plan{Objective: "Preserve operator choices", AcceptanceCriteria: []string{"Pending question remains answerable"}}})},
-		"questions": {record("q", model.QuestionSet{TaskID: "plan", Status: "pending", Questions: []model.Question{{Text: "Which directory should receive output?"}}})},
-		"sessions":  {record("a", model.Attempt{Task: "plan", Role: "plan", Provider: "cursor", ResolvedModel: "chosen-model", Status: "paused"})},
-	})
+	screen := dashboardScreen(t, d)
+	d.Present(snapshot)
 	d.ForceDraw()
 	if !strings.Contains(screenText(screen), "Saved repository") {
 		t.Fatal("saved repository missing from main screen")
 	}
-	d.focus = 2
+	d.SetFocus(d.runs)
 	d.input(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
-	d.ForceDraw()
-	text := screenText(screen)
+	body, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
 	for _, expected := range []string{"Preserve operator choices", "plan_approval", "delivery/saved", "Which directory", "cursor", "chosen-model", "paused"} {
 		if !strings.Contains(text, expected) {
 			t.Errorf("saved state missing %q", expected)
@@ -334,9 +338,9 @@ func TestDashboardInspectsSavedPlansAndPendingQuestions(t *testing.T) {
 func TestInboxUsesRecordedSenderWithoutAttemptHistory(t *testing.T) {
 	d := New()
 	d.Present(control.Snapshot{
-		"projects": {record("p", model.Project{ID: "p"})},
-		"tasks":    {record("task", model.Task{ID: "task", ProjectID: "p"})},
-		"inbox":    {record("notice", model.Notification{TaskID: "task", Kind: "question", Message: "Need clarification", Role: "review"})},
+		"projects":        {record("p", model.Project{ID: "p"})},
+		"execution_plans": {record("task", model.ExecutionPlan{ID: "task", ProjectID: "p"})},
+		"inbox":           {record("notice", model.Notification{TaskID: "task", Kind: "question", Message: "Need clarification", Role: "review"})},
 	})
 	label, _ := d.inbox.GetItemText(0)
 	if label != "time unknown · Reviewer - Need clarification" {

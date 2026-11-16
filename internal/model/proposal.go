@@ -11,6 +11,7 @@ import (
 // Proposal is the complete durable ledger record. Compact prompts contain only
 // a bounded projection; the SQLite row retains every field for later review.
 type Proposal struct {
+	IdeaFields         *IdeaDraft    `json:"idea_fields,omitempty"`
 	ID                 string        `json:"id"`
 	ProjectID          string        `json:"project_id"`
 	Category           string        `json:"category"`
@@ -36,6 +37,7 @@ type Proposal struct {
 // ProposalReconsideration is a supervisor-owned authorization from a human to
 // revisit one suppressed proposal fingerprint exactly once.
 type ProposalReconsideration struct {
+	RequestedIdeaVersion      int    `json:"requested_idea_version,omitempty"`
 	ID                        string `json:"id"`
 	ProjectID                 string `json:"project_id"`
 	PredecessorID             string `json:"predecessor_id"`

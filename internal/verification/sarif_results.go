@@ -14,12 +14,35 @@ type baselineSARIFLocation struct {
 		Artifact struct {
 			URI string `json:"uri"`
 		} `json:"artifactLocation"`
-		Region struct {
-			Snippet struct {
-				Text string `json:"text"`
-			} `json:"snippet"`
-		} `json:"region"`
+		Region *baselineSARIFRegion `json:"region"`
 	} `json:"physicalLocation"`
+}
+
+type baselineSARIFRegion struct {
+	StartLine   int  `json:"startLine"`
+	StartColumn *int `json:"startColumn"`
+	EndLine     *int `json:"endLine"`
+	EndColumn   *int `json:"endColumn"`
+	Snippet     struct {
+		Text string `json:"text"`
+	} `json:"snippet"`
+}
+
+func sarifCoordinate(value *int, fallback int) int {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+func (region *baselineSARIFRegion) coordinateIdentity() (string, error) {
+	column := sarifCoordinate(region.StartColumn, 1)
+	endLine := sarifCoordinate(region.EndLine, region.StartLine)
+	endColumn := sarifCoordinate(region.EndColumn, 0)
+	if region.StartLine <= 0 || column <= 0 || endLine < region.StartLine || region.EndColumn != nil && endColumn <= 0 || endLine == region.StartLine && endColumn > 0 && endColumn < column {
+		return "", errors.New("baseline comparison blocked: SARIF finding lacks a valid region")
+	}
+	return fmt.Sprintf("region:%d:%d:%d:%d", region.StartLine, column, endLine, endColumn), nil
 }
 
 type baselineSARIFResult struct {
@@ -33,15 +56,17 @@ type baselineSARIFResult struct {
 	Locations           []baselineSARIFLocation `json:"locations"`
 	Properties          map[string]any          `json:"properties"`
 }
-type baselineSARIFNotification struct {
-	Level string `json:"level"`
-}
 type baselineSARIFInvocation struct {
-	Successful                 *bool                       `json:"executionSuccessful"`
-	ExecutionNotifications     []baselineSARIFNotification `json:"toolExecutionNotifications"`
-	ConfigurationNotifications []baselineSARIFNotification `json:"toolConfigurationNotifications"`
+	Successful                 *bool                      `json:"executionSuccessful"`
+	ExecutionNotifications     baselineSARIFNotifications `json:"toolExecutionNotifications"`
+	ConfigurationNotifications baselineSARIFNotifications `json:"toolConfigurationNotifications"`
 }
 type baselineSARIFRun struct {
+	Tool struct {
+		Driver struct {
+			Name string `json:"name"`
+		} `json:"driver"`
+	} `json:"tool"`
 	Results     json.RawMessage           `json:"results"`
 	Invocations []baselineSARIFInvocation `json:"invocations"`
 }
@@ -66,6 +91,9 @@ func baselineSARIF(output string) ([]baselineFinding, error) {
 }
 
 func (run baselineSARIFRun) findings() ([]baselineFinding, error) {
+	if run.Tool.Driver.Name == "" || len(run.Invocations) == 0 {
+		return nil, errors.New("SARIF report lacks tool identity or completed invocation evidence")
+	}
 	for _, invocation := range run.Invocations {
 		if err := invocation.validate(); err != nil {
 			return nil, err
@@ -82,12 +110,14 @@ func (run baselineSARIFRun) findings() ([]baselineFinding, error) {
 }
 
 func (invocation baselineSARIFInvocation) validate() error {
-	if invocation.Successful != nil && !*invocation.Successful {
+	if invocation.Successful == nil || !*invocation.Successful {
 		return errors.New("baseline comparison blocked: SARIF analysis failed")
 	}
-	for _, notification := range append(invocation.ExecutionNotifications, invocation.ConfigurationNotifications...) {
-		if notification.Level == "error" {
-			return errors.New("baseline comparison blocked: SARIF tool error")
+	for _, notifications := range []baselineSARIFNotifications{invocation.ExecutionNotifications, invocation.ConfigurationNotifications} {
+		for _, notification := range notifications {
+			if err := notification.validate(); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -129,11 +159,18 @@ func (result baselineSARIFResult) finding() (baselineFinding, error) {
 
 func (result baselineSARIFResult) identity(message string) (string, error) {
 	identity := result.RuleID + ":"
-	if len(result.PartialFingerprints) > 0 {
-		return identity + result.fingerprint(), nil
-	}
 	if len(result.Locations) == 0 {
-		return "", errors.New("baseline comparison blocked: SARIF finding lacks stable location or fingerprint")
+		return "", errors.New("baseline comparison blocked: SARIF finding lacks stable location")
+	}
+	if len(result.PartialFingerprints) > 0 {
+		identity += result.fingerprint()
+		for _, location := range result.Locations {
+			if location.Physical.Artifact.URI == "" {
+				return "", errors.New("baseline comparison blocked: SARIF finding lacks artifact")
+			}
+			identity += "|" + location.Physical.Artifact.URI
+		}
+		return identity, nil
 	}
 	identity += strings.Join(strings.Fields(message), " ")
 	for _, location := range result.Locations {
@@ -160,10 +197,20 @@ func (result baselineSARIFResult) fingerprint() string {
 }
 
 func (location baselineSARIFLocation) identitySuffix() (string, error) {
-	if location.Physical.Artifact.URI == "" || location.Physical.Region.Snippet.Text == "" {
-		return "", errors.New("baseline comparison blocked: SARIF finding lacks artifact or region snippet")
+	if location.Physical.Artifact.URI == "" {
+		return "", errors.New("baseline comparison blocked: SARIF finding lacks artifact")
 	}
-	return "|" + location.Physical.Artifact.URI + "|" + strings.Join(strings.Fields(location.Physical.Region.Snippet.Text), " "), nil
+	if location.Physical.Region == nil {
+		return "|" + location.Physical.Artifact.URI + "|file", nil
+	}
+	if location.Physical.Region.Snippet.Text == "" {
+		span, err := location.Physical.Region.coordinateIdentity()
+		if err != nil {
+			return "", err
+		}
+		return "|" + location.Physical.Artifact.URI + "|" + span, nil
+	}
+	return "|" + location.Physical.Artifact.URI + "|snippet:" + strings.Join(strings.Fields(location.Physical.Region.Snippet.Text), " "), nil
 }
 
 func baselineMetrics(prefix string, values map[string]any, out map[string]float64) {

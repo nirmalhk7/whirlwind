@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/google/uuid"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,7 +100,7 @@ func TestLocalDirectionReconsiderationRequiresExactHumanScopeAndReceipt(t *testi
 	if err := server.Store.SaveDirections(ctx, "p", duplicate.Day, []model.Direction{duplicate}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("consumed human request authorized another owner: %v", err)
 	}
-	if tasks, err := server.Store.List(ctx, "tasks"); err != nil || len(tasks) != 0 {
+	if tasks, err := server.Store.List(ctx, "execution_plans"); err != nil || len(tasks) != 0 {
 		t.Fatalf("reconsideration selected a direction or started a plan: tasks=%d err=%v", len(tasks), err)
 	}
 	stale := command
@@ -149,6 +150,9 @@ func TestLocalProjectRegistrationNeedsNoRemoteAndPreservesStaging(t *testing.T) 
 	project, err := store.Decode[model.Project](saved)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.HasPrefix(project.ID, "project_") || uuid.Validate(strings.TrimPrefix(project.ID, "project_")) != nil {
+		t.Fatalf("project must have a prefixed UUID: %q", project.ID)
 	}
 	canonical, err := filepath.EvalSymlinks(repository)
 	if err != nil {

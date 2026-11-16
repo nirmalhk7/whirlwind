@@ -59,16 +59,16 @@ func (rule routeRule) matches(q apiRequest) bool {
 }
 func (q apiRequest) dispatch() error {
 	rules := []routeRule{
-		{"GET", "tasks", "plan-document", false, q.localPlanDocument},
-		{"POST", "tasks", "plan-review", false, q.reviewLocalPlan},
+		{"GET", "execution_plans", "plan-document", false, q.localPlanDocument},
+		{"POST", "execution_plans", "plan-review", false, q.reviewLocalPlan},
 		{"GET", "providers", "integrations", false, q.integrationInventory},
 		{"POST", "providers", "integrations", false, q.integrationInventory},
-		{"POST", "tasks", "budget-reconcile", false, q.reconcileTaskBudget},
+		{"POST", "execution_plans", "budget-reconcile", false, q.reconcileTaskBudget},
 		{"GET", "evaluation", "", true, q.evaluationReport},
-		{"POST", "tasks", "outcome", false, q.taskOutcome},
-		{"GET", "tasks", "budget", false, q.taskBudget},
-		{"PATCH", "tasks", "budget", false, q.taskBudget},
-		{"GET", "tasks", "usage", false, q.taskUsage},
+		{"POST", "execution_plans", "outcome", false, q.taskOutcome},
+		{"GET", "execution_plans", "budget", false, q.taskBudget},
+		{"PATCH", "execution_plans", "budget", false, q.taskBudget},
+		{"GET", "execution_plans", "usage", false, q.taskUsage},
 		{"GET", "sessions", "events", false, q.attemptEvents},
 
 		{"GET", "sessions", "evidence", false, q.linkedEvidence},
@@ -105,7 +105,7 @@ func (q apiRequest) dispatch() error {
 		{"POST", "directions", "defer", false, q.candidateLifecycle},
 		{"POST", "directions", "reopen", false, q.candidateLifecycle},
 		{"POST", "directions", "reconsider", false, q.candidateLifecycle},
-		{"POST", "tasks", "+", false, q.taskAction},
+		{"POST", "execution_plans", "+", false, q.taskAction},
 		{"POST", "questions", "answers", false, q.answerQuestions},
 		{"POST", "permissions", "decisions", false, q.decidePermission},
 	}

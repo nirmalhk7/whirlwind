@@ -13,10 +13,10 @@ import (
 func TestQuotaWaitSurvivesRestartAndHonorsManualPause(t *testing.T) {
 	e, task, cwd := testEngine(t)
 	ctx := context.Background()
-	r, _ := e.Store.Get(ctx, "tasks", task.ID)
+	r, _ := e.Store.Get(ctx, "execution_plans", task.ID)
 	task.Stage = "waiting_quota"
-	task.Wait = &model.TaskWait{Kind: "quota", Provider: "codex", Pool: "codex", Role: "code", ResumeStage: "coding", NextCheckAt: time.Now().Add(-time.Minute).Format(time.RFC3339Nano), PlanVersion: task.PlanVersion}
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, r.Version); err != nil {
+	task.Wait = &model.ExecutionPlanWait{Kind: "quota", Provider: "codex", Pool: "codex", Role: "code", ResumeStage: "coding", NextCheckAt: time.Now().Add(-time.Minute).Format(time.RFC3339Nano), PlanVersion: task.PlanVersion}
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, r.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.Store.Put(ctx, "providers", "codex", model.Provider{ID: "codex", Kind: "codex", Available: true, Quota: "exhausted", Capabilities: []string{"code"}}, 0); err != nil {
@@ -27,19 +27,19 @@ func TestQuotaWaitSurvivesRestartAndHonorsManualPause(t *testing.T) {
 		return recoveredQuotaAdapter{quotaReaderAdapter{state: "available"}}
 	}
 	restarted.refreshQuotaWaits(ctx)
-	r, _ = e.Store.Get(ctx, "tasks", task.ID)
-	saved, _ := store.Decode[model.Task](r)
+	r, _ = e.Store.Get(ctx, "execution_plans", task.ID)
+	saved, _ := store.Decode[model.ExecutionPlan](r)
 	if saved.Stage != "coding" || saved.Wait != nil {
 		t.Fatalf("wait failed to wake: %+v (%s)", saved, cwd)
 	}
 	saved.Stage = "paused"
 	saved.Wait = task.Wait
-	if err := e.Store.Put(ctx, "tasks", task.ID, saved, r.Version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, saved, r.Version); err != nil {
 		t.Fatal(err)
 	}
 	restarted.refreshQuotaWaits(ctx)
-	r, _ = e.Store.Get(ctx, "tasks", task.ID)
-	saved, _ = store.Decode[model.Task](r)
+	r, _ = e.Store.Get(ctx, "execution_plans", task.ID)
+	saved, _ = store.Decode[model.ExecutionPlan](r)
 	if saved.Stage != "paused" {
 		t.Fatal("manual pause auto-resumed")
 	}

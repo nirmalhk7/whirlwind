@@ -122,9 +122,12 @@ func validateChain(role string, chain []model.AgentChoice, providers map[string]
 	if len(chain) == 0 {
 		return fmt.Errorf("agent %s needs a primary choice; omit role to use defaults", role)
 	}
-	seen := map[[2]string]bool{}
+	seen := map[[4]string]bool{}
 	for _, choice := range chain {
-		key := [2]string{choice.Provider, choice.Model}
+		key := [4]string{choice.Provider, choice.Model, "", ""}
+		if choice.Thinking != nil {
+			key[2], key[3] = choice.Thinking.ConfigID, choice.Thinking.Value
+		}
 		if err := validateChoice(role, choice, providers, seen[key]); err != nil {
 			return err
 		}

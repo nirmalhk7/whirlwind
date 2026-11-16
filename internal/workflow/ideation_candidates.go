@@ -81,7 +81,7 @@ func (e *Engine) filterDirectionCandidates(ctx context.Context, request directio
 		candidate.RejectionReason = ""
 		candidate.DeferralReason = ""
 		if candidate.ID == "" {
-			candidate.ID = store.ID()
+			candidate.ID = model.NewIdeaID()
 		}
 		candidate, reason, err := e.directionRejectionReason(ctx, request, candidate, state)
 		if err != nil {

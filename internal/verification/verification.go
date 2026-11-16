@@ -15,22 +15,25 @@ import (
 )
 
 type Result struct {
-	Runtime          RuntimeIdentity `json:"runtime,omitempty"`
-	ExecutionProfile string          `json:"execution_profile,omitempty"`
-	ReusedFrom       string          `json:"reused_from,omitempty"`
-	Command          []string        `json:"command"`
-	TimeoutSeconds   int             `json:"timeout_seconds"`
-	StartedAt        string          `json:"started_at"`
-	FinishedAt       string          `json:"finished_at"`
-	ExitCode         *int            `json:"exit_code"`
-	Truncated        bool            `json:"truncated"`
-	OutputArtifact   string          `json:"output_artifact,omitempty"`
-	Diagnostics      string          `json:"diagnostics,omitempty"`
-	Name             string          `json:"name"`
-	Passed           bool            `json:"passed"`
-	Output           string          `json:"output"`
-	Error            string          `json:"error,omitempty"`
-	DurationMS       int64           `json:"duration_ms"`
+	Autofix          *AutofixProposal  `json:"autofix,omitempty"`
+	AutofixArtifact  string            `json:"autofix_artifact,omitempty"`
+	Artifacts        []CommandArtifact `json:"artifacts,omitempty"`
+	Runtime          RuntimeIdentity   `json:"runtime,omitempty"`
+	ExecutionProfile string            `json:"execution_profile,omitempty"`
+	ReusedFrom       string            `json:"reused_from,omitempty"`
+	Command          []string          `json:"command"`
+	TimeoutSeconds   int               `json:"timeout_seconds"`
+	StartedAt        string            `json:"started_at"`
+	FinishedAt       string            `json:"finished_at"`
+	ExitCode         *int              `json:"exit_code"`
+	Truncated        bool              `json:"truncated"`
+	OutputArtifact   string            `json:"output_artifact,omitempty"`
+	Diagnostics      string            `json:"diagnostics,omitempty"`
+	Name             string            `json:"name"`
+	Passed           bool              `json:"passed"`
+	Output           string            `json:"output"`
+	Error            string            `json:"error,omitempty"`
+	DurationMS       int64             `json:"duration_ms"`
 }
 
 type RuntimeIdentity struct {

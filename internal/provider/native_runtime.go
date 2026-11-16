@@ -79,7 +79,7 @@ func (provisioner nativeProvisioner) files(family string) error {
 	case "claude":
 		files = [][3]string{{nativeClaudeUserConfig, "HOME", nativeClaudeUserConfig}, {nativeClaudeSettings, "CLAUDE_CONFIG_DIR", "settings.json"}, {".claude/.credentials.json", "CLAUDE_CONFIG_DIR", ".credentials.json"}}
 	case "cursor":
-		files = [][3]string{{nativeCursorMCPConfig, "HOME", nativeCursorMCPConfig}, {".cursor/cli-config.json", "HOME", ".cursor/cli-config.json"}}
+		files = [][3]string{{nativeCursorMCPConfig, "HOME", nativeCursorMCPConfig}, {".cursor/cli-config.json", "HOME", ".cursor/cli-config.json"}, {cursorAuthPath, "HOME", cursorAuthPath}}
 	}
 	for _, file := range files {
 		if err := provisioner.add(file[0], file[1], file[2]); err != nil {

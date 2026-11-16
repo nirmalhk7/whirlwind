@@ -35,11 +35,11 @@ func TestRecoveryNoticeFailureRollsBackTaskPause(t *testing.T) {
 	if err := e.pauseFailure(context.Background(), task.ID, errors.New("chain exhausted")); err == nil {
 		t.Fatal("notification failure swallowed")
 	}
-	record, err := e.Store.Get(context.Background(), "tasks", task.ID)
+	record, err := e.Store.Get(context.Background(), "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := store.Decode[model.Task](record)
+	current, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || current.Stage != task.Stage {
 		t.Fatalf("task paused without notice: %+v %v", current, err)
 	}
@@ -57,11 +57,11 @@ func TestDispatchExhaustionPausesTaskAndNotifiesInbox(t *testing.T) {
 	ctx := context.Background()
 	h.engine.dispatch(ctx)
 	h.engine.background.Wait()
-	record, err := h.engine.Store.Get(ctx, "tasks", h.task.ID)
+	record, err := h.engine.Store.Get(ctx, "execution_plans", h.task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || task.Stage != "paused" || task.ResumeStage != "planning" {
 		t.Fatalf("task did not pause at failed stage: %+v %v", task, err)
 	}

@@ -42,7 +42,7 @@ type AdmissionSettings struct {
 	DefaultBudget   *BudgetPolicy           `json:"default_budget,omitempty"`
 	Pools           map[string]QuotaReserve `json:"pools,omitempty"`
 }
-type TaskWait struct {
+type ExecutionPlanWait struct {
 	AttemptID   string `json:"attempt_id,omitempty"`
 	Kind        string `json:"kind"`
 	Reason      string `json:"reason"`

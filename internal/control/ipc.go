@@ -62,6 +62,8 @@ type LocalServer struct {
 type Client struct{ path string }
 
 var allowedOperations = map[string]bool{
+	"idea.reconsider": true, "idea.update": true, "idea.approve": true, "idea.archive": true, "idea.retry_planning": true, "planner.cancel": true,
+	"plan.document.read": true, "plan.document.save": true, "plan.approve": true, "plan.request_changes": true, "plan.reject": true,
 	"inspect.snapshot": true, "inspect.records": true, "inspect.events": true, "inspect.plan": true, "inspect.artifact": true, "supervisor.stop": true,
 	"project.register": true, "ideation.start": true,
 	"provider.status":  true,
@@ -226,7 +228,7 @@ func validateRequest(request Request) error {
 	if request.Operation == "finalization.inspect" && (request.DiffOffset < 0 || request.DiffOffset > maxDiffCursor) {
 		return errors.New("finalization diff cursor is outside the supported range")
 	}
-	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "finalization.inspect" || request.Operation == "provider.status" {
+	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" || request.Operation == "finalization.inspect" || request.Operation == "provider.status" {
 		return nil
 	}
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {
@@ -235,7 +237,7 @@ func validateRequest(request Request) error {
 	if request.Operation != "project.register" && request.Operation != "supervisor.stop" && request.Operation != "runners.toggle" && request.ExpectedVersion < 1 {
 		return errors.New("expected_version must be positive for this supervisor command")
 	}
-	if request.Operation == "plan.review" && request.ContentHash == "" {
+	if (request.Operation == "plan.review" || request.Operation == "plan.document.save" || request.Operation == "plan.approve" || request.Operation == "plan.request_changes" || request.Operation == "plan.reject") && request.ContentHash == "" {
 		return errors.New("content_hash is required for plan review")
 	}
 	if len(request.Payload) > 0 && !json.Valid(request.Payload) {

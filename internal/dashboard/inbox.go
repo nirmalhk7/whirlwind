@@ -6,6 +6,6 @@ func (d *Dashboard) chooseDirection() {
 		return
 	}
 	d.modal = d.directions
-	d.directions.SetTitle(" Choose direction · Enter to approve · Esc to close ")
+	d.directions.SetTitle(" Choose direction · Enter opens approve/reject review · Esc to close ")
 	d.SetRoot(d.directions, true).SetFocus(d.directions)
 }

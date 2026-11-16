@@ -42,7 +42,7 @@ func TestDeleteKeyTargetsHighlightedInboxProposal(t *testing.T) {
 
 func TestDeleteKeyDoesNotDeleteTaskNotice(t *testing.T) {
 	d := New()
-	d.Present(control.Snapshot{"tasks": {record("task", model.Task{ID: "task"})}, "inbox": {record("notice", model.Notification{ID: "notice", TaskID: "task", Role: "plan", Message: "Review this plan"})}})
+	d.Present(control.Snapshot{"execution_plans": {record("task", model.ExecutionPlan{ID: "task"})}, "inbox": {record("notice", model.Notification{ID: "notice", TaskID: "task", Role: "plan", Message: "Review this plan"})}})
 	requests := make(chan control.Request, 1)
 	d.SetCommandHandler(func(_ context.Context, r control.Request) (json.RawMessage, error) { requests <- r; return nil, nil })
 	d.SetFocus(d.inbox)

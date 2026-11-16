@@ -18,10 +18,12 @@ type acpAuthFile struct {
 	destination string
 }
 
+const cursorAuthPath = ".cursor/auth.json"
+
 var acpAuthFiles = map[string]acpAuthFile{
 	"claude": {source: ".claude/.credentials.json", home: "CLAUDE_CONFIG_DIR", destination: ".credentials.json"},
 	"codex":  {source: ".codex/auth.json", home: "CODEX_HOME", destination: "auth.json"},
-	"cursor": {source: ".cursor/cli-config.json", home: "HOME", destination: ".cursor/cli-config.json"},
+	"cursor": {source: cursorAuthPath, home: "HOME", destination: cursorAuthPath},
 }
 
 // provisionACPAuth grants only the selected ACP profile's existing auth file

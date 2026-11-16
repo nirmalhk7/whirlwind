@@ -9,7 +9,7 @@ func TestReportCountsFailuresAndUnknownsWithoutClaimingAcceptance(t *testing.T) 
 	tokens := int64(30)
 	failure := false
 	success := true
-	task := model.Task{ID: "task", Stage: "pr_created", PR: "https://example.test/pr/1", ChecksPassed: true, Score: 10}
+	task := model.ExecutionPlan{ID: "task", Stage: "pr_created", PR: "https://example.test/pr/1", ChecksPassed: true, Score: 10}
 	sample := Sample{Task: task, Verified: true, Usage: model.UsageReport{Attempts: 2, TotalTokens: 30, UnknownTokenAttempts: 1}, Attempts: []model.Attempt{{AttemptID: "failed", Provider: "a", Model: "m", Role: "code", Success: &failure}, {AttemptID: "ok", Provider: "b", Model: "m", Role: "review", Success: &success}}, Entries: []model.UsageEntry{{AttemptID: "failed", Delta: &model.Usage{TotalTokens: &tokens}}, {AttemptID: "ok"}}}
 	report := Build([]Sample{sample})
 	if report.Attempts != 2 || report.ReportedTokens != 30 || report.UnknownTokenAttempts != 1 || report.VerifiedTasks != 1 || report.CreatedPRs != 1 || report.MergedPRs != 0 {
@@ -50,7 +50,7 @@ func TestComparisonRequiresEquivalentQualityAndCompleteTelemetry(t *testing.T) {
 }
 
 func TestOutcomeHistoryKeepsMergeAcceptanceAndRegressionDistinct(t *testing.T) {
-	report := Build([]Sample{{Task: model.Task{ID: "task", PR: "pr"}, Decisions: []string{"merged", "accepted", "regression", "regression"}}})
+	report := Build([]Sample{{Task: model.ExecutionPlan{ID: "task", PR: "pr"}, Decisions: []string{"merged", "accepted", "regression", "regression"}}})
 	if report.MergedPRs != 1 || report.UserAcceptedTasks != 1 || report.Regressions != 1 || report.UnknownAcceptanceTasks != 0 {
 		t.Fatalf("outcome history collapsed: %+v", report)
 	}

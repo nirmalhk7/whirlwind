@@ -7,7 +7,7 @@ import (
 )
 
 func TestHumanResumeStartsANewRecoveryGeneration(t *testing.T) {
-	task := model.Task{ID: "task", Stage: "paused", ResumeStage: "coding", Selection: &model.SelectionAuthorization{CandidateID: "candidate", CandidateVersion: 1, SelectedAt: "2026-11-06T00:00:00Z"}}
+	task := model.ExecutionPlan{ID: "task", Stage: "paused", ResumeStage: "coding", Selection: &model.SelectionAuthorization{CandidateID: "candidate", CandidateVersion: 1, SelectedAt: "2026-11-06T00:00:00Z"}}
 	if err := (apiRequest{}).resumeTask(&task); err != nil {
 		t.Fatal(err)
 	}

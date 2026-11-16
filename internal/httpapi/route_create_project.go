@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"net/url"
 	"path/filepath"
@@ -67,8 +65,7 @@ func (input projectInput) project(ctx context.Context) (model.Project, error) {
 	if err != nil {
 		return project, err
 	}
-	sum := sha256.Sum256([]byte(repo))
-	project = model.Project{ID: hex.EncodeToString(sum[:8]), Name: input.Name, Repo: repo, DefaultBranch: branch, Path: canonical, Policy: p, PolicyHash: h, WebhookURL: input.WebhookURL}
+	project = model.Project{ID: model.ProjectID(repo), Name: input.Name, Repo: repo, DefaultBranch: branch, Path: canonical, Policy: p, PolicyHash: h, WebhookURL: input.WebhookURL}
 	return project, nil
 }
 
@@ -125,8 +122,7 @@ func (q apiRequest) agenticProject(input projectInput) (model.Project, error) {
 	if err != nil {
 		return model.Project{}, err
 	}
-	sum := sha256.Sum256([]byte(canonical))
-	p := model.Project{ID: hex.EncodeToString(sum[:8]), Name: input.Name, Path: path, Repo: canonical, RemoteURL: canonical, Policy: rules, PolicyHash: hash, WebhookURL: input.WebhookURL}
+	p := model.Project{ID: model.ProjectID(canonical), Name: input.Name, Path: path, Repo: canonical, RemoteURL: canonical, Policy: rules, PolicyHash: hash, WebhookURL: input.WebhookURL}
 	p.DefaultBranch, err = q.Engine.InspectIntegrationRepository(ctx, p)
 	return p, err
 }

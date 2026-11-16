@@ -9,7 +9,7 @@ import (
 )
 
 func (q apiRequest) taskAction() error {
-	t, record, err := readCurrent[model.Task](q, "tasks")
+	t, record, err := readCurrent[model.ExecutionPlan](q, "execution_plans")
 	if err != nil {
 		return err
 	}
@@ -20,15 +20,15 @@ func (q apiRequest) taskAction() error {
 	if err = q.Store.Put(q.r.Context(), "audit", store.ID(), audit, 0); err != nil {
 		return err
 	}
-	q.save(q.w, q.r, "tasks", q.id, t, record.Version, 200)
+	q.save(q.w, q.r, "execution_plans", q.id, t, record.Version, 200)
 	return nil
 }
 
-func (q apiRequest) applyTaskAction(task *model.Task) error {
+func (q apiRequest) applyTaskAction(task *model.ExecutionPlan) error {
 	if task.Cancelled() {
 		return &apiError{409, "task_cancelled", "Cancelled tasks cannot resume; start new work explicitly"}
 	}
-	handlers := map[string]func(*model.Task) error{
+	handlers := map[string]func(*model.ExecutionPlan) error{
 		"pause": q.pauseTask, "resume": q.resumeTask, "adopt": q.adoptTask, "answers": q.answersTask, "approve": q.approveTask,
 	}
 	handler, ok := handlers[q.action]
@@ -38,7 +38,7 @@ func (q apiRequest) applyTaskAction(task *model.Task) error {
 	return handler(task)
 }
 
-func (q apiRequest) pauseTask(t *model.Task) error {
+func (q apiRequest) pauseTask(t *model.ExecutionPlan) error {
 	if t.Stage == "complete" || t.Stage == "pr_created" {
 		return &apiError{409, "invalid_stage", "Published work has no running task to pause"}
 	}
@@ -51,7 +51,7 @@ func (q apiRequest) pauseTask(t *model.Task) error {
 	return nil
 }
 
-func (q apiRequest) resumeTask(t *model.Task) error {
+func (q apiRequest) resumeTask(t *model.ExecutionPlan) error {
 	if !t.HasSelection() {
 		return &apiError{409, "selection_required", "Select the candidate or explicitly adopt this task before resuming"}
 	}
@@ -80,7 +80,7 @@ func (q apiRequest) resumeTask(t *model.Task) error {
 	return nil
 }
 
-func (q apiRequest) adoptTask(t *model.Task) error {
+func (q apiRequest) adoptTask(t *model.ExecutionPlan) error {
 	if t.HasSelection() || t.PR != "" || t.Stage == "complete" {
 		return &apiError{409, "invalid_stage", "Only unselected unpublished tasks can be adopted"}
 	}
@@ -101,7 +101,7 @@ func (q apiRequest) adoptTask(t *model.Task) error {
 	return nil
 }
 
-func (q apiRequest) answersTask(t *model.Task) error {
+func (q apiRequest) answersTask(t *model.ExecutionPlan) error {
 	var input struct {
 		Answers map[string]string `json:"answers"`
 	}
@@ -129,14 +129,14 @@ func (q apiRequest) answersTask(t *model.Task) error {
 	return nil
 }
 
-func (q apiRequest) approveTask(t *model.Task) error {
+func (q apiRequest) approveTask(t *model.ExecutionPlan) error {
 	if t.Stage != "approval" {
 		return &apiError{409, "invalid_stage", "Task does not await critical approval"}
 	}
 	return &apiError{409, "local_finalization_required", "Use the terminal dashboard's local finalization report and exact-candidate approval; raw task approval cannot change critical candidate state."}
 }
 
-func resumedImplementationStage(t *model.Task) string {
+func resumedImplementationStage(t *model.ExecutionPlan) string {
 	if t.Plan == nil {
 		return "planning"
 	}

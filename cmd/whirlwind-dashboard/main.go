@@ -33,7 +33,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		data = filepath.Join(home, ".local", "share", "whirlwind")
+		data = filepath.Join(home, ".local", "share", "whirlwind", "parity-v1")
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -60,7 +60,7 @@ func loadSnapshot(ctx context.Context, data string) (control.Snapshot, error) {
 		snapshot, started, callErr := loadOnlineSnapshot(ctx, control.NewClient(controlPath))
 		if callErr == nil {
 			loadProviderStatuses(ctx, control.NewClient(controlPath), snapshot)
-			return markSupervisor(snapshot, true), nil
+			return finishOnlineSnapshot(ctx, data, snapshot)
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -97,41 +97,11 @@ func loadOnlineSnapshot(ctx context.Context, client *control.Client) (control.Sn
 
 func completeOnlineSnapshot(ctx context.Context, client *control.Client, snapshot control.Snapshot) (bool, error) {
 	started := false
-	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "providers", "project_status"} {
-		var cursor int64
-		for {
-			request := control.Request{RequestID: fmt.Sprintf("dashboard-records-%s-%d", kind, cursor), Operation: "inspect.records", ResourceID: kind, EventCursor: cursor, Limit: 100}
-			response, err := dashboardCall(ctx, client, request)
-			if err != nil {
-				return started, fmt.Errorf("inspect %s: %w", kind, err)
-			}
-			started = true
-			encoded, err := json.Marshal(response.Result)
-			if err != nil {
-				return started, err
-			}
-			var page control.RecordPage
-			if err := json.Unmarshal(encoded, &page); err != nil {
-				return started, fmt.Errorf("decode inspection page for %s: %w", kind, err)
-			}
-			if page.Kind != kind || page.Cursor != cursor {
-				return started, fmt.Errorf("inspection page authority changed for %s", kind)
-			}
-			if len(page.Records) == 0 {
-				if page.HasMore {
-					return started, fmt.Errorf("inspection cursor did not advance for %s", kind)
-				}
-				snapshot[kind] = append(snapshot[kind], page.Records...)
-				break
-			}
-			if page.NextCursor <= cursor || page.Records[len(page.Records)-1].CreatedOrder != page.NextCursor {
-				return started, fmt.Errorf("inspection cursor did not advance for %s", kind)
-			}
-			snapshot[kind] = append(snapshot[kind], page.Records...)
-			if !page.HasMore {
-				break
-			}
-			cursor = page.NextCursor
+	for _, kind := range []string{"projects", "execution_plans", "ideas", "operations", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plan_versions", "agents", "providers", "project_status", "settings"} {
+		read, err := completeOnlineRecords(ctx, client, snapshot, kind)
+		started = started || read
+		if err != nil {
+			return started, fmt.Errorf("inspect %s: %w", kind, err)
 		}
 	}
 	return started, completeOnlineEvents(ctx, client, snapshot)

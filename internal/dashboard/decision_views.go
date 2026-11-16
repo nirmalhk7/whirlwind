@@ -14,13 +14,13 @@ func directionApprovalRequest(direction model.Direction, version int) control.Re
 	return control.Request{Operation: "direction.approve", ResourceID: direction.ID, ProjectID: direction.ProjectID, ExpectedVersion: version, Payload: json.RawMessage(`{}`)}
 }
 
-func planReviewRequest(plan model.Task, version int, hash string, payload json.RawMessage) control.Request {
+func planReviewRequest(plan model.ExecutionPlan, version int, hash string, payload json.RawMessage) control.Request {
 	return control.Request{Operation: "plan.review", PlanID: plan.ID, ProjectID: plan.ProjectID, ExpectedVersion: version, ContentHash: hash, Payload: payload}
 }
 
 func permissionSummary(record model.Record) string {
 	var saved struct {
-		Task        string          `json:"task"`
+		Task        string          `json:"plan_id"`
 		AttemptID   string          `json:"attempt_id"`
 		Provider    string          `json:"provider"`
 		Decision    string          `json:"decision"`
@@ -89,15 +89,15 @@ func sensitivePermissionKey(key string) bool {
 	return false
 }
 
-func (d *Dashboard) planRecord(id string) (model.Record, model.Task, bool) {
-	for _, record := range d.snapshot["tasks"] {
+func (d *Dashboard) planRecord(id string) (model.Record, model.ExecutionPlan, bool) {
+	for _, record := range d.snapshot["execution_plans"] {
 		if record.ID != id {
 			continue
 		}
-		plan, err := store.Decode[model.Task](record)
+		plan, err := store.Decode[model.ExecutionPlan](record)
 		return record, plan, err == nil
 	}
-	return model.Record{}, model.Task{}, false
+	return model.Record{}, model.ExecutionPlan{}, false
 }
 
 func (d *Dashboard) planStillCurrent(id string, version int, hash string) bool {

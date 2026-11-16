@@ -9,7 +9,7 @@ const exec = promisify(execFile);
 
 export async function configuration() {
   const root = await realpath(process.env.WHIRLWIND_ROOT || dirname(dirname(fileURLToPath(import.meta.url))));
-  const data = resolve(root, process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind"));
+  const data = resolve(root, process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind/parity-v1"));
   const listen = process.env.WHIRLWIND_LISTEN || "127.0.0.1:9877";
   const match = /^(127\.0\.0\.1|localhost|\[::1\]):(\d+)$/.exec(listen);
   const webPort = process.env.WHIRLWIND_WEB_PORT || "9876";

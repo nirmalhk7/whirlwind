@@ -4,6 +4,7 @@ import fcntl
 import os
 import pty
 import select
+import signal
 import struct
 import termios
 import time
@@ -11,7 +12,7 @@ import time
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENTRY = os.path.join(REPO, "bin", "whirlwind")
-RENDER_MARKER = b"Whirlwind | local terminal dashboard"
+RENDER_MARKER = b"Projects"
 
 
 class PTYSession:
@@ -48,10 +49,21 @@ class PTYSession:
         return True
 
     def terminate(self):
-        os.kill(self.pid, 15)
-        _, status = os.waitpid(self.pid, 0)
-        self.reaped = True
-        return status
+        # pty.fork gives this test its own session/process group. Terminate the
+        # whole owned launcher group, drain output and never wait indefinitely.
+        for requested_signal in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(self.pid, requested_signal)
+            except ProcessLookupError:
+                pass
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                status = self.child_status(os.WNOHANG)
+                if status is not None:
+                    return status
+                self.read_available(0.05)
+                time.sleep(0.01)
+        raise RuntimeError(f"owned PTY process group {self.pid} did not reap; output={bytes(self.output)[-4000:]!r}")
 
     def wait_for_render(self):
         deadline = time.monotonic() + 60
@@ -72,24 +84,18 @@ class PTYSession:
         while time.monotonic() < deadline:
             result = self.child_status(os.WNOHANG)
             if result is not None:
-                code = exit_code(result)
-                break
-            if not self.read_available(0.1):
-                break
-        else:
-            status = self.terminate()
-            raise AssertionError(f"dashboard remained open after q, exit={exit_code(status)}")
-        if not self.reaped:
-            _, status = os.waitpid(self.pid, 0)
-            self.reaped = True
-            code = exit_code(status)
-        return code
+                return exit_code(result)
+            self.read_available(0.1)
+            time.sleep(0.01)
+        status = self.terminate()
+        raise AssertionError(f"dashboard remained open after q, exit={exit_code(status)}")
 
     def close(self):
-        if not self.reaped:
-            os.kill(self.pid, 15)
-            os.waitpid(self.pid, 0)
-        os.close(self.master)
+        try:
+            if not self.reaped:
+                self.terminate()
+        finally:
+            os.close(self.master)
 
 
 def dashboard_pty(env):
@@ -99,7 +105,7 @@ def dashboard_pty(env):
         code = session.quit_and_wait()
         if code != 0:
             raise AssertionError(f"dashboard did not exit cleanly after q (exit={code}): {bytes(session.output)[-4000:]!r}")
-        for marker in (b"Projects", b"Plans", b"No projects"):
+        for marker in (b"Projects", b"Agents", b"Runs", b"Inbox", b"No projects"):
             if marker not in session.output:
                 raise AssertionError(f"dashboard PTY output missed {marker!r}: {bytes(session.output)[-4000:]!r}")
         return bytes(session.output)

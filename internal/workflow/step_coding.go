@@ -9,7 +9,12 @@ func (step *taskStep) coding() (bool, error) {
 	if step.task.Plan == nil {
 		return true, errors.New("plan required")
 	}
-	if err = step.code(step.ctx, step.project, &step.task); err != nil {
+	if step.task.IdeaID != "" {
+		err = step.codeWithPreparation()
+	} else {
+		err = step.code(step.ctx, step.project, &step.task)
+	}
+	if err != nil {
 		return true, err
 	}
 	if step.task.Stage == "coding" {

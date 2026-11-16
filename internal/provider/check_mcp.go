@@ -17,7 +17,7 @@ import (
 )
 
 func (s *providerSession) prepareCheckMCP(ctx context.Context, profile *execution.Profile) (func(), error) {
-	if !s.hasCheckTool() {
+	if !s.hasScopedTool() {
 		return func() {
 			// A session without check tools owns no resources to clean up.
 		}, nil
@@ -108,17 +108,17 @@ func checkMCPHandler(ctx context.Context, session *providerSession, token string
 				result = map[string]any{"protocolVersion": params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]string{"name": "whirlwind_checks", "version": "1"}}
 			}
 		case "tools/list":
-			result = map[string]any{"tools": []any{map[string]any{"name": "run_check", "description": "Run one committed check ID in an isolated snapshot; accepts no command, path, or shell text.", "inputSchema": checkSchema()}}}
+			result = map[string]any{"tools": session.checkTools()}
 		case "tools/call":
 			var params struct {
 				Name      string          `json:"name"`
 				Arguments json.RawMessage `json:"arguments"`
 			}
-			if err := json.Unmarshal(request.Params, &params); err != nil || params.Name != "run_check" {
-				rpcError = &checkRPCError{Code: -32602, Message: "committed run_check tool required"}
+			if err := json.Unmarshal(request.Params, &params); err != nil {
+				rpcError = &checkRPCError{Code: -32602, Message: "scoped tool request required"}
 				break
 			}
-			check, err := session.runCheckTool(ctx, params.Arguments)
+			check, err := session.callScopedTool(ctx, params.Name, params.Arguments)
 			if err != nil {
 				result = map[string]any{"content": []any{map[string]string{"type": "text", "text": err.Error()}}, "isError": true}
 			} else {

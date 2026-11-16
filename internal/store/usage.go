@@ -45,7 +45,10 @@ func txValues[T any](ctx context.Context, tx *sql.Tx, kind string) (out []T, res
 }
 
 func (s *Store) CompleteUsage(ctx context.Context, entry model.UsageEntry, changes []Change) error {
-	return s.Transaction(ctx, func(tx *sql.Tx) error { return completeUsageTx(ctx, tx, entry, changes) })
+	if err := s.Transaction(ctx, func(tx *sql.Tx) error { return completeUsageTx(ctx, tx, entry, changes) }); err != nil {
+		return err
+	}
+	return s.syncRunLogChanges(ctx, changes)
 }
 
 func completeUsageTx(ctx context.Context, tx *sql.Tx, entry model.UsageEntry, changes []Change) error {

@@ -10,6 +10,9 @@ import (
 )
 
 func (a *agentRun) prepare() error {
+	if err := a.prepareAutofixHandoff(); err != nil {
+		return err
+	}
 	a.prepareHandoff()
 	return a.prepareContextPack()
 }
@@ -68,7 +71,7 @@ func (a *agentRun) buildContextPack() error {
 func (a *agentRun) saveContextPack(key string, pack ctxengine.ContextPack) error {
 	_, err := a.Store.Get(a.ctx, "context_packs", key)
 	if errors.Is(err, store.ErrNotFound) {
-		err = a.Store.Put(a.ctx, "context_packs", key, map[string]any{"task": a.task.ID, "operation_id": a.input.OperationID, "pack": pack}, 0)
+		err = a.Store.Put(a.ctx, "context_packs", key, map[string]any{"plan_id": a.task.ID, "operation_id": a.input.OperationID, "pack": pack}, 0)
 		if errors.Is(err, store.ErrConflict) {
 			return nil
 		}

@@ -33,7 +33,7 @@ func (deadlinePlannerAgent) Run(ctx context.Context, in provider.Input, hooks pr
 	if err != nil || in.Role != "plan" {
 		return output, err
 	}
-	var plan model.Plan
+	var plan model.PlanSpecification
 	if err := json.Unmarshal([]byte(output.Text), &plan); err != nil {
 		return provider.Output{}, err
 	}
@@ -77,7 +77,7 @@ func configurePlannerQueue(t *testing.T, e *Engine) {
 	putFixtureAgent(t, e.Store, "plan", model.AgentConfig{Role: "plan", Chain: []model.AgentChoice{{Provider: "fake", Model: "fixture"}}})
 }
 
-func plannerWithTimeout(t *testing.T, seconds int) (*Engine, model.Task) {
+func plannerWithTimeout(t *testing.T, seconds int) (*Engine, model.ExecutionPlan) {
 	t.Helper()
 	e, task, _ := testEngine(t)
 	ctx := context.Background()
@@ -93,11 +93,11 @@ func plannerWithTimeout(t *testing.T, seconds int) (*Engine, model.Task) {
 func assertTimedOutPlanNotSaved(t *testing.T, e *Engine, id string) {
 	t.Helper()
 	ctx := context.Background()
-	record, err := e.Store.Get(ctx, "tasks", id)
+	record, err := e.Store.Get(ctx, "execution_plans", id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, _ := store.Decode[model.Task](record)
+	task, _ := store.Decode[model.ExecutionPlan](record)
 	if task.Plan != nil || task.Stage != "planning" {
 		t.Fatal("timed out planner advanced task")
 	}

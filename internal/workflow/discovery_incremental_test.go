@@ -220,20 +220,20 @@ func TestCandidateClassificationCannotPresentSourceHypothesisAsObservedDefect(t 
 func TestUnselectedLegacyTaskDoesNotRunPlanner(t *testing.T) {
 	e, task, _ := testEngine(t)
 	ctx := context.Background()
-	record, _ := e.Store.Get(ctx, "tasks", task.ID)
+	record, _ := e.Store.Get(ctx, "execution_plans", task.ID)
 	var legacy map[string]any
 	// Preserve the real task shape but remove authorization, as an older database would.
 	_ = json.Unmarshal(record.Data, &legacy)
 	delete(legacy, "selection")
 	legacy["stage"] = "planning"
-	if err := e.Store.Put(ctx, "tasks", task.ID, legacy, record.Version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, legacy, record.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.Step(ctx, task.ID); err != nil {
 		t.Fatal(err)
 	}
-	current, _ := e.Store.Get(ctx, "tasks", task.ID)
-	held, _ := store.Decode[model.Task](current)
+	current, _ := e.Store.Get(ctx, "execution_plans", task.ID)
+	held, _ := store.Decode[model.ExecutionPlan](current)
 	if held.Stage != "awaiting_selection" || held.Plan != nil {
 		t.Fatalf("legacy task executed: %+v", held)
 	}

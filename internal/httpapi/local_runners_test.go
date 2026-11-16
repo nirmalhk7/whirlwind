@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +16,10 @@ import (
 	"whirlwind/internal/workflow"
 )
 
+const (
+	runnerToggleTestOperation = "runners.toggle"
+)
+
 func TestLocalRunnerToggleFlipsPersistedStateAndReplaysOnce(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
@@ -21,23 +27,28 @@ func TestLocalRunnerToggleFlipsPersistedStateAndReplaysOnce(t *testing.T) {
 	if err := settingsfile.Attach(ctx, s.Store, file); err != nil {
 		t.Fatal(err)
 	}
-	task := model.Task{ID: "active", Stage: "coding", Selection: &model.SelectionAuthorization{CandidateID: "active", SelectedAt: "2026-11-08T00:00:00Z"}}
-	if err := s.Store.Put(ctx, "tasks", "active", task, 0); err != nil {
+	task := model.ExecutionPlan{ID: "active", Stage: "coding", Selection: &model.SelectionAuthorization{CandidateID: "active", SelectedAt: "2026-11-08T00:00:00Z"}}
+	if err := s.Store.Put(ctx, "execution_plans", "active", task, 0); err != nil {
 		t.Fatal(err)
 	}
 	for i, want := range []bool{true, false, true} {
-		command := LocalCommand{Operation: "runners.toggle", IdempotencyKey: fmt.Sprintf("toggle-%d", i)}
+		settings, err := s.Store.Get(ctx, "settings", "global")
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, _ := json.Marshal(map[string]bool{"stopped": want})
+		command := LocalCommand{Operation: runnerToggleTestOperation, ResourceID: "global", ExpectedVersion: settings.Version, Payload: payload, IdempotencyKey: fmt.Sprintf("toggle-%d", i)}
 		for retry := 0; retry < 2; retry++ {
 			if _, err := s.ExecuteLocal(ctx, command); err != nil {
 				t.Fatal(err)
 			}
 			assertRunnerToggleState(t, s.Store, file, want)
 		}
-		record, err := s.Store.Get(ctx, "tasks", "active")
+		record, err := s.Store.Get(ctx, "execution_plans", "active")
 		if err != nil {
 			t.Fatal(err)
 		}
-		task, err := store.Decode[model.Task](record)
+		task, err := store.Decode[model.ExecutionPlan](record)
 		stage := "coding"
 		if want {
 			stage = "paused"
@@ -64,11 +75,15 @@ func assertRunnerToggleState(t *testing.T, db *store.Store, file string, want bo
 	}
 }
 
-func TestLocalRunnerToggleUsesLatestAuthoritativeYAML(t *testing.T) {
+func TestLocalRunnerToggleRejectsStaleAuthoritativeYAML(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
 	file := filepath.Join(t.TempDir(), "settings.yaml")
 	if err := settingsfile.Attach(ctx, s.Store, file); err != nil {
+		t.Fatal(err)
+	}
+	inspected, err := s.Store.Get(ctx, "settings", "global")
+	if err != nil {
 		t.Fatal(err)
 	}
 	// Edit disk after startup without refreshing the engine or dashboard.
@@ -83,7 +98,16 @@ func TestLocalRunnerToggleUsesLatestAuthoritativeYAML(t *testing.T) {
 	if err := os.WriteFile(file, []byte(edited), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.ExecuteLocal(ctx, LocalCommand{Operation: "runners.toggle", IdempotencyKey: "toggle-disk-edit"}); err != nil {
+
+	if _, err := s.ExecuteLocal(ctx, LocalCommand{Operation: runnerToggleTestOperation, ResourceID: "global", ExpectedVersion: inspected.Version, Payload: json.RawMessage(`{"stopped":true}`), IdempotencyKey: "stale-toggle"}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale inspection overrode human settings edit: %v", err)
+	}
+	assertRunnerToggleState(t, s.Store, file, true)
+	current, err := s.Store.Get(ctx, "settings", "global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ExecuteLocal(ctx, LocalCommand{Operation: runnerToggleTestOperation, ResourceID: "global", ExpectedVersion: current.Version, Payload: json.RawMessage(`{"stopped":false}`), IdempotencyKey: "fresh-resume"}); err != nil {
 		t.Fatal(err)
 	}
 	assertRunnerToggleState(t, s.Store, file, false)

@@ -12,7 +12,7 @@ type providerMetric struct {
 	Role     string `json:"role"`
 	Success  bool   `json:"success"`
 	Category string `json:"category"`
-	Task     string `json:"task"`
+	Task     string `json:"plan_id"`
 }
 
 // outcomes computes provider success rates for comparable roles and repository categories once at least five outcomes are available.
@@ -49,7 +49,7 @@ func (e *Engine) humanDecisions(ctx context.Context) map[string]string {
 	records, _ := e.Store.List(ctx, "outcomes")
 	for _, record := range records {
 		var outcome struct {
-			Task     string `json:"task"`
+			Task     string `json:"plan_id"`
 			Decision string `json:"human_decision"`
 		}
 		_ = json.Unmarshal(record.Data, &outcome)
@@ -61,11 +61,11 @@ func (e *Engine) metricOutcome(ctx context.Context, m providerMetric, decisions 
 	if m.Role != "code" && m.Role != "review" {
 		return m.Success, true
 	}
-	record, err := e.Store.Get(ctx, "tasks", m.Task)
+	record, err := e.Store.Get(ctx, "execution_plans", m.Task)
 	if err != nil {
 		return false, false
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || (task.Stage != "pr_created" && task.Stage != "complete") {
 		return false, false
 	}

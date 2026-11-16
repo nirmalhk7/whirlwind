@@ -27,8 +27,8 @@ func TestCriticalChangeWaitsForHumanBeforeLocalFinalization(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	r, _ := e.Store.Get(ctx, "tasks", task.ID)
-	done, _ := store.Decode[model.Task](r)
+	r, _ := e.Store.Get(ctx, "execution_plans", task.ID)
+	done, _ := store.Decode[model.ExecutionPlan](r)
 	if done.Stage != "approval" || done.PR != "" || done.Approved || done.Delivery != nil || done.Approval != nil {
 		t.Fatalf("approval bypass: %+v", done)
 	}
@@ -53,7 +53,7 @@ func TestProductiveReviewHasNoPassCap(t *testing.T) {
 		t.Fatalf("review did not receive an approved, verified candidate: %+v", candidate)
 	}
 	candidate.ReviewPasses = 100
-	if err := e.Store.Put(ctx, "tasks", candidate.ID, candidate, version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", candidate.ID, candidate, version); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.Step(ctx, candidate.ID); err != nil {
@@ -90,7 +90,7 @@ func TestPRDescriptionListsEachUnitOnce(t *testing.T) {
 	if planEnd := strings.Index(planContext, "\nReview: "); planEnd >= 0 {
 		planContext = planContext[:planEnd]
 	}
-	var approvedPlan model.Plan
+	var approvedPlan model.PlanSpecification
 	if err := json.Unmarshal([]byte(planContext), &approvedPlan); err != nil {
 		t.Fatalf("decode approved plan in local finalizer context: %v", err)
 	}

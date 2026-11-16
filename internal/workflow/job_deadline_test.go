@@ -26,7 +26,7 @@ func TestIdeationDoesNotWrapWholeRunInFiveMinuteDeadline(t *testing.T) {
 	var previousDeadline time.Time
 	f.engine.Adapter = func(model.Provider) provider.Adapter {
 		return connectionAdapterFunc(func(ctx context.Context, in provider.Input, hooks provider.Hooks) (provider.Output, error) {
-			previousDeadline = assertFreshAttemptDeadline(t, ctx, previousDeadline)
+			previousDeadline = assertFreshAttemptDeadline(t, ctx, f.engine, in, previousDeadline)
 			if in.Purpose == "generation" && ctx.Err() != nil {
 				t.Fatalf("fallback generation context ended early: %v", ctx.Err())
 			}
@@ -67,7 +67,7 @@ func TestPlannerAttemptsReceiveFreshFiveMinuteDeadlinesAcrossFallback(t *testing
 	calls := 0
 	e.Adapter = func(model.Provider) provider.Adapter {
 		return connectionAdapterFunc(func(ctx context.Context, in provider.Input, hooks provider.Hooks) (provider.Output, error) {
-			deadline = assertFreshAttemptDeadline(t, ctx, deadline)
+			deadline = assertFreshAttemptDeadline(t, ctx, e, in, deadline)
 			wantModel := "first"
 			if calls == 4 {
 				wantModel = "next"
@@ -88,8 +88,8 @@ func TestPlannerAttemptsReceiveFreshFiveMinuteDeadlinesAcrossFallback(t *testing
 	if calls != 5 {
 		t.Fatalf("provider fallback not exercised: %d", calls)
 	}
-	record, _ := e.Store.Get(ctx, "tasks", task.ID)
-	saved, _ := store.Decode[model.Task](record)
+	record, _ := e.Store.Get(ctx, "execution_plans", task.ID)
+	saved, _ := store.Decode[model.ExecutionPlan](record)
 	if saved.Stage != "plan_approval" || saved.Plan == nil || saved.PlanDocument == nil || saved.PlanDocument.ApprovedHash != "" {
 		t.Fatal("successful planning failed to persist for human approval")
 	}
@@ -110,9 +110,31 @@ func assertFiveMinuteDeadline(t *testing.T, ctx context.Context, started time.Ti
 	}
 	return deadline
 }
-func assertFreshAttemptDeadline(t *testing.T, ctx context.Context, previous time.Time) time.Time {
+func assertFreshAttemptDeadline(t *testing.T, ctx context.Context, engine *Engine, input provider.Input, previous time.Time) time.Time {
 	t.Helper()
-	got := assertFiveMinuteDeadline(t, ctx, time.Now())
+	if input.Execution == nil || input.Execution.ExecutionID == "" {
+		t.Fatal("attempt execution identity missing")
+	}
+	record, err := engine.Store.Get(ctx, "sessions", input.Execution.ExecutionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := store.Decode[model.Attempt](record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := time.Parse(time.RFC3339Nano, attempt.StartedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := time.Parse(time.RFC3339Nano, attempt.DeadlineAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := ctx.Deadline()
+	if !ok || !got.Equal(persisted) || persisted.Sub(started) != 300*time.Second || !got.After(time.Now()) {
+		t.Fatalf("attempt deadline not exactly 300 seconds from persisted start: started=%s deadline=%s context=%s", attempt.StartedAt, attempt.DeadlineAt, got)
+	}
 	if !previous.IsZero() && !got.After(previous) {
 		t.Fatalf("new attempt reused an earlier deadline: got %v previous %v", got, previous)
 	}

@@ -15,7 +15,7 @@ const retryFailureFormat = "calls=%d error=%v"
 
 type retryHarness struct {
 	engine  *Engine
-	task    model.Task
+	task    model.ExecutionPlan
 	project model.Project
 	cwd     string
 }

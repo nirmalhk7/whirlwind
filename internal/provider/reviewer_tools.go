@@ -17,6 +17,9 @@ func (s *providerSession) hasCheckTool() bool {
 }
 
 func (s *providerSession) checkTools() []any {
+	if s.hasFinalizationTool() {
+		return []any{finalizationTool()}
+	}
 	if !s.hasCheckTool() {
 		return nil
 	}
@@ -52,10 +55,7 @@ func (s *providerSession) dynamicCheck(ctx context.Context, raw json.RawMessage)
 	if err := json.Unmarshal(raw, &request); err != nil {
 		return nil, err
 	}
-	if request.Tool != "run_check" {
-		return nil, errors.New("unknown dynamic tool")
-	}
-	result, err := s.runCheckTool(ctx, request.Arguments)
+	result, err := s.callScopedTool(ctx, request.Tool, request.Arguments)
 	if err != nil {
 		return nil, err
 	}

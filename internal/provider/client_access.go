@@ -56,6 +56,9 @@ func resolvePathSuffix(candidate string) (string, error) {
 // allow rejects mutations for read-only roles and asks the configured hook to authorize a tool request.
 func (c *Client) allow(ctx context.Context, p Permission) error {
 	if c.input.ReadOnly {
+		if p.Tool == "fs/write_text_file" && len(p.Paths) == 1 && c.plannerOutputPath(p.Paths[0]) {
+			return nil
+		}
 		return errors.New("read-only agent role")
 	}
 	if c.hooks.Permission == nil {
@@ -69,4 +72,35 @@ func (c *Client) allow(ctx context.Context, p Permission) error {
 		return errors.New("tool permission denied")
 	}
 	return nil
+}
+
+// Only the supervisor-assigned Planner output grant permits a read-only agent
+// to write. A grant cannot widen source, Git, or command permissions.
+func (c *Client) plannerOutputPath(path string) bool {
+	if c.input.Role != "plan" || c.input.Purpose != "idea_planning" || c.input.Execution == nil || !c.input.Execution.ReadOnly {
+		return false
+	}
+	root, err := filepath.EvalSymlinks(c.input.CWD)
+	if err != nil {
+		return false
+	}
+	resolved, err := c.path(path)
+	if err != nil {
+		return false
+	}
+	for _, output := range c.input.Execution.WriteRoots {
+		target, err := filepath.EvalSymlinks(output)
+		if err != nil {
+			continue
+		}
+		containment, err := filepath.Rel(root, target)
+		if err != nil || !filepath.IsLocal(containment) || containment == "." {
+			continue
+		}
+		relative, err := filepath.Rel(target, resolved)
+		if err == nil && filepath.IsLocal(relative) && relative != "." {
+			return true
+		}
+	}
+	return false
 }

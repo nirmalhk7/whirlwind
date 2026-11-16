@@ -20,7 +20,11 @@ func (d *Dashboard) refreshInbox() {
 	d.inboxMessages = nil
 	for i := range d.directionRows {
 		label, _ := d.directions.GetItemText(i)
-		d.inbox.AddItem(d.recordTimestamp("directions", d.directionRows[i].ID)+" · "+label, "", 0, nil)
+		kind := "directions"
+		if _, _, ok := d.ideaRecord(d.directionRows[i].ID); ok {
+			kind = "ideas"
+		}
+		d.inbox.AddItem(d.recordTimestamp(kind, d.directionRows[i].ID)+" · "+label, "", 0, nil)
 		d.inboxTaskIDs = append(d.inboxTaskIDs, "")
 		d.inboxMessages = append(d.inboxMessages, messageText(d.directionRows[i]))
 	}
@@ -69,7 +73,7 @@ func (d *Dashboard) addAttemptNotice(attemptID, taskID, message, fullMessage, ti
 
 type inboxPermission struct {
 	ID        string `json:"id"`
-	Task      string `json:"task"`
+	Task      string `json:"plan_id"`
 	AttemptID string `json:"attempt_id"`
 }
 

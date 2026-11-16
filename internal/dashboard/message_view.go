@@ -34,7 +34,12 @@ func messageText(message any) string {
 func (d *Dashboard) viewMessage(index int) {
 	if index >= 0 && index < len(d.directionRows) {
 		d.directions.SetCurrentItem(index)
-		d.confirmDirection()
+		if idea, version, ok := d.ideaRecord(d.directionRows[index].ID); ok {
+			d.showIdeaRecord(idea, version)
+			return
+		}
+		d.showDirectionRationale(d.directionRows[index])
+		d.directionChoiceFromRationale = true
 		return
 	}
 	if index >= 0 && index < len(d.inboxTaskIDs) {
@@ -82,7 +87,7 @@ func (d *Dashboard) viewSavedMessage(index int) {
 }
 
 func (d *Dashboard) showKeyboardHelp() {
-	view := tview.NewTextView().SetScrollable(true).SetText("Tab / Shift-Tab: switch panels\nUp / Down: select row\nEnter: full run logs, task details, or Inbox decision in Vim\nv / click Inbox proposal: edit decision in Vim (:wq submits; unchanged cancels)\nl (Runs) / click either run line: full saved run logs\nl (Tasks): latest task output\na: choose proposal for Vim decision\nd (Inbox): delete highlighted proposal\nh: direction history\nt: inspect tasks\nr: review plan\nc: answer questions\np: permissions\nf: finalization\nx: stop/resume runners\nEsc: close details or dialog\nq / Ctrl-C: quit")
+	view := tview.NewTextView().SetScrollable(true).SetText(strings.ReplaceAll(keyboardShortcuts, " | ", "\n") + "\n\nVim: :wq submits; unchanged cancels.\nRun logs: Ctrl-C returns to dashboard.")
 	view.SetBorder(true).SetTitle(" Keyboard instructions · Esc to close ")
 	d.modal = view
 	d.SetRoot(view, true).SetFocus(view)

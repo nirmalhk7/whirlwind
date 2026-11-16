@@ -15,7 +15,7 @@ var planDocumentList = regexp.MustCompile(`^(?:[-*+] |[0-9]+[.)] )(.+)$`)
 
 // RenderPlanDocument produces an editable specification whose prose, criteria,
 // and complete path scope are authoritative when the document is approved.
-func RenderPlanDocument(plan model.Plan) string {
+func RenderPlanDocument(plan model.PlanSpecification) string {
 	if approved, err := ParsePlanDocument(plan.Specification); err == nil && sameDocumentPlan(approved, plan) {
 		return strings.TrimSpace(plan.Specification) + "\n"
 	}
@@ -43,14 +43,7 @@ func RenderPlanDocument(plan model.Plan) string {
 		fmt.Fprintf(&body, "- %s: %s — Evidence: %s <!-- %s -->\n", requirement.ID, requirement.Outcome, requirement.EvidenceMethod, encoded)
 	}
 	body.WriteString("\n## Checks\n\n")
-	for _, check := range plan.Checks {
-		encoded, _ := json.Marshal(check)
-		name := strings.TrimSpace(check.Name)
-		if name == "" {
-			name = "Approved check"
-		}
-		fmt.Fprintf(&body, "- %s: `%s` <!-- %s -->\n", name, strings.Join(check.Command, " "), encoded)
-	}
+	writePlanDocumentChecks(&body, plan.Checks)
 	body.WriteString("\n## Repository test commands\n\n")
 	writePlanCommands(&body, plan.RepositoryTestCommands)
 	fmt.Fprintf(&body, "\n## Repository test command inventory\n\n%s\n", inventoryText(plan.RepositoryTestInventory))
@@ -80,21 +73,21 @@ func RenderPlanDocument(plan model.Plan) string {
 
 // ParsePlanDocument reads Markdown as text only. It never executes embedded
 // code, interprets HTML, or trusts a hidden structured payload over visible prose.
-func ParsePlanDocument(text string) (model.Plan, error) {
+func ParsePlanDocument(text string) (model.PlanSpecification, error) {
 	objective, sections, err := splitPlanDocument(text)
 	if err != nil {
-		return model.Plan{}, err
+		return model.PlanSpecification{}, err
 	}
 	for _, heading := range []string{"what", "why", "benefit", "where", "acceptance criteria", "implementation", "requirements", "checks", "repository test commands", "repository build commands"} {
 		if strings.TrimSpace(sections[heading]) == "" && !optionalPlanSection(heading) {
-			return model.Plan{}, fmt.Errorf("plan requires nonempty %s section", heading)
+			return model.PlanSpecification{}, fmt.Errorf("plan requires nonempty %s section", heading)
 		}
 	}
 	where, err := documentWhere(sections["where"])
 	if err != nil {
-		return model.Plan{}, err
+		return model.PlanSpecification{}, err
 	}
-	plan := model.Plan{Objective: objective, What: sections["what"], Why: sections["why"], Benefit: sections["benefit"], Where: where, Specification: strings.TrimSpace(text)}
+	plan := model.PlanSpecification{Objective: objective, What: sections["what"], Why: sections["why"], Benefit: sections["benefit"], Where: where, Specification: text}
 	plan.Scope, err = parsePlanDetailList(sections["scope"])
 	if err == nil {
 		plan.Exclusions, err = parsePlanDetailList(sections["exclusions"])
@@ -296,4 +289,15 @@ func stripDocumentChecklist(value string) string {
 		return strings.TrimSpace(value[3:])
 	}
 	return value
+}
+
+func writePlanDocumentChecks(body *strings.Builder, checks []model.Check) {
+	for _, check := range checks {
+		encoded, _ := json.Marshal(check)
+		name := strings.TrimSpace(check.Name)
+		if name == "" {
+			name = "Approved check"
+		}
+		fmt.Fprintf(body, "- %s: `%s` <!-- %s -->\n", name, strings.Join(check.Command, " "), encoded)
+	}
 }

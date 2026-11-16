@@ -20,7 +20,7 @@ func (a *agentAttempt) recordWorkerHeartbeat(ctx context.Context, at time.Time) 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.state.Finished {
-		return store.ErrConflict
+		return fmt.Errorf("%w: attempt already finished", store.ErrConflict)
 	}
 	return a.updateRuntimeState(ctx, at, "")
 }
@@ -36,8 +36,8 @@ func (a *agentAttempt) updateProcessState(ctx context.Context, state string) err
 
 func (a *agentAttempt) updateRuntimeState(ctx context.Context, at time.Time, processState string) error {
 	now := time.Now().UTC()
-	if at.After(now.Add(time.Millisecond)) || now.Sub(at) >= 2*runtimeHeartbeatInterval {
-		return store.ErrConflict
+	if err := validateHeartbeatSample(at, now); err != nil {
+		return err
 	}
 	record, err := a.Store.Get(ctx, "sessions", a.id)
 	if err != nil {
@@ -48,11 +48,11 @@ func (a *agentAttempt) updateRuntimeState(ctx context.Context, at time.Time, pro
 		return err
 	}
 	if !sameRuntimeOwner(stored, a.state) {
-		return store.ErrConflict
+		return fmt.Errorf("%w: runtime owner changed (finished=%t status=%s generation=%d expected=%d)", store.ErrConflict, stored.Finished, stored.Status, stored.ExecutionGeneration, a.state.ExecutionGeneration)
 	}
 	leaseExpires, err := time.Parse(time.RFC3339Nano, stored.LeaseExpiresAt)
 	if err != nil || !now.Before(leaseExpires) {
-		return store.ErrConflict
+		return fmt.Errorf("%w: runtime lease expired or invalid (expiry=%s observed=%s)", store.ErrConflict, stored.LeaseExpiresAt, now.Format(time.RFC3339Nano))
 	}
 	stored.WorkerHeartbeatAt = now.Format(time.RFC3339Nano)
 	stored.LeaseExpiresAt = now.Add(runtimeLeaseLifetime).Format(time.RFC3339Nano)
@@ -67,7 +67,7 @@ func (a *agentAttempt) updateRuntimeState(ctx context.Context, at time.Time, pro
 		stored.ProcessState = processState
 	}
 	if err := a.Store.Put(ctx, "sessions", a.id, stored, record.Version); err != nil {
-		return err
+		return fmt.Errorf("persist runtime heartbeat version %d: %w", record.Version, err)
 	}
 	a.state.WorkerHeartbeatAt = stored.WorkerHeartbeatAt
 	a.state.LeaseExpiresAt = stored.LeaseExpiresAt
@@ -165,4 +165,14 @@ func providerProgress(attempt *model.Attempt, kind string, data any, at time.Tim
 			attempt.ActiveTool = ""
 		}
 	}
+}
+
+func validateHeartbeatSample(at, now time.Time) error {
+	if at.After(now.Add(time.Millisecond)) {
+		return fmt.Errorf("%w: future heartbeat sample", store.ErrConflict)
+	}
+	if now.Sub(at) >= 2*runtimeHeartbeatInterval {
+		return fmt.Errorf("%w: stale heartbeat sample (age %s)", store.ErrConflict, now.Sub(at))
+	}
+	return nil
 }

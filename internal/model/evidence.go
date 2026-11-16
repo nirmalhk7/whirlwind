@@ -37,19 +37,24 @@ type Usage struct {
 	Cost                 *float64        `json:"cost"`
 	Scope                string          `json:"scope"`
 }
+
+const GlobalRunnerStopReason = "Paused by global runner stop"
+
 type Operation struct {
-	Kind        string `json:"kind"`
-	Subject     string `json:"subject"`
-	Owner       string `json:"owner"`
-	Stage       string `json:"stage"`
-	Input       any    `json:"input,omitempty"`
-	StartedAt   string `json:"started_at"`
-	FinishedAt  string `json:"finished_at,omitempty"`
-	Error       string `json:"error,omitempty"`
-	FailureKind string `json:"failure_kind,omitempty"`
+	RepositoryRevision string `json:"repository_revision,omitempty"`
+	ConfigurationHash  string `json:"configuration_hash,omitempty"`
+	Kind               string `json:"kind"`
+	Subject            string `json:"subject"`
+	Owner              string `json:"owner"`
+	Stage              string `json:"stage"`
+	Input              any    `json:"input,omitempty"`
+	StartedAt          string `json:"started_at"`
+	FinishedAt         string `json:"finished_at,omitempty"`
+	Error              string `json:"error,omitempty"`
+	FailureKind        string `json:"failure_kind,omitempty"`
 }
 type Provenance struct {
-	Task           string   `json:"task"`
+	Task           string   `json:"plan_id"`
 	PlanVersion    int      `json:"plan_version"`
 	Head           string   `json:"head"`
 	Base           string   `json:"base"`
@@ -59,7 +64,7 @@ type Provenance struct {
 	AttemptIDs     []string `json:"attempt_ids,omitempty"`
 }
 type Audit struct {
-	Task      string      `json:"task,omitempty"`
+	Task      string      `json:"plan_id,omitempty"`
 	AttemptID string      `json:"attempt_id,omitempty"`
 	Source    string      `json:"source"`
 	Action    string      `json:"action"`
@@ -73,7 +78,7 @@ type Publication struct {
 	PolicyHash  string      `json:"policy_hash"`
 	Evidence    *Provenance `json:"evidence,omitempty"`
 	Kind        string      `json:"kind"`
-	Task        string      `json:"task"`
+	Task        string      `json:"plan_id"`
 	PlanVersion int         `json:"plan_version"`
 	Repo        string      `json:"repo"`
 	Branch      string      `json:"branch,omitempty"`
@@ -93,6 +98,7 @@ type Publication struct {
 
 // Attempt preserves additive session fields while distinguishing reported runtime metadata from configured input.
 type Attempt struct {
+	IdeaID                string          `json:"idea_id,omitempty"`
 	ExecutionID           string          `json:"execution_id,omitempty"`
 	SandboxName           string          `json:"sandbox_name,omitempty"`
 	SandboxID             string          `json:"sandbox_id,omitempty"`
@@ -115,7 +121,7 @@ type Attempt struct {
 	RuntimeKind           string          `json:"runtime_kind,omitempty"`
 	RuntimeLauncher       string          `json:"runtime_launcher,omitempty"`
 	AttemptID             string          `json:"attempt_id"`
-	Task                  string          `json:"task"`
+	Task                  string          `json:"plan_id"`
 	ProjectID             string          `json:"project_id"`
 	UnitID                string          `json:"unit_id,omitempty"`
 	OperationID           string          `json:"operation_id,omitempty"`
@@ -165,7 +171,7 @@ type RecoveryEpisode struct {
 	EpisodeID     string `json:"episode_id"`
 	EntryID       string `json:"entry_id"`
 	ProjectID     string `json:"project_id"`
-	TaskID        string `json:"task_id"`
+	TaskID        string `json:"plan_id"`
 	Role          string `json:"role"`
 	Purpose       string `json:"purpose,omitempty"`
 	Provider      string `json:"provider"`

@@ -43,7 +43,7 @@ func (e *Engine) TestProviderChoice(ctx context.Context, p model.Provider, choic
 		id = store.ID()
 	}
 	input.OperationID = id
-	run := &agentRun{Engine: e, ctx: ctx, project: model.Project{}, task: model.Task{ID: "operation:" + id}, input: input}
+	run := &agentRun{Engine: e, ctx: ctx, project: model.Project{}, task: model.ExecutionPlan{ID: "operation:" + id}, input: input}
 	attempt, attemptErr := run.newAttempt(p)
 	if attemptErr != nil {
 		return out, attemptErr

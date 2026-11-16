@@ -20,7 +20,7 @@ func (a *agentRun) newAttempt(chosen model.Provider) (_ *agentAttempt, resultErr
 	defer func() {
 		if resultErr != nil {
 			if err := a.recordPrelaunchFailure(execution, chosen, resultErr); err != nil {
-				resultErr = errors.Join(resultErr, fmt.Errorf("%w: prelaunch cleanup: %v", store.ErrPersistence, err))
+				resultErr = errors.Join(resultErr, fmt.Errorf("%w: prelaunch cleanup: %w", store.ErrPersistence, err))
 			}
 		}
 	}()
@@ -49,6 +49,9 @@ func (a *agentRun) prepareNewAttempt(chosen model.Provider) (*agentAttempt, erro
 		return nil, err
 	}
 	execution := &agentAttempt{agentRun: a, chosen: chosen, id: store.ID()}
+	if a.pairAttempt != "" {
+		execution.id = a.pairAttempt
+	}
 	if _, err := a.reserveAttempt(chosen, execution.id); err != nil {
 		return nil, err
 	}
@@ -77,7 +80,7 @@ func (execution *agentAttempt) launch() error {
 	if a.input.Execution != nil {
 		configHash = a.input.Execution.Digest()
 	}
-	execution.state = model.Attempt{ExecutionID: execution.id, ExecutionGeneration: generation, RuntimeKind: runtimeKind, RuntimeLauncher: runtimeLauncher, WorkerHeartbeatAt: started.Format(time.RFC3339Nano), LeaseExpiresAt: started.Add(runtimeLeaseLifetime).Format(time.RFC3339Nano), ProviderProgressAt: started.Format(time.RFC3339Nano), ProcessState: "starting", SandboxHealth: "unknown", SandboxPhase: "unknown", ConfigSnapshotVersion: 1, ConfigSnapshotHash: configHash, ExecutionProfile: a.input.ExecutionProfile, AttemptID: execution.id, Task: a.task.ID, UnitID: a.input.UnitID, OperationID: a.input.OperationID, Purpose: a.input.Purpose, PreviousAttemptID: a.previousAttempt, ResumedFromAttemptID: a.resumeSource, RecoveryEpisodeID: episodeID, RestartCount: a.recoveryRestartCount, QueuePosition: a.queuePosition, QueueLength: a.queueLength, Role: a.input.Role, Provider: chosen.ID, SessionID: a.input.SessionID, RequestedSessionID: a.input.SessionID, CWD: a.input.CWD, PlanVersion: a.task.PlanVersion, Finished: false, Status: "running", Owner: a.owner, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, PolicyHash: a.project.PolicyHash, Model: a.input.Model, ProjectID: a.project.ID, ProviderName: chosen.Name, Transport: provider.ExecutionProvider(chosen, a.input.Thinking).Kind, Thinking: a.input.Thinking, DeadlineAt: deadline.Format(time.RFC3339Nano), StartedAt: started.Format(time.RFC3339Nano)}
+	execution.state = model.Attempt{IdeaID: plannerIdeaID(a), ExecutionID: execution.id, ExecutionGeneration: generation, RuntimeKind: runtimeKind, RuntimeLauncher: runtimeLauncher, WorkerHeartbeatAt: started.Format(time.RFC3339Nano), LeaseExpiresAt: started.Add(runtimeLeaseLifetime).Format(time.RFC3339Nano), ProviderProgressAt: started.Format(time.RFC3339Nano), ProcessState: "starting", SandboxHealth: "unknown", SandboxPhase: "unknown", ConfigSnapshotVersion: 1, ConfigSnapshotHash: configHash, ExecutionProfile: a.input.ExecutionProfile, AttemptID: execution.id, Task: a.task.ID, UnitID: a.input.UnitID, OperationID: a.input.OperationID, Purpose: a.input.Purpose, PreviousAttemptID: a.previousAttempt, ResumedFromAttemptID: a.resumeSource, RecoveryEpisodeID: episodeID, RestartCount: a.recoveryRestartCount, QueuePosition: a.queuePosition, QueueLength: a.queueLength, Role: a.input.Role, Provider: chosen.ID, SessionID: a.input.SessionID, RequestedSessionID: a.input.SessionID, CWD: a.input.CWD, PlanVersion: a.task.PlanVersion, Finished: false, Status: "running", Owner: a.owner, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, PolicyHash: a.project.PolicyHash, Model: a.input.Model, ProjectID: a.project.ID, ProviderName: chosen.Name, Transport: provider.ExecutionProvider(chosen, a.input.Thinking).Kind, Thinking: a.input.Thinking, DeadlineAt: deadline.Format(time.RFC3339Nano), StartedAt: started.Format(time.RFC3339Nano)}
 	if a.input.Execution != nil {
 		execution.state.SandboxName = a.input.Execution.SandboxName
 		execution.state.ExecutionLabelValue = a.input.Execution.ExecutionLabelValue
@@ -86,8 +89,29 @@ func (execution *agentAttempt) launch() error {
 		execution.state.GatewayEndpoint = a.input.Execution.GatewayEndpoint
 		execution.state.Workspace = a.input.Execution.Workspace
 	}
-	if err := a.Store.Put(a.ctx, "sessions", execution.id, execution.state, 0); err != nil {
+	expected := 0
+	if a.pairAttempt != "" {
+		record, err := a.Store.Get(a.ctx, "sessions", execution.id)
+		if err != nil {
+			return err
+		}
+		queued, err := store.Decode[model.Attempt](record)
+		if err != nil {
+			return err
+		}
+		if queued.Status != "queued" || queued.Finished || queued.Owner != a.owner || queued.Task != a.task.ID || queued.ProjectID != a.project.ID || queued.PlanVersion != a.task.PlanVersion || queued.Role != a.input.Role {
+			return store.ErrConflict
+		}
+		expected = record.Version
+	}
+	if err := a.Store.Put(a.ctx, "sessions", execution.id, execution.state, expected); err != nil {
 		return err
+	}
+
+	if a.input.Purpose == "idea_planning" {
+		if err := a.Store.PlannerRunLocation(a.ctx, execution.id, a.input.PlannerPublicationPath); err != nil {
+			return err
+		}
 	}
 	if err := execution.captureInput(); err != nil {
 		return err
@@ -173,4 +197,11 @@ func (a *agentAttempt) saveStarted() error {
 	}
 	a.previousAttempt = a.id
 	return a.eventErr
+}
+
+func plannerIdeaID(a *agentRun) string {
+	if a.input.Role == "plan" && a.input.Purpose == "idea_planning" {
+		return a.task.IdeaID
+	}
+	return ""
 }

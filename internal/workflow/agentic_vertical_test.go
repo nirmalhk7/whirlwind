@@ -20,12 +20,16 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	agenticResultRequirement = "REQ-RESULT"
+)
+
 const agenticFixtureConnection = "mcp://forge"
 const agenticResultFile = "result.go"
 const agenticRegressionFile = "result_test.go"
 
-// The fixture replaces only native provider execution. Git operations, checks,
-// approval, evidence, submission organization and reconciliation remain real.
+// Provider execution and scanner output are controlled. Git operations, command
+// execution, approval, evidence, submission and reconciliation remain real.
 type agenticVerticalAdapter struct {
 	mu           sync.Mutex
 	prompt       string
@@ -38,7 +42,7 @@ func (a *agenticVerticalAdapter) Run(ctx context.Context, in provider.Input, hoo
 	}
 	switch in.Role {
 	case "plan":
-		plan := model.Plan{Objective: "Return useful result", What: "Return true from Result with regression coverage", Why: "Consumers currently receive false", Benefit: "Consumers receive a usable result", Where: []string{agenticResultFile, agenticRegressionFile}, AcceptanceCriteria: []string{"Result returns true", "Regression test fails before the change and passes afterwards"}, Scope: []string{"Change Result and add a regression test"}, Exclusions: []string{"Do not change unrelated tests"}, Steps: []string{"Add the failing regression", "Implement Result", "Run the approved test"}, RepositoryTestCommands: [][]string{{"go", "test", "-json", "./..."}}, RepositoryTestInventory: "Configured: .whirlwind.yaml: go test -json ./...", RepositoryBuildInventory: "None configured: .whirlwind.yaml inspected", Requirements: []model.Requirement{{ID: "REQ-RESULT", Outcome: "Result returns true", EvidenceMethod: "Run TestResult"}}, Units: []model.Unit{{ID: "result", Objective: "Test first, implement Result, verify regression", AllowedPaths: []string{agenticResultFile, agenticRegressionFile}}}}
+		plan := model.PlanSpecification{Objective: "Return useful result", What: "Return true from Result with regression coverage", Why: "Consumers currently receive false", Benefit: "Consumers receive a usable result", Where: []string{agenticResultFile, agenticRegressionFile}, AcceptanceCriteria: []string{"Result returns true", "Regression test fails before the change and passes afterwards"}, Scope: []string{"Change Result and add a regression test"}, Exclusions: []string{"Do not change unrelated tests"}, Steps: []string{"Add the failing regression", "Implement Result", "Run the approved test"}, RepositoryTestCommands: [][]string{{"go", "test", "-json", "./..."}}, RepositoryTestInventory: "Configured: .whirlwind.yaml: go test -json ./...", RepositoryBuildInventory: "None configured: .whirlwind.yaml inspected", Requirements: []model.Requirement{{ID: agenticResultRequirement, Outcome: "Result returns true", EvidenceMethod: "Run TestResult"}}, Units: []model.Unit{{ID: "result", Objective: "Test first, implement Result, verify regression", AllowedPaths: []string{agenticResultFile, agenticRegressionFile}}}}
 		text, _ := json.Marshal(plan)
 		return provider.Output{Text: string(text)}, nil
 	case "code":
@@ -47,7 +51,7 @@ func (a *agenticVerticalAdapter) Run(ctx context.Context, in provider.Input, hoo
 		if !strings.Contains(in.Prompt, "Host execution evidence") || !strings.Contains(in.Prompt, `"phase":"red"`) || !strings.Contains(in.Prompt, `"phase":"green"`) {
 			return provider.Output{}, fmt.Errorf("review omitted actual host TDD evidence")
 		}
-		text, _ := json.Marshal(model.Review{Requirements: []model.RequirementResult{{ID: "REQ-RESULT", Status: "pass", Code: []string{agenticResultFile, agenticRegressionFile}, Evidence: []string{"TestResult passed after a recorded failing run"}, Explanation: "Result now returns true and the regression test passes."}}, Findings: []model.Finding{}, Summary: "The candidate satisfies the approved requirement."})
+		text, _ := json.Marshal(model.Review{Requirements: []model.RequirementResult{{ID: agenticResultRequirement, Status: "pass", Code: []string{agenticResultFile, agenticRegressionFile}, Evidence: []string{"TestResult passed after a recorded failing run"}, Explanation: "Result now returns true and the regression test passes."}}, Findings: []model.Finding{}, Summary: "The candidate satisfies the approved requirement."})
 		return provider.Output{Text: string(text)}, nil
 	case "finalizer":
 		a.mu.Lock()
@@ -285,7 +289,7 @@ type agenticWorkflowFixture struct {
 	t            *testing.T
 	ctx          context.Context
 	e            *Engine
-	task         model.Task
+	task         model.ExecutionPlan
 	project      model.Project
 	repo, marker string
 	debt         bool
@@ -294,7 +298,7 @@ type agenticWorkflowFixture struct {
 
 func (f *agenticWorkflowFixture) prepareRepository() {
 	t, e, repo := f.t, f.e, f.repo
-	e.PlansRoot = filepath.Join(t.TempDir(), "plans")
+	e.PlansRoot = filepath.Join(t.TempDir(), "plan_versions")
 	bin := t.TempDir()
 	marker := filepath.Join(bin, "gh-called")
 	f.marker = marker
@@ -363,8 +367,8 @@ func (f *agenticWorkflowFixture) configureNativeProvider() {
 	task.Issue = model.Issue{Title: "Return useful result", Body: "Result must return true"}
 	task.Selection.PolicyHash = project.PolicyHash
 	task.Sources = []model.SourceRef{{Provider: "fake", Host: "issues.example", Connection: "mcp://issues", Repository: "APP", ID: "APP-3", URL: "https://issues.example/APP-3"}}
-	taskRecord, _ := e.Store.Get(ctx, "tasks", task.ID)
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, taskRecord.Version); err != nil {
+	taskRecord, _ := e.Store.Get(ctx, "execution_plans", task.ID)
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, taskRecord.Version); err != nil {
 		t.Fatal(err)
 	}
 	f.task, f.project = task, project
@@ -394,6 +398,7 @@ func (f *agenticWorkflowFixture) approveLocalPlan() {
 	if unchanged.Stage != "plan_approval" || unchanged.Worktree != "" {
 		t.Fatal("unapproved local plan started coding")
 	}
+	includeFixturePlanQlty(t, &pending, cleanQltyFixtureCheck(t))
 	view, err := e.ReadLocalPlan(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -403,7 +408,7 @@ func (f *agenticWorkflowFixture) approveLocalPlan() {
 	}
 }
 
-func (f *agenticWorkflowFixture) completeLocalDelivery() model.Task {
+func (f *agenticWorkflowFixture) completeLocalDelivery() model.ExecutionPlan {
 	t, ctx, e, task := f.t, f.ctx, f.e, f.task
 	for i := 0; i < 20; i++ {
 		current, version := localStoredTask(t, e, task.ID)
@@ -502,19 +507,15 @@ func storedWorkflowEvidence(ctx context.Context, database *store.Store, kind, id
 	return string(record.Data)
 }
 
-func (f *agenticWorkflowFixture) verifyTDD(done model.Task) {
+func (f *agenticWorkflowFixture) verifyTDD(done model.ExecutionPlan) {
 	t, ctx, e, task := f.t, f.ctx, f.e, f.task
 	redGreen, err := e.Store.List(ctx, "tdd_checks")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	phases := map[string]bool{}
 	var red, green *tddCheck
 	for _, record := range redGreen {
 		entry, err := store.Decode[tddCheck](record)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, err)
 		if entry.Task == task.ID {
 			phases[entry.Phase] = true
 			if entry.Phase == "red" {
@@ -552,12 +553,12 @@ func (f *agenticWorkflowFixture) verifyDebtTDDPair(red, green *tddCheck) {
 	}
 }
 
-func (f *agenticWorkflowFixture) verifySubmission(done model.Task) {
+func (f *agenticWorkflowFixture) verifySubmission(done model.ExecutionPlan) {
 	t, task, adapter := f.t, f.task, f.adapter
 	adapter.mu.Lock()
 	prompt := adapter.prompt
 	adapter.mu.Unlock()
-	if !strings.Contains(prompt, "REQ-RESULT") || !strings.Contains(prompt, task.ID) || strings.Contains(prompt, "create PR") {
+	if !strings.Contains(prompt, agenticResultRequirement) || !strings.Contains(prompt, task.ID) || strings.Contains(prompt, "create PR") {
 		t.Fatalf("local finalizer prompt omitted reviewed provenance/requirements or requested remote publication: %s", prompt)
 	}
 	if done.Delivery == nil || done.Delivery.Stage != "complete" {
@@ -578,7 +579,7 @@ func (f *agenticWorkflowFixture) verifySubmission(done model.Task) {
 	}
 }
 
-func (f *agenticWorkflowFixture) reconcile(done model.Task) {
+func (f *agenticWorkflowFixture) reconcile(done model.ExecutionPlan) {
 	t, e, task := f.t, f.e, f.task
 	completed, _ := localStoredTask(t, e, task.ID)
 	if completed.Stage != "complete" {

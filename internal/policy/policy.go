@@ -81,6 +81,9 @@ func AllowedPath(p model.Policy, path string) bool {
 func validateChecks(checks []model.Check) error {
 	names := map[string]bool{}
 	for _, c := range checks {
+		if !slices.Contains([]string{"", "verify", "autofix"}, c.Mode) {
+			return errors.New("verification command mode must be verify or autofix")
+		}
 		if c.FreshnessSeconds < 0 || (c.Reusable && c.FreshnessSeconds == 0) {
 			return errors.New("reusable checks require positive freshness_seconds")
 		}
@@ -110,6 +113,9 @@ func validateRiskRule(r model.RiskRule) error {
 		return errors.New("risk selector required")
 	}
 	for _, c := range r.Checks {
+		if !slices.Contains([]string{"", "verify", "autofix"}, c.Mode) {
+			return errors.New("verification command mode must be verify or autofix")
+		}
 		if c.FreshnessSeconds < 0 || (c.Reusable && c.FreshnessSeconds == 0) {
 			return errors.New("reusable risk checks require positive freshness_seconds")
 		}

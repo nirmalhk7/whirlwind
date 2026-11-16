@@ -17,7 +17,7 @@ func runLocalDeliveryToCompletion(t *testing.T, step *taskStep) bool {
 		if finished {
 			return true
 		}
-		if err := step.Store.Put(step.ctx, "tasks", step.task.ID, step.task, step.record.Version); err != nil {
+		if err := step.Store.Put(step.ctx, "execution_plans", step.task.ID, step.task, step.record.Version); err != nil {
 			t.Fatal(err)
 		}
 		step.record.Version++

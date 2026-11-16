@@ -61,7 +61,7 @@ func TestStopAllCancelsTaskAndProviderRunnersAndAllowsNewWork(t *testing.T) {
 func TestStoppedFlagBlocksRunnersUntilCleared(t *testing.T) {
 	e, task, _ := testEngine(t)
 	ctx := context.Background()
-	initial, _ := e.Store.Get(ctx, "tasks", task.ID)
+	initial, _ := e.Store.Get(ctx, "execution_plans", task.ID)
 	settings := DefaultSettings()
 	settings.Stopped = true
 	record, err := e.Store.Get(ctx, "settings", "global")
@@ -101,7 +101,7 @@ func TestStoppedFlagBlocksRunnersUntilCleared(t *testing.T) {
 	}
 	e.dispatch(ctx)
 	e.background.Wait()
-	current, _ := e.Store.Get(ctx, "tasks", task.ID)
+	current, _ := e.Store.Get(ctx, "execution_plans", task.ID)
 	if current.Version != initial.Version {
 		t.Fatalf("stopped dispatch advanced task: %+v", current)
 	}
@@ -169,7 +169,7 @@ func setRunnerStopped(t *testing.T, e *Engine, stopped bool) {
 type stoppedRunnerFixture struct {
 	engine   *Engine
 	project  model.Project
-	task     model.Task
+	task     model.ExecutionPlan
 	provider model.Provider
 	path     string
 	ctx      context.Context

@@ -31,7 +31,11 @@ func kernelProcesses() ([]inspectedProcess, error) {
 }
 
 func darwinIdentity(row unix.KinfoProc) inspectedProcess {
-	return inspectedProcess{Identity: Identity{PID: int(row.Proc.P_pid), Parent: int(row.Eproc.Ppid), Group: int(row.Eproc.Pgid), Started: fmt.Sprintf("%d:%d", row.Proc.P_starttime.Sec, row.Proc.P_starttime.Usec), Zombie: row.Proc.P_stat == 5}}
+	// P_WEXIT processes cannot run user code, but may remain in the kernel
+	// table before becoming SZOMB. KERN_PROCARGS2 already returns EINVAL for
+	// them. Preserve their identity without reading unavailable environment.
+	const processExiting = 0x00002000
+	return inspectedProcess{Identity: Identity{PID: int(row.Proc.P_pid), Parent: int(row.Eproc.Ppid), Group: int(row.Eproc.Pgid), Started: fmt.Sprintf("%d:%d", row.Proc.P_starttime.Sec, row.Proc.P_starttime.Usec), Zombie: row.Proc.P_stat == 5 || row.Proc.P_flag&processExiting != 0}}
 }
 
 func kernelIdentity(pid int) (Identity, error) {

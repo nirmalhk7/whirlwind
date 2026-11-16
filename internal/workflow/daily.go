@@ -15,6 +15,7 @@ func (e *Engine) Daily(ctx context.Context) {
 	if settings.Stopped {
 		return
 	}
+	e.dispatchQueuedIdeation(ctx)
 	schedule := settings.Ideation
 	if !schedule.Enabled {
 		return

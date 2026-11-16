@@ -29,7 +29,7 @@ func setProjectPaused(t *testing.T, e *Engine, id string, paused bool) {
 func TestPausedProjectBlocksExecutionWithStaleProjectSnapshot(t *testing.T) {
 	e, task, path := testEngine(t)
 	ctx := context.Background()
-	initial, _ := e.Store.Get(ctx, "tasks", task.ID)
+	initial, _ := e.Store.Get(ctx, "execution_plans", task.ID)
 	initialInbox, _ := e.Store.List(ctx, "inbox")
 	p, err := e.Project(ctx, task.ProjectID)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestPausedProjectBlocksExecutionWithStaleProjectSnapshot(t *testing.T) {
 	if notices, err := e.Store.List(ctx, "inbox"); err != nil || len(notices) != len(initialInbox) {
 		t.Fatalf("pause added notifications: %d %v", len(notices), err)
 	}
-	current, err := e.Store.Get(ctx, "tasks", task.ID)
+	current, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil || current.Version != initial.Version {
 		t.Fatalf("task advanced while paused: %+v %v", current, err)
 	}
@@ -99,7 +99,7 @@ func TestProjectPauseDoesNotRecordScheduledFailure(t *testing.T) {
 
 func TestStopProjectCancelsActiveAndQueuedWorkOnlyForThatProject(t *testing.T) {
 	e, task, path := testEngine(t)
-	initial, _ := e.Store.Get(context.Background(), "tasks", task.ID)
+	initial, _ := e.Store.Get(context.Background(), "execution_plans", task.ID)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	p, err := e.Project(ctx, task.ProjectID)
@@ -122,7 +122,7 @@ func TestStopProjectCancelsActiveAndQueuedWorkOnlyForThatProject(t *testing.T) {
 	stepDone, otherDone, queuedDone := make(chan error, 1), make(chan error, 1), make(chan error, 1)
 	go func() { stepDone <- e.Step(ctx, task.ID) }()
 	go func() {
-		_, err := e.agent(ctx, other, model.Task{ID: "other-task"}, provider.Input{Role: "plan", CWD: path, Prompt: "other"})
+		_, err := e.agent(ctx, other, model.ExecutionPlan{ID: "other-task"}, provider.Input{Role: "plan", CWD: path, Prompt: "other"})
 		otherDone <- err
 	}()
 	for range 2 {
@@ -155,7 +155,7 @@ func TestStopProjectCancelsActiveAndQueuedWorkOnlyForThatProject(t *testing.T) {
 		t.Fatalf("other project interrupted: %v", err)
 	default:
 	}
-	current, err := e.Store.Get(context.Background(), "tasks", task.ID)
+	current, err := e.Store.Get(context.Background(), "execution_plans", task.ID)
 	if err != nil || current.Version != initial.Version {
 		t.Fatalf("pause lost task checkpoint: %+v %v", current, err)
 	}

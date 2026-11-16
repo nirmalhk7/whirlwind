@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"whirlwind/internal/model"
 )
 
 type baselineFinding struct {
@@ -17,6 +19,16 @@ type baselineFinding struct {
 // evidence is retained; accepted debt has explicit baseline comparison metadata.
 // Only complete SARIF, Go test JSON, and JUnit failures can be grandfathered.
 func CompareBaseline(base, head Report) Report {
+	return compareBaseline(base, head, nil)
+}
+
+// CompareBaselineForChecks retains optional ordinary failures as raw evidence
+// while using the frozen human configuration to compute mandatory acceptance.
+func CompareBaselineForChecks(base, head Report, checks []model.Check) Report {
+	return compareBaseline(base, head, checks)
+}
+
+func compareBaseline(base, head Report, checks []model.Check) Report {
 	out := Report{Passed: true, Results: append([]Result(nil), head.Results...)}
 	used := make([]bool, len(base.Results))
 	for i := range out.Results {
@@ -29,11 +41,7 @@ func CompareBaseline(base, head Report) Report {
 				break
 			}
 		}
-		if err := compareBaselineResult(previous, result); err != nil {
-			result.Passed = false
-			result.Error = joinBaselineError(result.Error, err.Error())
-		}
-		if !result.Passed {
+		if !qualifyBaselineResult(previous, result, checks) {
 			out.Passed = false
 		}
 	}
@@ -46,6 +54,15 @@ func CompareBaseline(base, head Report) Report {
 		}
 	}
 	return out
+}
+
+func qualifyBaselineResult(previous *Result, result *Result, checks []model.Check) bool {
+	advisory := advisoryFailureForChecks(checks, *result)
+	if err := compareBaselineResult(previous, result); err != nil && !advisory {
+		result.Passed = false
+		result.Error = joinBaselineError(result.Error, err.Error())
+	}
+	return result.Passed || advisory
 }
 
 func sameBaselineCheck(a, b Result) bool {
@@ -75,11 +92,20 @@ func compareBaselineResult(base *Result, head *Result) error {
 	if err != nil {
 		return err
 	}
+	if IsQltyHeadDiffCommand(head.Command) && len(findings) > 0 {
+		head.Passed = false
+		return errors.New("new Qlty findings were reported in the HEAD diff; existing-debt comparison cannot waive them")
+	}
 	return compareBaselineFindings(base, head, quality, findings)
 }
 
 func compareBaselineFindings(base *Result, head *Result, quality bool, findings []baselineFinding) error {
 	if len(findings) == 0 {
+		if !IsQltyHeadDiffCommand(head.Command) {
+			if _, err := previousBaselineFindings(base, quality); err != nil {
+				return err
+			}
+		}
 		return validateEmptyBaselineFindings(*head)
 	}
 	head.Passed = false
@@ -112,6 +138,9 @@ func previousBaselineFindings(base *Result, quality bool) ([]baselineFinding, er
 		return nil, fmt.Errorf("unusable baseline: %w", err)
 	}
 	previous, err := baselineFindings(*base, quality)
+	if err == nil && len(previous) == 0 {
+		err = validateEmptyBaselineFindings(*base)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("unusable baseline: %w", err)
 	}

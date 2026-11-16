@@ -63,7 +63,7 @@ type fakeAgent struct{ score float64 }
 func (f fakeAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks) (provider.Output, error) {
 	switch in.Role {
 	case "plan":
-		b, _ := json.Marshal(model.Plan{
+		b, _ := json.Marshal(model.PlanSpecification{
 			Objective: "Add file", What: "Add result.txt", Why: "Result is missing", Benefit: "Result becomes available", Where: []string{resultFile},
 			Scope: []string{"Create the result file in the approved worktree."}, Exclusions: []string{"Do not change unrelated files."}, Steps: []string{"Add a failing result check.", "Create result.txt.", "Run the configured result check."},
 			AcceptanceCriteria: []string{"file exists"}, Requirements: []model.Requirement{{ID: "REQ-RESULT", Outcome: "result.txt exists in the candidate worktree.", EvidenceMethod: "Run the configured test -f result.txt check."}},
@@ -87,7 +87,7 @@ func (f fakeAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks)
 }
 
 // testEngine creates a committed temporary repository, real SQLite store, fake provider, and eligible task for workflow tests.
-func testEngine(t *testing.T) (*Engine, model.Task, string) {
+func testEngine(t *testing.T) (*Engine, model.ExecutionPlan, string) {
 	ctx := context.Background()
 	if os.Getenv("WHIRLWIND_OPENSHELL_CLI") == "" {
 		fixture := openshell.Install(t)
@@ -101,9 +101,7 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	}
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
-	if err := os.Mkdir(repo, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, os.Mkdir(repo, 0700))
 	run := func(args ...string) {
 		c := exec.Command("git", append([]string{"-C", repo}, args...)...)
 		c.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
@@ -114,51 +112,33 @@ func testEngine(t *testing.T) (*Engine, model.Task, string) {
 	run("init", "-b", "main")
 	run("config", "user.name", "Test")
 	run("config", "user.email", "test@example.com")
-	if err := os.WriteFile(filepath.Join(repo, ".whirlwind.yaml"), []byte("budget:\n  max_attempts: 100\n  max_runtime_seconds: 3600\n  verification_attempts: 4\n  verification_runtime_seconds: 60\nchecks:\n  - name: test\n    command: [sh, -c, 'test -f result.txt']\nallowed_paths: ['**']\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\ncommands: []\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(repo, ".whirlwind.yaml"), []byte("budget:\n  max_attempts: 100\n  max_runtime_seconds: 3600\n  verification_attempts: 4\n  verification_runtime_seconds: 60\nchecks:\n  - name: test\n    command: [sh, -c, 'test -f result.txt']\nallowed_paths: ['**']\nrisk_rules:\n  - level: high\n    paths: ['auth/**']\ncommands: []\n"), 0600))
 	run("add", ".")
 	run("commit", "-m", "initial")
 	p, hash, e := policy.Load(repo)
-	if e != nil {
-		t.Fatal(e)
-	}
+	requireWorkflowSuccess(t, e)
 	s, e := store.Open(filepath.Join(root, "state.db"))
-	if e != nil {
-		t.Fatal(e)
-	}
+	requireWorkflowSuccess(t, e)
 	t.Cleanup(func() { _ = s.Close() })
 	settings := DefaultSettings()
 	settings.Admission = model.AdmissionSettings{DiscoveryBudget: &model.BudgetPolicy{MaxAttempts: 100, MaxRuntimeSeconds: 3600}, DefaultBudget: &model.BudgetPolicy{MaxAttempts: 100, MaxRuntimeSeconds: 3600, VerificationAttempts: 4, VerificationRuntimeSeconds: 60}, Pools: map[string]model.QuotaReserve{"*": {MinRemainingPercent: 0, MaxAgeSeconds: 60, MaxConcurrent: 8}}}
-	if err := s.Put(ctx, "settings", "global", settings, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, s.Put(ctx, "settings", "global", settings, 0))
 	project := model.Project{ID: "p", Repo: "o/r", Path: repo, Policy: p, PolicyHash: hash}
-	if err := s.Put(ctx, "projects", "p", project, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Put(ctx, "providers", "fake", model.Provider{ID: "fake", Kind: "acp", Available: true, Quota: "unknown", Capabilities: model.AgentRoles()}, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, s.Put(ctx, "projects", "p", project, 0))
+	requireWorkflowSuccess(t, s.Put(ctx, "providers", "fake", model.Provider{ID: "fake", Kind: "acp", Available: true, Quota: "unknown", Capabilities: model.AgentRoles()}, 0))
 	installFixtureAgentQueues(t, s)
 	task, e := s.IngestIssue(ctx, project, model.Issue{Number: 1, Title: "file", Body: "add file", State: "OPEN", Labels: []string{"whirlwind:ready"}})
-	if e != nil {
-		t.Fatal(e)
-	}
+	requireWorkflowSuccess(t, e)
 	engine := New(s, fakeGitHub{}, root)
-	engine.PlansRoot = filepath.Join(root, "plans")
+	engine.PlansRoot = filepath.Join(root, "plan_versions")
 	// Most workflow fixtures represent already selected work; intake gates have dedicated tests.
 	task.Selection = &model.SelectionAuthorization{CandidateID: "fixture-selection", CandidateVersion: 1, Objective: task.Issue.Title, PolicyHash: hash, SelectedAt: "2026-10-22T00:00:00Z"}
 	task.Stage = "planning"
-	record, _ := s.Get(ctx, "tasks", task.ID)
-	if err := s.Put(ctx, "tasks", task.ID, task, record.Version); err != nil {
-		t.Fatal(err)
-	}
+	record, _ := s.Get(ctx, "execution_plans", task.ID)
+	requireWorkflowSuccess(t, s.Put(ctx, "execution_plans", task.ID, task, record.Version))
 	candidates, _ := s.List(ctx, "directions")
 	for _, candidate := range candidates {
-		if err := s.RemoveDirection(ctx, candidate.ID, candidate.Version); err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, s.RemoveDirection(ctx, candidate.ID, candidate.Version))
 	}
 	engine.Adapter = func(model.Provider) provider.Adapter { return fakeAgent{9} }
 	return engine, task, repo
@@ -215,16 +195,16 @@ func TestIssueToPRUsesWorktreeAndVerification(t *testing.T) {
 func TestSelectedDirectionPublishesPlanBeforeCoding(t *testing.T) {
 	ctx := context.Background()
 	e, original, _ := testEngine(t)
-	task := model.Task{ID: "selected", ProjectID: original.ProjectID, Stage: "planning", PlanVersion: 1, Issue: model.Issue{Title: "idea", Body: "add file"}}
+	task := model.ExecutionPlan{ID: "selected", ProjectID: original.ProjectID, Stage: "planning", PlanVersion: 1, Issue: model.Issue{Title: "idea", Body: "add file"}}
 	task.Selection = original.Selection
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.Step(ctx, task.ID); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := e.Store.Get(ctx, "tasks", task.ID)
-	planned, _ := store.Decode[model.Task](r)
+	r, _ := e.Store.Get(ctx, "execution_plans", task.ID)
+	planned, _ := store.Decode[model.ExecutionPlan](r)
 	if planned.Stage != "plan_approval" || planned.Worktree != "" || planned.PlanDocument == nil || planned.PlanDocument.ApprovedHash != "" {
 		t.Fatalf("coding started before separate local plan approval: %+v", planned)
 	}
@@ -232,7 +212,7 @@ func TestSelectedDirectionPublishesPlanBeforeCoding(t *testing.T) {
 	if err != nil || view.Hash == "" || len(view.Plan.Requirements) != 1 || view.Plan.Requirements[0].ID != "REQ-RESULT" {
 		t.Fatalf("selected direction did not publish its reviewable specification: %+v %v", view, err)
 	}
-	if _, err := e.Store.Get(ctx, "plans", planned.ID+":1"); !errors.Is(err, store.ErrNotFound) {
+	if _, err := e.Store.Get(ctx, "plan_versions", planned.ID+":1"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("unapproved plan requirements were prematurely frozen: %v", err)
 	}
 }
@@ -247,7 +227,7 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 	if blocked.Stage != "repair" || blocked.ChecksPassed || blocked.ReviewID != "" || blocked.Delivery != nil || blocked.PlanDocument == nil || blocked.PlanDocument.ApprovedHash == "" {
 		t.Fatalf("failed configured check reached review or bypassed human plan approval: %+v", blocked)
 	}
-	plan, err := fixture.e.Store.Get(fixture.ctx, "plans", blocked.ID+":1")
+	plan, err := fixture.e.Store.Get(fixture.ctx, "plan_versions", blocked.ID+":1")
 	if err != nil {
 		t.Fatal(err)
 	}

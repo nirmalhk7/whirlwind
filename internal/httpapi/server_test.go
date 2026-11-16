@@ -97,11 +97,11 @@ func TestSignedWebhookDeduplicatesEligibleIssue(t *testing.T) {
 			t.Fatalf("%d %s", w.Code, w.Body)
 		}
 	}
-	tasks, e := s.Store.List(context.Background(), "tasks")
+	tasks, e := s.Store.List(context.Background(), "execution_plans")
 	if e != nil || len(tasks) != 1 {
 		t.Fatalf("%d %v", len(tasks), e)
 	}
-	r := httptest.NewRequest("GET", "http://public/api/v1/tasks", nil)
+	r := httptest.NewRequest("GET", "http://public/api/v1/execution_plans", nil)
 	w := httptest.NewRecorder()
 	s.Webhoowhirlwinddler().ServeHTTP(w, r)
 	if w.Code != 404 {
@@ -155,13 +155,13 @@ func (w *cancelWriter) Flush() { w.ResponseRecorder.Flush(); w.cancel() }
 func TestResumePreservesPendingPlannerQuestions(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
-	task := model.Task{ID: "q", Stage: "questions", Plan: &model.Plan{Questions: []model.Question{{ID: "q1", Text: "Which callback?"}}}}
+	task := model.ExecutionPlan{ID: "q", Stage: "questions", Plan: &model.PlanSpecification{Questions: []model.Question{{ID: "q1", Text: "Which callback?"}}}}
 	task.Selection = &model.SelectionAuthorization{CandidateID: "q", SelectedAt: "2026-10-22T00:00:00Z"}
-	if err := s.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
+	if err := s.Store.Put(ctx, "execution_plans", task.ID, task, 0); err != nil {
 		t.Fatal(err)
 	}
 	send := func(action, key, version string) *httptest.ResponseRecorder {
-		r := httptest.NewRequest("POST", "http://localhost/api/v1/tasks/q/"+action, bytes.NewReader([]byte(`{}`)))
+		r := httptest.NewRequest("POST", "http://localhost/api/v1/execution_plans/q/"+action, bytes.NewReader([]byte(`{}`)))
 		r.Header.Set(idempotencyKeyHeader, key)
 		r.Header.Set(ifMatchHeader, version)
 		w := httptest.NewRecorder()
@@ -176,7 +176,7 @@ func TestResumePreservesPendingPlannerQuestions(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &r) != nil {
 		t.Fatal(w.Body)
 	}
-	resumed, _ := store.Decode[model.Task](r)
+	resumed, _ := store.Decode[model.ExecutionPlan](r)
 	if resumed.Stage != "questions" {
 		t.Fatalf("questions bypassed: %s", resumed.Stage)
 	}

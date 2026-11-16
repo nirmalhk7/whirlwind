@@ -12,15 +12,33 @@ import (
 
 func (a *agentRun) prepareExecutionProfile(chosen model.Provider) error {
 	effective := provider.ExecutionProvider(chosen, a.input.Thinking)
-	policy := a.project.Policy.Sandbox
-	if a.input.Purpose == "provider_test" && a.project.ID == "" {
-		policy = chosen.Sandbox
+	policy, err := execution.CombineSandboxPolicies(a.project.Policy.Sandbox, chosen.Sandbox)
+	if err != nil {
+		return fmt.Errorf("sandbox setup required: %w", err)
 	}
 	profile, err := execution.ForProvider(a.input.CWD, a.input.ReadOnly, a.project.PolicyHash, policy, effective.Command)
 	if err != nil {
 		return fmt.Errorf("sandbox setup required: %w", err)
 	}
+
+	if a.input.Purpose == "idea_planning" {
+		if a.input.Role != "plan" || !a.input.ReadOnly {
+			return fmt.Errorf("invalid output: Planner output requires read-only Planner role")
+		}
+		output, err := filepath.EvalSymlinks(a.input.PlannerOutputDirectory)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(profile.CWD, output)
+		if err != nil || !filepath.IsLocal(relative) || relative == "." {
+			return fmt.Errorf("invalid output: Planner output escapes assigned worktree")
+		}
+		profile.WriteRoots = []string{output}
+	}
 	profile.MCPBroker = a.input.MCPBroker
+	if a.input.Role == "code" {
+		profile.ReadRoots = append(profile.ReadRoots, a.autofixReadRoots...)
+	}
 	profile.MCPBrokerToken = a.input.MCPBrokerToken
 	if a.input.NativeIntegrations {
 		if err := provider.ProvisionNativeIntegrations(&profile, chosen); err != nil {

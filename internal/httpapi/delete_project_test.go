@@ -60,9 +60,9 @@ func TestDeleteProjectBlocksActiveWork(t *testing.T) {
 			}
 			switch kind {
 			case "task":
-				_ = s.Store.Put(ctx, "tasks", "t", model.Task{ID: "t", ProjectID: "p", Stage: "coding"}, 0)
+				_ = s.Store.Put(ctx, "execution_plans", "t", model.ExecutionPlan{ID: "t", ProjectID: "p", Stage: "coding"}, 0)
 			case "task-lease":
-				_ = s.Store.Put(ctx, "tasks", "t", model.Task{ID: "t", ProjectID: "p", Stage: "paused"}, 0)
+				_ = s.Store.Put(ctx, "execution_plans", "t", model.ExecutionPlan{ID: "t", ProjectID: "p", Stage: "paused"}, 0)
 				_, _ = s.Store.Claim(ctx, "task:t", "worker", time.Minute)
 			case "generation":
 				_, _ = s.Store.Claim(ctx, "generation:p", "worker", time.Minute)
@@ -93,7 +93,7 @@ func seedDeleteProjectHistory(t *testing.T, s *Server, ctx context.Context) stri
 		data     any
 	}{
 		{"projects", "p", model.Project{ID: "p", Name: "Project", Path: filepath.Dir(path)}},
-		{"tasks", "t", model.Task{ID: "t", ProjectID: "p", Stage: "paused"}},
+		{"execution_plans", "t", model.ExecutionPlan{ID: "t", ProjectID: "p", Stage: "paused"}},
 		{"sessions", "run", map[string]any{"project_id": "p", "finished": true}},
 		{"projects", "other", model.Project{ID: "other"}},
 	} {
@@ -106,7 +106,7 @@ func seedDeleteProjectHistory(t *testing.T, s *Server, ctx context.Context) stri
 
 func assertDeletedProjectHistory(t *testing.T, s *Server, ctx context.Context, path string) {
 	t.Helper()
-	for _, ref := range [][2]string{{"tasks", "t"}, {"sessions", "run"}, {"projects", "other"}} {
+	for _, ref := range [][2]string{{"execution_plans", "t"}, {"sessions", "run"}, {"projects", "other"}} {
 		if _, err := s.Store.Get(ctx, ref[0], ref[1]); err != nil {
 			t.Fatal(err)
 		}

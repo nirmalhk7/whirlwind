@@ -15,7 +15,7 @@ import (
 )
 
 type finalizationReport struct {
-	Task             model.Task           `json:"task"`
+	Task             model.ExecutionPlan  `json:"plan_id"`
 	Review           model.Review         `json:"review"`
 	Adherence        model.Adherence      `json:"adherence"`
 	ApprovedPlanHash string               `json:"approved_plan_hash"`
@@ -40,7 +40,7 @@ type finalizationApprovalPayload struct {
 	PolicyHash       string `json:"policy_hash"`
 }
 
-func (d *Dashboard) loadFinalizationReport(plan model.Task, version int, diffOffset int64, visitedOffsets []int64) {
+func (d *Dashboard) loadFinalizationReport(plan model.ExecutionPlan, version int, diffOffset int64, visitedOffsets []int64) {
 	d.status.SetText("Whirlwind | loading accepted review, exact candidate diff, and adherence report…")
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -69,7 +69,7 @@ func (d *Dashboard) loadFinalizationReport(plan model.Task, version int, diffOff
 	}()
 }
 
-func (d *Dashboard) showFinalizationApproval(plan model.Task, version int, report finalizationReport, visitedOffsets []int64) {
+func (d *Dashboard) showFinalizationApproval(plan model.ExecutionPlan, version int, report finalizationReport, visitedOffsets []int64) {
 	policyHash, ok := d.projectPolicyHash(plan.ProjectID)
 	request, err := finalizationApprovalRequest(plan, version, policyHash, report)
 	if !ok || err != nil || !d.approvalPlanStillCurrent(plan, version, policyHash) {
@@ -102,7 +102,7 @@ func (d *Dashboard) showFinalizationApproval(plan model.Task, version int, repor
 	d.showForm(form)
 }
 
-func finalizationApprovalRequest(plan model.Task, version int, policyHash string, report finalizationReport) (control.Request, error) {
+func finalizationApprovalRequest(plan model.ExecutionPlan, version int, policyHash string, report finalizationReport) (control.Request, error) {
 	if !report.Accepted || !report.Adherence.Accepted || !reflect.DeepEqual(report.Review.Adherence, &report.Adherence) || !reviewAdherenceMatchesTask(report.Review, plan, policyHash) || !reviewAdherenceMatchesTask(report.Review, report.Task, report.PolicyHash) {
 		return control.Request{}, fmt.Errorf("current accepted review report does not match the selected candidate")
 	}
@@ -121,7 +121,7 @@ func finalizationApprovalRequest(plan model.Task, version int, policyHash string
 	return control.Request{Operation: "finalization.approve", PlanID: report.Task.ID, ExpectedVersion: version, IdempotencyKey: store.ID(), Payload: body}, nil
 }
 
-func (d *Dashboard) approvalPlanStillCurrent(plan model.Task, version int, policyHash string) bool {
+func (d *Dashboard) approvalPlanStillCurrent(plan model.ExecutionPlan, version int, policyHash string) bool {
 	if !d.planStillCurrent(plan.ID, version, "") || d.projectPolicyHashOrEmpty(plan.ProjectID) != policyHash {
 		return false
 	}
@@ -129,7 +129,7 @@ func (d *Dashboard) approvalPlanStillCurrent(plan model.Task, version int, polic
 	return ok && current.Stage == "approval" && current.PlanVersion == plan.PlanVersion && current.ReviewedCommit == plan.ReviewedCommit && current.ReviewID == plan.ReviewID && current.VerificationID == plan.VerificationID && dashboardApprovedPlanHash(current) == dashboardApprovedPlanHash(plan)
 }
 
-func dashboardApprovedPlanHash(task model.Task) string {
+func dashboardApprovedPlanHash(task model.ExecutionPlan) string {
 	if task.PlanDocument == nil {
 		return ""
 	}

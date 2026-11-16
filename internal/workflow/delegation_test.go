@@ -21,7 +21,7 @@ func TestDelegationSerializesUnknownAndOverlappingScopes(t *testing.T) {
 }
 
 func TestUnitPlanDoesNotDuplicateOtherUnits(t *testing.T) {
-	plan := model.Plan{Objective: "shared goal", Specification: "required contract", AcceptanceCriteria: []string{"must pass"}, Units: []model.Unit{{ID: "a", Objective: "first"}, {ID: "b", Objective: "second"}}}
+	plan := model.PlanSpecification{Objective: "shared goal", Specification: "required contract", AcceptanceCriteria: []string{"must pass"}, Units: []model.Unit{{ID: "a", Objective: "first"}, {ID: "b", Objective: "second"}}}
 	scoped := planForUnit(plan, 0)
 	if len(scoped.Units) != 1 || scoped.Units[0].ID != "a" || scoped.Objective != "shared goal" || scoped.AcceptanceCriteria[0] != "must pass" {
 		t.Fatalf("bad scoped plan: %+v", scoped)

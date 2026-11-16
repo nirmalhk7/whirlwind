@@ -19,7 +19,7 @@ func writeProposalTx(tx *sql.Tx, proposal model.Proposal, enforceFingerprint boo
 	if err := upsertProposalTx(tx, proposal, encoded, components); err != nil {
 		return err
 	}
-	if err := replaceProposalIndexesTx(tx, proposal); err != nil {
+	if err := replaceProposalSearchTx(tx, proposal); err != nil {
 		return err
 	}
 	return saveProposalFingerprintTx(tx, proposal, enforceFingerprint)
@@ -37,29 +37,6 @@ func encodeProposal(proposal model.Proposal) (string, string, error) {
 func upsertProposalTx(tx *sql.Tx, proposal model.Proposal, encoded, components string) error {
 	_, err := tx.Exec("INSERT INTO proposals(project_id,id,category,problem,mechanism,components,revision,status,fingerprint,title,created_at,data) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(project_id,id) DO UPDATE SET category=excluded.category,problem=excluded.problem,mechanism=excluded.mechanism,components=excluded.components,revision=excluded.revision,status=excluded.status,fingerprint=excluded.fingerprint,title=excluded.title,data=excluded.data", proposal.ProjectID, proposal.ID, proposal.Category, proposal.Problem, proposal.Mechanism, components, proposal.RepositoryRevision, proposal.Status, proposal.Fingerprint, proposal.Title, proposal.CreatedAt, encoded)
 	return err
-}
-
-func replaceProposalIndexesTx(tx *sql.Tx, proposal model.Proposal) error {
-	if err := replaceProposalComponentsTx(tx, proposal); err != nil {
-		return err
-	}
-	return replaceProposalSearchTx(tx, proposal)
-}
-
-func replaceProposalComponentsTx(tx *sql.Tx, proposal model.Proposal) error {
-	if _, err := tx.Exec("DELETE FROM proposal_components WHERE project_id=? AND proposal_id=?", proposal.ProjectID, proposal.ID); err != nil {
-		return err
-	}
-	for _, component := range proposal.Components {
-		component = strings.TrimSpace(component)
-		if component == "" {
-			continue
-		}
-		if _, err := tx.Exec("INSERT OR IGNORE INTO proposal_components(project_id,component,proposal_id) VALUES(?,?,?)", proposal.ProjectID, component, proposal.ID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func replaceProposalSearchTx(tx *sql.Tx, proposal model.Proposal) error {

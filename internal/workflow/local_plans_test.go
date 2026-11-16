@@ -18,12 +18,12 @@ const (
 	localPlanResultFile = "result.txt"
 )
 
-func localPlanFixture(t *testing.T) (*Engine, model.Task) {
+func localPlanFixture(t *testing.T) (*Engine, model.ExecutionPlan) {
 	t.Helper()
 	e, task, _ := testEngine(t)
-	e.PlansRoot = filepath.Join(t.TempDir(), "plans")
+	e.PlansRoot = filepath.Join(t.TempDir(), "plan_versions")
 	task.Mode = model.AgenticMode
-	task.Plan = &model.Plan{Objective: localPlanObjective, What: "Change result.txt", Why: "Current result is incomplete", Benefit: "Result becomes useful", Where: []string{localPlanResultFile}, Scope: []string{"Correct the generated result value."}, Exclusions: []string{"Do not change the result file format."}, Steps: []string{"Add a failing result assertion.", "Fix result generation and run repository checks."}, RepositoryTestInventory: "None configured: inspected go.mod and CI workflows.", RepositoryBuildInventory: "None configured: inspected go.mod and CI workflows.", Checks: []model.Check{{Name: "result-regression", Command: []string{"go", "test", "./..."}}}, AcceptanceCriteria: []string{"result is correct"}, Requirements: []model.Requirement{{ID: "REQ-RESULT", Outcome: "The result contains the expected value.", EvidenceMethod: "Run TestResultContainsExpectedValue"}}, Units: []model.Unit{{ID: "main", Objective: "Write failing test, implement result, run checks", AllowedPaths: []string{localPlanResultFile}}}}
+	task.Plan = &model.PlanSpecification{Objective: localPlanObjective, What: "Change result.txt", Why: "Current result is incomplete", Benefit: "Result becomes useful", Where: []string{localPlanResultFile}, Scope: []string{"Correct the generated result value."}, Exclusions: []string{"Do not change the result file format."}, Steps: []string{"Add a failing result assertion.", "Fix result generation and run repository checks."}, RepositoryTestInventory: "None configured: inspected go.mod and CI workflows.", RepositoryBuildInventory: "None configured: inspected go.mod and CI workflows.", Checks: []model.Check{{Name: "result-regression", Command: []string{"go", "test", "./..."}}}, AcceptanceCriteria: []string{"result is correct"}, Requirements: []model.Requirement{{ID: "REQ-RESULT", Outcome: "The result contains the expected value.", EvidenceMethod: "Run TestResultContainsExpectedValue"}}, Units: []model.Unit{{ID: "main", Objective: "Write failing test, implement result, run checks", AllowedPaths: []string{localPlanResultFile}}}}
 	project, err := e.Project(context.Background(), task.ProjectID)
 	if err != nil {
 		t.Fatal(err)
@@ -31,20 +31,20 @@ func localPlanFixture(t *testing.T) (*Engine, model.Task) {
 	if err := e.WriteLocalPlan(context.Background(), project, &task); err != nil {
 		t.Fatal(err)
 	}
-	r, _ := e.Store.Get(context.Background(), "tasks", task.ID)
-	if err := e.Store.Put(context.Background(), "tasks", task.ID, task, r.Version); err != nil {
+	r, _ := e.Store.Get(context.Background(), "execution_plans", task.ID)
+	if err := e.Store.Put(context.Background(), "execution_plans", task.ID, task, r.Version); err != nil {
 		t.Fatal(err)
 	}
 	return e, task
 }
 
-func localStoredTask(t *testing.T, e *Engine, id string) (model.Task, int) {
+func localStoredTask(t *testing.T, e *Engine, id string) (model.ExecutionPlan, int) {
 	t.Helper()
-	r, err := e.Store.Get(context.Background(), "tasks", id)
+	r, err := e.Store.Get(context.Background(), "execution_plans", id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.Decode[model.Task](r)
+	task, err := store.Decode[model.ExecutionPlan](r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,11 +75,11 @@ func TestLocalPlanApprovalBindsCurrentDocumentAndVersion(t *testing.T) {
 	if err := e.ValidateLocalPlan(ctx, approved); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := e.Store.Get(ctx, "plans", task.ID+":1")
+	snapshot, err := e.Store.Get(ctx, "plan_versions", task.ID+":1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, _ := store.Decode[model.Plan](snapshot)
+	plan, _ := store.Decode[model.PlanSpecification](snapshot)
 	if plan.Objective != view.Plan.Objective {
 		t.Fatal("approved snapshot not saved")
 	}
@@ -101,13 +101,13 @@ func TestNewLocalPlanUsesPersistedRepositoryTimestampName(t *testing.T) {
 func TestLegacyCodingPlanPausesForExplicitRequirementApproval(t *testing.T) {
 	ctx := context.Background()
 	e, task, _ := testEngine(t)
-	e.PlansRoot = filepath.Join(t.TempDir(), "plans")
+	e.PlansRoot = filepath.Join(t.TempDir(), "plan_versions")
 	task.Mode = model.PersonalMode
 	task.PlanVersion = 1
 	task.Stage = "coding"
-	task.Plan = &model.Plan{Objective: "Retain legacy result", What: "Keep result", Why: "Legacy records need review", Benefit: "No work is lost", Where: []string{localPlanResultFile}, AcceptanceCriteria: []string{"The result retains its prior value."}, Units: []model.Unit{{ID: "main", Objective: "Preserve result", AllowedPaths: []string{localPlanResultFile}}}}
+	task.Plan = &model.PlanSpecification{Objective: "Retain legacy result", What: "Keep result", Why: "Legacy records need review", Benefit: "No work is lost", Where: []string{localPlanResultFile}, AcceptanceCriteria: []string{"The result retains its prior value."}, Units: []model.Unit{{ID: "main", Objective: "Preserve result", AllowedPaths: []string{localPlanResultFile}}}}
 	_, existingVersion := localStoredTask(t, e, task.ID)
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, existingVersion); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, existingVersion); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.ValidateLocalPlan(ctx, task); err != nil {
@@ -154,8 +154,8 @@ func TestLocalPlanEditRevokesApprovalAndRetainsImmutableSnapshot(t *testing.T) {
 	if err := e.ReviewLocalPlan(ctx, task.ID, version, "approve", updated.Hash, ""); err != nil {
 		t.Fatal(err)
 	}
-	old, _ := e.Store.Get(ctx, "plans", task.ID+":1")
-	oldPlan, _ := store.Decode[model.Plan](old)
+	old, _ := e.Store.Get(ctx, "plan_versions", task.ID+":1")
+	oldPlan, _ := store.Decode[model.PlanSpecification](old)
 	if oldPlan.Objective != localPlanObjective {
 		t.Fatal("reapproval overwrote prior immutable snapshot")
 	}
@@ -197,7 +197,7 @@ func TestLocalPlanRejectsSymlinksAndArbitraryPaths(t *testing.T) {
 	}
 	task.PlanDocument.Path = outside
 	_, version := localStoredTask(t, e, task.ID)
-	if err := e.Store.Put(context.Background(), "tasks", task.ID, task, version); err != nil {
+	if err := e.Store.Put(context.Background(), "execution_plans", task.ID, task, version); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.ReadLocalPlan(context.Background(), task.ID); err == nil {
@@ -267,7 +267,7 @@ func TestLocalPlanRetryRecoversPublishedDocumentBeforeTaskCommit(t *testing.T) {
 	task.Stage, task.PlanDocument = "planning", nil
 	task.Plan = nil
 	_, version := localStoredTask(t, e, task.ID)
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, version); err != nil {
 		t.Fatal(err)
 	}
 	// Recovery must use durable document identity, not an Engine-local cache.
@@ -287,14 +287,14 @@ func TestLocalPlanRetryRecoversPublishedDocumentBeforeTaskCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	retry, version := localStoredTask(t, e, task.ID)
-	retry.Plan = &model.Plan{Objective: "Different retry output", Why: "retry", Benefit: "retry benefit", Where: []string{localPlanResultFile}, AcceptanceCriteria: []string{"retry criteria"}, Units: []model.Unit{{ID: "main", Objective: "retry output", AllowedPaths: []string{localPlanResultFile}}}}
+	retry.Plan = &model.PlanSpecification{Objective: "Different retry output", Why: "retry", Benefit: "retry benefit", Where: []string{localPlanResultFile}, AcceptanceCriteria: []string{"retry criteria"}, Units: []model.Unit{{ID: "main", Objective: "retry output", AllowedPaths: []string{localPlanResultFile}}}}
 	if err := e.WriteLocalPlan(ctx, project, &retry); err != nil {
 		t.Fatal(err)
 	}
 	if retry.Stage != "plan_approval" || retry.Plan.Objective != "User retained objective" || retry.PlanDocument.Path != path || retry.PlanDocument.Hash != localPlanHash(edited) || retry.PlanDocument.ApprovedHash != "" {
 		t.Fatalf("orphan edits not recovered into unapproved task: %+v", retry)
 	}
-	if err := e.Store.Put(ctx, "tasks", retry.ID, retry, version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", retry.ID, retry, version); err != nil {
 		t.Fatal(err)
 	}
 	view, err := e.ReadLocalPlan(ctx, retry.ID)
@@ -418,7 +418,7 @@ func TestLocalPlanStalePolicyValidationCannotReviveCancelledTask(t *testing.T) {
 	stale, version := localStoredTask(t, e, task.ID)
 	cancelled, _ := localStoredTask(t, e, task.ID)
 	cancelled.Stage = "cancelled"
-	if err := e.Store.Put(ctx, "tasks", task.ID, cancelled, version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, cancelled, version); err != nil {
 		t.Fatal(err)
 	}
 	stale.PlanDocument.PolicyHash = "outdated-policy"

@@ -13,7 +13,7 @@ import (
 
 type pendingPermission struct {
 	ID          string          `json:"id"`
-	Task        string          `json:"task"`
+	Task        string          `json:"plan_id"`
 	AttemptID   string          `json:"attempt_id"`
 	Provider    string          `json:"provider"`
 	Decision    string          `json:"decision"`
@@ -65,7 +65,7 @@ func (e *Engine) AnswerQuestionSetWithReceipt(ctx context.Context, questionID st
 		task.Stage = stage
 		task.Handoff.NextAction = "Resume the approved plan at its original " + attempt.Role + " stage with a fresh attempt."
 	}
-	return e.commitHumanDecision(ctx, questionRecord, "questions", set, taskRecord, task, attempt, "answer_questions", questionID, expectedVersion, receipt)
+	return e.commitHumanDecision(ctx, humanDecisionWrite{record: questionRecord, kind: "questions", value: set, action: "answer_questions", target: questionID, version: expectedVersion}, taskRecord, task, attempt, receipt)
 }
 
 func (e *Engine) DecidePermission(ctx context.Context, permissionID string, expectedVersion int, decision string) error {
@@ -100,7 +100,7 @@ func (e *Engine) DecidePermissionWithReceipt(ctx context.Context, permissionID s
 	task.Error = ""
 	task.Stage = stage
 	task.Handoff.NextAction = "Resume the approved plan at its original " + attempt.Role + " stage with a fresh attempt."
-	return e.commitHumanDecision(ctx, permissionRecord, "permissions", permission, taskRecord, task, attempt, "permission_"+decision, permissionID, expectedVersion, receipt)
+	return e.commitHumanDecision(ctx, humanDecisionWrite{record: permissionRecord, kind: "permissions", value: permission, action: "permission_" + decision, target: permissionID, version: expectedVersion}, taskRecord, task, attempt, receipt)
 }
 
 func validateHumanAnswers(set model.QuestionSet, answers map[string]string) error {
@@ -115,29 +115,20 @@ func validateHumanAnswers(set model.QuestionSet, answers map[string]string) erro
 	return nil
 }
 
-func (e *Engine) pendingDecisionOwner(ctx context.Context, taskID, attemptID string, planVersion int) (model.Record, model.Task, model.Attempt, string, error) {
-	taskRecord, err := e.Store.Get(ctx, "tasks", taskID)
+func (e *Engine) pendingDecisionOwner(ctx context.Context, taskID, attemptID string, planVersion int) (model.Record, model.ExecutionPlan, model.Attempt, string, error) {
+	taskRecord, err := e.Store.Get(ctx, "execution_plans", taskID)
 	if err != nil {
-		return model.Record{}, model.Task{}, model.Attempt{}, "", err
+		return model.Record{}, model.ExecutionPlan{}, model.Attempt{}, "", err
 	}
-	task, err := store.Decode[model.Task](taskRecord)
+	task, err := store.Decode[model.ExecutionPlan](taskRecord)
 	if err != nil {
 		return taskRecord, task, model.Attempt{}, "", err
 	}
 	if task.Stage != "paused" || task.Wait == nil || task.Wait.Kind != "human_decision" || task.PlanVersion != planVersion || task.Wait.PlanVersion != planVersion || task.ResumeStage == "" || task.Wait.ResumeStage != task.ResumeStage {
 		return taskRecord, task, model.Attempt{}, "", store.ErrConflict
 	}
-	if task.Wait.AttemptID != "" && task.Wait.AttemptID != attemptID {
-		return taskRecord, task, model.Attempt{}, "", store.ErrConflict
-	}
-	if task.Wait.AttemptID == "" {
-		matches, matchErr := uniquePendingDecisionAttempt(ctx, e.Store, task.ID, planVersion, attemptID)
-		if matchErr != nil {
-			return taskRecord, task, model.Attempt{}, "", matchErr
-		}
-		if !matches {
-			return taskRecord, task, model.Attempt{}, "", store.ErrConflict
-		}
+	if err := e.validatePendingDecisionAttempt(ctx, task, planVersion, attemptID); err != nil {
+		return taskRecord, task, model.Attempt{}, "", err
 	}
 	attemptRecord, err := e.Store.Get(ctx, "sessions", attemptID)
 	if err != nil {
@@ -166,8 +157,7 @@ func uniquePendingDecisionAttempt(ctx context.Context, database *store.Store, ta
 		for _, record := range records {
 			var owner struct {
 				ID          string `json:"id"`
-				TaskID      string `json:"task_id"`
-				Task        string `json:"task"`
+				TaskID      string `json:"plan_id"`
 				AttemptID   string `json:"attempt_id"`
 				PlanVersion int    `json:"plan_version"`
 				Status      string `json:"status"`
@@ -176,7 +166,7 @@ func uniquePendingDecisionAttempt(ctx context.Context, database *store.Store, ta
 			if err := json.Unmarshal(record.Data, &owner); err != nil {
 				return false, err
 			}
-			ownedByTask := owner.TaskID == taskID || owner.Task == taskID
+			ownedByTask := owner.TaskID == taskID
 			isPending := owner.Status == "pending" || owner.Decision == "pending"
 			if ownedByTask && isPending && owner.PlanVersion == planVersion && owner.AttemptID != "" {
 				attempts[owner.AttemptID] = true
@@ -195,8 +185,7 @@ func latestPendingDecisionAttempt(ctx context.Context, database *store.Store, ta
 		}
 		for _, record := range records {
 			var owner struct {
-				TaskID      string `json:"task_id"`
-				Task        string `json:"task"`
+				TaskID      string `json:"plan_id"`
 				AttemptID   string `json:"attempt_id"`
 				PlanVersion int    `json:"plan_version"`
 				Status      string `json:"status"`
@@ -205,7 +194,7 @@ func latestPendingDecisionAttempt(ctx context.Context, database *store.Store, ta
 			if err := json.Unmarshal(record.Data, &owner); err != nil {
 				return "", err
 			}
-			ownedByTask := owner.TaskID == taskID || owner.Task == taskID
+			ownedByTask := owner.TaskID == taskID
 			isPending := owner.Status == "pending" || owner.Decision == "pending"
 			if ownedByTask && isPending && owner.PlanVersion == planVersion && owner.AttemptID != "" {
 				pending[owner.AttemptID] = true
@@ -250,7 +239,7 @@ func roleMayResumeStage(role, stage string) bool {
 	}
 }
 
-func appendScopeChangeAnswers(task *model.Task, set model.QuestionSet) {
+func appendScopeChangeAnswers(task *model.ExecutionPlan, set model.QuestionSet) {
 	var section strings.Builder
 	section.WriteString("\n\nSpecification-changing clarification responses:\n")
 	for _, question := range set.Questions {
@@ -263,17 +252,25 @@ func appendScopeChangeAnswers(task *model.Task, set model.QuestionSet) {
 	task.Issue.Body += section.String()
 }
 
-func (e *Engine) commitHumanDecision(ctx context.Context, decisionRecord model.Record, kind string, value any, taskRecord model.Record, task model.Task, attempt model.Attempt, action, target string, version int, receipt *store.Receipt) error {
-	notices, err := e.humanDecisionNotices(ctx, task.ID, target)
+type humanDecisionWrite struct {
+	record         model.Record
+	kind           string
+	value          any
+	action, target string
+	version        int
+}
+
+func (e *Engine) commitHumanDecision(ctx context.Context, decision humanDecisionWrite, taskRecord model.Record, task model.ExecutionPlan, attempt model.Attempt, receipt *store.Receipt) error {
+	notices, err := e.humanDecisionNotices(ctx, task.ID, decision.target)
 	if err != nil {
 		return err
 	}
 	changes := []store.Change{
-		{Kind: kind, ID: target, Value: value, Expected: decisionRecord.Version},
-		{Kind: "tasks", ID: task.ID, Value: task, Expected: taskRecord.Version},
+		{Kind: decision.kind, ID: decision.target, Value: decision.value, Expected: decision.record.Version},
+		{Kind: "execution_plans", ID: task.ID, Value: task, Expected: taskRecord.Version},
 	}
 	changes = append(changes, notices...)
-	audit := model.Audit{Task: task.ID, AttemptID: attempt.AttemptID, Source: "local_operator", Action: action, Target: target, Version: version, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	audit := model.Audit{Task: task.ID, AttemptID: attempt.AttemptID, Source: "local_operator", Action: decision.action, Target: decision.target, Version: decision.version, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	changes = append(changes, store.Change{Kind: "audit", ID: store.ID(), Value: audit})
 	return e.Store.Write(ctx, changes, receipt)
 }
@@ -317,4 +314,20 @@ func sameJSONValue(left, right []byte) bool {
 	leftJSON, leftErr := json.Marshal(leftValue)
 	rightJSON, rightErr := json.Marshal(rightValue)
 	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+}
+
+func (e *Engine) validatePendingDecisionAttempt(ctx context.Context, task model.ExecutionPlan, planVersion int, attemptID string) error {
+	if task.Wait.AttemptID != "" && task.Wait.AttemptID != attemptID {
+		return store.ErrConflict
+	}
+	if task.Wait.AttemptID == "" {
+		matches, matchErr := uniquePendingDecisionAttempt(ctx, e.Store, task.ID, planVersion, attemptID)
+		if matchErr != nil {
+			return matchErr
+		}
+		if !matches {
+			return store.ErrConflict
+		}
+	}
+	return nil
 }

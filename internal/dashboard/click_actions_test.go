@@ -2,11 +2,11 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -56,42 +56,46 @@ func TestSelectedRunHighlightsBothLinesAfterScrolling(t *testing.T) {
 	}
 }
 
-func TestInboxClickOpensEntireMessageInVim(t *testing.T) {
-	directory := t.TempDir()
-	capture := filepath.Join(directory, "captured")
-	t.Setenv("PATH", directory+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("VIM_CAPTURE", capture)
-	if err := os.WriteFile(filepath.Join(directory, "vim"), []byte("#!/bin/sh\nfor arg do file=\"$arg\"; done\n/bin/cat \"$file\" > \"$VIM_CAPTURE\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
+func TestInboxClickAndVShowDirectionRationaleWithoutDecision(t *testing.T) {
 	d := New()
 	dashboardScreen(t, d)
-	description := "First line\n" + strings.Repeat("full message [literal] ", 200) + "\nLast line"
-	d.Present(control.Snapshot{"projects": {record("p", model.Project{ID: "p"})}, "directions": {record("idea", model.Direction{ID: "idea", ProjectID: "p", Title: "Idea", Description: description, Problem: "Underlying problem", Mechanism: "Proposed mechanism"})}})
+	calls := 0
+	d.SetCommandHandler(func(_ context.Context, _ control.Request) (json.RawMessage, error) {
+		calls++
+		return json.RawMessage("{}"), nil
+	})
+	d.Present(control.Snapshot{"projects": {record("p", model.Project{ID: "p"})}, "directions": {record("idea", model.Direction{ID: "idea", ProjectID: "p", GroupID: "current", Day: "2026-11-10", Title: "Idea", Problem: "Underlying problem", Mechanism: "Proposed mechanism", ExpectedBenefit: "Fewer review cycles"})}})
+	d.focus = 3
 	d.ForceDraw()
 	x, y, _, _ := d.inbox.GetInnerRect()
 	d.inbox.MouseHandler()(tview.MouseLeftClick, tcell.NewEventMouse(x, y, tcell.Button1, tcell.ModNone), func(p tview.Primitive) { d.SetFocus(p) })
-	body, err := os.ReadFile(capture)
-	if err != nil {
-		t.Fatalf("Vim did not receive message: %v", err)
-	}
-	for _, want := range []string{description, "Underlying problem", "Proposed mechanism"} {
-		if !strings.Contains(string(body), want) {
-			t.Fatalf("Vim missing full message field %q", want)
+	assertRationale := func() {
+		t.Helper()
+		view, ok := d.modal.(*tview.TextView)
+		if !ok {
+			t.Fatalf("rationale action opened %T, want read-only rationale", d.modal)
+		}
+		for _, want := range []string{"Problem", "Underlying problem", "Approach", "Proposed mechanism", "Benefit", "Fewer review cycles"} {
+			if !strings.Contains(view.GetText(false), want) {
+				t.Errorf("rationale view omitted %q", want)
+			}
 		}
 	}
-	if d.modal != nil {
-		t.Fatal("click opened approval instead of Vim")
+	assertRationale()
+	if calls != 0 {
+		t.Fatal("clicking to view rationale submitted a direction decision")
 	}
-	if err := os.Remove(capture); err != nil {
-		t.Fatal(err)
-	}
+	d.modalInput(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
+	d.focus = 3
 	d.input(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone))
-	body, err = os.ReadFile(capture)
-	if err != nil || !strings.Contains(string(body), description) {
-		t.Fatal("v did not open same full message in Vim")
+	assertRationale()
+	d.input(tcell.NewEventKey(tcell.KeyRune, 'a', tcell.ModNone))
+	if _, ok := d.modal.(*tview.List); !ok {
+		t.Fatalf("a did not open the explicit direction chooser: %T", d.modal)
 	}
-
+	if calls != 0 {
+		t.Fatal("opening the direction chooser submitted a decision")
+	}
 }
 
 func TestAllKeyboardInstructionsCanOpenAndClose(t *testing.T) {
@@ -118,8 +122,9 @@ func TestFooterKeepsKeyboardHelpAfterStatusUpdates(t *testing.T) {
 	d.status.SetText(d.supervisorStatus(control.Snapshot{"supervisor": {record("local", map[string]bool{"online": true})}}))
 	d.ForceDraw()
 	rows := strings.Split(strings.TrimSuffix(screenText(screen), "\n"), "\n")
-	footer := strings.Join(rows[len(rows)-2:], "\n")
-	for _, want := range []string{"connected", "Tab", "quit", "Vim", "logs", "approve"} {
+	_, statusRow, _, _ := d.status.GetRect()
+	footer := strings.Join(rows[statusRow:], "\n")
+	for _, want := range []string{"connected", "Tab", "quit", "v/click rationale", "logs", "approve"} {
 		if !strings.Contains(footer, want) {
 			t.Errorf("footer missing %s: %s", want, footer)
 		}
@@ -152,6 +157,7 @@ func TestRunClickOrEnterShowsOnlyThatRunsFullSavedLogs(t *testing.T) {
 	}
 	for _, line := range []int{0, 1, 2} {
 		t.Run(string(rune('0'+line)), func(t *testing.T) {
+			capture := captureRunTail(t, "first FINAL")
 			d := New()
 			screen := tcell.NewSimulationScreen("UTF-8")
 			d.SetScreen(screen)
@@ -170,25 +176,18 @@ func TestRunClickOrEnterShowsOnlyThatRunsFullSavedLogs(t *testing.T) {
 				x, y, _, _ := d.runs.GetInnerRect()
 				d.runs.MouseHandler()(tview.MouseLeftClick, tcell.NewEventMouse(x, y+2+line, tcell.Button1, tcell.ModNone), func(p tview.Primitive) { d.SetFocus(p) })
 			})
-			deadline := time.Now().Add(3 * time.Second)
-			for {
-				text := ""
-				d.QueueUpdateDraw(func() {
-					if view, ok := d.modal.(*tview.TextView); ok {
-						text = view.GetText(false)
-					}
-				})
-				if strings.Contains(text, "first FINAL") {
-					if !strings.Contains(text, "first prompt") || strings.Contains(text, "second FINAL") {
-						t.Fatal("logs mixed runs or omitted earlier event")
-					}
-					break
-				}
-				if time.Now().After(deadline) {
-					t.Fatalf("full selected-run logs not shown: %.200s", text)
-				}
-				time.Sleep(10 * time.Millisecond)
+			body, err := os.ReadFile(capture)
+			if err != nil {
+				t.Fatalf("selected run did not open in terminal tail: %v", err)
 			}
+			text := string(body)
+			if !strings.Contains(text, "first prompt") || !strings.Contains(text, "first FINAL") || strings.Contains(text, "second FINAL") {
+				t.Fatal("terminal tail mixed runs or omitted full history")
+			}
+			if d.modal != nil {
+				t.Fatal("run logs still opened a tview modal")
+			}
+
 		})
 	}
 }

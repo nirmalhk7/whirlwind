@@ -134,11 +134,11 @@ func TestSubmittingRequiresAcceptedReportBeforeCreatingDelivery(t *testing.T) {
 	task.ReviewedCommit = submissionGit(t, project.Path, "rev-parse", "HEAD")
 	task.Branch = "main"
 	task.ChecksPassed = true
-	record, err := e.Store.Get(ctx, "tasks", task.ID)
+	record, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, record.Version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, record.Version); err != nil {
 		t.Fatal(err)
 	}
 	record.Version++
@@ -150,7 +150,7 @@ func TestSubmittingRequiresAcceptedReportBeforeCreatingDelivery(t *testing.T) {
 }
 
 func TestPublishingRoutesToLocalDeliveryWithoutRemotePublication(t *testing.T) {
-	step := &taskStep{task: model.Task{Stage: "publishing"}}
+	step := &taskStep{task: model.ExecutionPlan{Stage: "publishing"}}
 	finished, err := step.publishing()
 	if finished || err != nil || step.task.Stage != "submitting" {
 		t.Fatalf("publishing did not route to local delivery: finished=%v stage=%q err=%v", finished, step.task.Stage, err)
@@ -172,7 +172,7 @@ func TestAcceptedCandidateCompletesAsExactLocalDelivery(t *testing.T) {
 		if finished {
 			break
 		}
-		if err := e.Store.Put(ctx, "tasks", task.ID, step.task, step.record.Version); err != nil {
+		if err := e.Store.Put(ctx, "execution_plans", task.ID, step.task, step.record.Version); err != nil {
 			t.Fatal(err)
 		}
 		step.record.Version++
@@ -223,7 +223,7 @@ func TestAcceptedDeliveryShowsEveryUnmetRequirementToFinalizer(t *testing.T) {
 		if finished {
 			break
 		}
-		if err := e.Store.Put(ctx, "tasks", task.ID, step.task, step.record.Version); err != nil {
+		if err := e.Store.Put(ctx, "execution_plans", task.ID, step.task, step.record.Version); err != nil {
 			t.Fatal(err)
 		}
 		step.record.Version++
@@ -243,37 +243,21 @@ func TestAcceptedDeliveryShowsEveryUnmetRequirementToFinalizer(t *testing.T) {
 	}
 }
 
-func acceptedDeliveryFixture(t *testing.T) (*Engine, model.Task, model.Project, model.Record) {
+func acceptedDeliveryFixture(t *testing.T) (*Engine, model.ExecutionPlan, model.Project, model.Record) {
 	return acceptedDeliveryFixtureWith(t, nil, nil, nil)
 }
 
-func acceptedDeliveryFixtureWith(t *testing.T, requirements []model.Requirement, judgments []model.RequirementResult, prompt *string) (*Engine, model.Task, model.Project, model.Record) {
+func acceptedDeliveryFixtureWith(t *testing.T, requirements []model.Requirement, judgments []model.RequirementResult, prompt *string) (*Engine, model.ExecutionPlan, model.Project, model.Record) {
+	return acceptedDeliveryFixtureOptions(t, requirements, judgments, prompt, true)
+}
+
+func acceptedDeliveryFixtureOptions(t *testing.T, requirements []model.Requirement, judgments []model.RequirementResult, prompt *string, includeQlty bool) (*Engine, model.ExecutionPlan, model.Project, model.Record) {
 	t.Helper()
 	openshell.Install(t)
 	ctx := context.Background()
 	e, task := localPlanFixture(t)
-	if len(requirements) > 0 {
-		task.Plan.Requirements = requirements
-		// Edit the published, unapproved document as a human would. Clearing its
-		// identity now correctly restores the durable original instead of replacing it.
-		if err := os.WriteFile(task.PlanDocument.Path, []byte(RenderPlanDocument(*task.Plan)), 0600); err != nil {
-			t.Fatal(err)
-		}
-		project, err := e.Project(ctx, task.ProjectID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := e.WriteLocalPlan(ctx, project, &task); err != nil {
-			t.Fatal(err)
-		}
-		record, err := e.Store.Get(ctx, "tasks", task.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := e.Store.Put(ctx, "tasks", task.ID, task, record.Version); err != nil {
-			t.Fatal(err)
-		}
-	}
+	prepareDeliveryFixturePlan(t, e, &task, requirements, includeQlty)
+	configureDeliveryFixtureFinalizer(t, e)
 	view, err := e.ReadLocalPlan(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -296,28 +280,13 @@ func acceptedDeliveryFixtureWith(t *testing.T, requirements []model.Requirement,
 	task.Stage, task.Worktree, task.Branch = "submitting", project.Path, "main"
 	task.Base, task.ReviewedCommit = base, submissionGit(t, project.Path, "rev-parse", "HEAD")
 	task.ReviewID, task.VerificationID, task.ChecksPassed = task.ID+":1:1", "verification-1", true
-	taskRecord, err := e.Store.Get(ctx, "tasks", task.ID)
+	taskRecord, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, taskRecord.Version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, taskRecord.Version); err != nil {
 		t.Fatal(err)
 	}
-	projectRecord, err := e.Store.Get(ctx, "providers", "fake")
-	if err != nil {
-		t.Fatal(err)
-	}
-	providerConfig, err := store.Decode[model.Provider](projectRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(providerConfig.Capabilities, "finalizer") {
-		providerConfig.Capabilities = append(providerConfig.Capabilities, "finalizer")
-	}
-	if err := e.Store.Put(ctx, "providers", providerConfig.ID, providerConfig, projectRecord.Version); err != nil {
-		t.Fatal(err)
-	}
-	putFixtureAgent(t, e.Store, "finalizer", model.AgentConfig{Role: "finalizer", Chain: []model.AgentChoice{{Provider: "fake", Model: "fixture"}}})
 	e.Adapter = func(model.Provider) provider.Adapter { return localDeliverySummaryAdapter{prompt: prompt} }
 	provenance := model.Provenance{Task: task.ID, PlanVersion: task.PlanVersion, Head: task.ReviewedCommit, Base: task.Base, PolicyHash: project.PolicyHash, VerificationID: task.VerificationID, ReviewID: task.ReviewID}
 	verification := map[string]any{"stage": "running", "provenance": provenance}
@@ -337,11 +306,61 @@ func acceptedDeliveryFixtureWith(t *testing.T, requirements []model.Requirement,
 	if err := e.Store.Put(ctx, "reviews", task.ReviewID, review, 0); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := e.Store.Get(ctx, "tasks", task.ID)
+	updated, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return e, task, project, updated
+}
+
+func prepareDeliveryFixturePlan(t *testing.T, e *Engine, task *model.ExecutionPlan, requirements []model.Requirement, includeQlty bool) {
+	t.Helper()
+	ctx := context.Background()
+	if includeQlty {
+		includeFixturePlanQlty(t, task)
+	}
+	if len(requirements) > 0 {
+		task.Plan.Requirements = requirements
+		// Edit the published, unapproved document as a human would. Clearing its
+		// identity now correctly restores the durable original instead of replacing it.
+		if err := os.WriteFile(task.PlanDocument.Path, []byte(RenderPlanDocument(*task.Plan)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		project, err := e.Project(ctx, task.ProjectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.WriteLocalPlan(ctx, project, task); err != nil {
+			t.Fatal(err)
+		}
+		record, err := e.Store.Get(ctx, "execution_plans", task.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.Store.Put(ctx, "execution_plans", task.ID, task, record.Version); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func configureDeliveryFixtureFinalizer(t *testing.T, e *Engine) {
+	t.Helper()
+	ctx := context.Background()
+	projectRecord, err := e.Store.Get(ctx, "providers", "fake")
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerConfig, err := store.Decode[model.Provider](projectRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(providerConfig.Capabilities, "finalizer") {
+		providerConfig.Capabilities = append(providerConfig.Capabilities, "finalizer")
+	}
+	if err := e.Store.Put(ctx, "providers", providerConfig.ID, providerConfig, projectRecord.Version); err != nil {
+		t.Fatal(err)
+	}
+	putFixtureAgent(t, e.Store, "finalizer", model.AgentConfig{Role: "finalizer", Chain: []model.AgentChoice{{Provider: "fake", Model: "fixture"}}})
 }
 
 type localDeliverySummaryAdapter struct{ prompt *string }

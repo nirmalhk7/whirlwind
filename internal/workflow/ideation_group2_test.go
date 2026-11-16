@@ -76,7 +76,7 @@ func TestOverlongIdeationRetriesWithoutSaving(t *testing.T) {
 	if err := e.Ideate(ctx, project, "2026-10-14"); err == nil || !strings.Contains(err.Error(), "no worthwhile new direction") {
 		t.Fatalf("overlong ideas accepted: %v", err)
 	}
-	if fixture.generations != 3 || len(fixture.reviewPrompts) != 1 {
+	if fixture.generations != 5 || len(fixture.reviewPrompts) != 1 {
 		t.Fatalf("generation retries=%d novelty reviews=%d", fixture.generations, len(fixture.reviewPrompts))
 	}
 	for _, prompt := range fixture.reviewPrompts {

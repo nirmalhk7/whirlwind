@@ -37,8 +37,7 @@ func (s *Server) inspectArtifact(ctx context.Context, taskID, artifactID string)
 
 func (s *Server) artifactBelongsToTask(ctx context.Context, artifact model.Artifact, taskID string) error {
 	var attempt struct {
-		Task   string `json:"task"`
-		TaskID string `json:"task_id"`
+		Task string `json:"plan_id"`
 	}
 	record, err := s.Store.Get(ctx, artifact.OwnerKind, artifact.AttemptID)
 	if err != nil {
@@ -47,7 +46,7 @@ func (s *Server) artifactBelongsToTask(ctx context.Context, artifact model.Artif
 	if err := json.Unmarshal(record.Data, &attempt); err != nil {
 		return err
 	}
-	if attempt.Task != taskID && attempt.TaskID != taskID {
+	if attempt.Task != taskID {
 		return store.ErrNotFound
 	}
 	return nil

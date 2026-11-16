@@ -97,17 +97,17 @@ func TestLegacyPendingDecisionSurvivesSupervisorRecovery(t *testing.T) {
 	if err := e.Store.Put(ctx, "sessions", question.AttemptID, attempt, attemptRecord.Version); err != nil {
 		t.Fatal(err)
 	}
-	taskRecord, err := e.Store.Get(ctx, "tasks", task.ID)
+	taskRecord, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyTask, err := store.Decode[model.Task](taskRecord)
+	legacyTask, err := store.Decode[model.ExecutionPlan](taskRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
 	legacyTask.Wait.AttemptID = ""
 	legacyTask.Recoveries = 2
-	if err := e.Store.Put(ctx, "tasks", task.ID, legacyTask, taskRecord.Version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, legacyTask, taskRecord.Version); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.Store.RecoverInterrupted(ctx, e.owner); err != nil {
@@ -124,11 +124,11 @@ func TestLegacyPendingDecisionSurvivesSupervisorRecovery(t *testing.T) {
 	if err := e.AnswerQuestionSet(ctx, questionID, questionVersion, map[string]string{"choice": "continue reviewed scope"}, false); err != nil {
 		t.Fatalf("legacy pending decision did not resume after recovery: %v", err)
 	}
-	resumedRecord, err := e.Store.Get(ctx, "tasks", task.ID)
+	resumedRecord, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	resumed, err := store.Decode[model.Task](resumedRecord)
+	resumed, err := store.Decode[model.ExecutionPlan](resumedRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,11 +151,11 @@ func TestScopeChangingQuestionReturnsToPlanningAndPreservesWork(t *testing.T) {
 	if err := e.AnswerQuestionSet(context.Background(), questionID, questionVersion, map[string]string{"choice": "replace database"}, true); err != nil {
 		t.Fatal(err)
 	}
-	record, err := e.Store.Get(context.Background(), "tasks", task.ID)
+	record, err := e.Store.Get(context.Background(), "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	updated, err := store.Decode[model.Task](record)
+	updated, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestScopeChangingQuestionReturnsToPlanningAndPreservesWork(t *testing.T) {
 	if updated.Worktree != "/existing/worktree" || updated.Branch != "existing-branch" || updated.LastAttemptID != "previous" || len(updated.ImplementationAttempts) != 1 || updated.ImplementationAttempts[0] != "previous" {
 		t.Fatalf("scope change discarded existing work or attempt history: %+v", updated)
 	}
-	if _, err := e.Store.Get(context.Background(), "plans", task.ID+":1"); err != nil {
+	if _, err := e.Store.Get(context.Background(), "plan_versions", task.ID+":1"); err != nil {
 		t.Fatalf("previous immutable plan was removed: %v", err)
 	}
 }
@@ -188,11 +188,11 @@ func TestOlderPendingQuestionCannotResumeNewerPauseAndClarificationsKeepRetryBud
 	if err != nil {
 		t.Fatal(err)
 	}
-	taskRecord, err := e.Store.Get(ctx, "tasks", task.ID)
+	taskRecord, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err = store.Decode[model.Task](taskRecord)
+	task, err = store.Decode[model.ExecutionPlan](taskRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,17 +262,17 @@ func TestOlderPendingQuestionCannotResumeNewerPauseAndClarificationsKeepRetryBud
 func pauseTaskForQuestion(t *testing.T, e *Engine, taskID, attemptID string) {
 	t.Helper()
 	ctx := context.Background()
-	record, err := e.Store.Get(ctx, "tasks", taskID)
+	record, err := e.Store.Get(ctx, "execution_plans", taskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		t.Fatal(err)
 	}
 	task.Stage, task.ResumeStage = "paused", "review"
-	task.Wait = &model.TaskWait{AttemptID: attemptID, Kind: "human_decision", ResumeStage: "review", PlanVersion: task.PlanVersion}
-	if err := e.Store.Put(ctx, "tasks", taskID, task, record.Version); err != nil {
+	task.Wait = &model.ExecutionPlanWait{AttemptID: attemptID, Kind: "human_decision", ResumeStage: "review", PlanVersion: task.PlanVersion}
+	if err := e.Store.Put(ctx, "execution_plans", taskID, task, record.Version); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -324,56 +324,40 @@ func TestPermissionApprovalIsRevalidatedAndConsumedByFreshExactAction(t *testing
 	}
 }
 
-func seedHumanDecision(t *testing.T, e *Engine, task model.Task, resumeStage, role, kind string) (string, int) {
+func seedHumanDecision(t *testing.T, e *Engine, task model.ExecutionPlan, resumeStage, role, kind string) (string, int) {
 	t.Helper()
 	ctx := context.Background()
-	record, err := e.Store.Get(ctx, "tasks", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task, err = store.Decode[model.Task](record)
-	if err != nil {
-		t.Fatal(err)
-	}
+	record, err := e.Store.Get(ctx, "execution_plans", task.ID)
+	requireWorkflowSuccess(t, err)
+	task, err = store.Decode[model.ExecutionPlan](record)
+	requireWorkflowSuccess(t, err)
 	task.PlanVersion, task.Stage, task.ResumeStage = 1, "paused", resumeStage
 	attemptID := store.ID()
-	task.Wait = &model.TaskWait{AttemptID: attemptID, Kind: "human_decision", ResumeStage: resumeStage, PlanVersion: 1}
-	task.Plan = &model.Plan{Objective: "existing plan"}
+	task.Wait = &model.ExecutionPlanWait{AttemptID: attemptID, Kind: "human_decision", ResumeStage: resumeStage, PlanVersion: 1}
+	task.Plan = &model.PlanSpecification{Objective: "existing plan"}
 	task.Worktree, task.Branch, task.LastAttemptID = "/existing/worktree", "existing-branch", "previous"
 	task.ImplementationAttempts = []string{"previous"}
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, record.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, task, record.Version))
 	attempt := model.Attempt{AttemptID: attemptID, Task: task.ID, ProjectID: task.ProjectID, Role: role, PlanVersion: 1, Finished: true, Status: "failed"}
-	if err := e.Store.Put(ctx, "sessions", attemptID, attempt, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "sessions", attemptID, attempt, 0))
 	id := store.ID()
 	switch kind {
 	case "question":
 		set := model.QuestionSet{ID: id, TaskID: task.ID, AttemptID: attemptID, Provider: "fixture", Questions: []model.Question{{ID: "choice", Text: "Choose?"}}, Status: "pending", PlanVersion: 1}
-		if err := e.Store.Put(ctx, "questions", id, set, 0); err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, e.Store.Put(ctx, "questions", id, set, 0))
 	case "permission":
-		permission := map[string]any{"id": id, "task": task.ID, "attempt_id": attemptID, "provider": "fixture", "request": map[string]any{"tool": "command", "command": []string{"git", "status"}}, "decision": "pending", "plan_version": 1}
-		if err := e.Store.Put(ctx, "permissions", id, permission, 0); err != nil {
-			t.Fatal(err)
-		}
+		permission := map[string]any{"id": id, "plan_id": task.ID, "attempt_id": attemptID, "provider": "fixture", "request": map[string]any{"tool": "command", "command": []string{"git", "status"}}, "decision": "pending", "plan_version": 1}
+		requireWorkflowSuccess(t, e.Store.Put(ctx, "permissions", id, permission, 0))
 	}
 	decisionRecord, err := e.Store.Get(ctx, map[string]string{"question": "questions", "permission": "permissions"}[kind], id)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if kind == "question" {
-		planRecord, planErr := e.Store.Get(ctx, "plans", task.ID+":1")
+		planRecord, planErr := e.Store.Get(ctx, "plan_versions", task.ID+":1")
 		if errors.Is(planErr, store.ErrNotFound) {
-			if err := e.Store.Put(ctx, "plans", task.ID+":1", *task.Plan, 0); err != nil {
-				t.Fatal(err)
-			}
+			requireWorkflowSuccess(t, e.Store.Put(ctx, "plan_versions", task.ID+":1", *task.Plan, 0))
 		} else if planErr != nil {
 			t.Fatal(planErr)
-		} else if _, err := store.Decode[model.Plan](planRecord); err != nil {
+		} else if _, err := store.Decode[model.PlanSpecification](planRecord); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -382,11 +366,11 @@ func seedHumanDecision(t *testing.T, e *Engine, task model.Task, resumeStage, ro
 
 func assertResumedDecision(t *testing.T, e *Engine, taskID, stage string, planVersion int) {
 	t.Helper()
-	record, err := e.Store.Get(context.Background(), "tasks", taskID)
+	record, err := e.Store.Get(context.Background(), "execution_plans", taskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,11 +381,11 @@ func assertResumedDecision(t *testing.T, e *Engine, taskID, stage string, planVe
 
 func assertPausedDecision(t *testing.T, e *Engine, taskID string) {
 	t.Helper()
-	record, err := e.Store.Get(context.Background(), "tasks", taskID)
+	record, err := e.Store.Get(context.Background(), "execution_plans", taskID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		t.Fatal(err)
 	}

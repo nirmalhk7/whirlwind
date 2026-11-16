@@ -23,8 +23,8 @@ const (
 	workflowPlanObjective     = "Improve result"
 	workflowPlanChange        = "Change result.txt"
 	workflowRevisedPlanChange = "Change result.txt and cover retries"
-	workflowPlanDocumentRoute = "tasks/task/plan-document"
-	workflowPlanReviewRoute   = "tasks/task/plan-review"
+	workflowPlanDocumentRoute = "execution_plans/task/plan-document"
+	workflowPlanReviewRoute   = "execution_plans/task/plan-review"
 	workflowInventoryRoute    = "providers/native/integrations"
 )
 
@@ -121,18 +121,26 @@ func assertWorkflowModes(t *testing.T, s *Server, active, configured string, res
 	}
 }
 
-func workflowLocalPlan(t *testing.T) (*Server, model.Task) {
+func workflowLocalPlan(t *testing.T) (*Server, model.ExecutionPlan) {
 	t.Helper()
 	s := setup(t)
 	ctx := context.Background()
-	s.Engine.PlansRoot = filepath.Join(t.TempDir(), "plans")
+	if err := s.Store.Put(ctx, "providers", "configured", model.Provider{ID: "configured", Kind: "acp", Command: []string{"/usr/bin/true"}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, role := range model.AgentRoles() {
+		if err := s.Store.Put(ctx, "agents", role, model.AgentConfig{Role: role, Chain: []model.AgentChoice{{Provider: "configured", Model: "human-selected-fixture"}}}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.Engine.PlansRoot = filepath.Join(t.TempDir(), "plan_versions")
 	project := model.Project{ID: "project", Name: "fixture", PolicyHash: "approved-policy", Policy: model.Policy{AllowedPaths: []string{workflowResultPath}}}
 	if err := s.Store.Put(ctx, "projects", project.ID, project, 0); err != nil {
 		t.Fatal(err)
 	}
-	task := model.Task{ID: "task", ProjectID: project.ID, Mode: model.AgenticMode, PlanVersion: 1,
+	task := model.ExecutionPlan{ID: "task", ProjectID: project.ID, Mode: model.AgenticMode, PlanVersion: 1,
 		Issue: model.Issue{Title: workflowPlanObjective, Body: "Make result useful"},
-		Plan: &model.Plan{
+		Plan: &model.PlanSpecification{
 			Objective: workflowPlanObjective, What: workflowPlanChange, Why: "Result incomplete", Benefit: "Useful result",
 			Where: []string{workflowResultPath}, Scope: []string{"Correct the result value."}, Exclusions: []string{"Keep the result file format."},
 			Steps:                    []string{"Add a failing result assertion.", "Correct the result and rerun the assertion."},
@@ -146,7 +154,7 @@ func workflowLocalPlan(t *testing.T) (*Server, model.Task) {
 	if err := s.Engine.WriteLocalPlan(ctx, project, &task); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
+	if err := s.Store.Put(ctx, "execution_plans", task.ID, task, 0); err != nil {
 		t.Fatal(err)
 	}
 	return s, task
@@ -174,15 +182,15 @@ func TestWorkflowPlanAPIApprovalBindsHashAndVersion(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &record); err != nil || w.Code != 200 {
 		t.Fatalf("approve: %d %s %v", w.Code, w.Body, err)
 	}
-	approved, err := store.Decode[model.Task](record)
+	approved, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || approved.Stage != "coding" || approved.PlanDocument.ApprovedHash != view.Hash || approved.PlanDocument.PolicyHash != "approved-policy" || approved.PlanDocument.ApprovedAt == "" {
 		t.Fatalf("approval evidence missing: %+v %v", approved, err)
 	}
-	snapshot, err := s.Store.Get(context.Background(), "plans", "task:1")
+	snapshot, err := s.Store.Get(context.Background(), "plan_versions", "task:1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := store.Decode[model.Plan](snapshot)
+	plan, err := store.Decode[model.PlanSpecification](snapshot)
 	if err != nil || plan.What != workflowPlanChange {
 		t.Fatalf("immutable plan not saved: %+v %v", plan, err)
 	}
@@ -222,19 +230,19 @@ func TestWorkflowPlanAPIEditsRequireFreshApproval(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("read approved edit: %d %s", w.Code, w.Body)
 	}
-	record, err := s.Store.Get(context.Background(), "tasks", task.ID)
+	record, err := s.Store.Get(context.Background(), "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	invalidated, err := store.Decode[model.Task](record)
+	invalidated, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || invalidated.Stage != "plan_approval" || invalidated.PlanDocument.ApprovedHash != "" || invalidated.PlanVersion != 2 {
 		t.Fatalf("document edit retained approval: %+v %v", invalidated, err)
 	}
-	snapshot, err := s.Store.Get(context.Background(), "plans", "task:1")
+	snapshot, err := s.Store.Get(context.Background(), "plan_versions", "task:1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved, err := store.Decode[model.Plan](snapshot)
+	approved, err := store.Decode[model.PlanSpecification](snapshot)
 	if err != nil || approved.Objective != workflowPlanObjective || approved.What != workflowRevisedPlanChange {
 		t.Fatalf("manual edit overwrote immutable approval: %+v %v", approved, err)
 	}
@@ -247,7 +255,7 @@ func TestWorkflowPlanAPIRevisionPreservesObjectiveAndFeedback(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &record); err != nil || w.Code != 200 {
 		t.Fatalf("request revision: %d %s %v", w.Code, w.Body, err)
 	}
-	revised, err := store.Decode[model.Task](record)
+	revised, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || revised.Stage != "planning" || revised.PlanVersion != 2 || revised.Plan != nil || revised.PlanDocument != nil || !strings.Contains(revised.Issue.Body, "Cover retry behavior") || !strings.Contains(revised.Issue.Body, "Make result useful") {
 		t.Fatalf("revision dropped objective or feedback: %+v %v", revised, err)
 	}
@@ -264,12 +272,12 @@ func TestWorkflowPlanAPIRejectIsTerminal(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &record); err != nil || w.Code != 200 {
 		t.Fatalf("reject: %d %s %v", w.Code, w.Body, err)
 	}
-	cancelled, err := store.Decode[model.Task](record)
+	cancelled, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || cancelled.Stage != "cancelled" || cancelled.ResumeStage != "" {
 		t.Fatalf("rejection not terminal: %+v %v", cancelled, err)
 	}
 	for _, action := range []string{"resume", "adopt"} {
-		w = workflowModeRequest(t, s, "POST", "tasks/task/"+action, strconv.Itoa(record.Version), map[string]string{})
+		w = workflowModeRequest(t, s, "POST", "execution_plans/task/"+action, strconv.Itoa(record.Version), map[string]string{})
 		if w.Code != 409 || !strings.Contains(w.Body.String(), "task_cancelled") {
 			t.Fatalf("cancelled task %s accepted: %d %s", action, w.Code, w.Body)
 		}

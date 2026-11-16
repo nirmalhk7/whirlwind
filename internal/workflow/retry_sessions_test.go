@@ -65,7 +65,12 @@ func TestUnitSessionDoesNotCrossScope(t *testing.T) {
 
 func TestSessionLookupFailureStopsExecution(t *testing.T) {
 	h := newRetryHarness(t)
-	if err := h.engine.Store.Put(context.Background(), "sessions", "malformed", map[string]any{"plan_version": "wrong type"}, 0); err != nil {
+	ctx := context.Background()
+	saved := model.Attempt{ElapsedMS: fixtureRuntime(0), ExecutionProfile: h.executionProfile(t), Task: h.task.ID, Role: "code", Provider: "fake", CWD: h.cwd, PlanVersion: 1, Model: "fixture-model", Transport: "acp", SessionID: "malformed"}
+	if err := h.engine.Store.Put(ctx, "sessions", "malformed", saved, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.engine.Store.DB.ExecContext(ctx, "UPDATE resources SET data=? WHERE kind=? AND id=?", `{"plan_version":"wrong type"}`, "sessions", "malformed"); err != nil {
 		t.Fatal(err)
 	}
 	calls := 0

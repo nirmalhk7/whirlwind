@@ -21,6 +21,7 @@ func (d *Dashboard) Watch(ctx context.Context, load func(context.Context) (contr
 	d.SetBeforeDrawFunc(func(tcell.Screen) bool {
 		if result := latest.Swap(nil); result != nil {
 			if result.err != nil {
+				d.updateRunnerStatus(nil)
 				d.status.SetText("Whirlwind | State unavailable: " + result.err.Error())
 			} else {
 				d.status.SetText(d.supervisorStatus(result.snapshot))

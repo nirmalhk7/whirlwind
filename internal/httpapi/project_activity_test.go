@@ -107,9 +107,9 @@ func TestProjectPauseAndGlobalStopRemainIndependent(t *testing.T) {
 	if err := s.Store.Put(ctx, "projects", "p", model.Project{ID: "p"}, 0); err != nil {
 		t.Fatal(err)
 	}
-	for _, task := range []model.Task{{ID: "queued", ProjectID: "p", Stage: "planning"}, {ID: "manual", ProjectID: "p", Stage: "paused", ResumeStage: "review", Error: "Paused by user"}} {
+	for _, task := range []model.ExecutionPlan{{ID: "queued", ProjectID: "p", Stage: "planning"}, {ID: "manual", ProjectID: "p", Stage: "paused", ResumeStage: "review", Error: "Paused by user"}} {
 		task.Selection = &model.SelectionAuthorization{CandidateID: task.ID, SelectedAt: "2026-10-22T00:00:00Z"}
-		if err := s.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
+		if err := s.Store.Put(ctx, "execution_plans", task.ID, task, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -117,7 +117,7 @@ func TestProjectPauseAndGlobalStopRemainIndependent(t *testing.T) {
 		t.Fatal(w.Body)
 	}
 	for _, id := range []string{"queued", "manual"} {
-		r, err := s.Store.Get(ctx, "tasks", id)
+		r, err := s.Store.Get(ctx, "execution_plans", id)
 		if err != nil || r.Version != 1 {
 			t.Fatalf("project pause changed saved task: %+v %v", r, err)
 		}
@@ -132,8 +132,8 @@ func TestProjectPauseAndGlobalStopRemainIndependent(t *testing.T) {
 		}
 		assertProjectPaused(t, s, "p", true)
 	}
-	r, _ := s.Store.Get(ctx, "tasks", "manual")
-	task, _ := store.Decode[model.Task](r)
+	r, _ := s.Store.Get(ctx, "execution_plans", "manual")
+	task, _ := store.Decode[model.ExecutionPlan](r)
 	if task.Stage != "paused" || task.Error != "Paused by user" {
 		t.Fatalf("manual pause lost: %+v", task)
 	}

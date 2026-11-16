@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
@@ -14,8 +15,8 @@ import (
 )
 
 type acceptedReviewEvidence struct {
-	task         model.Task
-	frozen       model.Plan
+	task         model.ExecutionPlan
+	frozen       model.PlanSpecification
 	review       model.Review
 	project      model.Project
 	verification verification.Report
@@ -35,6 +36,18 @@ func (e *Engine) LoadAcceptedReviewReport(ctx context.Context, taskID string) (m
 
 func (e *Engine) acceptedReviewReport(ctx context.Context, evidence acceptedReviewEvidence) (model.Review, model.Adherence, bool, error) {
 	checks, err := planVerificationChecks(evidence.project.Policy, evidence.frozen)
+	if evidence.task.IdeaID != "" {
+		// Canonical plans reference human-configured commands. They must not
+		// acquire the synthetic plan-test-N names used by legacy documents.
+		err = validatePlanCommandReferences(evidence.project.Policy, evidence.frozen)
+		if err == nil {
+			var files, patch string
+			files, patch, err = checkedDiff(ctx, evidence.project.Policy, &evidence.task)
+			if err == nil {
+				_, checks = verification.Select(evidence.project.Policy, strings.Split(files, "\n"), patch)
+			}
+		}
+	}
 	if err != nil {
 		return model.Review{}, model.Adherence{}, false, fmt.Errorf("approved verification inventory is invalid: %w", err)
 	}
@@ -45,7 +58,11 @@ func (e *Engine) acceptedReviewReport(ctx context.Context, evidence acceptedRevi
 	if !evidence.verification.Passed || !checksPassed {
 		return model.Review{}, model.Adherence{}, false, errors.New("verification evidence does not prove every approved check passed")
 	}
-	report, err := EvaluateAdherence(evidence.frozen.Requirements, evidence.review.Requirements, *evidence.review.Provenance, evidence.provenance, checksPassed)
+	// Verification precedes review, so its immutable record may not yet carry
+	// a ReviewID. Acceptance binds the separately validated completed review.
+	acceptance := evidence.provenance
+	acceptance.ReviewID = evidence.review.Provenance.ReviewID
+	report, err := EvaluateAdherence(evidence.frozen.Requirements, evidence.review.Requirements, *evidence.review.Provenance, acceptance, checksPassed)
 	if err != nil {
 		return model.Review{}, model.Adherence{}, false, err
 	}
@@ -69,53 +86,53 @@ func (e *Engine) loadAcceptedReviewEvidence(ctx context.Context, taskID string) 
 	return acceptedReviewEvidence{task: task, frozen: frozen, review: review, project: project, verification: report, provenance: provenance}, nil
 }
 
-func (e *Engine) loadApprovedTaskPlan(ctx context.Context, taskID string) (model.Task, model.Plan, error) {
+func (e *Engine) loadApprovedTaskPlan(ctx context.Context, taskID string) (model.ExecutionPlan, model.PlanSpecification, error) {
 	task, err := e.loadReviewTask(ctx, taskID)
 	if err != nil {
-		return model.Task{}, model.Plan{}, err
+		return model.ExecutionPlan{}, model.PlanSpecification{}, err
 	}
 	frozen, err := e.loadFrozenPlan(ctx, task)
 	return task, frozen, err
 }
 
-func (e *Engine) loadReviewTask(ctx context.Context, taskID string) (model.Task, error) {
-	record, err := e.Store.Get(ctx, "tasks", taskID)
+func (e *Engine) loadReviewTask(ctx context.Context, taskID string) (model.ExecutionPlan, error) {
+	record, err := e.Store.Get(ctx, "execution_plans", taskID)
 	if err != nil {
-		return model.Task{}, err
+		return model.ExecutionPlan{}, err
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
-		return model.Task{}, err
+		return model.ExecutionPlan{}, err
 	}
 	if !taskHasApprovedReview(task) {
-		return model.Task{}, errors.New("task lacks an approved plan and completed review evidence")
+		return model.ExecutionPlan{}, errors.New("task lacks an approved plan and completed review evidence")
 	}
 	return task, nil
 }
 
-func taskHasApprovedReview(task model.Task) bool {
+func taskHasApprovedReview(task model.ExecutionPlan) bool {
 	hasTaskIdentity := task.ID != "" && task.ProjectID != ""
 	hasPlan := task.PlanVersion > 0 && task.Plan != nil && task.PlanDocument != nil && task.PlanDocument.ApprovedHash != ""
 	hasReview := task.ReviewID != "" && task.VerificationID != "" && task.ReviewedCommit != ""
 	return hasTaskIdentity && hasPlan && hasReview
 }
 
-func (e *Engine) loadFrozenPlan(ctx context.Context, task model.Task) (model.Plan, error) {
-	planRecord, err := e.Store.Get(ctx, "plans", fmt.Sprintf("%s:%d", task.ID, task.PlanVersion))
+func (e *Engine) loadFrozenPlan(ctx context.Context, task model.ExecutionPlan) (model.PlanSpecification, error) {
+	planRecord, err := e.Store.Get(ctx, "plan_versions", fmt.Sprintf("%s:%d", task.ID, task.PlanVersion))
 	if err != nil {
-		return model.Plan{}, err
+		return model.PlanSpecification{}, err
 	}
-	frozen, err := store.Decode[model.Plan](planRecord)
+	frozen, err := store.Decode[model.PlanSpecification](planRecord)
 	if err != nil {
-		return model.Plan{}, err
+		return model.PlanSpecification{}, err
 	}
 	if !sameApprovedPlanSpecification(frozen, *task.Plan) {
-		return model.Plan{}, errors.New("task plan differs from its immutable approved snapshot")
+		return model.PlanSpecification{}, errors.New("task plan differs from its immutable approved snapshot")
 	}
 	return frozen, nil
 }
 
-func (e *Engine) loadReviewAndProject(ctx context.Context, task model.Task) (model.Project, model.Review, error) {
+func (e *Engine) loadReviewAndProject(ctx context.Context, task model.ExecutionPlan) (model.Project, model.Review, error) {
 	review, err := e.loadReview(ctx, task)
 	if err != nil {
 		return model.Project{}, model.Review{}, err
@@ -130,7 +147,7 @@ func (e *Engine) loadReviewAndProject(ctx context.Context, task model.Task) (mod
 	return project, review, nil
 }
 
-func (e *Engine) loadReview(ctx context.Context, task model.Task) (model.Review, error) {
+func (e *Engine) loadReview(ctx context.Context, task model.ExecutionPlan) (model.Review, error) {
 	record, err := e.Store.Get(ctx, "reviews", task.ReviewID)
 	if err != nil {
 		return model.Review{}, err
@@ -152,20 +169,20 @@ func validateReviewPolicy(review model.Review, project model.Project) error {
 	return nil
 }
 
-func reviewMatchesTask(review model.Review, task model.Task) bool {
+func reviewMatchesTask(review model.Review, task model.ExecutionPlan) bool {
 	provenance := review.Provenance
 	return provenance != nil && reviewIdentityMatches(provenance, task) && reviewCandidateMatches(provenance, task)
 }
 
-func reviewIdentityMatches(provenance *model.Provenance, task model.Task) bool {
+func reviewIdentityMatches(provenance *model.Provenance, task model.ExecutionPlan) bool {
 	return provenance.ReviewID == task.ReviewID && provenance.VerificationID == task.VerificationID && provenance.PlanVersion == task.PlanVersion
 }
 
-func reviewCandidateMatches(provenance *model.Provenance, task model.Task) bool {
+func reviewCandidateMatches(provenance *model.Provenance, task model.ExecutionPlan) bool {
 	return provenance.Head == task.ReviewedCommit && provenance.Task == task.ID && provenance.Base == task.Base
 }
 
-func (e *Engine) loadVerificationEvidence(ctx context.Context, task model.Task, project model.Project) (verification.Report, model.Provenance, error) {
+func (e *Engine) loadVerificationEvidence(ctx context.Context, task model.ExecutionPlan, project model.Project) (verification.Report, model.Provenance, error) {
 	record, err := e.Store.Get(ctx, "verification", task.VerificationID)
 	if err != nil {
 		return verification.Report{}, model.Provenance{}, err
@@ -187,19 +204,23 @@ func (e *Engine) loadVerificationEvidence(ctx context.Context, task model.Task, 
 	return evidence.Report, evidence.Provenance, nil
 }
 
-func verificationMatchesTask(stage string, provenance model.Provenance, task model.Task, policyHash string) bool {
+func verificationMatchesTask(stage string, provenance model.Provenance, task model.ExecutionPlan, policyHash string) bool {
 	return stage == "complete" && verificationIdentityMatches(provenance, task) && verificationCandidateMatches(provenance, task, policyHash)
 }
 
-func verificationIdentityMatches(provenance model.Provenance, task model.Task) bool {
+func verificationIdentityMatches(provenance model.Provenance, task model.ExecutionPlan) bool {
 	return provenance.Task == task.ID && provenance.PlanVersion == task.PlanVersion && provenance.VerificationID == task.VerificationID
 }
 
-func verificationCandidateMatches(provenance model.Provenance, task model.Task, policyHash string) bool {
+func verificationCandidateMatches(provenance model.Provenance, task model.ExecutionPlan, policyHash string) bool {
 	return provenance.Head == task.ReviewedCommit && provenance.Base == task.Base && provenance.PolicyHash == policyHash
 }
 
-func (e *Engine) approvedChecksPassed(ctx context.Context, task model.Task, provenance model.Provenance, required []model.Check, report verification.Report) (bool, error) {
+func (e *Engine) approvedChecksPassed(ctx context.Context, task model.ExecutionPlan, provenance model.Provenance, required []model.Check, report verification.Report) (bool, error) {
+	approved := make(map[string]model.Check, len(required))
+	for _, check := range required {
+		approved[check.Name] = check
+	}
 	results := make(map[string][]verification.Result, len(report.Results))
 	passed := true
 	for _, result := range report.Results {
@@ -207,7 +228,7 @@ func (e *Engine) approvedChecksPassed(ctx context.Context, task model.Task, prov
 			return false, errors.New("verification evidence contains an unnamed or commandless check result")
 		}
 		results[result.Name] = append(results[result.Name], result)
-		if !approvedCheckResultPassed(result) {
+		if !approvedCheckResultPassed(result) && !verification.AdvisoryFailureAllowed(approved[result.Name], result) {
 			passed = false
 		}
 		check := model.Check{Name: result.Name, Command: result.Command}
@@ -240,13 +261,13 @@ func approvedCheckResultPassed(result verification.Result) bool {
 	return *result.ExitCode == 0 && result.Error == ""
 }
 
-func sameApprovedPlanSpecification(frozen, current model.Plan) bool {
+func sameApprovedPlanSpecification(frozen, current model.PlanSpecification) bool {
 	frozen = clearUnitRuntime(frozen)
 	current = clearUnitRuntime(current)
 	return reflect.DeepEqual(frozen, current)
 }
 
-func clearUnitRuntime(plan model.Plan) model.Plan {
+func clearUnitRuntime(plan model.PlanSpecification) model.PlanSpecification {
 	plan.Units = append([]model.Unit(nil), plan.Units...)
 	for index := range plan.Units {
 		unit := &plan.Units[index]

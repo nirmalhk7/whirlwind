@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { access, chmod, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import net from "node:net";
@@ -57,6 +57,11 @@ test("start, status, restart and stop manage the durable local supervisor", asyn
   assert.equal((await run("status")).code, 1);
   let result = await run("start");
   assert.equal(result.code, 0, result.output);
+  const verifier=join(data,"runtime","whirlwind-verify");
+  await access(verifier);
+  const rejected=spawnSync(verifier,[],{input:'{}',encoding:'utf8',timeout:10000});
+  assert.equal(rejected.status,1,rejected.stderr);
+  assert.match(rejected.stderr,/verification/i);
   const first = JSON.parse(await readFile(join(data, "control/supervisor.json"), "utf8"));
   assert.equal((await run("status")).code, 0);
   const concurrent = await Promise.all([run("start"), run("start")]);
@@ -225,4 +230,33 @@ test("legacy browser ownership requires explicit stop before supervisor startup"
   await waitGone(legacy.pid);
   result = await run("start");
   assert.equal(result.code, 0, result.output);
+});
+
+test("stop waits for the owned process to finish after its control socket closes", async t => {
+  const {run,data,env}=await fixture(t);
+  const token="d".repeat(32);
+  const key=createHash("sha256").update(data).digest("hex").slice(0,16);
+  const socketPath=join("/tmp",`whirlwind-${process.getuid()}`,`${key}.sock`);
+  const marker=join(data,"cleanup-finished");
+  await mkdir(dirname(socketPath),{recursive:true,mode:0o700});
+  const source=`
+    const net=require('node:net'),fs=require('node:fs');
+    const server=net.createServer(socket=>socket.on('data',data=>{
+      const request=JSON.parse(data.toString());
+      socket.end(JSON.stringify({request_id:request.request_id,result:request.operation==='supervisor.stop'?{status:'stopping'}:[]})+'\\n');
+      if(request.operation==='supervisor.stop') server.close(()=>setTimeout(()=>{fs.writeFileSync(process.argv[2],'complete');process.exit(0)},1200));
+    }));
+    server.listen(process.argv[1],()=>process.stdout.write('ready\\n'));
+  `;
+  const child=spawn(process.execPath,["-e",source,socketPath,marker],{env:{...env,WHIRLWIND_SUPERVISOR_TOKEN:token},stdio:["ignore","pipe","pipe"]});
+  t.after(()=>{if(processAlive(child.pid))child.kill();});
+  await new Promise((resolve,reject)=>{child.stdout.once("data",resolve);child.once("error",reject);child.once("exit",code=>reject(new Error(`control peer exited ${code}`)));});
+  const statePath=join(data,"control/supervisor.json");
+  await mkdir(dirname(statePath),{recursive:true});
+  await writeFile(statePath,JSON.stringify({version:1,token,pid:child.pid,root:repo,startedAt:new Date().toISOString()}));
+  const stopped=await run("stop");
+  assert.equal(stopped.code,0,stopped.output);
+  assert.equal(processAlive(child.pid),false,"stop returned while owned process still cleaning up");
+  assert.equal(await readFile(marker,"utf8"),"complete");
+  await assert.rejects(access(statePath),{code:"ENOENT"});
 });

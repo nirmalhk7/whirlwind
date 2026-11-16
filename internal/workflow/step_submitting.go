@@ -26,6 +26,15 @@ func (step *taskStep) submitting() (bool, error) {
 	delivery := step.task.Delivery
 	switch delivery.Stage {
 	case "prepared":
+		if step.task.IdeaID != "" {
+			// Finalizer inspects its own immutable worktree. Publishing the
+			// delivery reference belongs to the scoped operation, not startup.
+			if err := prepareScopedDeliveryWorktree(step.ctx, delivery); err != nil {
+				return true, err
+			}
+			delivery.Stage = "snapshot_ready"
+			return false, nil
+		}
 		commit, err := promoteReviewedSnapshot(step.ctx, delivery.OriginalWorktree, delivery.Worktree, delivery.Branch, delivery.Base, delivery.ReviewedCommit)
 		if err != nil {
 			return true, err
@@ -39,7 +48,7 @@ func (step *taskStep) submitting() (bool, error) {
 		return step.finishLocalDelivery()
 	case "complete":
 		step.task.Stage = "complete"
-		return true, step.Store.Put(step.ctx, "tasks", step.task.ID, step.task, step.record.Version)
+		return true, step.Store.Put(step.ctx, "execution_plans", step.task.ID, step.task, step.record.Version)
 	default:
 		return true, fmt.Errorf("unknown local delivery state %q", delivery.Stage)
 	}
@@ -123,10 +132,13 @@ func deliveryUnmetRequirements(report model.Adherence) []string {
 
 func deliveryKey(taskID string, planVersion int) string {
 	sum := sha256.Sum256([]byte(taskID))
-	return fmt.Sprintf("task-%x-v%d", sum[:8], planVersion)
+	return fmt.Sprintf("plan-%x-v%d", sum[:8], planVersion)
 }
 
 func (step *taskStep) finishLocalDelivery() (bool, error) {
+	if step.task.IdeaID != "" {
+		return step.finishScopedLocalDelivery()
+	}
 	delivery := step.task.Delivery
 	if _, err := promoteReviewedSnapshot(step.ctx, delivery.OriginalWorktree, delivery.Worktree, delivery.Branch, delivery.Base, delivery.ReviewedCommit); err != nil {
 		return true, err
@@ -157,7 +169,7 @@ func (step *taskStep) finishLocalDelivery() (bool, error) {
 	step.task.Handoff.NextAction = "Review the local delivery branch and commit; decide whether to push it"
 	notice := model.Notification{ID: store.ID(), TaskID: step.task.ID, Kind: "delivery", Message: "Local delivery ready at " + delivery.Branch + " (" + delivery.ReviewedCommit + ")"}
 	err = step.Store.Write(step.ctx, []store.Change{
-		{Kind: "tasks", ID: step.task.ID, Value: step.task, Expected: step.record.Version},
+		{Kind: "execution_plans", ID: step.task.ID, Value: step.task, Expected: step.record.Version},
 		{Kind: "inbox", ID: notice.ID, Value: notice},
 	}, nil)
 	return true, err

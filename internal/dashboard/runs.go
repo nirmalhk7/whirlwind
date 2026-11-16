@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,14 +13,35 @@ import (
 )
 
 type runRow struct {
-	id      string
-	attempt model.Attempt
-	started time.Time
-	order   int64
+	id        string
+	attempt   model.Attempt
+	started   time.Time
+	order     int64
+	operation *ideationRunView
+}
+
+type ideationRunView struct {
+	model.Operation
+	Directions []model.IdeationDirectionProgress `json:"ideation_directions"`
 }
 
 func (d *Dashboard) refreshRuns() {
 	rows := make([]runRow, 0, len(d.snapshot["sessions"]))
+	for _, record := range d.snapshot["operations"] {
+		var operation ideationRunView
+		if err := json.Unmarshal(record.Data, &operation); err != nil {
+			d.detail.SetText("Cannot read ideation history: " + err.Error())
+			continue
+		}
+		if operation.Kind != "ideation" || (d.projectID != "" && operation.Subject != d.projectID) {
+			continue
+		}
+		started, err := time.Parse(time.RFC3339Nano, operation.StartedAt)
+		if err != nil {
+			started, _ = time.Parse(time.RFC3339Nano, record.UpdatedAt)
+		}
+		rows = append(rows, runRow{id: record.ID, operation: &operation, started: started, order: record.CreatedOrder})
+	}
 	for _, record := range d.snapshot["sessions"] {
 		attempt, err := store.Decode[model.Attempt](record)
 		if err != nil {
@@ -63,6 +85,10 @@ func (d *Dashboard) refreshRuns() {
 	for i, row := range rows {
 		if row.id == d.runID {
 			selected = i
+		}
+		if row.operation != nil {
+			d.runs.AddItem(tview.Escape("Ideation · "+row.operation.Stage), tview.Escape(row.id+" · "+recordedRuntimeValue(row.operation.StartedAt)), 0, nil)
+			continue
 		}
 		attempt := row.attempt
 		name := attempt.ProviderName
@@ -120,6 +146,10 @@ func (d *Dashboard) selectRun(index int, _, _ string, _ rune) {
 	row := d.runRows[index]
 	d.runID = row.id
 	d.planID = ""
+	if row.operation != nil {
+		d.detail.SetText(ideationRunDetails(row.id, *row.operation))
+		return
+	}
 	taskDetails := ""
 	for i, task := range d.planRows {
 		if task.ID == row.attempt.Task {

@@ -7,7 +7,7 @@ import (
 	"whirlwind/internal/model"
 )
 
-func sameDocumentPlan(left, right model.Plan) bool {
+func sameDocumentPlan(left, right model.PlanSpecification) bool {
 	if !slices.Equal([]string{left.Objective, left.What, left.Why, left.Benefit}, []string{right.Objective, right.What, right.Why, right.Benefit}) {
 		return false
 	}
@@ -20,7 +20,7 @@ func sameDocumentPlan(left, right model.Plan) bool {
 	return sameDocumentUnits(left.Units, right.Units)
 }
 
-func documentRationale(plan model.Plan) (what, why, benefit string) {
+func documentRationale(plan model.PlanSpecification) (what, why, benefit string) {
 	what, why, benefit = strings.TrimSpace(plan.What), strings.TrimSpace(plan.Why), strings.TrimSpace(plan.Benefit)
 	if what == "" {
 		what = strings.TrimSpace(plan.Objective)
@@ -37,7 +37,7 @@ func documentRationale(plan model.Plan) (what, why, benefit string) {
 	return
 }
 
-func documentPaths(plan model.Plan) []string {
+func documentPaths(plan model.PlanSpecification) []string {
 	paths := append([]string{}, plan.Where...)
 	if len(paths) == 0 {
 		for _, unit := range plan.Units {

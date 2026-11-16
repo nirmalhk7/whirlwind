@@ -12,7 +12,10 @@ import (
 )
 
 func (step *taskStep) planning() (bool, error) {
-	plan, err := step.generatePlan()
+	if step.task.IdeaID != "" {
+		return false, step.generateIdeaPlan()
+	}
+	_, err := step.generatePlan()
 	if err != nil {
 		return true, err
 	}
@@ -22,32 +25,29 @@ func (step *taskStep) planning() (bool, error) {
 		}
 		return false, nil
 	}
-	step.task.Handoff.NextAction = "implement plan"
-	key := fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion)
-	previous, _ := step.Store.Get(step.ctx, "plans", key)
-	step.pending = append(step.pending, store.Change{Kind: "plans", ID: key, Value: plan, Expected: previous.Version})
+	step.task.Handoff.NextAction = "Answer planner questions before reviewing the specification."
 	return false, nil
 }
 
-func (step *taskStep) generatePlan() (model.Plan, error) {
+func (step *taskStep) generatePlan() (model.PlanSpecification, error) {
 	path, err := step.planningWorktree()
 	if err != nil {
-		return model.Plan{}, err
+		return model.PlanSpecification{}, err
 	}
 	prompt, err := step.planningPrompt()
 	if err != nil {
-		return model.Plan{}, err
+		return model.PlanSpecification{}, err
 	}
 	input, cleanup, err := step.planningIntegrationInput(path, prompt)
 	if err != nil {
-		return model.Plan{}, err
+		return model.PlanSpecification{}, err
 	}
 	if cleanup != nil {
 		defer cleanup()
 	}
 	out, err := step.agent(step.ctx, step.project, step.task, input)
 	if err != nil {
-		return model.Plan{}, err
+		return model.PlanSpecification{}, err
 	}
 	step.task.LastAttemptID = out.AttemptID
 	return step.applyPlannerOutput(out.Text)
@@ -71,7 +71,7 @@ func (step *taskStep) planningIntegrationInput(path, prompt string) (provider.In
 	input.Prompt += "\nSelected read-only connection scopes available through the supervisor broker: " + jsonText(sources) + ". Do not attempt any external write or use another connection."
 	return input, func() { _ = broker.close() }, nil
 }
-func (step *taskStep) applyPlannerOutput(text string) (model.Plan, error) {
+func (step *taskStep) applyPlannerOutput(text string) (model.PlanSpecification, error) {
 	plan, err := decodePlan(text)
 	if err != nil {
 		return plan, err
@@ -145,8 +145,8 @@ func (step *taskStep) planningPrompt() (string, error) {
 	return prompt + "\nUser selection authorization:\n" + jsonText(step.task.Selection) + "\nDecide implementation details within selected objective and project policy. Preserve the selected objective, define stable requirement IDs with exact outcomes and evidence methods, list exact repository commands found in committed configuration, and list checks. For each test/build command inventory, use `Configured: <source file and command>` when commands exist, or `None configured: <committed files inspected>` when none exist; do not invent commands. Include explicit scope, exclusions, and ordered implementation steps. Ask inbox questions for missing information. No plan may begin coding before human local approval. Mode: " + step.WorkflowConfiguration(step.ctx).ActiveMode + ".", err
 }
 
-func decodePlan(text string) (model.Plan, error) {
-	var plan model.Plan
+func decodePlan(text string) (model.PlanSpecification, error) {
+	var plan model.PlanSpecification
 	if err := provider.JSON(text, &plan); err != nil {
 		return plan, err
 	}
@@ -176,7 +176,7 @@ func decodePlan(text string) (model.Plan, error) {
 	return plan, ValidateUnits(plan.Units)
 }
 
-func validateDetailedPlan(plan model.Plan) error {
+func validateDetailedPlan(plan model.PlanSpecification) error {
 	for label, entries := range map[string][]string{"scope": plan.Scope, "exclusions": plan.Exclusions, "implementation steps": plan.Steps} {
 		if len(entries) == 0 {
 			return fmt.Errorf("planner must provide explicit %s", label)
@@ -225,7 +225,7 @@ func validatePlanRequirements(requirements []model.Requirement) error {
 	}
 	return nil
 }
-func (step *taskStep) applyPlan(plan model.Plan) error {
+func (step *taskStep) applyPlan(plan model.PlanSpecification) error {
 	if err := ValidateUnitScopes(step.project, plan.Units); err != nil {
 		return err
 	}

@@ -22,7 +22,7 @@ func TestDashboardLoadsSameDatabaseWithoutRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	for _, kind := range []string{"tasks", "sessions", "questions"} {
+	for _, kind := range []string{"execution_plans", "sessions", "questions"} {
 		if err := db.Put(ctx, kind, "saved", map[string]any{"status": "pending", "finished": false, "restarts": 2, "deadline": "2026-11-06T23:05:00Z"}, 0); err != nil {
 			t.Fatal(err)
 		}
@@ -38,7 +38,7 @@ func TestDashboardLoadsSameDatabaseWithoutRecovery(t *testing.T) {
 
 func assertUnchangedSnapshot(t *testing.T, db *store.Store, snapshot control.Snapshot) {
 	t.Helper()
-	for _, kind := range []string{"tasks", "sessions", "questions"} {
+	for _, kind := range []string{"execution_plans", "sessions", "questions"} {
 		if len(snapshot[kind]) != 1 {
 			t.Errorf("dashboard lost saved %s", kind)
 			continue
@@ -81,9 +81,13 @@ func TestDashboardRestoresHistoryAndCurrentDecisionsOnlineAndOffline(t *testing.
 		t.Fatal(err)
 	}
 	defer db.Close()
-	for _, kind := range []string{"tasks", "sessions", "questions", "permissions", "plans"} {
+	for _, kind := range []string{"execution_plans", "sessions", "questions", "permissions", "plan_versions"} {
 		for i := range 105 {
-			if err := db.Put(ctx, kind, fmt.Sprintf("%s-old-%03d", kind, i), map[string]any{"project_id": "project", "status": "resolved"}, 0); err != nil {
+			id := fmt.Sprintf("%s-old-%03d", kind, i)
+			if kind == "plan_versions" {
+				id = fmt.Sprintf("execution_plans-old-%03d:1", i)
+			}
+			if err := db.Put(ctx, kind, id, map[string]any{"project_id": "project", "status": "resolved"}, 0); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -103,7 +107,7 @@ func TestDashboardRestoresHistoryAndCurrentDecisionsOnlineAndOffline(t *testing.
 		if err != nil {
 			t.Fatalf("%s inspection: %v", mode, err)
 		}
-		for _, kind := range []string{"tasks", "sessions", "questions", "permissions", "plans"} {
+		for _, kind := range []string{"execution_plans", "sessions", "questions", "permissions", "plan_versions"} {
 			minimum := 105
 			if kind == "sessions" || kind == "questions" || kind == "permissions" {
 				minimum++
@@ -177,7 +181,7 @@ func TestDashboardPaginationErrorsAndStalledCursorsAreVisible(t *testing.T) {
 			}
 			defer db.Close()
 			for i := range 100 {
-				if err := db.Put(ctx, "tasks", fmt.Sprintf("task-%03d", i), map[string]any{"stage": "plan"}, 0); err != nil {
+				if err := db.Put(ctx, "execution_plans", fmt.Sprintf("task-%03d", i), map[string]any{"stage": "plan"}, 0); err != nil {
 					t.Fatal(err)
 				}
 			}

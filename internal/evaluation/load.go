@@ -17,7 +17,7 @@ func Load(ctx context.Context, s *store.Store) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	samples, known, err := taskSamples(ctx, s, records["tasks"], data)
+	samples, known, err := taskSamples(ctx, s, records["execution_plans"], data)
 	if err != nil {
 		return Report{}, err
 	}
@@ -59,14 +59,14 @@ func unknownTaskSamples(ctx context.Context, s *store.Store, byTask map[string][
 		if err != nil {
 			return nil, err
 		}
-		samples = append(samples, Sample{Operation: true, Task: model.Task{ID: id, Stage: "operation"}, Usage: usage, Entries: usage.Entries, Attempts: attempts, Category: categories[id]})
+		samples = append(samples, Sample{Operation: true, Task: model.ExecutionPlan{ID: id, Stage: "operation"}, Usage: usage, Entries: usage.Entries, Attempts: attempts, Category: categories[id]})
 	}
 	return samples, nil
 }
 
 func loadEvaluationRecords(ctx context.Context, s *store.Store) (map[string][]model.Record, error) {
 	records := make(map[string][]model.Record, 5)
-	for _, kind := range []string{"tasks", "sessions", "outcomes", "metrics", "audit"} {
+	for _, kind := range []string{"execution_plans", "sessions", "outcomes", "metrics", "audit"} {
 		items, err := s.List(ctx, kind)
 		if err != nil {
 			return nil, err
@@ -80,7 +80,7 @@ func loadDecisions(records []model.Record) (map[string]string, map[string][]stri
 	decisions, history := map[string]string{}, map[string][]string{}
 	for _, record := range records {
 		var outcome struct {
-			Task     string `json:"task"`
+			Task     string `json:"plan_id"`
 			Decision string `json:"human_decision"`
 		}
 		if err := json.Unmarshal(record.Data, &outcome); err != nil {
@@ -96,7 +96,7 @@ func loadCategories(records []model.Record) (map[string]string, error) {
 	categories := map[string]string{}
 	for _, record := range records {
 		var metric struct {
-			Task     string `json:"task"`
+			Task     string `json:"plan_id"`
 			Category string `json:"category"`
 		}
 		if err := json.Unmarshal(record.Data, &metric); err != nil {
@@ -144,7 +144,7 @@ type sampleData struct {
 func taskSamples(ctx context.Context, s *store.Store, records []model.Record, data sampleData) ([]Sample, map[string]bool, error) {
 	samples, known := []Sample{}, map[string]bool{}
 	for _, record := range records {
-		task, err := store.Decode[model.Task](record)
+		task, err := store.Decode[model.ExecutionPlan](record)
 		if err != nil {
 			return nil, nil, err
 		}

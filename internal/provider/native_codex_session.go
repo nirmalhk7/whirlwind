@@ -18,7 +18,7 @@ type codexThread struct {
 
 func (s *providerSession) initializeCodex() error {
 	initial := map[string]any{"clientInfo": map[string]any{"name": "whirlwind", "version": "0.1.0"}}
-	if s.hasCheckTool() || s.input.NativeIntegrations {
+	if s.hasScopedTool() || s.input.NativeIntegrations {
 		initial["capabilities"] = map[string]bool{"experimentalApi": true}
 	}
 	if err := s.rpc.Call(s.ctx, "initialize", initial, nil); err != nil {

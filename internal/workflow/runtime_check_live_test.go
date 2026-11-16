@@ -129,7 +129,7 @@ func liveOwnedCheckToken(t *testing.T) string {
 	return hex.EncodeToString(token[:])
 }
 
-func assertPersistedOwnedCheck(t *testing.T, engine *Engine, task model.Task, cwd string, check model.Check, identity verification.RuntimeIdentity) {
+func assertPersistedOwnedCheck(t *testing.T, engine *Engine, task model.ExecutionPlan, cwd string, check model.Check, identity verification.RuntimeIdentity) {
 	t.Helper()
 	rows, err := engine.Store.List(context.Background(), "runtime_jobs")
 	if err != nil {

@@ -148,7 +148,7 @@ func seenUsage(entries []model.UsageEntry, id string) bool {
 	return false
 }
 func addLegacyUsage(ctx context.Context, tx *sql.Tx, task string, seen map[string]bool, report *model.UsageReport) (resultErr error) {
-	rows, err := tx.QueryContext(ctx, "SELECT id,data FROM resources WHERE kind='sessions' AND json_extract(data,'$.task')=? ORDER BY rowid", task)
+	rows, err := tx.QueryContext(ctx, "SELECT id,data FROM resources WHERE kind='sessions' AND json_extract(data,'$.plan_id')=? ORDER BY rowid", task)
 	if err != nil {
 		return err
 	}

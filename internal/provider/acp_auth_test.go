@@ -49,6 +49,19 @@ func TestProvisionACPAuthRejectsMissingAuthorizedCredentials(t *testing.T) {
 	}
 }
 
+// CLI preferences exist even without login; accepting them makes missing
+// credentials look provisioned and delays the actionable failure until launch.
+func TestCursorCLISettingsDoNotSatisfyACPAuthentication(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeNativeFixture(t, filepath.Join(home, ".cursor/cli-config.json"), `{"permissions":{}}`)
+	profile := execution.Profile{CWD: t.TempDir()}
+	err := provisionACPAuth(&profile, model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"})
+	if err == nil || !strings.Contains(err.Error(), "authenticate") || len(profile.NativeFiles) != 0 || len(profile.ReadRoots) != 0 {
+		t.Fatalf("non-credential settings satisfied authentication: %v; %+v", err, profile)
+	}
+}
+
 func TestProvisionACPAuthAcceptsOnlyExplicitlyAllowedProfileEnvironment(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "authorized-claude-secret-reference")
@@ -67,14 +80,14 @@ func TestProvisionACPAuthRejectsCredentialSymlinks(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	outside := filepath.Join(t.TempDir(), "cli-config.json")
+	outside := filepath.Join(t.TempDir(), "auth.json")
 	writeNativeFixture(t, outside, `{"auth":"private"}`)
-	if err := os.Symlink(outside, filepath.Join(home, ".cursor/cli-config.json")); err != nil {
+	if err := os.Symlink(outside, filepath.Join(home, protocolCursorCredentialPath)); err != nil {
 		t.Fatal(err)
 	}
 	profile := execution.Profile{CWD: t.TempDir()}
 	err := provisionACPAuth(&profile, model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"})
-	if err == nil || len(profile.NativeFiles) != 0 {
+	if err == nil || !strings.Contains(err.Error(), "regular file") || len(profile.NativeFiles) != 0 {
 		t.Fatalf("credential symlink was granted: error=%v files=%+v", err, profile.NativeFiles)
 	}
 }
@@ -85,7 +98,7 @@ func TestProvisionACPAuthUsesLinuxProviderConfigHome(t *testing.T) {
 	}{
 		{"codex", ".codex/auth.json", "CODEX_HOME", "auth.json"},
 		{"claude", ".claude/.credentials.json", "CLAUDE_CONFIG_DIR", ".credentials.json"},
-		{"cursor", ".cursor/cli-config.json", "HOME", ".cursor/cli-config.json"},
+		{"cursor", protocolCursorCredentialPath, "HOME", protocolCursorCredentialPath},
 	} {
 		t.Run(test.id, func(t *testing.T) {
 			home := t.TempDir()

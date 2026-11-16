@@ -60,7 +60,7 @@ func (s *Store) stageNotification(ctx context.Context, n model.Notification) err
 }
 
 func notifyTaskTransition(ctx context.Context, tx *sql.Tx, before, after []byte) error {
-	var old, task model.Task
+	var old, task model.ExecutionPlan
 	if len(before) > 0 {
 		if err := json.Unmarshal(before, &old); err != nil {
 			return err
@@ -72,7 +72,7 @@ func notifyTaskTransition(ctx context.Context, tx *sql.Tx, before, after []byte)
 	return notifyTaskStage(ctx, tx, old, task)
 }
 
-func notifyTaskStage(ctx context.Context, tx *sql.Tx, old, task model.Task) error {
+func notifyTaskStage(ctx context.Context, tx *sql.Tx, old, task model.ExecutionPlan) error {
 	if task.Stage == old.Stage && task.Error == old.Error {
 		return nil
 	}

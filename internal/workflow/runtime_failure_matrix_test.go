@@ -66,7 +66,7 @@ func crashACPChild(ctx context.Context, cwd string) error {
 func runtimeMatrixSuccessfulOutput(role string) string {
 	switch role {
 	case "plan":
-		plan := model.Plan{
+		plan := model.PlanSpecification{
 			Objective: "Recover the interrupted attempt", What: "Use the fallback choice", Why: "The first ACP child exited", Benefit: "The role returns a valid result", Where: []string{"src/main.go"},
 			AcceptanceCriteria: []string{"The fallback role result is valid"}, Scope: []string{"Retry the configured role queue"}, Exclusions: []string{"Do not alter the worktree"}, Steps: []string{"Retry the first model", "Use the fallback model"},
 			RepositoryTestInventory: "None configured: fixture repository configuration inspected", RepositoryBuildInventory: "None configured: fixture repository configuration inspected",
@@ -145,11 +145,11 @@ func TestProcessCrashRecoveryMatrixAcrossCanonicalRoles(t *testing.T) {
 				}
 				return nil
 			}
-			taskRecord, err := reopened.Get(context.Background(), "tasks", task.ID)
+			taskRecord, err := reopened.Get(context.Background(), "execution_plans", task.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			currentTask, err := store.Decode[model.Task](taskRecord)
+			currentTask, err := store.Decode[model.ExecutionPlan](taskRecord)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -188,7 +188,7 @@ func TestProcessCrashRecoveryMatrixAcrossCanonicalRoles(t *testing.T) {
 	}
 }
 
-func runtimeMatrixPersistedState(t *testing.T, engine *Engine, project model.Project, task model.Task, role string, choice model.AgentChoice) string {
+func runtimeMatrixPersistedState(t *testing.T, engine *Engine, project model.Project, task model.ExecutionPlan, role string, choice model.AgentChoice) string {
 	t.Helper()
 	var summaries []string
 	expectedRun := &agentRun{Engine: engine, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: role}}
@@ -199,27 +199,11 @@ func runtimeMatrixPersistedState(t *testing.T, engine *Engine, project model.Pro
 			return fmt.Sprintf("%s list error: %v", kind, err)
 		}
 		for _, record := range records {
-			if kind == "sessions" {
-				state, decodeErr := store.Decode[model.Attempt](record)
-				if decodeErr != nil {
-					return fmt.Sprintf("%s decode error: %v", kind, decodeErr)
-				}
-				events, eventErr := engine.Store.AttemptEvents(context.Background(), state.AttemptID, 0, 100)
-				var kinds []string
-				if eventErr == nil {
-					for _, event := range events {
-						kinds = append(kinds, event.Kind)
-					}
-				}
-				identityMatches := state.AttemptID == state.ExecutionID && state.ExecutionGeneration == 1 && state.Owner == engine.Owner() && state.RecoveryEpisodeID == expectedEpisode
-				summaries = append(summaries, fmt.Sprintf("session(attempt=%s execution=%s generation=%d owner=%s episode=%s expected_owner=%s expected_episode=%s identity_matches=%t role=%s model=%s restart=%d status=%s success=%v error=%q process=%s events=%v event_error=%v)", state.AttemptID, state.ExecutionID, state.ExecutionGeneration, state.Owner, state.RecoveryEpisodeID, engine.Owner(), expectedEpisode, identityMatches, state.Role, state.Model, state.RestartCount, state.Status, state.Success, state.Error, state.ProcessState, kinds, eventErr))
-				continue
+			summary, err := runtimeMatrixRecordSummary(engine, kind, record, expectedEpisode)
+			if err != nil {
+				return err.Error()
 			}
-			episode, decodeErr := store.Decode[model.RecoveryEpisode](record)
-			if decodeErr != nil {
-				return fmt.Sprintf("%s decode error: %v", kind, decodeErr)
-			}
-			summaries = append(summaries, fmt.Sprintf("episode(role=%s model=%s restart=%d status=%s failure=%s)", episode.Role, episode.Model, episode.RestartCount, episode.Status, episode.FailureKind))
+			summaries = append(summaries, summary)
 		}
 	}
 	cooldowns, err := engine.Store.List(context.Background(), "provider_cooldowns")
@@ -299,4 +283,27 @@ func assertQueueEntry(t *testing.T, attempt model.Attempt, position, length int)
 	if !positionOK || !lengthOK || int(savedPosition) != position || int(savedLength) != length {
 		t.Fatalf("persisted queue entry for %s = %v/%v, want %d/%d", attempt.AttemptID, saved["queue_position"], saved["queue_length"], position, length)
 	}
+}
+
+func runtimeMatrixRecordSummary(engine *Engine, kind string, record model.Record, expectedEpisode string) (string, error) {
+	if kind == "sessions" {
+		state, decodeErr := store.Decode[model.Attempt](record)
+		if decodeErr != nil {
+			return "", fmt.Errorf("%s decode error: %v", kind, decodeErr)
+		}
+		events, eventErr := engine.Store.AttemptEvents(context.Background(), state.AttemptID, 0, 100)
+		var kinds []string
+		if eventErr == nil {
+			for _, event := range events {
+				kinds = append(kinds, event.Kind)
+			}
+		}
+		identityMatches := state.AttemptID == state.ExecutionID && state.ExecutionGeneration == 1 && state.Owner == engine.Owner() && state.RecoveryEpisodeID == expectedEpisode
+		return fmt.Sprintf("session(attempt=%s execution=%s generation=%d owner=%s episode=%s expected_owner=%s expected_episode=%s identity_matches=%t role=%s model=%s restart=%d status=%s success=%v error=%q process=%s events=%v event_error=%v)", state.AttemptID, state.ExecutionID, state.ExecutionGeneration, state.Owner, state.RecoveryEpisodeID, engine.Owner(), expectedEpisode, identityMatches, state.Role, state.Model, state.RestartCount, state.Status, state.Success, state.Error, state.ProcessState, kinds, eventErr), nil
+	}
+	episode, decodeErr := store.Decode[model.RecoveryEpisode](record)
+	if decodeErr != nil {
+		return "", fmt.Errorf("%s decode error: %v", kind, decodeErr)
+	}
+	return fmt.Sprintf("episode(role=%s model=%s restart=%d status=%s failure=%s)", episode.Role, episode.Model, episode.RestartCount, episode.Status, episode.FailureKind), nil
 }

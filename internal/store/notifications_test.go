@@ -46,13 +46,13 @@ func TestTaskTransitionNotificationCommitsWithTask(t *testing.T) {
 	if err := s.SettleUsage(ctx, model.UsageEntry{TaskID: "task", AttemptID: "unknown"}); err != nil {
 		t.Fatal(err)
 	}
-	task := model.Task{ID: "task", Stage: "coding", Handoff: model.Handoff{NextAction: "implement accepted plan"}}
-	if err := s.Put(ctx, "tasks", task.ID, task, 0); err != nil {
+	task := model.ExecutionPlan{ID: "task", Stage: "coding", Handoff: model.Handoff{NextAction: "implement accepted plan"}}
+	if err := s.Put(ctx, "execution_plans", task.ID, task, 0); err != nil {
 		t.Fatal(err)
 	}
 	task.Stage = "review"
 	task.Handoff.NextAction = "review tested diff"
-	if err := s.Put(ctx, "tasks", task.ID, task, 1); err != nil {
+	if err := s.Put(ctx, "execution_plans", task.ID, task, 1); err != nil {
 		t.Fatal(err)
 	}
 	records, _ := s.List(ctx, "inbox")
@@ -63,14 +63,14 @@ func TestTaskTransitionNotificationCommitsWithTask(t *testing.T) {
 	if alert.Usage == nil || alert.Usage.Attempts != 1 || alert.Usage.UnknownTokenAttempts != 1 {
 		t.Fatal("milestone hides unknown consumption")
 	}
-	if err := s.Put(ctx, "tasks", task.ID, task, 1); err == nil {
+	if err := s.Put(ctx, "execution_plans", task.ID, task, 1); err == nil {
 		t.Fatal("stale task write accepted")
 	}
 	after, _ := s.List(ctx, "inbox")
 	if len(after) != len(records) {
 		t.Fatal("failed transaction emitted notification")
 	}
-	if err := s.Put(ctx, "tasks", task.ID, task, 2); err != nil {
+	if err := s.Put(ctx, "execution_plans", task.ID, task, 2); err != nil {
 		t.Fatal(err)
 	}
 	after, _ = s.List(ctx, "inbox")

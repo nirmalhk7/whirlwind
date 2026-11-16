@@ -72,7 +72,7 @@ type storedSession struct {
 	CreatedOrder     int64                 `json:"-"`
 	AttemptID        string                `json:"attempt_id"`
 	UnitID           string                `json:"unit_id"`
-	Task             string                `json:"task"`
+	Task             string                `json:"plan_id"`
 	Role             string                `json:"role"`
 	Provider         string                `json:"provider"`
 	CWD              string                `json:"cwd"`

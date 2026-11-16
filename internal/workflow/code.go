@@ -13,7 +13,7 @@ import (
 )
 
 // code executes dependency-ready batches, preserving partial checkpoints before full-task verification.
-func (e *Engine) code(ctx context.Context, p model.Project, t *model.Task) error {
+func (e *Engine) code(ctx context.Context, p model.Project, t *model.ExecutionPlan) error {
 	if t.Plan == nil {
 		return errors.New("plan required")
 	}
@@ -26,7 +26,7 @@ func (e *Engine) code(ctx context.Context, p model.Project, t *model.Task) error
 	return e.executeUnits(ctx, p, t)
 }
 
-func (e *Engine) executeUnits(ctx context.Context, p model.Project, t *model.Task) error {
+func (e *Engine) executeUnits(ctx context.Context, p model.Project, t *model.ExecutionPlan) error {
 	if err := e.prepareWorkspace(ctx, p, t); err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func (e *Engine) executeUnits(ctx context.Context, p model.Project, t *model.Tas
 	}
 	return e.finishCode(ctx, p, t)
 }
-func (e *Engine) prepareWorkspace(ctx context.Context, p model.Project, t *model.Task) error {
+func (e *Engine) prepareWorkspace(ctx context.Context, p model.Project, t *model.ExecutionPlan) error {
 	if t.Worktree == "" {
 		e.restoreWorkspace(ctx, t)
 	}
@@ -78,7 +78,7 @@ func (e *Engine) prepareWorkspace(ctx context.Context, p model.Project, t *model
 	}
 	return nil
 }
-func (e *Engine) restoreWorkspace(ctx context.Context, t *model.Task) {
+func (e *Engine) restoreWorkspace(ctx context.Context, t *model.ExecutionPlan) {
 	record, err := e.Store.Get(ctx, "workspaces", fmt.Sprintf("%s:%d", t.ID, t.PlanVersion))
 	if err != nil {
 		return
@@ -90,7 +90,7 @@ func (e *Engine) restoreWorkspace(ctx context.Context, t *model.Task) {
 		t.Worktree = saved.Path
 	}
 }
-func (e *Engine) restoreUnits(ctx context.Context, t *model.Task) map[string]bool {
+func (e *Engine) restoreUnits(ctx context.Context, t *model.ExecutionPlan) map[string]bool {
 	for n := range t.Plan.Units {
 		unit := &t.Plan.Units[n]
 		record, err := e.Store.Get(ctx, "units", unitKey(t.ID, t.PlanVersion, unit.ID))
@@ -127,7 +127,7 @@ func dependenciesComplete(dependencies []string, completed map[string]bool) bool
 	}
 	return true
 }
-func (e *Engine) runUnits(ctx context.Context, p model.Project, t *model.Task, ready []int) error {
+func (e *Engine) runUnits(ctx context.Context, p model.Project, t *model.ExecutionPlan, ready []int) error {
 	snapshot := *t
 	snapshot.Plan = nil
 	var units errgroup.Group
@@ -139,7 +139,7 @@ func (e *Engine) runUnits(ctx context.Context, p model.Project, t *model.Task, r
 			if allowance <= 0 {
 				allowance = ctxengine.DefaultInputAllowance
 			}
-			decision := map[string]any{"task": t.ID, "unit": t.Plan.Units[n].ID, "objective": t.Plan.Units[n].Objective, "dependencies": t.Plan.Units[n].Dependencies, "scope": t.Plan.Units[n].AllowedPaths, "parallel": len(ready) > 1, "reason": "dependency-ready scope isolated; every attempt requires budget admission", "estimated_overhead": map[string]any{"input_allowance": allowance, "additional_batch_input_allowance": allowance * (len(ready) - 1), "method": "utf8_bytes_upper_estimate", "provider_added_context": "unknown"}, "reservation_scope": t.ID}
+			decision := map[string]any{"plan_id": t.ID, "unit": t.Plan.Units[n].ID, "objective": t.Plan.Units[n].Objective, "dependencies": t.Plan.Units[n].Dependencies, "scope": t.Plan.Units[n].AllowedPaths, "parallel": len(ready) > 1, "reason": "dependency-ready scope isolated; every attempt requires budget admission", "estimated_overhead": map[string]any{"input_allowance": allowance, "additional_batch_input_allowance": allowance * (len(ready) - 1), "method": "utf8_bytes_upper_estimate", "provider_added_context": "unknown"}, "reservation_scope": t.ID}
 			if err = e.Store.Put(ctx, "delegations", key, decision, 0); err != nil && !errors.Is(err, store.ErrConflict) {
 				return err
 			}

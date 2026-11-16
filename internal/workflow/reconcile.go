@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"log"
-	"strings"
 	"time"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
 
-// Reconcile leases GitHub reconciliation, ingests eligible or withdrawn issues, and records terminal PR decisions.
+// Reconcile restores owned runtimes and eligible issue state under a supervisor lease.
 func (e *Engine) Reconcile(ctx context.Context) {
 	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
 		log.Printf("reconcile standalone sandbox runtimes: %v", err)
@@ -52,15 +51,15 @@ func (e *Engine) reconcileProject(ctx context.Context, p model.Project) {
 		seen[issue.Number] = true
 		_, _ = e.Ingest(ctx, p, issue)
 	}
-	tasks, _ := e.Store.List(ctx, "tasks")
+	tasks, _ := e.Store.List(ctx, "execution_plans")
 	for _, record := range tasks {
-		task, _ := store.Decode[model.Task](record)
+		task, _ := store.Decode[model.ExecutionPlan](record)
 		if task.ProjectID == p.ID {
 			e.reconcileTask(ctx, p, task, record.Version, seen)
 		}
 	}
 }
-func (e *Engine) reconcileTask(ctx context.Context, p model.Project, t model.Task, version int, seen map[int]bool) {
+func (e *Engine) reconcileTask(ctx context.Context, p model.Project, t model.ExecutionPlan, version int, seen map[int]bool) {
 	if t.Cancelled() {
 		return
 	}
@@ -73,35 +72,22 @@ func (e *Engine) reconcileTask(ctx context.Context, p model.Project, t model.Tas
 	// Existing PR values remain historical data. Canonical runtime no longer
 	// polls or changes remote PR state after local delivery.
 }
-func (e *Engine) reconcilePR(ctx context.Context, p model.Project, t model.Task, version int) {
-	if t.Cancelled() {
-		return
-	}
-	decision, err := e.GitHub.PRState(ctx, p.Repo, t.PR)
-	if err != nil || (decision != "MERGED" && decision != "CLOSED") {
-		return
-	}
-	t.Stage = "complete"
-	if err := e.Store.Write(ctx, []store.Change{{Kind: "tasks", ID: t.ID, Value: t, Expected: version}, {Kind: "outcomes", ID: store.ID(), Value: map[string]any{"task": t.ID, "pr": t.PR, "human_decision": strings.ToLower(decision), "observed_at": time.Now().UTC().Format(time.RFC3339Nano)}}}, nil); err != nil {
-		log.Printf("persist PR outcome: %v", err)
-	}
-}
 
 // Ingest cancels tasks affected by issue changes before delegating deduplication and replanning to SQLite storage.
-func (e *Engine) Ingest(ctx context.Context, p model.Project, i model.Issue) (model.Task, error) {
+func (e *Engine) Ingest(ctx context.Context, p model.Project, i model.Issue) (model.ExecutionPlan, error) {
 	if e.Agentic(ctx) {
-		return model.Task{}, errors.New("ready issue intake is disabled in Agentic mode")
+		return model.ExecutionPlan{}, errors.New("ready issue intake is disabled in Agentic mode")
 	}
-	records, _ := e.Store.List(ctx, "tasks")
+	records, _ := e.Store.List(ctx, "execution_plans")
 	for _, record := range records {
-		task, _ := store.Decode[model.Task](record)
+		task, _ := store.Decode[model.ExecutionPlan](record)
 		if affectedByIssue(task, p, i) {
 			e.Stop(task.ID)
 		}
 	}
 	return e.Store.IngestIssue(ctx, p, i)
 }
-func affectedByIssue(t model.Task, p model.Project, i model.Issue) bool {
+func affectedByIssue(t model.ExecutionPlan, p model.Project, i model.Issue) bool {
 	incoming, ix := time.Parse(time.RFC3339, i.UpdatedAt)
 	existing, ex := time.Parse(time.RFC3339, t.Issue.UpdatedAt)
 	if ix == nil && ex == nil && incoming.Before(existing) {

@@ -11,7 +11,7 @@ import (
 )
 
 func (e *Engine) reviewDirectionNovelty(ctx context.Context, request directionGenerationRequest, directions, previous []model.Direction) (bool, string, []string, error) {
-	prompt, err := agents.Render("ideate_novelty.md", map[string]string{"Candidates": boundedSources(jsonText(directions)), "Previous": boundedSources(jsonText(compactProposalHistory(previous))), "ApprovedPlans": boundedSources(jsonText(request.snapshot.ApprovedPlans)), "Repository": boundedSources(jsonText(request.snapshot.CurrentRepository)), "HumanReconsiderations": boundedSources(jsonText(request.snapshot.HumanReconsiderations))})
+	prompt, err := agents.Render("ideate_novelty.md", map[string]string{"Candidates": boundedSources(jsonText(directions)), "Previous": boundedSources(jsonText(compactProposalHistory(previous))), "ApprovedPlans": boundedSources(jsonText(request.snapshot.ApprovedPlans)), "Repository": noveltyRepositoryContextJSON(request.snapshot, directions), "HumanReconsiderations": boundedSources(jsonText(request.snapshot.HumanReconsiderations))})
 	if err != nil {
 		return false, "", nil, err
 	}
@@ -20,7 +20,7 @@ func (e *Engine) reviewDirectionNovelty(ctx context.Context, request directionGe
 		return false, "", nil, err
 	}
 	defer cleanup()
-	out, err := e.agent(ctx, request.project, model.Task{ID: request.budgetTaskID, Issue: model.Issue{Title: "idea novelty review"}}, provider.Input{Role: "ideate", Purpose: "novelty:" + store.ID(), CWD: scratch, Prompt: prompt, ReadOnly: true})
+	out, err := e.agent(ctx, request.project, model.ExecutionPlan{ID: request.budgetTaskID, Issue: model.Issue{Title: "idea novelty review"}}, provider.Input{Role: "ideate", Purpose: "novelty:" + store.ID(), CWD: scratch, Prompt: prompt, ReadOnly: true})
 	if err != nil {
 		return false, "", nil, err
 	}

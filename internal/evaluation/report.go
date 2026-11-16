@@ -10,7 +10,7 @@ import (
 
 type Sample struct {
 	Operation     bool
-	Task          model.Task
+	Task          model.ExecutionPlan
 	Usage         model.UsageReport
 	Attempts      []model.Attempt
 	Entries       []model.UsageEntry
@@ -51,7 +51,7 @@ type Report struct {
 	CorpusID                 string       `json:"corpus_id,omitempty"`
 	DiscoveryRuns            int          `json:"discovery_runs"`
 	OperationRuns            int          `json:"operation_runs"`
-	Tasks                    int          `json:"tasks"`
+	Tasks                    int          `json:"execution_plans"`
 	Attempts                 int          `json:"attempts"`
 	VerifiedTasks            int          `json:"verified_tasks"`
 	CreatedPRs               int          `json:"created_prs"`

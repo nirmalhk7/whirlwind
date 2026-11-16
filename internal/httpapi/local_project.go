@@ -62,7 +62,8 @@ func (s *Server) saveLocalProject(ctx context.Context, command LocalCommand, fin
 	}
 	receipt := &store.Receipt{Key: command.IdempotencyKey, Fingerprint: fingerprint, Status: 201, Body: body}
 	audit := model.Audit{Source: "local_operator", Action: "project.register", Target: project.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	if err := s.Store.Write(ctx, []store.Change{{Kind: "projects", ID: project.ID, Value: project}, {Kind: "audit", ID: store.ID(), Value: audit}}, receipt); err != nil {
+	run := model.Operation{Kind: "ideation", Subject: project.ID, Stage: "queued", StartedAt: audit.CreatedAt, Input: map[string]string{"project_id": project.ID, "day": time.Now().UTC().Format("2006-01-02")}}
+	if err := s.Store.Write(ctx, []store.Change{{Kind: "projects", ID: project.ID, Value: project}, {Kind: "audit", ID: store.ID(), Value: audit}, {Kind: "operations", ID: store.ID(), Value: run}}, receipt); err != nil {
 		return nil, err
 	}
 	return body, nil
@@ -73,7 +74,7 @@ func localProject(ctx context.Context, input projectInput) (model.Project, error
 }
 
 func localFingerprint(operation string, command LocalCommand, payload []byte) string {
-	value := fmt.Sprintf("%s %s %d %s %s", operation, command.ResourceID, command.ExpectedVersion, command.ContentHash, payload)
+	value := fmt.Sprintf("%q %q %q %q %d %q %s", operation, command.ResourceID, command.ProjectID, command.PlanID, command.ExpectedVersion, command.ContentHash, payload)
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }

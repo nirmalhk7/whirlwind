@@ -71,7 +71,7 @@ func (e *Engine) adoptSetupAttempt(ctx context.Context, p model.Project, attempt
 		return err
 	}
 	input := provider.Input{CWD: attempt.CWD, ReadOnly: true, Role: "ideate", Purpose: attempt.Purpose, Model: attempt.Model, Thinking: attempt.Thinking, Policy: p.Policy}
-	run := agentRun{Engine: e, ctx: ctx, project: p, task: model.Task{ID: attempt.Task}, input: input}
+	run := agentRun{Engine: e, ctx: ctx, project: p, task: model.ExecutionPlan{ID: attempt.Task}, input: input}
 	if err = run.prepareExecutionProfile(source); err != nil {
 		return err
 	}

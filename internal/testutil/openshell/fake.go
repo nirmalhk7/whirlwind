@@ -315,7 +315,7 @@ const valueAfter = name => { const index = args.indexOf(name); return index < 0 
 const selectedAuth = new Map([
   ['.codex/auth.json', {home:'CODEX_HOME',path:'auth.json'}],
   ['.claude/.credentials.json', {home:'CLAUDE_CONFIG_DIR',path:'.credentials.json'}],
-  ['.cursor/cli-config.json', {home:'HOME',path:'.cursor/cli-config.json'}],
+  ['.cursor/auth.json', {home:'HOME',path:'.cursor/auth.json'}],
 ]);
 const fakeGuestPath = (state, guestPath) => {
   if (typeof guestPath !== 'string' || !path.posix.isAbsolute(guestPath)) throw new Error('fake guest path must be absolute');

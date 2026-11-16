@@ -37,7 +37,7 @@ func TestActionResultPersistenceFailureSurvivesSupervisorRestart(t *testing.T) {
 	}
 }
 
-func loadActionTestProject(t *testing.T, e *Engine, task model.Task) model.Project {
+func loadActionTestProject(t *testing.T, e *Engine, task model.ExecutionPlan) model.Project {
 	t.Helper()
 	project, err := e.Project(context.Background(), task.ProjectID)
 	if err != nil {
@@ -181,7 +181,7 @@ func TestCompletedActionResultSurvivesSupervisorRestartAndAllowsPreparation(t *t
 	}
 }
 
-func startPersistedActionAttempt(t *testing.T, e *Engine, task model.Task, project model.Project, cwd, id string) (*agentAttempt, context.CancelFunc) {
+func startPersistedActionAttempt(t *testing.T, e *Engine, task model.ExecutionPlan, project model.Project, cwd, id string) (*agentAttempt, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	state := persistedActionAttempt(task, project, cwd, id)
@@ -200,7 +200,7 @@ func startPersistedActionAttempt(t *testing.T, e *Engine, task model.Task, proje
 	return attempt, cancel
 }
 
-func persistedActionAttempt(task model.Task, project model.Project, cwd, id string) model.Attempt {
+func persistedActionAttempt(task model.ExecutionPlan, project model.Project, cwd, id string) model.Attempt {
 	return model.Attempt{
 		AttemptID: id, Task: task.ID, ProjectID: project.ID,
 		PlanVersion: task.PlanVersion, Role: "plan", Purpose: "primary", UnitID: "unit-1",
@@ -208,7 +208,7 @@ func persistedActionAttempt(task model.Task, project model.Project, cwd, id stri
 	}
 }
 
-func recoveryActionRun(e *Engine, task model.Task, project model.Project, cwd string) *agentRun {
+func recoveryActionRun(e *Engine, task model.ExecutionPlan, project model.Project, cwd string) *agentRun {
 	return &agentRun{
 		Engine: e, ctx: context.Background(), task: task, project: project,
 		input: provider.Input{Role: "plan", Purpose: "primary", UnitID: "unit-1", CWD: cwd},
@@ -232,7 +232,7 @@ func interruptAttempt(t *testing.T, database *store.Store, id string) {
 	}
 }
 
-func assertStartedActionBlocksReplacement(t *testing.T, e *Engine, task model.Task, project model.Project, cwd, actionID string) {
+func assertStartedActionBlocksReplacement(t *testing.T, e *Engine, task model.ExecutionPlan, project model.Project, cwd, actionID string) {
 	t.Helper()
 	run := recoveryActionRun(e, task, project, cwd)
 	_, err := run.newAttempt(model.Provider{ID: "replacement", Kind: "acp", Available: true, Capabilities: model.AgentRoles()})

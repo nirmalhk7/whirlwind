@@ -18,29 +18,31 @@ import (
 )
 
 type Input struct {
-	ReadinessOnly        bool
-	NativeIntegrations   bool
-	ProviderID           string
-	ACPProfile           string
-	DiscoverConnected    bool
-	CatalogOnly          bool
-	RequiredIntegrations []model.IntegrationTarget
-	IntegrationScopes    []model.IntegrationSource
-	MCPBroker            *execution.MCPBroker
-	MCPBrokerToken       string `json:"-"`
-	Execution            *execution.Profile
-	ExecutionProfile     string
-	UnitID               string
-	OperationID          string
-	Purpose              string
-	Model                string
-	Thinking             *model.ThinkingChoice
-	Role                 string
-	CWD                  string
-	Prompt               string
-	SessionID            string
-	Policy               model.Policy
-	ReadOnly             bool
+	PlannerOutputDirectory string
+	PlannerPublicationPath string
+	ReadinessOnly          bool
+	NativeIntegrations     bool
+	ProviderID             string
+	ACPProfile             string
+	DiscoverConnected      bool
+	CatalogOnly            bool
+	RequiredIntegrations   []model.IntegrationTarget
+	IntegrationScopes      []model.IntegrationSource
+	MCPBroker              *execution.MCPBroker
+	MCPBrokerToken         string `json:"-"`
+	Execution              *execution.Profile
+	ExecutionProfile       string
+	UnitID                 string
+	OperationID            string
+	Purpose                string
+	Model                  string
+	Thinking               *model.ThinkingChoice
+	Role                   string
+	CWD                    string
+	Prompt                 string
+	SessionID              string
+	Policy                 model.Policy
+	ReadOnly               bool
 }
 type ToolEvidence struct {
 	Ref     string `json:"ref"`
@@ -67,10 +69,11 @@ type Permission struct {
 	Raw     json.RawMessage `json:"raw"`
 }
 type Hooks struct {
-	RunCheck   func(context.Context, string) (CheckResult, error)
-	Questions  func(context.Context, []model.Question) (map[string]string, error)
-	Event      func(string, any)
-	Permission func(context.Context, Permission) (bool, error)
+	FinalizeDelivery func(context.Context) (FinalizationResult, error)
+	RunCheck         func(context.Context, string) (CheckResult, error)
+	Questions        func(context.Context, []model.Question) (map[string]string, error)
+	Event            func(string, any)
+	Permission       func(context.Context, Permission) (bool, error)
 }
 type Adapter interface {
 	// Run executes or resumes one agent prompt and exposes events, questions, and permissions through hooks.
@@ -211,7 +214,7 @@ func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider
 		if s.input.NativeIntegrations {
 			return nil, errors.New("selected read-only MCP broker conflicts with raw native integration mounts")
 		}
-		if s.hasCheckTool() {
+		if s.hasScopedTool() {
 			return nil, errors.New("selected integration broker conflicts with reviewer check broker; use separate agent attempts")
 		}
 		if p.Kind != "acp" {

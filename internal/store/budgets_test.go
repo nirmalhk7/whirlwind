@@ -183,7 +183,7 @@ func TestVerificationRuntimeIsChargedWithoutInferenceCounters(t *testing.T) {
 func TestLegacySessionsRemainInAdmissionAccounting(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
-	if err := s.Put(ctx, "sessions", "old", map[string]any{"task": "t", "provider": "codex", "role": "code", "finished": true, "elapsed_ms": 1000}, 0); err != nil {
+	if err := s.Put(ctx, "sessions", "old", map[string]any{"plan_id": "t", "provider": "codex", "role": "code", "finished": true, "elapsed_ms": 1000}, 0); err != nil {
 		t.Fatal(err)
 	}
 	report, err := s.TaskUsage(ctx, "t")
@@ -203,7 +203,7 @@ func TestLegacySessionsRemainInAdmissionAccounting(t *testing.T) {
 func TestLegacyRuntimeRequiresExplicitReconciliation(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
-	if err := s.Put(ctx, "sessions", "old", map[string]any{"task": "t", "provider": "codex", "role": "code", "finished": true}, 0); err != nil {
+	if err := s.Put(ctx, "sessions", "old", map[string]any{"plan_id": "t", "provider": "codex", "role": "code", "finished": true}, 0); err != nil {
 		t.Fatal(err)
 	}
 	b := model.BudgetPolicy{MaxAttempts: 3, MaxRuntimeSeconds: 60}

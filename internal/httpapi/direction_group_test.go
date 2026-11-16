@@ -12,9 +12,10 @@ import (
 
 const (
 	directionGroupWorktree  = "/saved-work"
-	firstDirectionTaskID    = "direction-a0"
 	firstDirectionGroupPath = "directions/a0/group"
 )
+
+var firstDirectionTaskID = model.PlanID("direction-a0")
 
 func setupDirectionGroups(t *testing.T) *Server {
 	t.Helper()
@@ -32,7 +33,7 @@ func setupDirectionGroups(t *testing.T) *Server {
 			}
 		}
 	}
-	if err := s.Store.Put(ctx, "tasks", firstDirectionTaskID, model.Task{ID: firstDirectionTaskID, ProjectID: "p", Stage: "coding", Worktree: directionGroupWorktree}, 0); err != nil {
+	if err := s.Store.Put(ctx, "execution_plans", firstDirectionTaskID, model.ExecutionPlan{ID: firstDirectionTaskID, ProjectID: "p", Stage: "coding", Worktree: directionGroupWorktree}, 0); err != nil {
 		t.Fatal(err)
 	}
 	return s
@@ -47,14 +48,14 @@ func directionRequest(s *Server, method, path, version, key, body string) *httpt
 	return w
 }
 
-func TestSelectingDirectionReplacesOnlyItsGroupChoice(t *testing.T) {
+func TestApprovingIdeaPreservesPeerDecisionsAndExecution(t *testing.T) {
 	s := setupDirectionGroups(t)
 	ctx := context.Background()
 	w := directionRequest(s, "POST", "directions/a1/select", "1", "switch", "{}")
 	if w.Code != 202 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
-	for id, want := range map[string]bool{"a0": false, "a1": true, "a2": false, "a3": false, "b0": true} {
+	for id, want := range map[string]bool{"a0": true, "a1": true, "a2": false, "a3": false, "b0": true} {
 		record, err := s.Store.Get(ctx, "directions", id)
 		if err != nil {
 			t.Fatal(err)
@@ -64,14 +65,14 @@ func TestSelectingDirectionReplacesOnlyItsGroupChoice(t *testing.T) {
 			t.Fatalf("%s: %+v %v", id, d, err)
 		}
 	}
-	record, _ := s.Store.Get(ctx, "tasks", firstDirectionTaskID)
-	task, _ := store.Decode[model.Task](record)
-	if task.Stage != "paused" || task.ResumeStage != "coding" || task.Worktree != directionGroupWorktree {
-		t.Fatalf("previous task lost: %+v", task)
+	record, _ := s.Store.Get(ctx, "execution_plans", firstDirectionTaskID)
+	task, _ := store.Decode[model.ExecutionPlan](record)
+	if task.Stage != "coding" || task.ResumeStage != "" || task.Worktree != directionGroupWorktree {
+		t.Fatalf("peer execution changed: %+v", task)
 	}
 	stale := directionRequest(s, "POST", "directions/a2/select", "1", "stale-peer", "{}")
-	if stale.Code != 409 {
-		t.Fatalf("stale group snapshot accepted: %d %s", stale.Code, stale.Body)
+	if stale.Code != 202 {
+		t.Fatalf("independent peer approval rejected: %d %s", stale.Code, stale.Body)
 	}
 }
 
@@ -118,8 +119,8 @@ func deleteAndReplayDirectionGroup(t *testing.T, s *Server) {
 
 func assertDirectionGroupTaskPaused(t *testing.T, s *Server) {
 	t.Helper()
-	record, _ := s.Store.Get(context.Background(), "tasks", firstDirectionTaskID)
-	task, _ := store.Decode[model.Task](record)
+	record, _ := s.Store.Get(context.Background(), "execution_plans", firstDirectionTaskID)
+	task, _ := store.Decode[model.ExecutionPlan](record)
 	if task.Stage != "paused" || task.ResumeStage != "coding" || task.Worktree != directionGroupWorktree {
 		t.Fatalf("work lost: %+v", task)
 	}
@@ -148,21 +149,21 @@ func TestSwitchingOrDeletingGloballyStoppedChoiceKeepsItStoppedOnResume(t *testi
 func assertGlobalStopStaysStopped(t *testing.T, action string) {
 	s := setupDirectionGroups(t)
 	ctx := context.Background()
-	record, _ := s.Store.Get(ctx, "tasks", firstDirectionTaskID)
-	task, _ := store.Decode[model.Task](record)
+	record, _ := s.Store.Get(ctx, "execution_plans", firstDirectionTaskID)
+	task, _ := store.Decode[model.ExecutionPlan](record)
 	task.Stage = "paused"
 	task.ResumeStage = "coding"
 	task.Error = globalStopReason
-	if err := s.Store.Put(ctx, "tasks", record.ID, task, record.Version); err != nil {
+	if err := s.Store.Put(ctx, "execution_plans", record.ID, task, record.Version); err != nil {
 		t.Fatal(err)
 	}
 	response := globallyStoppedDirectionAction(s, action)
 	if response.Code >= 300 {
 		t.Fatalf("%d %s", response.Code, response.Body)
 	}
-	record, _ = s.Store.Get(ctx, "tasks", firstDirectionTaskID)
-	task, _ = store.Decode[model.Task](record)
-	if task.Stage != "paused" || task.ResumeStage != "coding" || task.Error == globalStopReason {
+	record, _ = s.Store.Get(ctx, "execution_plans", firstDirectionTaskID)
+	task, _ = store.Decode[model.ExecutionPlan](record)
+	if task.Stage != "paused" || task.ResumeStage != "coding" || (action == "switch" && task.Error != globalStopReason) || (action == "delete" && task.Error == globalStopReason) {
 		t.Fatalf("global resume could revive old choice: %+v", task)
 	}
 }

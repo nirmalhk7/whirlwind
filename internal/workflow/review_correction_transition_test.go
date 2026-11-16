@@ -25,11 +25,11 @@ func TestUnmetReviewReturnsToCodingWithoutChangingApprovedRequirements(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	frozenRecord, err := e.Store.Get(ctx, "plans", task.ID+":1")
+	frozenRecord, err := e.Store.Get(ctx, "plan_versions", task.ID+":1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	frozen, err := store.Decode[model.Plan](frozenRecord)
+	frozen, err := store.Decode[model.PlanSpecification](frozenRecord)
 	if err != nil {
 		t.Fatal(err)
 	}

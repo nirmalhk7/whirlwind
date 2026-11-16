@@ -15,16 +15,16 @@ import (
 const maxLocalPlanBytes = 1024 * 1024
 
 type PlanDocumentView struct {
-	Path         string     `json:"path"`
-	Hash         string     `json:"hash"`
-	Content      string     `json:"content"`
-	Plan         model.Plan `json:"plan"`
-	ApprovedHash string     `json:"approved_hash,omitempty"`
+	Path         string                  `json:"path"`
+	Hash         string                  `json:"hash"`
+	Content      string                  `json:"content"`
+	Plan         model.PlanSpecification `json:"plan"`
+	ApprovedHash string                  `json:"approved_hash,omitempty"`
 }
 
 // WriteLocalPlan prepares an approval document; the caller persists the task
 // together with its other planning-stage changes. Existing edits are retained.
-func (e *Engine) WriteLocalPlan(ctx context.Context, project model.Project, task *model.Task) error {
+func (e *Engine) WriteLocalPlan(ctx context.Context, project model.Project, task *model.ExecutionPlan) error {
 	if (model.EffectiveMode(task.Mode) != model.AgenticMode && model.EffectiveMode(task.Mode) != model.PersonalMode) || task.Plan == nil || task.ProjectID != project.ID {
 		return errors.New("local plans require a configured task with a plan and matching project")
 	}
@@ -67,7 +67,7 @@ func legacyPendingRequirements(criteria []string) []model.Requirement {
 	return requirements
 }
 
-func renderLocalPlanContent(task model.Task) string {
+func renderLocalPlanContent(task model.ExecutionPlan) string {
 	content := RenderPlanDocument(*task.Plan)
 	if len(task.Sources) == 0 {
 		return content
@@ -81,7 +81,7 @@ func renderLocalPlanContent(task model.Task) string {
 	return content
 }
 
-func (e *Engine) recoverLocalPlanContent(task *model.Task, content string) (string, error) {
+func (e *Engine) recoverLocalPlanContent(task *model.ExecutionPlan, content string) (string, error) {
 	root, relative, err := e.localPlanLocation(*task)
 	if err != nil {
 		return "", err
@@ -125,19 +125,19 @@ func (e *Engine) ReadLocalPlan(ctx context.Context, id string) (PlanDocumentView
 	return view, err
 }
 
-func (e *Engine) localPlanForRead(ctx context.Context, id string) (model.Record, model.Task, error) {
-	record, err := e.Store.Get(ctx, "tasks", id)
+func (e *Engine) localPlanForRead(ctx context.Context, id string) (model.Record, model.ExecutionPlan, error) {
+	record, err := e.Store.Get(ctx, "execution_plans", id)
 	if err != nil {
-		return record, model.Task{}, err
+		return record, model.ExecutionPlan{}, err
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || task.PlanDocument == nil {
 		return record, task, errors.New("task has no local plan")
 	}
 	return record, task, nil
 }
 
-func (e *Engine) readLocalPlanContent(ctx context.Context, record model.Record, task *model.Task) (string, error) {
+func (e *Engine) readLocalPlanContent(ctx context.Context, record model.Record, task *model.ExecutionPlan) (string, error) {
 	content, err := e.readLocalPlanFile(*task)
 	if err != nil && localPlanApproved(*task) {
 		if invalidationErr := e.invalidateLocalApproval(ctx, record, task, "", "Local plan is inaccessible; review is required."); invalidationErr != nil {
@@ -147,9 +147,12 @@ func (e *Engine) readLocalPlanContent(ctx context.Context, record model.Record, 
 	return content, err
 }
 
-func (e *Engine) refreshLocalPlanApproval(ctx context.Context, record model.Record, task *model.Task, content string) error {
+func (e *Engine) refreshLocalPlanApproval(ctx context.Context, record model.Record, task *model.ExecutionPlan, content string) error {
 	if !localPlanApproved(*task) {
 		return nil
+	}
+	if err := e.validateApprovalConfiguration(ctx, *task); err != nil {
+		return e.invalidateLocalApproval(ctx, record, task, content, err.Error())
 	}
 	project, err := e.Project(ctx, task.ProjectID)
 	if err != nil {
@@ -161,14 +164,14 @@ func (e *Engine) refreshLocalPlanApproval(ctx context.Context, record model.Reco
 	return nil
 }
 
-func clearLocalPlanExecution(task *model.Task) {
+func clearLocalPlanExecution(task *model.ExecutionPlan) {
 	task.Approval, task.Submission, task.Wait = nil, nil, nil
 	task.ChecksPassed, task.Approved, task.Score = false, false, 0
 	task.VerificationID, task.ReviewID, task.ReviewedCommit = "", "", ""
 	task.ImplementationAttempts, task.LastAttemptID = nil, ""
 }
 
-func (e *Engine) invalidateLocalApproval(ctx context.Context, record model.Record, task *model.Task, content, reason string) error {
+func (e *Engine) invalidateLocalApproval(ctx context.Context, record model.Record, task *model.ExecutionPlan, content, reason string) error {
 	if localPlanFinished(*task) {
 		return nil
 	}
@@ -193,7 +196,7 @@ func (e *Engine) invalidateLocalApproval(ctx context.Context, record model.Recor
 	task.Stage, task.ResumeStage, task.Error = "plan_approval", "", reason
 	task.Handoff.NextAction = "Review the edited local plan in Inbox before execution resumes."
 	notice := model.Notification{ID: store.ID(), TaskID: task.ID, Kind: "plan_approval", Message: reason, Current: "plan_approval", NextAction: task.Handoff.NextAction}
-	if err := e.Store.Write(ctx, []store.Change{{Kind: "tasks", ID: task.ID, Value: *task, Expected: record.Version}, {Kind: "inbox", ID: notice.ID, Value: notice}}, nil); err != nil {
+	if err := e.Store.Write(ctx, []store.Change{{Kind: "execution_plans", ID: task.ID, Value: *task, Expected: record.Version}, {Kind: "inbox", ID: notice.ID, Value: notice}}, nil); err != nil {
 		return err
 	}
 	e.Stop(task.ID)
@@ -220,12 +223,12 @@ func (e *Engine) resolveLocalPlanNotices(ctx context.Context, id string) ([]stor
 }
 
 func (e *Engine) refreshLocalApprovals(ctx context.Context) {
-	rows, err := e.Store.List(ctx, "tasks")
+	rows, err := e.Store.List(ctx, "execution_plans")
 	if err != nil {
 		return
 	}
 	for _, r := range rows {
-		t, err := store.Decode[model.Task](r)
+		t, err := store.Decode[model.ExecutionPlan](r)
 		if err != nil || localPlanFinished(t) || !localPlanApproved(t) {
 			continue
 		}
@@ -235,6 +238,6 @@ func (e *Engine) refreshLocalApprovals(ctx context.Context) {
 	}
 }
 
-func localPlanFinished(task model.Task) bool {
+func localPlanFinished(task model.ExecutionPlan) bool {
 	return task.Cancelled() || task.Stage == "complete" || task.Stage == "pr_created"
 }

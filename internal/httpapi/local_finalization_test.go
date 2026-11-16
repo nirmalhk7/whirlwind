@@ -27,7 +27,7 @@ func TestExactCandidateDiffUsesReviewedCommitAndRejectsChangedCheckout(t *testin
 	}
 	mustCommand(t, worktree, "git", "commit", "--quiet", "-am", "candidate")
 	reviewed := strings.TrimSpace(mustCommand(t, worktree, "git", "rev-parse", "HEAD"))
-	task := model.Task{Worktree: worktree, Base: base, ReviewedCommit: reviewed}
+	task := model.ExecutionPlan{Worktree: worktree, Base: base, ReviewedCommit: reviewed}
 	diff, err := exactCandidateDiffPage(context.Background(), task, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -72,7 +72,7 @@ func TestExactCandidateDiffRejectsMovedHeadAndOversizedOutput(t *testing.T) {
 	}
 	mustCommand(t, worktree, "git", "commit", "--quiet", "-am", "large candidate")
 	reviewed := strings.TrimSpace(mustCommand(t, worktree, "git", "rev-parse", "HEAD"))
-	task := model.Task{Worktree: worktree, Base: base, ReviewedCommit: reviewed}
+	task := model.ExecutionPlan{Worktree: worktree, Base: base, ReviewedCommit: reviewed}
 	var diff strings.Builder
 	pages := 0
 	offset := int64(0)

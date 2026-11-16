@@ -122,7 +122,7 @@ func (e *Engine) refreshSetupConfiguration(ctx context.Context, p model.Project,
 	// from the project authority; execute readiness in a fresh owned snapshot.
 	input.CWD = p.Path
 	input.Execution = nil
-	run := agentRun{Engine: e, ctx: ctx, project: p, task: model.Task{ID: "setup-probe:" + p.ID}, input: input}
+	run := agentRun{Engine: e, ctx: ctx, project: p, task: model.ExecutionPlan{ID: "setup-probe:" + p.ID}, input: input}
 	if err = run.prepareExecutionProfile(source); err != nil {
 		return err
 	}

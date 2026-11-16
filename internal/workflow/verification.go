@@ -16,14 +16,23 @@ import (
 )
 
 // verify reserves capacity, checks diff scope, runs baseline and risk-specific checks, and stores diagnostics in the task handoff.
-func (e *Engine) verify(ctx context.Context, p model.Project, t *model.Task) (resultErr error) {
-	var plan model.Plan
+func (e *Engine) verify(ctx context.Context, p model.Project, t *model.ExecutionPlan) (resultErr error) {
+	var plan model.PlanSpecification
 	if t.Plan != nil {
 		plan = *t.Plan
 	}
-	checks, err := planVerificationChecks(p.Policy, plan)
-	if err != nil {
-		return err
+	var checks []model.Check
+	var err error
+	if t.IdeaID != "" {
+		if err := validatePlanCommandReferences(p.Policy, plan); err != nil {
+			return err
+		}
+		checks = append([]model.Check{}, p.Policy.Checks...)
+	} else {
+		checks, err = planVerificationChecks(p.Policy, plan)
+		if err != nil {
+			return err
+		}
 	}
 	p.Policy.Checks = checks
 	if err := e.acquire(ctx, p); err != nil {
@@ -64,7 +73,7 @@ func (run *verificationRun) checkDiff(p model.Policy, files, patch string) error
 	}
 	artifact, err := run.engine.Store.CaptureResource(run.ctx, run.owner, "reviewed_patch", "text/x-diff", []byte(patch), store.CaptureOptions{Limit: store.PatchPayloadLimit})
 	if err != nil {
-		return fmt.Errorf(verificationPersistenceError, store.ErrPersistence, err)
+		return fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
 	}
 	run.value["patch_artifact"] = artifact.ID
 	risk, checks := verification.Select(p, strings.Split(files, "\n"), patch)
@@ -76,11 +85,13 @@ func (run *verificationRun) checkDiff(p model.Policy, files, patch string) error
 		return err
 	}
 	run.value["baseline"] = baseline
-	checks = append(checks, model.Check{Name: "diff", Command: []string{"git", "diff", "--check", run.task.Base + "...HEAD"}}, model.Check{Name: "tracked-files-clean", Command: []string{"git", "diff", "--exit-code"}}, model.Check{Name: "index-clean", Command: []string{"git", "diff", "--cached", "--exit-code"}})
+	if run.task.IdeaID == "" {
+		checks = append(checks, model.Check{Name: "diff", Command: []string{"git", "diff", "--check", run.task.Base + "...HEAD"}}, model.Check{Name: "tracked-files-clean", Command: []string{"git", "diff", "--exit-code"}}, model.Check{Name: "index-clean", Command: []string{"git", "diff", "--cached", "--exit-code"}})
+	}
 	stored := verification.Report{Passed: false, Results: []verification.Result{}}
 	report, observeErr := run.runChecks(p, checks, nil)
 	if observeErr == nil {
-		report = verification.CompareBaseline(baseline, report)
+		report = verification.CompareBaselineForChecks(baseline, report, checks)
 	}
 	for _, result := range report.Results {
 		if err := run.captureResult(&stored, result); err != nil {
@@ -98,7 +109,7 @@ func (run *verificationRun) captureResult(stored *verification.Report, result ve
 	}
 	artifact, err := run.engine.Store.CaptureResource(context.WithoutCancel(run.ctx), run.owner, "check:"+result.Name, "text/plain", []byte(result.Output), store.CaptureOptions{Limit: store.MessagePayloadLimit})
 	if err != nil {
-		return fmt.Errorf(verificationPersistenceError, store.ErrPersistence, err)
+		return fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
 	}
 	result.OutputArtifact = artifact.ID
 	result.Output = string(store.Prefix([]byte(result.Output), 4096))
@@ -143,7 +154,11 @@ func (run *verificationRun) finish(stored, report verification.Report, observeEr
 
 func (run *verificationRun) handoff(report verification.Report) error {
 	run.task.Handoff.FailingTests = nil
+	run.task.Handoff.AutofixProposals = nil
 	for _, result := range report.Results {
+		if result.Autofix != nil && result.AutofixArtifact != "" {
+			run.task.Handoff.AutofixProposals = append(run.task.Handoff.AutofixProposals, model.AutofixHandoff{ArtifactID: result.AutofixArtifact, VerificationID: run.id, CheckID: result.Name, CandidateCommit: result.Autofix.CandidateCommit, CandidateTree: result.Autofix.CandidateTree, SHA256: result.Autofix.SHA256, PlanVersion: run.task.PlanVersion})
+		}
 		if !result.Passed {
 			run.task.Handoff.FailingTests = append(run.task.Handoff.FailingTests, result.Name+": "+string(store.Prefix([]byte(result.Output), 4096))+" "+result.Error)
 		}
@@ -155,7 +170,7 @@ func (run *verificationRun) handoff(report verification.Report) error {
 }
 
 // progress measures check/blocker/criteria outcomes; patch churn alone never resets recovery.
-func (e *Engine) progress(ctx context.Context, t *model.Task) error {
+func (e *Engine) progress(ctx context.Context, t *model.ExecutionPlan) error {
 	diff, err := github.Run(ctx, t.Worktree, "git", "diff", t.Base)
 	if err != nil {
 		return err
@@ -181,7 +196,7 @@ func (e *Engine) progress(ctx context.Context, t *model.Task) error {
 	return nil
 }
 
-func checkedDiff(ctx context.Context, p model.Policy, t *model.Task) (string, string, error) {
+func checkedDiff(ctx context.Context, p model.Policy, t *model.ExecutionPlan) (string, string, error) {
 	revisionRange := t.Base + "...HEAD"
 	files, err := github.Run(ctx, t.Worktree, "git", "diff", "--name-only", revisionRange)
 	if err != nil {

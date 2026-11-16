@@ -31,7 +31,7 @@ func TestSelectIdeaWithEmptyPolicyWaitsForPolicySetup(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &record); err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || task.Stage != "paused" || task.ResumeStage != "planning" || task.Error == "" {
 		t.Fatalf("idea execution not held for policy: %+v %v", task, err)
 	}

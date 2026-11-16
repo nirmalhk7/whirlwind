@@ -22,8 +22,9 @@ var ErrPersistence = errors.New("required persistence failed")
 var ErrLeased = errors.New("lease already held")
 
 type Store struct {
-	DB     *sql.DB
-	Source SettingsSource
+	DB      *sql.DB
+	Source  SettingsSource
+	runLogs *runLogStorage
 }
 type Lease struct {
 	Owner     string
@@ -45,12 +46,16 @@ func Open(path string) (*Store, error) {
 	if e := os.MkdirAll(filepath.Dir(path), 0700); e != nil {
 		return nil, e
 	}
-	db, e := sql.Open("sqlite", path)
+	dsn, e := sqliteURI(path, false)
+	if e != nil {
+		return nil, e
+	}
+	db, e := sql.Open("sqlite", dsn)
 	if e != nil {
 		return nil, e
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{DB: db}
+	s := &Store{DB: db, runLogs: newRunLogStorage(path)}
 	for _, q := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON", "PRAGMA busy_timeout=5000"} {
 		if _, e = db.Exec(q); e != nil {
 			_ = db.Close()
@@ -126,7 +131,10 @@ func (s *Store) Put(ctx context.Context, kind, id string, value any, expected in
 	if b := staged(ctx); b != nil {
 		return b.put(ctx, s, Change{kind, id, value, expected})
 	}
-	return s.Transaction(ctx, func(tx *sql.Tx) error { return put(ctx, tx, kind, id, value, expected) })
+	if err := s.Transaction(ctx, func(tx *sql.Tx) error { return put(ctx, tx, kind, id, value, expected) }); err != nil {
+		return err
+	}
+	return s.syncCommittedRunLogs(ctx, []Change{{Kind: kind, ID: id}})
 }
 
 // Transaction commits the callback atomically and retries SQLite busy or locked errors up to three attempts.
@@ -136,7 +144,10 @@ func (s *Store) Transaction(ctx context.Context, f func(*sql.Tx) error) error {
 		if e != nil {
 			return e
 		}
-		e = f(tx)
+		e = validateLeaseFences(ctx, tx)
+		if e == nil {
+			e = f(tx)
+		}
 		if e == nil {
 			e = tx.Commit()
 		} else {

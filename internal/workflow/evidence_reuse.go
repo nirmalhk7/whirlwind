@@ -148,6 +148,9 @@ func (run *verificationRun) cacheResult(ctx context.Context, key evidenceKey, re
 }
 
 func (run *verificationRun) runChecks(policy model.Policy, checks []model.Check, observe func(verification.Result) error) (verification.Report, error) {
+	if run.task.IdeaID != "" {
+		return run.runLocalChecks(policy, checks, observe)
+	}
 	profile, err := execution.ForPolicy(run.task.Worktree, true, evidenceDigest(policy), policy.Sandbox)
 	if err != nil {
 		return verification.Report{}, err

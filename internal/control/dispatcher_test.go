@@ -24,19 +24,19 @@ func TestInspectionPagesAreBoundedProjectScopedAndCursorStable(t *testing.T) {
 		if i < 4 {
 			project = "target"
 		}
-		if err := db.Put(ctx, "tasks", string(rune('a'+i)), map[string]string{"project_id": project}, 0); err != nil {
+		if err := db.Put(ctx, "execution_plans", string(rune('a'+i)), map[string]string{"project_id": project}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 	dispatcher := SupervisorDispatcher{DB: db.DB}
-	first, err := dispatcher.records(ctx, Request{ResourceID: "tasks", ProjectID: "target", Limit: 2})
+	first, err := dispatcher.records(ctx, Request{ResourceID: "execution_plans", ProjectID: "target", Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(first.Records) != 2 || !first.HasMore || first.NextCursor <= first.Cursor {
 		t.Fatalf("first page is not bounded/scoped: %+v", first)
 	}
-	second, err := dispatcher.records(ctx, Request{ResourceID: "tasks", ProjectID: "target", EventCursor: first.NextCursor, Limit: 2})
+	second, err := dispatcher.records(ctx, Request{ResourceID: "execution_plans", ProjectID: "target", EventCursor: first.NextCursor, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

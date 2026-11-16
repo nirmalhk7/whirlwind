@@ -18,6 +18,7 @@ import (
 type discoverySnapshot struct {
 	HistoryContextBytes   int                             `json:"-"`
 	PlanContextBytes      int                             `json:"-"`
+	repositorySourceText  map[string]string               `json:"-"`
 	Fingerprint           string                          `json:"fingerprint"`
 	Commit                string                          `json:"commit"`
 	Files                 map[string]string               `json:"files"`
@@ -34,7 +35,7 @@ type discoverySnapshot struct {
 }
 
 type approvedPlanContext struct {
-	TaskID      string   `json:"task"`
+	TaskID      string   `json:"plan_id"`
 	PlanVersion int      `json:"version"`
 	Hash        string   `json:"approved_hash"`
 	Objective   string   `json:"objective"`
@@ -60,7 +61,7 @@ type verificationCheck struct {
 }
 
 type verificationEvidence struct {
-	Task       string           `json:"task"`
+	Task       string           `json:"plan_id"`
 	Provenance model.Provenance `json:"provenance"`
 	Error      string           `json:"error"`
 	Report     struct {
@@ -86,7 +87,7 @@ func (e *Engine) prepareDiscovery(ctx context.Context, p model.Project) (string,
 		return "", nil, base.previous, false, err
 	}
 	index, previous, brief := base.index, base.previous, base.brief
-	snapshot := discoverySnapshot{Commit: index.Commit, Files: map[string]string{}, Sources: jsonText(base.sources), Brief: brief}
+	snapshot := discoverySnapshot{Commit: index.Commit, Files: map[string]string{}, Sources: jsonText(base.sources), Brief: brief, repositorySourceText: frozenRepositorySourceText(index)}
 	snapshot.Evidence = append(snapshot.Evidence, base.externalRefs...)
 	snapshot.PolicyHash = p.PolicyHash
 	configuredMax := brief.MaxCandidates
@@ -117,12 +118,12 @@ func (e *Engine) prepareDiscovery(ctx context.Context, p model.Project) (string,
 		snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "github", Ref: p.Repo, Revision: model.Fingerprint([]byte(snapshot.Sources)), Summary: "Issue and discussion snapshot"})
 	}
 	fresh, _ := ctx.Value(freshDiscoveryKey{}).(bool)
-	changed = addFreshDiscoveryContext(fresh, changed, paths, index, &snapshot)
+	changed = addDiscoveryRepositoryContext(changed, snapshot.ExplorationAreas, index, &snapshot)
 	snapshot.CurrentRepository = changed
 	historyTerms := strings.Join([]string{brief.Goal, brief.Constraints, brief.Priorities, jsonText(changed), jsonText(snapshot.Diagnostics), jsonText(snapshot.Evidence)}, " ")
 	historyBudget, planBudget := discoveryHistoryBudgets(e.settings(ctx).Ideation)
-	if reconsiderationBytes > historyBudget {
-		return "", nil, snapshot, false, errors.New("ideation history budget cannot fit all pending human reconsideration requests")
+	if err := historyBudgetFitError(len(snapshot.HumanReconsiderations), reconsiderationBytes, historyBudget); err != nil {
+		return "", nil, snapshot, false, err
 	}
 	history, err := e.searchPreviousDirections(ctx, p.ID, historyTerms, historyBudget-reconsiderationBytes)
 	if err != nil {
@@ -142,13 +143,16 @@ func (e *Engine) prepareDiscovery(ctx context.Context, p model.Project) (string,
 	if len(snapshot.Evidence) == 0 {
 		snapshot.Evidence = []model.EvidenceRef{{Kind: "repository", Ref: p.Repo, Revision: index.Commit, Summary: "Current repository snapshot"}}
 	}
-	prompt, err := agents.Render("ideate.md", map[string]string{"Index": boundedSources(jsonText(changed)), "Sources": boundedSources(snapshot.Sources), "Previous": boundedSources(jsonText(compactProposalHistory(history))), "ApprovedPlans": boundedSources(jsonText(snapshot.ApprovedPlans)), "HumanReconsiderations": boundedSources(jsonText(snapshot.HumanReconsiderations)), "Areas": jsonText(snapshot.ExplorationAreas), "Brief": jsonText(brief), "Evidence": boundedSources(jsonText(snapshot.Evidence)), "Diagnostics": boundedSources(jsonText(snapshot.Diagnostics)), "MaxCandidates": strconv.Itoa(snapshot.MaxCandidates)})
+	indexContext := ideationRepositoryIndexJSON(changed)
+	repositoryBudget := ideationRepositoryContextLimit - len(indexContext) - 128
+	repositoryContext := ideationRepositoryContextJSON(&snapshot, index, repositoryBudget)
+	prompt, err := agents.Render("ideate.md", map[string]string{"Index": indexContext, "RepositoryContext": repositoryContext, "Sources": boundedSources(snapshot.Sources), "Previous": boundedSources(jsonText(compactProposalHistory(history))), "ApprovedPlans": boundedSources(jsonText(snapshot.ApprovedPlans)), "HumanReconsiderations": boundedSources(jsonText(snapshot.HumanReconsiderations)), "Areas": jsonText(snapshot.ExplorationAreas), "Brief": jsonText(brief), "Evidence": boundedSources(jsonText(snapshot.Evidence)), "Diagnostics": boundedSources(jsonText(snapshot.Diagnostics)), "MaxCandidates": strconv.Itoa(snapshot.MaxCandidates)})
 	return prompt, history, snapshot, false, err
 }
 
 func (e *Engine) loadDiscoveryBase(ctx context.Context, project model.Project) (discoveryBase, error) {
 	base := discoveryBase{brief: model.IdeationBrief{}}
-	index, err := e.index(ctx, project)
+	index, err := e.discoveryIndex(ctx, project)
 	if err != nil {
 		return base, err
 	}
@@ -197,13 +201,13 @@ func (e *Engine) currentApprovedPlans(ctx context.Context, projectID, terms stri
 	if maxBytes <= 0 || limit <= 0 {
 		return nil, nil
 	}
-	tasks, err := e.Store.List(ctx, "tasks")
+	tasks, err := e.Store.List(ctx, "execution_plans")
 	if err != nil {
 		return nil, err
 	}
 	plans := make([]approvedPlanContext, 0, min(len(tasks), limit))
 	for _, record := range tasks {
-		task, err := store.Decode[model.Task](record)
+		task, err := store.Decode[model.ExecutionPlan](record)
 		if err != nil {
 			return nil, err
 		}
@@ -220,14 +224,14 @@ func (e *Engine) currentApprovedPlans(ctx context.Context, projectID, terms stri
 		if version < 1 {
 			continue
 		}
-		approved, err := e.Store.Get(ctx, "plans", fmt.Sprintf("%s:%d", task.ID, version))
+		approved, err := e.Store.Get(ctx, "plan_versions", fmt.Sprintf("%s:%d", task.ID, version))
 		if errors.Is(err, store.ErrNotFound) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		plan, err := store.Decode[model.Plan](approved)
+		plan, err := store.Decode[model.PlanSpecification](approved)
 		if err != nil {
 			return nil, err
 		}
@@ -254,7 +258,7 @@ func (e *Engine) currentApprovedPlans(ctx context.Context, projectID, terms stri
 	return bounded, nil
 }
 
-func approvedPlanOutcomes(plan model.Plan) []string {
+func approvedPlanOutcomes(plan model.PlanSpecification) []string {
 	outcomes := append([]string{}, plan.AcceptanceCriteria...)
 	for _, requirement := range plan.Requirements {
 		if outcome := strings.TrimSpace(requirement.Outcome); outcome != "" {
@@ -264,7 +268,7 @@ func approvedPlanOutcomes(plan model.Plan) []string {
 	return outcomes
 }
 
-func approvedPlanScope(plan model.Plan) []string {
+func approvedPlanScope(plan model.PlanSpecification) []string {
 	scope := append([]string{}, plan.Where...)
 	for _, unit := range plan.Units {
 		scope = append(scope, unit.AllowedPaths...)
@@ -288,24 +292,6 @@ func approvedPlanRelevance(plan approvedPlanContext, terms string) int {
 		}
 	}
 	return count
-}
-
-func rotatingDiscoveryAreas(paths []string, counts map[string]int, limit int) []string {
-	areas := append([]string{}, paths...)
-	sort.SliceStable(areas, func(i, j int) bool {
-		left, right := counts[areas[i]], counts[areas[j]]
-		if left != right {
-			return left < right
-		}
-		return areas[i] < areas[j]
-	})
-	if limit <= 0 || limit > 12 {
-		limit = 12
-	}
-	if len(areas) > limit {
-		areas = areas[:limit]
-	}
-	return areas
 }
 
 // Audit capture metadata stays in the persisted source snapshot. Only its

@@ -17,7 +17,7 @@ type tddCheck struct {
 	RawResult        *verification.Result `json:"raw_result,omitempty"`
 	BaselineAccepted bool                 `json:"baseline_accepted,omitempty"`
 	Files            map[string]string    `json:"files,omitempty"`
-	Task             string               `json:"task"`
+	Task             string               `json:"plan_id"`
 	Unit             string               `json:"unit"`
 	PlanVersion      int                  `json:"plan_version"`
 	CheckID          string               `json:"check_id"`
@@ -85,7 +85,11 @@ func (r *codingCheckRun) execute(ctx context.Context) error {
 	}
 	checks := structuredChecks([]model.Check{r.check})
 	var result verification.Result
-	result, err = r.attempt.Engine.runOwnedCheck(ctx, r.attempt.input.CWD, checks[0], profile, runtimeCheckOwner{TaskID: r.attempt.task.ID, AttemptID: r.attempt.id, Role: "code"})
+	if r.attempt.task.IdeaID != "" {
+		result, err = r.attempt.runIndependentCodingCheck(ctx, checks[0], r.entry.Snapshot, r.entry.Files)
+	} else {
+		result, err = r.attempt.runOwnedCheck(ctx, r.attempt.input.CWD, checks[0], profile, runtimeCheckOwner{TaskID: r.attempt.task.ID, AttemptID: r.attempt.id, Role: "code"})
+	}
 	if err != nil {
 		return fmt.Errorf("coding check returned no complete result: %w", err)
 	}
@@ -129,9 +133,28 @@ func (r *codingCheckRun) determinePhase(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	baseline, err := a.qualityBaseline(ctx, r.current, a.task, structuredChecks([]model.Check{r.check}))
+	checks := structuredChecks([]model.Check{r.check})
+	if a.task.IdeaID != "" {
+		checks, err = brokerCheckCommands(r.current.Policy, r.check.Name)
+		if err != nil {
+			return "", err
+		}
+	}
+	baseline, err := a.qualityBaseline(ctx, r.current, a.task, checks)
 	if err != nil {
 		return "", err
+	}
+	if a.task.IdeaID != "" {
+		selected := verification.Report{Passed: baseline.Passed}
+		for _, result := range baseline.Results {
+			if result.Name == r.check.Name {
+				selected.Results = append(selected.Results, result)
+			}
+		}
+		if len(selected.Results) != 1 {
+			return "", errors.New("baseline omitted requested broker check")
+		}
+		baseline = selected
 	}
 	phase, err := r.phaseAgainstBaseline(ctx, origin, baseline)
 	if err != nil {
@@ -189,10 +212,10 @@ func tddPhase(origin codingOrigin, production, tests string, result verification
 	}
 	return "green"
 }
-func codingOriginKey(t model.Task, unit string) string {
+func codingOriginKey(t model.ExecutionPlan, unit string) string {
 	return fmt.Sprintf("%s:%d:%s", t.ID, t.PlanVersion, unit)
 }
-func (e *Engine) recordCodingOrigin(ctx context.Context, t model.Task, cwd, unit string) error {
+func (e *Engine) recordCodingOrigin(ctx context.Context, t model.ExecutionPlan, cwd, unit string) error {
 	key := codingOriginKey(t, unit)
 	if _, err := e.Store.Get(ctx, "tdd_origins", key); err == nil {
 		return nil

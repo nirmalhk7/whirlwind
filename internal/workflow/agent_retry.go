@@ -244,9 +244,13 @@ func (a *agentRun) runChoiceAttempt(source model.Provider) (provider.Output, pro
 	if err := a.ctx.Err(); err != nil {
 		return provider.Output{}, provider.FailureUnknown, nil, err
 	}
-	if err := a.acquire(a.ctx, a.project); err != nil {
-		return provider.Output{}, provider.FailureUnknown, nil, err
+	a.pairAttempt = takePairSlot(a.ctx, a.project.ID, a.task.ID, a.task.PlanVersion, a.input.Role)
+	if a.pairAttempt == "" {
+		if err := a.acquire(a.ctx, a.project); err != nil {
+			return provider.Output{}, provider.FailureUnknown, nil, err
+		}
 	}
+	defer func() { a.pairAttempt = "" }()
 	defer a.release(a.project.ID)
 	a.input.SessionID = ""
 	execution, err := a.newAttempt(source)

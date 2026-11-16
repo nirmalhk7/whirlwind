@@ -22,8 +22,8 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 	t.Cleanup(screen.Fini)
 	screen.SetSize(180, 60)
 	d.Present(control.Snapshot{
-		"projects": {record("p", model.Project{ID: "p", Name: "Repo"})},
-		"tasks":    {record("t", model.Task{ID: "t", ProjectID: "p"})},
+		"projects":        {record("p", model.Project{ID: "p", Name: "Repo"})},
+		"execution_plans": {record("t", model.ExecutionPlan{ID: "t", ProjectID: "p"})},
 		"sessions": {
 			record("old", model.Attempt{AttemptID: "old", ProjectID: "p", Role: "code", Provider: "codex", Model: "old-model", Status: "complete", Finished: true, StartedAt: "2026-11-08T09:00:00Z"}),
 			record("latest", model.Attempt{AttemptID: "latest", ProjectID: "p", Role: "ideate", Provider: "cursor", ResolvedModel: "live-model", EffectiveThinking: &model.ThinkingChoice{Value: "high"}, Status: "running", StartedAt: "2026-11-08T12:00:00+02:00"}),
@@ -112,9 +112,9 @@ func TestProjectsHaveNoWhiteSelectionBackground(t *testing.T) {
 func TestProjectRunWithoutTaskCannotActOnUnrelatedTask(t *testing.T) {
 	d := New()
 	d.Present(control.Snapshot{
-		"projects": {record("p", model.Project{ID: "p", Name: "Repo"})},
-		"tasks":    {record("t", model.Task{ID: "t", ProjectID: "p"})},
-		"sessions": {record("ideate", model.Attempt{AttemptID: "ideate", ProjectID: "p", Role: "ideate"})},
+		"projects":        {record("p", model.Project{ID: "p", Name: "Repo"})},
+		"execution_plans": {record("t", model.ExecutionPlan{ID: "t", ProjectID: "p"})},
+		"sessions":        {record("ideate", model.Attempt{AttemptID: "ideate", ProjectID: "p", Role: "ideate"})},
 	})
 	if _, _, ok := d.selectedPlanRecord(); ok {
 		t.Fatal("project-level run selected unrelated task for decisions")
@@ -129,9 +129,9 @@ func TestProjectRunWithoutTaskCannotActOnUnrelatedTask(t *testing.T) {
 func TestInboxTaskInspectionRemainsSelectedAcrossRunRefresh(t *testing.T) {
 	d := New()
 	snapshot := control.Snapshot{
-		"projects": {record("p", model.Project{ID: "p", Name: "Repo"})},
-		"tasks":    {record("first", model.Task{ID: "first", ProjectID: "p"}), record("second", model.Task{ID: "second", ProjectID: "p"})},
-		"sessions": {record("run", model.Attempt{AttemptID: "run", ProjectID: "p", Task: "first", Role: "code"})},
+		"projects":        {record("p", model.Project{ID: "p", Name: "Repo"})},
+		"execution_plans": {record("first", model.ExecutionPlan{ID: "first", ProjectID: "p"}), record("second", model.ExecutionPlan{ID: "second", ProjectID: "p"})},
+		"sessions":        {record("run", model.Attempt{AttemptID: "run", ProjectID: "p", Task: "first", Role: "code"})},
 	}
 	d.Present(snapshot)
 	d.focus = 3

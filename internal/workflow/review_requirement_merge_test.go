@@ -17,7 +17,7 @@ func TestSpecialistFailedRequirementOverridesPrimaryPass(t *testing.T) {
 	e, task, repo := testEngine(t)
 	task.Worktree = repo
 	task.PlanVersion, task.VerificationID, task.Risk = 1, "verification", "high"
-	task.Plan = &model.Plan{Requirements: []model.Requirement{{ID: "REQ-1", Outcome: "reject unsafe input", EvidenceMethod: "run validation test"}}}
+	task.Plan = &model.PlanSpecification{Requirements: []model.Requirement{{ID: "REQ-1", Outcome: "reject unsafe input", EvidenceMethod: "run validation test"}}}
 	ctx := context.Background()
 	project, err := e.Project(ctx, task.ProjectID)
 	if err != nil {
@@ -57,7 +57,7 @@ func TestCriticalAcceptedLocalReviewWaitsForBoundHumanApproval(t *testing.T) {
 	task.VerificationID = "verification-4"
 	task.ReviewedCommit = "candidate-sha"
 	task.ChecksPassed = true
-	task.Plan = &model.Plan{Requirements: []model.Requirement{{ID: "R1", Outcome: "safe behavior", EvidenceMethod: "test"}}}
+	task.Plan = &model.PlanSpecification{Requirements: []model.Requirement{{ID: "R1", Outcome: "safe behavior", EvidenceMethod: "test"}}}
 	project, err := e.Project(context.Background(), task.ProjectID)
 	if err != nil {
 		t.Fatal(err)

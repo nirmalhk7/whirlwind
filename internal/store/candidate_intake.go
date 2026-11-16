@@ -9,7 +9,7 @@ import (
 )
 
 // issueCandidate is written in the same transaction as its held task and issue identity.
-func issueCandidate(ctx context.Context, tx *sql.Tx, p model.Project, t model.Task) error {
+func issueCandidate(ctx context.Context, tx *sql.Tx, p model.Project, t model.ExecutionPlan) error {
 	if t.HasSelection() {
 		return nil
 	}

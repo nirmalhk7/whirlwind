@@ -25,7 +25,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 	}
 	writeReviewEvidenceFixture(t, repo)
 
-	plan := model.Plan{
+	plan := model.PlanSpecification{
 		Objective:                "Return useful result",
 		What:                     "Return true from Result with regression coverage",
 		Why:                      "Consumers currently receive false",
@@ -110,10 +110,10 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		t.Fatal("fixture TDD phases changed the test source")
 	}
 	commitReviewCode(t, repo)
-	if err := engine.Store.Put(ctx, "tdd_checks", "a-review-red", reviewTDDCheck(task, "red", false, redSnapshot, redProduction, redTests, redFiles, redArtifact.ID), 0); err != nil {
+	if err := engine.Store.Put(ctx, "tdd_checks", "a-review-red", reviewTDDCheck(task, "red", false, reviewTDDIdentity{snapshot: redSnapshot, production: redProduction, tests: redTests}, redFiles, redArtifact.ID), 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Store.Put(ctx, "tdd_checks", "b-review-green", reviewTDDCheck(task, "green", true, greenSnapshot, greenProduction, greenTests, greenFiles, greenArtifact.ID), 0); err != nil {
+	if err := engine.Store.Put(ctx, "tdd_checks", "b-review-green", reviewTDDCheck(task, "green", true, reviewTDDIdentity{snapshot: greenSnapshot, production: greenProduction, tests: greenTests}, greenFiles, greenArtifact.ID), 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,7 +262,9 @@ func saveReviewTDDArtifacts(t *testing.T, database *store.Store, ctx context.Con
 	return red, green
 }
 
-func reviewTDDCheck(task model.Task, phase string, passed bool, snapshot, production, tests string, files map[string]string, artifact string) tddCheck {
+type reviewTDDIdentity struct{ snapshot, production, tests string }
+
+func reviewTDDCheck(task model.ExecutionPlan, phase string, passed bool, identity reviewTDDIdentity, files map[string]string, artifact string) tddCheck {
 	exit := 1
 	if passed {
 		exit = 0
@@ -270,7 +272,7 @@ func reviewTDDCheck(task model.Task, phase string, passed bool, snapshot, produc
 	return tddCheck{
 		RawResult: &verification.Result{Command: []string{"go", "test", "-json", "./..."}, ExitCode: &exit, Name: "test", Passed: passed, OutputArtifact: artifact},
 		Files:     files, Task: task.ID, Unit: "result", PlanVersion: task.PlanVersion, CheckID: "test", Passed: passed,
-		Phase: phase, Snapshot: snapshot, Production: production, Tests: tests, AttemptID: artifact,
+		Phase: phase, Snapshot: identity.snapshot, Production: identity.production, Tests: identity.tests, AttemptID: artifact,
 		OutputArtifact: artifact, At: "2026-11-07T00:00:00Z",
 	}
 }

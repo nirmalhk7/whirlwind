@@ -14,7 +14,7 @@ func TestResumeSessionMatchesSelectedModel(t *testing.T) {
 	e, task, cwd := testEngine(t)
 	ctx := context.Background()
 	for _, item := range []struct{ model, session string }{{"model-one", "session-one"}, {"model-two", "session-two"}} {
-		if err := e.Store.Put(ctx, "sessions", store.ID(), map[string]any{"task": task.ID, "role": "code", "provider": "fake", "cwd": cwd, "plan_version": 1, "model": item.model, "session_id": item.session}, 0); err != nil {
+		if err := e.Store.Put(ctx, "sessions", store.ID(), map[string]any{"plan_id": task.ID, "role": "code", "provider": "fake", "cwd": cwd, "plan_version": 1, "model": item.model, "session_id": item.session}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -61,7 +61,7 @@ func TestResumeAttemptMatchesTransportAndThinking(t *testing.T) {
 	source := model.Provider{ID: "native", Kind: "acp"}
 	_ = e.Store.Put(ctx, "providers", source.ID, source, 0)
 	for _, item := range []struct{ transport, value, session string }{{"acp", "high", "acp-high"}, {"acp", "low", "acp-low"}, {"codex", "", "native-default"}} {
-		state := map[string]any{"elapsed_ms": 0, "task": task.ID, "role": "code", "provider": source.ID, "cwd": cwd, "plan_version": task.PlanVersion, "model": "m", "session_id": item.session, "transport": item.transport}
+		state := map[string]any{"elapsed_ms": 0, "plan_id": task.ID, "role": "code", "provider": source.ID, "cwd": cwd, "plan_version": task.PlanVersion, "model": "m", "session_id": item.session, "transport": item.transport}
 		if item.value != "" {
 			state["thinking"] = map[string]string{"config_id": "effort", "value": item.value}
 		}

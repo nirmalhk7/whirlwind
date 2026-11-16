@@ -23,19 +23,19 @@ func (q apiRequest) taskBudget() error {
 	return nil
 }
 
-func (q apiRequest) budgetTask() (model.Task, model.Record, error) {
+func (q apiRequest) budgetTask() (model.ExecutionPlan, model.Record, error) {
 	if q.r.Method == "PATCH" {
-		return readCurrent[model.Task](q, "tasks")
+		return readCurrent[model.ExecutionPlan](q, "execution_plans")
 	}
-	record, err := q.Store.Get(q.r.Context(), "tasks", q.id)
+	record, err := q.Store.Get(q.r.Context(), "execution_plans", q.id)
 	if err != nil {
-		return model.Task{}, record, err
+		return model.ExecutionPlan{}, record, err
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	return task, record, err
 }
 
-func (q apiRequest) updateTaskBudget(task model.Task, record model.Record) error {
+func (q apiRequest) updateTaskBudget(task model.ExecutionPlan, record model.Record) error {
 	var budget model.BudgetPolicy
 	if err := json.Unmarshal(q.body, &budget); err != nil {
 		return err
@@ -48,11 +48,11 @@ func (q apiRequest) updateTaskBudget(task model.Task, record model.Record) error
 	if err := q.Store.Put(q.r.Context(), "audit", store.ID(), audit, 0); err != nil {
 		return err
 	}
-	q.save(q.w, q.r, "tasks", task.ID, task, record.Version, 200)
+	q.save(q.w, q.r, "execution_plans", task.ID, task, record.Version, 200)
 	return nil
 }
 
-func (q apiRequest) effectiveTaskBudget(task model.Task) (*model.BudgetPolicy, string) {
+func (q apiRequest) effectiveTaskBudget(task model.ExecutionPlan) (*model.BudgetPolicy, string) {
 	effective, source := task.Budget, "task"
 	if effective == nil {
 		project, err := q.Engine.Project(q.r.Context(), task.ProjectID)
@@ -76,7 +76,7 @@ func (q apiRequest) effectiveTaskBudget(task model.Task) (*model.BudgetPolicy, s
 	return effective, source
 }
 func (q apiRequest) taskUsage() error {
-	if _, err := q.Store.Get(q.r.Context(), "tasks", q.id); err != nil {
+	if _, err := q.Store.Get(q.r.Context(), "execution_plans", q.id); err != nil {
 		return err
 	}
 	report, err := q.Store.TaskUsage(q.r.Context(), q.id)
@@ -88,14 +88,14 @@ func (q apiRequest) taskUsage() error {
 }
 
 func (q apiRequest) reconcileTaskBudget() error {
-	task, record, err := readCurrent[model.Task](q, "tasks")
+	task, record, err := readCurrent[model.ExecutionPlan](q, "execution_plans")
 	if err != nil {
 		return err
 	}
 	return q.reconcileTaskBudgetFor(task, record)
 }
 
-func (q apiRequest) reconcileTaskBudgetFor(task model.Task, record model.Record) error {
+func (q apiRequest) reconcileTaskBudgetFor(task model.ExecutionPlan, record model.Record) error {
 	var input struct {
 		AttemptID       string       `json:"attempt_id"`
 		Usage           *model.Usage `json:"usage"`
@@ -111,7 +111,7 @@ func (q apiRequest) reconcileTaskBudgetFor(task model.Task, record model.Record)
 	return q.commitTaskBudgetReconciliation(task, record, input.AttemptID, input.Usage, input.ActiveRuntimeMS)
 }
 
-func (q apiRequest) commitTaskBudgetReconciliation(task model.Task, record model.Record, attemptID string, usage *model.Usage, activeRuntimeMS *int64) error {
+func (q apiRequest) commitTaskBudgetReconciliation(task model.ExecutionPlan, record model.Record, attemptID string, usage *model.Usage, activeRuntimeMS *int64) error {
 	changes, err := q.Store.ReconciliationChanges(q.r.Context(), task.ID, attemptID, usage, activeRuntimeMS)
 	if err != nil {
 		return &apiError{409, "reconciliation_required", err.Error()}
@@ -123,6 +123,6 @@ func (q apiRequest) commitTaskBudgetReconciliation(task model.Task, record model
 	if err = q.Store.Put(q.r.Context(), "audit", store.ID(), audit, 0); err != nil {
 		return err
 	}
-	q.save(q.w, q.r, "tasks", task.ID, task, record.Version, 200)
+	q.save(q.w, q.r, "execution_plans", task.ID, task, record.Version, 200)
 	return nil
 }

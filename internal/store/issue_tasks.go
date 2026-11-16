@@ -11,15 +11,15 @@ import (
 )
 
 // IngestIssue deduplicates repository issues, binds published planner tasks, pauses withdrawn issues, and invalidates stale plans after edits.
-func (s *Store) IngestIssue(ctx context.Context, p model.Project, i model.Issue) (model.Task, error) {
-	var t model.Task
+func (s *Store) IngestIssue(ctx context.Context, p model.Project, i model.Issue) (model.ExecutionPlan, error) {
+	var t model.ExecutionPlan
 	e := s.Transaction(ctx, func(tx *sql.Tx) error {
 		return ingestIssueTx(ctx, tx, p, i, &t)
 	})
 	return t, e
 }
 
-func ingestIssueTx(ctx context.Context, tx *sql.Tx, project model.Project, issue model.Issue, task *model.Task) error {
+func ingestIssueTx(ctx context.Context, tx *sql.Tx, project model.Project, issue model.Issue, task *model.ExecutionPlan) error {
 	id, e := issueTaskID(ctx, tx, project, issue)
 	if errors.Is(e, sql.ErrNoRows) {
 		return createIssueTask(ctx, tx, project, issue, task)
@@ -36,7 +36,7 @@ func refreshIngestedIssue(input issueTaskRefresh) error {
 		return err
 	}
 	if prior.Cancelled() && input.issue.Eligible() && newCancelledSource(prior.Issue, input.issue) {
-		if _, err := input.tx.ExecContext(input.ctx, "DELETE FROM issue_tasks WHERE repo=? AND issue=?", input.project.Repo, input.issue.Number); err != nil {
+		if _, err := input.tx.ExecContext(input.ctx, "DELETE FROM issue_plans WHERE repo=? AND issue=?", input.project.Repo, input.issue.Number); err != nil {
 			return err
 		}
 		return createIssueTask(input.ctx, input.tx, input.project, input.issue, input.task)
@@ -49,16 +49,16 @@ func refreshIngestedIssue(input issueTaskRefresh) error {
 
 func issueTaskID(ctx context.Context, tx *sql.Tx, project model.Project, issue model.Issue) (string, error) {
 	var id string
-	err := tx.QueryRowContext(ctx, "SELECT task_id FROM issue_tasks WHERE repo=? AND issue=?", project.Repo, issue.Number).Scan(&id)
+	err := tx.QueryRowContext(ctx, "SELECT plan_id FROM issue_plans WHERE repo=? AND issue=?", project.Repo, issue.Number).Scan(&id)
 	return id, err
 }
 
-func loadIssueTask(ctx context.Context, tx *sql.Tx, id string) (model.Task, error) {
+func loadIssueTask(ctx context.Context, tx *sql.Tx, id string) (model.ExecutionPlan, error) {
 	var data []byte
-	if err := tx.QueryRowContext(ctx, "SELECT data FROM resources WHERE kind='tasks' AND id=?", id).Scan(&data); err != nil {
-		return model.Task{}, err
+	if err := tx.QueryRowContext(ctx, "SELECT data FROM resources WHERE kind='execution_plans' AND id=?", id).Scan(&data); err != nil {
+		return model.ExecutionPlan{}, err
 	}
-	var task model.Task
+	var task model.ExecutionPlan
 	err := json.Unmarshal(data, &task)
 	return task, err
 }
@@ -81,13 +81,13 @@ type issueTaskRefresh struct {
 	id      string
 	project model.Project
 	issue   model.Issue
-	task    *model.Task
+	task    *model.ExecutionPlan
 }
 
 func refreshIssueTask(input issueTaskRefresh) error {
 	var data []byte
 	var version int
-	if err := input.tx.QueryRowContext(input.ctx, "SELECT data,version FROM resources WHERE kind='tasks' AND id=?", input.id).Scan(&data, &version); err != nil {
+	if err := input.tx.QueryRowContext(input.ctx, "SELECT data,version FROM resources WHERE kind='execution_plans' AND id=?", input.id).Scan(&data, &version); err != nil {
 		return err
 	}
 	if err := json.Unmarshal(data, input.task); err != nil {
@@ -98,26 +98,26 @@ func refreshIssueTask(input issueTaskRefresh) error {
 			input.task.Stage = "planning"
 			authorizeReady(input.task, input.project)
 		}
-		return put(input.ctx, input.tx, "tasks", input.id, *input.task, version)
+		return put(input.ctx, input.tx, "execution_plans", input.id, *input.task, version)
 	}
 	return nil
 }
 
 // BindIssue atomically associates a planner task with its published GitHub issue.
-func (s *Store) BindIssue(ctx context.Context, repo string, t model.Task, expected int) error {
+func (s *Store) BindIssue(ctx context.Context, repo string, t model.ExecutionPlan, expected int) error {
 	return s.Transaction(ctx, func(tx *sql.Tx) error {
 		var other string
-		err := tx.QueryRowContext(ctx, "SELECT task_id FROM issue_tasks WHERE repo=? AND issue=?", repo, t.Issue.Number).Scan(&other)
+		err := tx.QueryRowContext(ctx, "SELECT plan_id FROM issue_plans WHERE repo=? AND issue=?", repo, t.Issue.Number).Scan(&other)
 		if err == nil && other != t.ID {
 			return ErrConflict
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO issue_tasks(repo,issue,task_id) VALUES(?,?,?)", repo, t.Issue.Number, t.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO issue_plans(repo,issue,plan_id) VALUES(?,?,?)", repo, t.Issue.Number, t.ID); err != nil {
 			return err
 		}
-		return put(ctx, tx, "tasks", t.ID, t, expected)
+		return put(ctx, tx, "execution_plans", t.ID, t, expected)
 	})
 }
 
@@ -165,7 +165,7 @@ func insertDirectionIfNew(ctx context.Context, tx *sql.Tx, project, groupID stri
 	return put(ctx, tx, "directions", direction.ID, direction, 0)
 }
 
-func createIssueTask(ctx context.Context, tx *sql.Tx, p model.Project, i model.Issue, t *model.Task) error {
+func createIssueTask(ctx context.Context, tx *sql.Tx, p model.Project, i model.Issue, t *model.ExecutionPlan) error {
 	if !i.Eligible() {
 		return ErrNotFound
 	}
@@ -173,7 +173,7 @@ func createIssueTask(ctx context.Context, tx *sql.Tx, p model.Project, i model.I
 		*t = candidate
 		return bindIssueTask(ctx, tx, p.Repo, *t, revision)
 	}
-	*t = model.Task{Mode: model.PersonalMode, ID: ID(), ProjectID: p.ID, Issue: i, PlanVersion: 1, Stage: "planning", Handoff: model.Handoff{Version: 1, NextAction: "implement ready issue specification"}}
+	*t = model.ExecutionPlan{Mode: model.PersonalMode, ID: model.NewPlanID(), ProjectID: p.ID, Issue: i, PlanVersion: 1, Stage: "planning", Handoff: model.Handoff{Version: 1, NextAction: "implement ready issue specification"}}
 	authorizeReady(t, p)
 	if err := bindIssueTask(ctx, tx, p.Repo, *t, 0); err != nil {
 		return err
@@ -181,38 +181,38 @@ func createIssueTask(ctx context.Context, tx *sql.Tx, p model.Project, i model.I
 	return issueCandidate(ctx, tx, p, *t)
 }
 
-func plannerIssueTask(ctx context.Context, tx *sql.Tx, p model.Project, i model.Issue) (model.Task, string, int, bool) {
+func plannerIssueTask(ctx context.Context, tx *sql.Tx, p model.Project, i model.Issue) (model.ExecutionPlan, string, int, bool) {
 	marker := "<!-- whirlwind-plan:"
 	begin := strings.Index(i.Body, marker)
 	if begin < 0 {
-		return model.Task{}, "", 0, false
+		return model.ExecutionPlan{}, "", 0, false
 	}
 	rest := i.Body[begin+len(marker):]
 	end := strings.Index(rest, " -->")
 	if end < 0 {
-		return model.Task{}, "", 0, false
+		return model.ExecutionPlan{}, "", 0, false
 	}
 	var data []byte
 	var revision int
-	if err := tx.QueryRowContext(ctx, "SELECT data,version FROM resources WHERE kind='tasks' AND id=?", rest[:end]).Scan(&data, &revision); err != nil {
-		return model.Task{}, "", 0, false
+	if err := tx.QueryRowContext(ctx, "SELECT data,version FROM resources WHERE kind='execution_plans' AND id=?", rest[:end]).Scan(&data, &revision); err != nil {
+		return model.ExecutionPlan{}, "", 0, false
 	}
-	var candidate model.Task
+	var candidate model.ExecutionPlan
 	if json.Unmarshal(data, &candidate) != nil || !unpublishedPlan(candidate, p.ID) || !candidate.HasSelection() {
-		return model.Task{}, "", 0, false
+		return model.ExecutionPlan{}, "", 0, false
 	}
 	candidate.Issue = i
 	candidate.Stage = "coding"
 	return candidate, rest[:end], revision, true
 }
 
-func unpublishedPlan(task model.Task, projectID string) bool {
+func unpublishedPlan(task model.ExecutionPlan, projectID string) bool {
 	return task.ProjectID == projectID && task.Issue.Number == 0 && task.Stage == "plan_ready" && task.Plan != nil
 }
 
-func bindIssueTask(ctx context.Context, tx *sql.Tx, repo string, t model.Task, revision int) error {
-	if _, err := tx.ExecContext(ctx, "INSERT INTO issue_tasks(repo,issue,task_id) VALUES(?,?,?)", repo, t.Issue.Number, t.ID); err != nil {
+func bindIssueTask(ctx context.Context, tx *sql.Tx, repo string, t model.ExecutionPlan, revision int) error {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO issue_plans(repo,issue,plan_id) VALUES(?,?,?)", repo, t.Issue.Number, t.ID); err != nil {
 		return err
 	}
-	return put(ctx, tx, "tasks", t.ID, t, revision)
+	return put(ctx, tx, "execution_plans", t.ID, t, revision)
 }

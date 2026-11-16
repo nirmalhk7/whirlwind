@@ -36,7 +36,7 @@ type IdeationBrief struct {
 	MaxCandidates int    `json:"max_candidates,omitempty"`
 }
 
-func (t Task) HasSelection() bool {
+func (t ExecutionPlan) HasSelection() bool {
 	return t.Selection != nil && t.Selection.CandidateID != "" && t.Selection.SelectedAt != ""
 }
 

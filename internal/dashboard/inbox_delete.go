@@ -9,6 +9,14 @@ func (d *Dashboard) deleteInboxProposal() {
 		return
 	}
 	direction := d.directionRows[index]
+	if idea, version, ok := d.ideaRecord(direction.ID); ok {
+		if idea.DecisionStatus == "in_process" {
+			d.status.SetText("Whirlwind | active planning must finish or be cancelled before archival")
+			return
+		}
+		d.archiveIdeaForm(idea, version)
+		return
+	}
 	version := d.directionRecordVersion(direction.ID)
 	if version < 1 {
 		d.status.SetText("Whirlwind | proposal version unavailable; refresh before deleting")

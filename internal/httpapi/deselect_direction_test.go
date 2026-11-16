@@ -10,9 +10,10 @@ import (
 )
 
 const (
-	directionTaskID   = "direction-idea"
 	directionWorktree = "/saved-work"
 )
+
+var directionTaskID = model.PlanID("direction-idea")
 
 func TestDeselectDirectionPausesTaskAndReselectRestoresIt(t *testing.T) {
 	s := setup(t)
@@ -23,7 +24,7 @@ func TestDeselectDirectionPausesTaskAndReselectRestoresIt(t *testing.T) {
 	if err := s.Store.Put(ctx, "directions", "idea", model.Direction{ID: "idea", ProjectID: "p", Selected: true}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Store.Put(ctx, "tasks", directionTaskID, model.Task{ID: directionTaskID, ProjectID: "p", Stage: "coding", Worktree: directionWorktree}, 0); err != nil {
+	if err := s.Store.Put(ctx, "execution_plans", directionTaskID, model.ExecutionPlan{ID: directionTaskID, ProjectID: "p", Stage: "coding", Worktree: directionWorktree}, 0); err != nil {
 		t.Fatal(err)
 	}
 	send := func(action, version, key string) *httptest.ResponseRecorder {
@@ -40,8 +41,8 @@ func TestDeselectDirectionPausesTaskAndReselectRestoresIt(t *testing.T) {
 	}
 	d, _ := s.Store.Get(ctx, "directions", "idea")
 	direction, _ := store.Decode[model.Direction](d)
-	taskRecord, _ := s.Store.Get(ctx, "tasks", directionTaskID)
-	task, _ := store.Decode[model.Task](taskRecord)
+	taskRecord, _ := s.Store.Get(ctx, "execution_plans", directionTaskID)
+	task, _ := store.Decode[model.ExecutionPlan](taskRecord)
 	if direction.Selected || task.Stage != "paused" || task.ResumeStage != "coding" || task.Worktree != directionWorktree {
 		t.Fatalf("unsafe deselection: %+v %+v", direction, task)
 	}
@@ -54,12 +55,12 @@ func TestDeselectDirectionPausesTaskAndReselectRestoresIt(t *testing.T) {
 	if selected := send("select", "2", "reselect"); selected.Code != 202 {
 		t.Fatalf("reselect: %d %s", selected.Code, selected.Body)
 	}
-	taskRecord, _ = s.Store.Get(ctx, "tasks", directionTaskID)
-	task, _ = store.Decode[model.Task](taskRecord)
+	taskRecord, _ = s.Store.Get(ctx, "execution_plans", directionTaskID)
+	task, _ = store.Decode[model.ExecutionPlan](taskRecord)
 	if task.Stage != "coding" || task.Error != "" || task.Worktree != directionWorktree {
 		t.Fatalf("did not restore task: %+v", task)
 	}
-	tasks, _ := s.Store.List(ctx, "tasks")
+	tasks, _ := s.Store.List(ctx, "execution_plans")
 	if len(tasks) != 1 {
 		t.Fatal("reselection duplicated task")
 	}
@@ -81,7 +82,7 @@ func assertDeselectPreservesStage(t *testing.T, stage string) {
 		t.Fatal(err)
 	}
 	if stage != "missing" {
-		if err := s.Store.Put(ctx, "tasks", directionTaskID, model.Task{ID: directionTaskID, Stage: stage, Error: "Existing state", PR: "https://example.test/pr/1"}, 0); err != nil {
+		if err := s.Store.Put(ctx, "execution_plans", directionTaskID, model.ExecutionPlan{ID: directionTaskID, Stage: stage, Error: "Existing state", PR: "https://example.test/pr/1"}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -101,7 +102,7 @@ func assertDirectionTaskPreserved(t *testing.T, db *store.Store, ctx context.Con
 	if stage == "missing" {
 		return
 	}
-	record, _ := db.Get(ctx, "tasks", directionTaskID)
+	record, _ := db.Get(ctx, "execution_plans", directionTaskID)
 	if record.Version != 1 {
 		t.Fatal("existing task state changed")
 	}

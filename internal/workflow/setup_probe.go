@@ -101,7 +101,7 @@ func (e *Engine) setupProbeInput(ctx context.Context, p model.Project, b setupBl
 	input.ReadOnly = true
 	input.Execution = nil
 	input.ExecutionProfile = ""
-	run := agentRun{Engine: e, ctx: ctx, project: p, task: model.Task{ID: "setup-probe:" + p.ID}, input: input}
+	run := agentRun{Engine: e, ctx: ctx, project: p, task: model.ExecutionPlan{ID: "setup-probe:" + p.ID}, input: input}
 	if err := run.prepareExecutionProfile(b.Source); err != nil {
 		return provider.Input{}, cleanup, err
 	}

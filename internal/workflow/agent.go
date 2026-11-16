@@ -16,7 +16,7 @@ type agentRun struct {
 	*Engine
 	ctx                  context.Context
 	project              model.Project
-	task                 model.Task
+	task                 model.ExecutionPlan
 	input                provider.Input
 	providers            []model.Provider
 	index                ctxengine.Index
@@ -26,10 +26,12 @@ type agentRun struct {
 	recoveryRestartCount int
 	queuePosition        int
 	queueLength          int
+	pairAttempt          string
+	autofixReadRoots     []string
 }
 
 // agent reserves capacity for a named request, prepares its context, and retries unavailable providers.
-func (e *Engine) agent(ctx context.Context, p model.Project, t model.Task, input provider.Input) (provider.Output, error) {
+func (e *Engine) agent(ctx context.Context, p model.Project, t model.ExecutionPlan, input provider.Input) (provider.Output, error) {
 	ctx, release, err := e.projectRunnerContext(ctx, p.ID)
 	if err != nil {
 		return provider.Output{}, err

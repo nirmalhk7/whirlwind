@@ -8,6 +8,7 @@ import (
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
+	"whirlwind/internal/verification"
 	"whirlwind/prompts/agents"
 )
 
@@ -39,13 +40,13 @@ func (step *taskStep) verifyReviewReadiness() error {
 }
 
 func (step *taskStep) failedReviewVerification(err error) (bool, error) {
-	if errors.Is(err, store.ErrPersistence) {
+	if errors.Is(err, store.ErrPersistence) || errors.Is(err, verification.ErrJobSetup) {
 		return true, err
 	}
 	step.task.ChecksPassed = false
 	step.task.Stage = "repair"
 	step.task.Error = err.Error()
-	return true, step.Store.Put(step.ctx, "tasks", step.task.ID, step.task, step.record.Version)
+	return true, step.Store.Put(step.ctx, "execution_plans", step.task.ID, step.task, step.record.Version)
 }
 
 func (step *taskStep) performReview() (model.Review, string, error) {
@@ -79,6 +80,11 @@ func (step *taskStep) reviewSnapshot() (reviewSnapshot, error) {
 	if err != nil {
 		return reviewSnapshot{}, err
 	}
+	if step.task.IdeaID != "" {
+		if err := step.validateReviewRunnerReport(commit); err != nil {
+			return reviewSnapshot{}, err
+		}
+	}
 	previous := step.latestReview(step.ctx, fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion))
 	base := step.task.Base + "...HEAD"
 	intro := ""
@@ -97,6 +103,21 @@ func (step *taskStep) reviewSnapshot() (reviewSnapshot, error) {
 	prompt, err := agents.Render("review.md", map[string]string{"Plan": jsonText(step.task.Plan), "Requirements": jsonText(step.task.Plan.Requirements), "Previous": previous, "Diff": intro + diff, "Evidence": evidence, "Source": jsonText(step.task.Issue)})
 	if err != nil {
 		return reviewSnapshot{}, err
+	}
+	if step.task.IdeaID != "" {
+		key := fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion)
+		row, err := step.Store.Get(step.ctx, "review_preparations", key)
+		if err != nil {
+			return reviewSnapshot{}, fmt.Errorf("missing preparation: Reviewer preparation unavailable: %w", err)
+		}
+		prepared, err := store.Decode[reviewerPreparation](row)
+		if err != nil {
+			return reviewSnapshot{}, err
+		}
+		if prepared.PlanID != step.task.ID || prepared.PlanVersion != step.task.PlanVersion || prepared.DocumentHash != step.task.PlanDocument.ApprovedHash || prepared.Base != step.task.Base {
+			return reviewSnapshot{}, store.ErrConflict
+		}
+		prompt += "\nCompleted Reviewer preparation against approved base (evaluate each checklist item against this immutable candidate and the complete runner report):\n" + jsonText(prepared)
 	}
 	return reviewSnapshot{commit, prompt}, nil
 }
@@ -140,11 +161,11 @@ func decodeReviewProvenance(raw string, review *model.Review) bool {
 	return json.Unmarshal([]byte(raw), review) == nil && review.Provenance != nil
 }
 
-func reviewProvenanceMatches(provenance *model.Provenance, task model.Task, project model.Project, head string) bool {
+func reviewProvenanceMatches(provenance *model.Provenance, task model.ExecutionPlan, project model.Project, head string) bool {
 	return provenanceMatchesTask(provenance, task) && provenanceMatchesProject(provenance, project) && provenanceMatchesHead(provenance, head)
 }
 
-func provenanceMatchesTask(provenance *model.Provenance, task model.Task) bool {
+func provenanceMatchesTask(provenance *model.Provenance, task model.ExecutionPlan) bool {
 	return provenance.Task == task.ID && provenance.PlanVersion == task.PlanVersion && provenance.Base == task.Base
 }
 
@@ -252,7 +273,7 @@ func (step *taskStep) applyReview(review model.Review) error {
 	return step.progress(step.ctx, &step.task)
 }
 
-func criticalApprovalMessage(task model.Task, policyHash string) string {
+func criticalApprovalMessage(task model.ExecutionPlan, policyHash string) string {
 	return fmt.Sprintf("Approve local finalization only after reviewing candidate %s, plan version %d, review %s, verification %s, and policy %s.", task.ReviewedCommit, task.PlanVersion, task.ReviewID, task.VerificationID, policyHash)
 }
 

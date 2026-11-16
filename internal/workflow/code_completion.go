@@ -8,7 +8,7 @@ import (
 	"whirlwind/internal/store"
 )
 
-func (e *Engine) finishCode(ctx context.Context, p model.Project, t *model.Task) error {
+func (e *Engine) finishCode(ctx context.Context, p model.Project, t *model.ExecutionPlan) error {
 	t.Handoff.Worktree = t.Worktree
 	t.Handoff.Branch = t.Branch
 	t.Handoff.NextAction = "verify full implementation"
@@ -28,7 +28,7 @@ func (e *Engine) finishCode(ctx context.Context, p model.Project, t *model.Task)
 	records, _ := e.Store.List(ctx, "checkpoints")
 	for _, r := range records {
 		var checkpoint struct {
-			Task    string `json:"task"`
+			Task    string `json:"plan_id"`
 			Version int    `json:"plan_version"`
 		}
 		_ = json.Unmarshal(r.Data, &checkpoint)

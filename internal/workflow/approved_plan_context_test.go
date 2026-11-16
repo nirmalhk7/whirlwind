@@ -11,6 +11,10 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	approvedContextDraftObjective = "Draft secret webhook credential cleanup"
+)
+
 func TestDiscoveryComparesOnlyCurrentApprovedPlansForItsProject(t *testing.T) {
 	ctx := context.Background()
 	engine, task, _ := testEngine(t)
@@ -18,26 +22,26 @@ func TestDiscoveryComparesOnlyCurrentApprovedPlansForItsProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	approved := model.Plan{Objective: "Add bounded webhook retries", What: "Retry transient webhook delivery failures", Why: "Transient failures currently lose events", Benefit: "Events survive temporary outages", Where: []string{"internal/webhook"}, AcceptanceCriteria: []string{"Retry transient failures"}, Units: []model.Unit{{ID: "main", Objective: "Add retry policy"}}}
-	approvedTask := model.Task{ID: "approved", ProjectID: project.ID, PlanVersion: 2, Plan: &approved, PlanDocument: &model.PlanDocument{Hash: "approved-hash", ApprovedHash: "approved-hash", PlanVersion: 2}}
-	if err := engine.Store.Put(ctx, "tasks", approvedTask.ID, approvedTask, 0); err != nil {
+	approved := model.PlanSpecification{Objective: "Add bounded webhook retries", What: "Retry transient webhook delivery failures", Why: "Transient failures currently lose events", Benefit: "Events survive temporary outages", Where: []string{"internal/webhook"}, AcceptanceCriteria: []string{"Retry transient failures"}, Units: []model.Unit{{ID: "main", Objective: "Add retry policy"}}}
+	approvedTask := model.ExecutionPlan{ID: "approved", ProjectID: project.ID, PlanVersion: 2, Plan: &approved, PlanDocument: &model.PlanDocument{Hash: "approved-hash", ApprovedHash: "approved-hash", PlanVersion: 2}}
+	if err := engine.Store.Put(ctx, "execution_plans", approvedTask.ID, approvedTask, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Store.Put(ctx, "plans", "approved:2", approved, 0); err != nil {
+	if err := engine.Store.Put(ctx, "plan_versions", "approved:2", approved, 0); err != nil {
 		t.Fatal(err)
 	}
-	unapproved := model.Task{ID: "draft", ProjectID: project.ID, PlanVersion: 1, Plan: &model.Plan{Objective: "Draft secret webhook credential cleanup"}, PlanDocument: &model.PlanDocument{Hash: "draft-hash"}}
-	if err := engine.Store.Put(ctx, "tasks", unapproved.ID, unapproved, 0); err != nil {
+	unapproved := model.ExecutionPlan{ID: "draft", ProjectID: project.ID, PlanVersion: 1, Plan: &model.PlanSpecification{Objective: approvedContextDraftObjective}, PlanDocument: &model.PlanDocument{Hash: "draft-hash"}}
+	if err := engine.Store.Put(ctx, "execution_plans", unapproved.ID, unapproved, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Store.Put(ctx, "plans", "draft:1", model.Plan{Objective: "Draft secret webhook credential cleanup"}, 0); err != nil {
+	if err := engine.Store.Put(ctx, "plan_versions", "draft:1", model.PlanSpecification{Objective: approvedContextDraftObjective}, 0); err != nil {
 		t.Fatal(err)
 	}
-	otherProject := model.Task{ID: "other", ProjectID: "different-project", PlanVersion: 1, Plan: &model.Plan{Objective: "Other project private deployment details"}, PlanDocument: &model.PlanDocument{Hash: "other-hash", ApprovedHash: "other-hash", PlanVersion: 1}}
-	if err := engine.Store.Put(ctx, "tasks", otherProject.ID, otherProject, 0); err != nil {
+	otherProject := model.ExecutionPlan{ID: "other", ProjectID: "different-project", PlanVersion: 1, Plan: &model.PlanSpecification{Objective: "Other project private deployment details"}, PlanDocument: &model.PlanDocument{Hash: "other-hash", ApprovedHash: "other-hash", PlanVersion: 1}}
+	if err := engine.Store.Put(ctx, "execution_plans", otherProject.ID, otherProject, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := engine.Store.Put(ctx, "plans", "other:1", *otherProject.Plan, 0); err != nil {
+	if err := engine.Store.Put(ctx, "plan_versions", "other:1", *otherProject.Plan, 0); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,7 +52,7 @@ func TestDiscoveryComparesOnlyCurrentApprovedPlansForItsProject(t *testing.T) {
 	if !strings.Contains(prompt, "Add bounded webhook retries") {
 		t.Fatalf("ideation prompt omitted this project's approved plan context: %s", prompt)
 	}
-	if strings.Contains(prompt, "Draft secret webhook credential cleanup") || strings.Contains(prompt, "Other project private deployment details") {
+	if strings.Contains(prompt, approvedContextDraftObjective) || strings.Contains(prompt, "Other project private deployment details") {
 		t.Fatalf("ideation prompt exposed an unapproved or other-project plan: %s", prompt)
 	}
 }

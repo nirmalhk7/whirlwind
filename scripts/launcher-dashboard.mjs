@@ -22,7 +22,7 @@ function foreground(command, args, options) {
 
 export async function dashboard() {
   const root = await realpath(process.env.WHIRLWIND_ROOT || dirname(dirname(fileURLToPath(import.meta.url))));
-  const data = resolve(root, process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind"));
+  const data = resolve(root, process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind/parity-v1"));
   const temporary = await mkdtemp(join(tmpdir(), "whirlwind-dashboard-"));
   const binary = join(temporary, "dashboard");
   const options = { cwd: root, env: { ...process.env, WHIRLWIND_DATA_DIR: data } };

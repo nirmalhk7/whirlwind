@@ -2,11 +2,13 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 )
@@ -50,11 +52,14 @@ func codingSnapshotManifest(ctx context.Context, cwd string) (string, string, st
 func codingFileFingerprint(cwd, file string) (string, error) {
 	path := filepath.Join(cwd, file)
 	info, err := os.Lstat(path)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
 		return "deleted", nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if info.IsDir() {
+		return "deleted", nil
 	}
 	if !info.Mode().IsRegular() {
 		return "", fmt.Errorf("TDD snapshot requires regular file: %s", file)

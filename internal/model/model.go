@@ -6,12 +6,17 @@ import (
 )
 
 type Check struct {
-	OutputPaths      []string `json:"output_paths,omitempty" yaml:"output_paths"`
-	Reusable         bool     `json:"reusable,omitempty" yaml:"reusable"`
-	FreshnessSeconds int      `json:"freshness_seconds,omitempty" yaml:"freshness_seconds"`
-	Name             string   `json:"name" yaml:"name"`
-	Command          []string `json:"command" yaml:"command"`
-	TimeoutSeconds   int      `json:"timeout_seconds" yaml:"timeout_seconds"`
+	Mode             string            `json:"mode,omitempty" yaml:"mode"`
+	DependsOn        []string          `json:"depends_on,omitempty" yaml:"depends_on"`
+	Required         *bool             `json:"required,omitempty" yaml:"required"`
+	ReportFormat     string            `json:"report_format,omitempty" yaml:"report_format"`
+	Environment      map[string]string `json:"environment,omitempty" yaml:"environment"`
+	OutputPaths      []string          `json:"output_paths,omitempty" yaml:"output_paths"`
+	Reusable         bool              `json:"reusable,omitempty" yaml:"reusable"`
+	FreshnessSeconds int               `json:"freshness_seconds,omitempty" yaml:"freshness_seconds"`
+	Name             string            `json:"name" yaml:"name"`
+	Command          []string          `json:"command" yaml:"command"`
+	TimeoutSeconds   int               `json:"timeout_seconds" yaml:"timeout_seconds"`
 }
 type RiskRule struct {
 	APISymbols []string `json:"api_symbols,omitempty" yaml:"api_symbols"`
@@ -27,6 +32,7 @@ type Embeddings struct {
 	Enabled  bool   `json:"enabled" yaml:"enabled"`
 }
 type Policy struct {
+	Quality            *QualityPolicy `json:"quality,omitempty" yaml:"quality"`
 	AdaptiveRouting    bool           `json:"adaptive_routing,omitempty" yaml:"adaptive_routing"`
 	Sandbox            *SandboxPolicy `json:"sandbox,omitempty" yaml:"sandbox"`
 	ContextInputTokens int            `json:"context_input_tokens,omitempty" yaml:"context_input_tokens"`
@@ -43,6 +49,7 @@ type Policy struct {
 	Embeddings         *Embeddings    `json:"embeddings,omitempty" yaml:"embeddings"`
 }
 type Project struct {
+	Status        string `json:"status,omitempty"`
 	RemoteURL     string `json:"remote_url,omitempty"`
 	Paused        bool   `json:"paused"`
 	DefaultBranch string `json:"default_branch"`
@@ -90,7 +97,9 @@ func (i Issue) Eligible() bool {
 	return slices.Contains(i.Labels, "whirlwind:ready")
 }
 
-type Task struct {
+type ExecutionPlan struct {
+	IdeaID                 string                  `json:"idea_id,omitempty"`
+	IdeationRunID          string                  `json:"ideation_run_id,omitempty"`
 	Mode                   string                  `json:"mode,omitempty"`
 	Sources                []SourceRef             `json:"sources,omitempty"`
 	PlanDocument           *PlanDocument           `json:"plan_document,omitempty"`
@@ -99,7 +108,7 @@ type Task struct {
 	Progress               *ProgressEvidence       `json:"progress,omitempty"`
 	Selection              *SelectionAuthorization `json:"selection,omitempty"`
 	Budget                 *BudgetPolicy           `json:"budget,omitempty"`
-	Wait                   *TaskWait               `json:"wait,omitempty"`
+	Wait                   *ExecutionPlanWait      `json:"wait,omitempty"`
 	ImplementationAttempts []string                `json:"implementation_attempts,omitempty"`
 	LastAttemptID          string                  `json:"last_attempt_id,omitempty"`
 	VerificationID         string                  `json:"verification_id,omitempty"`
@@ -112,7 +121,7 @@ type Task struct {
 	Issue                  Issue                   `json:"issue"`
 	PlanVersion            int                     `json:"plan_version"`
 	Stage                  string                  `json:"stage"`
-	Plan                   *Plan                   `json:"plan,omitempty"`
+	Plan                   *PlanSpecification      `json:"plan,omitempty"`
 	Worktree               string                  `json:"worktree,omitempty"`
 	Branch                 string                  `json:"branch,omitempty"`
 	Base                   string                  `json:"base,omitempty"`
@@ -130,7 +139,8 @@ type Task struct {
 	Error                  string                  `json:"error,omitempty"`
 	Handoff                Handoff                 `json:"handoff"`
 }
-type Plan struct {
+type PlanSpecification struct {
+	Approval                 *PlanApproval `json:"approval,omitempty"`
 	Requirements             []Requirement `json:"requirements,omitempty"`
 	Checks                   []Check       `json:"checks,omitempty"`
 	RepositoryTestCommands   [][]string    `json:"repository_test_commands,omitempty"`
@@ -187,6 +197,7 @@ type Review struct {
 	Summary      string              `json:"summary"`
 }
 type Direction struct {
+	IdeaFields         *IdeaDraft    `json:"idea_fields,omitempty"`
 	ExpectedBenefit    string        `json:"expected_benefit,omitempty"`
 	Problem            string        `json:"problem,omitempty"`
 	Mechanism          string        `json:"mechanism,omitempty"`
@@ -203,7 +214,7 @@ type Direction struct {
 	ProblemKind        string        `json:"problem_kind,omitempty"`
 	Rank               int           `json:"rank,omitempty"`
 	Status             string        `json:"status,omitempty"`
-	TaskID             string        `json:"task_id,omitempty"`
+	TaskID             string        `json:"plan_id,omitempty"`
 	SourceIssue        *Issue        `json:"source_issue,omitempty"`
 	Fingerprint        string        `json:"fingerprint,omitempty"`
 	Scope              []string      `json:"scope,omitempty"`
@@ -218,15 +229,16 @@ type Direction struct {
 	Selected           bool          `json:"selected"`
 }
 type Handoff struct {
-	Version           int      `json:"version"`
-	Worktree          string   `json:"worktree"`
-	Branch            string   `json:"branch"`
-	Commits           []string `json:"commits"`
-	Checkpoints       []string `json:"checkpoints"`
-	CompletedWork     []string `json:"completed_work"`
-	CompletedCriteria []string `json:"completed_criteria"`
-	FailingTests      []string `json:"failing_tests"`
-	NextAction        string   `json:"next_action"`
+	AutofixProposals  []AutofixHandoff `json:"autofix_proposals,omitempty"`
+	Version           int              `json:"version"`
+	Worktree          string           `json:"worktree"`
+	Branch            string           `json:"branch"`
+	Commits           []string         `json:"commits"`
+	Checkpoints       []string         `json:"checkpoints"`
+	CompletedWork     []string         `json:"completed_work"`
+	CompletedCriteria []string         `json:"completed_criteria"`
+	FailingTests      []string         `json:"failing_tests"`
+	NextAction        string           `json:"next_action"`
 }
 type Event struct {
 	ID         int64           `json:"id"`
@@ -253,7 +265,7 @@ type Notification struct {
 	Completed   []string     `json:"completed,omitempty"`
 	EvidenceID  string       `json:"evidence_id,omitempty"`
 	ID          string       `json:"id"`
-	TaskID      string       `json:"task_id,omitempty"`
+	TaskID      string       `json:"plan_id,omitempty"`
 	Kind        string       `json:"kind"`
 	Message     string       `json:"message"`
 	Resolved    bool         `json:"resolved"`
@@ -262,7 +274,7 @@ type Notification struct {
 type QuestionSet struct {
 	AttemptID   string            `json:"attempt_id,omitempty"`
 	ID          string            `json:"id"`
-	TaskID      string            `json:"task_id"`
+	TaskID      string            `json:"plan_id"`
 	Provider    string            `json:"provider"`
 	Questions   []Question        `json:"questions"`
 	Answers     map[string]string `json:"answers"`

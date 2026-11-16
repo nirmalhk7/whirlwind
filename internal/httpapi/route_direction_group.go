@@ -24,37 +24,6 @@ func (q apiRequest) directionGroup(direction model.Direction) ([]model.Record, e
 	return group, nil
 }
 
-func (q apiRequest) unselectGroupPeers(direction model.Direction) error {
-	group, err := q.directionGroup(direction)
-	if err != nil {
-		return err
-	}
-	for _, record := range group {
-		if record.ID == direction.ID {
-			continue
-		}
-		d, err := store.Decode[model.Direction](record)
-		if err != nil {
-			return err
-		}
-		if d.Selected {
-			if err = q.pauseDirectionTask(directionTask(d)); err != nil {
-				return err
-			}
-		}
-		d.Selected = false
-		if d.Status == "selected" {
-			d.Status = "proposed"
-		}
-		// Touch every peer, including unselected ones: competing selections from
-		// the same group must conflict instead of committing two selected ideas.
-		if err = q.Store.Put(q.r.Context(), "directions", record.ID, d, record.Version); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (q apiRequest) deleteDirectionGroup() error {
 	group, versions, err := q.directionGroupForDeletion()
 	if err != nil {
@@ -102,7 +71,7 @@ func validateDirectionGroupVersions(group []model.Record, versions map[string]in
 
 func (q apiRequest) removeDirectionGroup(group []model.Record) error {
 	for _, record := range group {
-		if err := q.pauseDirectionTask("direction-" + record.ID); err != nil {
+		if err := q.pauseDirectionTask(model.PlanID(directionTaskPrefix + record.ID)); err != nil {
 			return err
 		}
 		if err := q.Store.RemoveDirection(q.r.Context(), record.ID, record.Version); err != nil {

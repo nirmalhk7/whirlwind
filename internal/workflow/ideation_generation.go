@@ -14,6 +14,12 @@ import (
 func (e *Engine) generateAndSaveIdeation(ctx context.Context, p model.Project, day string) error {
 	prompt, previous, snapshot, unchanged, err := e.prepareDiscovery(ctx, p)
 	if err != nil {
+		if errors.Is(err, errIdeationHistoryBudget) {
+			return e.pauseFailedIdeation(ctx, p, day, err)
+		}
+		return err
+	}
+	if err := e.validateIdeationRunIdentity(ctx, p, snapshot.Commit); err != nil {
 		return err
 	}
 	if unchanged {
@@ -26,7 +32,9 @@ func (e *Engine) generateAndSaveIdeation(ctx context.Context, p model.Project, d
 	for n := range directions {
 		d := &directions[n]
 		d.Rank = n + 1
-		d.ID = store.ID()
+		if d.ID == "" {
+			d.ID = model.NewIdeaID()
+		}
 		d.ProjectID = p.ID
 		d.Day = day
 	}
@@ -84,10 +92,17 @@ func (e *Engine) notifyGeneratedDirections(ctx context.Context, project model.Pr
 
 // IdeateWhenAvailable queues a manual run behind active generation for this project.
 func (e *Engine) generateDirections(ctx context.Context, p model.Project, prompt string, previous []model.Direction, snapshot discoverySnapshot) ([]model.Direction, error) {
-	ctx = withIdeationHistoryBudget(ctx, e.settings(ctx).Ideation)
+	var err error
+	ctx, err = e.withDurableIdeationHistoryBudget(ctx, p.ID)
+	if err != nil {
+		return nil, err
+	}
 	maxAttempts := e.settings(ctx).Ideation.NoveltyRepairAttempts
+	if operationID(ctx) != "" {
+		maxAttempts = e.settings(ctx).Ideation.MaxAttemptsPerDirection
+	}
 	if maxAttempts <= 0 {
-		maxAttempts = 3
+		maxAttempts = 5
 	}
 	request := newDirectionGenerationRequest(ctx, p, prompt, previous, snapshot)
 	return e.runDirectionRepairs(ctx, request, maxAttempts)
@@ -102,17 +117,44 @@ func newDirectionGenerationRequest(ctx context.Context, project model.Project, p
 	if operation := operationID(ctx); operation != "" {
 		budgetTaskID = ideationPrefix + project.ID + ":" + operation
 	}
-	return directionGenerationRequest{project: project, prompt: prompt, previous: previous, snapshot: snapshot, runID: store.ID(), budgetTaskID: budgetTaskID}
+	runID := operationID(ctx)
+	if runID == "" {
+		runID = store.ID()
+	}
+	return directionGenerationRequest{project: project, prompt: prompt, previous: previous, snapshot: snapshot, runID: runID, budgetTaskID: budgetTaskID}
 }
 
 func (e *Engine) runDirectionRepairs(ctx context.Context, request directionGenerationRequest, maxAttempts int) ([]model.Direction, error) {
 	accepted := []model.Direction{}
+	if operationID(ctx) != "" {
+		var err error
+		accepted, err = e.acceptedRunDirections(ctx, request.runID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var rejected error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if len(missingDirectionCategories(accepted)) == 0 {
+			return accepted, nil
+		}
 		request.accepted = accepted
 		request.attempt = attempt
+		if operationID(ctx) != "" {
+			var err error
+			request.candidateIDs, err = e.reserveDirectionCandidates(ctx, request.runID, accepted)
+			if exhaustedCandidateAllowance(err) {
+				return accepted, nil
+			}
+			if err != nil {
+				return accepted, err
+			}
+		}
 		directions, nextRejection, done, err := e.runDirectionRepairAttempt(ctx, request, rejected)
 		if err != nil {
+			return accepted, err
+		}
+		if err := e.publishDirectionCandidates(ctx, request, directions); err != nil {
 			return accepted, err
 		}
 		if len(directions) >= len(accepted) {
@@ -151,26 +193,86 @@ type directionGenerationRequest struct {
 	budgetTaskID string
 	accepted     []model.Direction
 	attempt      int
+	candidateIDs map[string]string
 }
 
 func (e *Engine) generateDirectionAttempt(ctx context.Context, request directionGenerationRequest, rejected error) ([]model.Direction, error, bool, error) {
+	var recovered []model.Direction
+	pending := map[string]string{}
+	for category, id := range request.candidateIDs {
+		candidate, generated, err := e.Store.GeneratedIdeaCandidate(ctx, id)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		if generated {
+			recovered = append(recovered, candidate)
+		} else {
+			pending[category] = id
+		}
+	}
+	if operationID(ctx) != "" && len(pending) == 0 {
+		return e.validateDirectionAttempt(ctx, request, recovered)
+	}
 	input := request.prompt
+	if operationID(ctx) != "" {
+		var allowed []string
+		for _, category := range directionCategories {
+			if pending[category] != "" {
+				allowed = append(allowed, category)
+			}
+		}
+		input += "\nOnly these directions have a reserved candidate allowance: " + strings.Join(allowed, ", ") + ". Do not generate any other direction."
+	}
 	if rejected != nil {
 		input += "\nRepair only these missing or duplicate categories: " + strings.Join(missingDirectionCategories(request.accepted), ", ") + ". Keep all previously accepted proposals unchanged. Prior batch finding: " + rejected.Error()
 	}
 	if len(request.accepted) > 0 {
 		input += "\nAlready accepted proposals to preserve verbatim: " + jsonText(request.accepted) + "\nGenerate candidates only for the missing categories: " + strings.Join(missingDirectionCategories(request.accepted), ", ")
 	}
-	out, err := e.agent(ctx, request.project, model.Task{ID: request.budgetTaskID, Issue: model.Issue{Title: "innovation"}}, provider.Input{Role: "ideate", Purpose: "generation", CWD: request.scratch, Prompt: input, ReadOnly: true})
+	out, err := e.agent(ctx, request.project, model.ExecutionPlan{ID: request.budgetTaskID, Issue: model.Issue{Title: "innovation"}}, provider.Input{Role: "ideate", Purpose: "generation", CWD: request.scratch, Prompt: input, ReadOnly: true})
 	if err != nil {
 		return nil, nil, false, err
 	}
-	var directions []model.Direction
-	if err := provider.JSON(out.Text, &directions); err != nil {
+	directions, err := decodeGeneratedIdeas(out.Text)
+	if err != nil {
+		if len(recovered) > 0 {
+			return e.validateDirectionAttempt(ctx, request, recovered)
+		}
 		return nil, err, false, nil
+	}
+	if operationID(ctx) != "" {
+		eligible := directions[:0]
+		for _, direction := range directions {
+			if pending[direction.Category] != "" {
+				eligible = append(eligible, direction)
+			}
+		}
+		directions = eligible
 	}
 	for n := range directions {
 		directions[n].ProjectID = request.project.ID
+		if id := request.candidateIDs[directions[n].Category]; id != "" {
+			directions[n].ID = id
+		}
 	}
+	if operationID(ctx) != "" {
+		generated := map[string]model.Direction{}
+		for _, direction := range directions {
+			if id := request.candidateIDs[direction.Category]; id != "" {
+				if _, exists := generated[id]; !exists {
+					generated[id] = direction
+				}
+			}
+		}
+		for category, id := range pending {
+			if _, exists := generated[id]; !exists {
+				generated[id] = model.Direction{ID: id, ProjectID: request.project.ID, Category: category}
+			}
+		}
+		if err := e.Store.RecordGeneratedIdeaCandidates(ctx, generated); err != nil {
+			return nil, nil, false, err
+		}
+	}
+	directions = append(recovered, directions...)
 	return e.validateDirectionAttempt(ctx, request, directions)
 }

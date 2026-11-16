@@ -49,11 +49,11 @@ func assertCancelledPersonalPR(t *testing.T, mode string, sourcePresent bool) {
 	task.Mode, task.Stage = mode, "pr_created"
 	task.PR, task.Worktree = "https://github.com/o/r/pull/17", repo
 	task.ReviewID, task.VerificationID = "retained-review", "retained-verification"
-	record, err := e.Store.Get(ctx, "tasks", task.ID)
+	record, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, record.Version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, record.Version); err != nil {
 		t.Fatal(err)
 	}
 	for _, nextMode := range []string{model.AgenticMode, model.PersonalMode} {
@@ -61,7 +61,7 @@ func assertCancelledPersonalPR(t *testing.T, mode string, sourcePresent bool) {
 			t.Fatal(err)
 		}
 	}
-	cancelled, err := e.Store.Get(ctx, "tasks", task.ID)
+	cancelled, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,9 +95,9 @@ func assertCancelledPersonalPR(t *testing.T, mode string, sourcePresent bool) {
 	}
 }
 
-func assertCancelledPRPreserved(t *testing.T, record model.Record, original model.Task) {
+func assertCancelledPRPreserved(t *testing.T, record model.Record, original model.ExecutionPlan) {
 	t.Helper()
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || !task.Cancelled() || task.PR != original.PR || task.Worktree != original.Worktree || task.ReviewID != original.ReviewID || task.VerificationID != original.VerificationID {
 		t.Fatalf("mode cancellation lost published work or evidence: %+v %v", task, err)
 	}
@@ -105,11 +105,11 @@ func assertCancelledPRPreserved(t *testing.T, record model.Record, original mode
 
 func assertCancellationUnchanged(t *testing.T, e *Engine, expected model.Record) {
 	t.Helper()
-	actual, err := e.Store.Get(context.Background(), "tasks", expected.ID)
+	actual, err := e.Store.Get(context.Background(), "execution_plans", expected.ID)
 	if err != nil || actual.Version != expected.Version || !bytes.Equal(actual.Data, expected.Data) {
 		t.Fatalf("cancelled task changed: before=%+v after=%+v error=%v", expected, actual, err)
 	}
-	tasks, err := e.Store.List(context.Background(), "tasks")
+	tasks, err := e.Store.List(context.Background(), "execution_plans")
 	if err != nil || len(tasks) != 1 {
 		t.Fatalf("unchanged source redispatched cancelled work: %+v %v", tasks, err)
 	}

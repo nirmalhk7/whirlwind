@@ -13,7 +13,7 @@ import (
 
 // Pin the document name before publishing a file. A request's later task write
 // may never commit, but retries must still find the same human-edited document.
-func (e *Engine) restoreLocalPlanIdentity(ctx context.Context, project model.Project, task *model.Task) error {
+func (e *Engine) restoreLocalPlanIdentity(ctx context.Context, project model.Project, task *model.ExecutionPlan) error {
 	ctx = store.Unstaged(ctx)
 	key := fmt.Sprintf("%s:v%d", task.ID, task.PlanVersion)
 	record, err := e.Store.Get(ctx, "plan_drafts", key)
@@ -52,7 +52,7 @@ func (e *Engine) restoreLocalPlanIdentity(ctx context.Context, project model.Pro
 	return nil
 }
 
-func (e *Engine) newLocalPlanDraft(project model.Project, task model.Task) (model.PlanDraft, error) {
+func (e *Engine) newLocalPlanDraft(project model.Project, task model.ExecutionPlan) (model.PlanDraft, error) {
 	repoName := safePlanRepoName(project.Name)
 	if repoName == "" {
 		repoName = safePlanRepoName(filepath.Base(project.Path))

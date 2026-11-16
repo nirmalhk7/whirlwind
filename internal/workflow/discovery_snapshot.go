@@ -20,18 +20,29 @@ func indexedDiscoveryChanges(index ctxengine.Index, previous discoverySnapshot, 
 		fingerprint := model.Fingerprint([]byte(entry.Text))
 		snapshot.Files[path] = fingerprint
 		if previous.Files[path] != fingerprint {
-			snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: index.Commit, Summary: "Changed indexed source"})
+			revision, summary := discoveryEvidenceRevision(index, path, fingerprint)
+			snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: revision, Summary: summary})
 			if len(changed) < 24 {
 				changed = append(changed, discoveryEntryContext(path, entry))
 			}
 		}
 	}
-	for path := range previous.Files {
-		if _, exists := snapshot.Files[path]; !exists {
-			snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: index.Commit, Summary: "Removed indexed source"})
-		}
-	}
+	appendRemovedDiscoveryEvidence(index, previous, snapshot)
 	return changed, paths
+}
+
+func appendRemovedDiscoveryEvidence(index ctxengine.Index, previous discoverySnapshot, snapshot *discoverySnapshot) {
+	for path := range previous.Files {
+		if _, exists := snapshot.Files[path]; exists || index.WorkingTreeExcluded[path] {
+			continue
+		}
+		revision, summary := index.Commit, "Removed indexed source"
+		if index.WorkingTreeDeleted[path] {
+			revision = "worktree-deleted:" + index.Commit
+			summary = "Deleted from the current working tree"
+		}
+		snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: revision, Summary: summary})
+	}
 }
 
 func discoveryEntryContext(path string, entry ctxengine.Entry) map[string]any {
@@ -66,16 +77,51 @@ func discoveryFingerprint(snapshot discoverySnapshot) string {
 	return model.Fingerprint([]byte(jsonText(identity)))
 }
 
-func addFreshDiscoveryContext(fresh bool, changed []map[string]any, paths []string, index ctxengine.Index, snapshot *discoverySnapshot) []map[string]any {
-	if !fresh || len(changed) != 0 {
-		return changed
+func addDiscoveryRepositoryContext(changed []map[string]any, paths []string, index ctxengine.Index, snapshot *discoverySnapshot) []map[string]any {
+	limit := 12
+	changedByPath := make(map[string]map[string]any, len(changed))
+	changedPaths := make([]string, 0, len(changed))
+	for _, item := range changed {
+		path, _ := item["path"].(string)
+		if path == "" {
+			continue
+		}
+		changedByPath[path] = item
+		changedPaths = append(changedPaths, path)
 	}
-	for _, path := range paths[:min(len(paths), 24)] {
-		entry := index.Files[path]
-		changed = append(changed, discoveryEntryContext(path, entry))
-		snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: index.Commit, Summary: "Explicit fresh exploration"})
+	candidates := append(append([]string{}, paths...), changedPaths...)
+	selected := rotatingDiscoveryAreas(candidates, nil, limit)
+	result := make([]map[string]any, 0, limit)
+	for _, path := range selected {
+		if item, changed := changedByPath[path]; changed {
+			result = append(result, item)
+		} else if entry, exists := index.Files[path]; exists {
+			result = append(result, discoveryEntryContext(path, entry))
+			if !hasCodeEvidence(snapshot.Evidence, path) {
+				revision, summary := discoveryEvidenceRevision(index, path, model.Fingerprint([]byte(entry.Text)))
+				snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "code", Ref: path, Revision: revision, Summary: summary})
+			}
+		} else {
+			continue
+		}
 	}
-	return changed
+	return result
+}
+
+func discoveryEvidenceRevision(index ctxengine.Index, path, fingerprint string) (string, string) {
+	if _, changed := index.WorkingTreeFiles[path]; changed {
+		return "worktree:" + index.Commit + ":" + fingerprint, "Current working-tree source"
+	}
+	return index.Commit, "Current indexed source for exploration"
+}
+
+func hasCodeEvidence(evidence []model.EvidenceRef, path string) bool {
+	for _, ref := range evidence {
+		if ref.Kind == "code" && ref.Ref == path {
+			return true
+		}
+	}
+	return false
 }
 
 func boundedSources(sources string) string {

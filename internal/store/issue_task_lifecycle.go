@@ -6,7 +6,7 @@ import (
 	"whirlwind/internal/model"
 )
 
-func updateIssueTask(t *model.Task, i model.Issue) bool {
+func updateIssueTask(t *model.ExecutionPlan, i model.Issue) bool {
 	if t.Cancelled() || issueUpdateIsStale(t.Issue, i) {
 		return false
 	}
@@ -30,7 +30,7 @@ func issueUpdateIsStale(previous, incoming model.Issue) bool {
 	return incomingErr == nil && existingErr == nil && incomingTime.Before(existingTime)
 }
 
-func resumeWithdrawnIssue(task *model.Task, issue model.Issue) bool {
+func resumeWithdrawnIssue(task *model.ExecutionPlan, issue model.Issue) bool {
 	withdrawn := !task.Issue.Eligible() && task.Stage == "paused" && task.Error == "Issue closed or whirlwind:ready removed"
 	if !withdrawn || !sameIssueContent(task.Issue, issue) {
 		return false
@@ -46,7 +46,7 @@ func resumeWithdrawnIssue(task *model.Task, issue model.Issue) bool {
 	return true
 }
 
-func updateIssueTimestamp(task *model.Task, issue model.Issue) bool {
+func updateIssueTimestamp(task *model.ExecutionPlan, issue model.Issue) bool {
 	if task.Issue.UpdatedAt == issue.UpdatedAt {
 		return false
 	}
@@ -54,7 +54,7 @@ func updateIssueTimestamp(task *model.Task, issue model.Issue) bool {
 	return true
 }
 
-func withdrawIssueTask(t *model.Task, i model.Issue) bool {
+func withdrawIssueTask(t *model.ExecutionPlan, i model.Issue) bool {
 	if t.EligibilityOverride && sameIssueContent(t.Issue, i) {
 		return false
 	}
@@ -72,7 +72,7 @@ func sameIssueContent(a, b model.Issue) bool {
 	return a.Body == b.Body && a.Title == b.Title
 }
 
-func invalidateIssueTask(t *model.Task) {
+func invalidateIssueTask(t *model.ExecutionPlan) {
 	t.ImplementationAttempts = nil
 	t.Approval = nil
 	t.VerificationID = ""
@@ -104,7 +104,7 @@ func invalidateIssueTask(t *model.Task) {
 	}
 }
 
-func authorizeReady(t *model.Task, p model.Project) {
+func authorizeReady(t *model.ExecutionPlan, p model.Project) {
 	if t.Issue.Number > 0 {
 		t.Sources = []model.SourceRef{{Host: "github.com", Connection: "gh", Repository: p.Repo, ID: fmt.Sprint(t.Issue.Number), URL: t.Issue.URL, Revision: t.Issue.UpdatedAt}}
 	}

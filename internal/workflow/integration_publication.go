@@ -37,7 +37,7 @@ func inspectedDefaultBranch(ctx context.Context, project model.Project, raw json
 
 // PreflightPublication verifies exact native destination capabilities before
 // implementation. Only witnessed read-only tools may run during preflight.
-func (e *Engine) PreflightPublication(ctx context.Context, p model.Project, task model.Task) error {
+func (e *Engine) PreflightPublication(ctx context.Context, p model.Project, task model.ExecutionPlan) error {
 	target, err := e.publicationTarget(ctx, p)
 	if err != nil {
 		return err

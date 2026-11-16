@@ -20,7 +20,7 @@ func localPlanHash(content string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (e *Engine) localPlanLocation(task model.Task) (string, string, error) {
+func (e *Engine) localPlanLocation(task model.ExecutionPlan) (string, string, error) {
 	if !localPlanID(task.ProjectID) || !localPlanID(task.ID) || task.PlanVersion < 1 {
 		return "", "", errors.New("local plans require safe task/project IDs and a positive version")
 	}
@@ -96,7 +96,7 @@ func localPlanComponents(root *os.Root, relative string) error {
 	return nil
 }
 
-func (e *Engine) readLocalPlanFile(task model.Task) (string, error) {
+func (e *Engine) readLocalPlanFile(task model.ExecutionPlan) (string, error) {
 	rootPath, relative, err := e.localPlanLocation(task)
 	if err != nil {
 		return "", err
@@ -152,7 +152,7 @@ func openLocalPlanFile(root *os.Root, relative string) (*os.File, error) {
 	return file, nil
 }
 
-func (e *Engine) writeLocalPlanFile(task model.Task, content string) (string, error) {
+func (e *Engine) writeLocalPlanFile(task model.ExecutionPlan, content string) (string, error) {
 	if len(content) > maxLocalPlanBytes {
 		return "", errors.New("local plan exceeds 1 MiB")
 	}

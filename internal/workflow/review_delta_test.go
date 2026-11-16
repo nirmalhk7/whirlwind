@@ -17,7 +17,7 @@ func TestSaveReviewStoresComputedPercentageAndOnlyPassedRequirementOutcomes(t *t
 	task.VerificationID = "verification-for-review"
 	task.PlanVersion = 3
 	task.ReviewedCommit = "candidate-head"
-	task.Plan = &model.Plan{AcceptanceCriteria: []string{"legacy summary"}, Requirements: []model.Requirement{{ID: "R1", Outcome: "API behavior works", EvidenceMethod: "test"}, {ID: "R2", Outcome: "migration preserves history", EvidenceMethod: "test"}}}
+	task.Plan = &model.PlanSpecification{AcceptanceCriteria: []string{"legacy summary"}, Requirements: []model.Requirement{{ID: "R1", Outcome: "API behavior works", EvidenceMethod: "test"}, {ID: "R2", Outcome: "migration preserves history", EvidenceMethod: "test"}}}
 	project, err := e.Project(ctx, task.ProjectID)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestRepairReviewUsesDeltaOnlyWithMatchingPriorEvidence(t *testing.T) {
 	task.Worktree = repo
 	task.Base = git(reviewDeltaGitRevParse, "HEAD")
 	task.Risk = "low"
-	task.Plan = &model.Plan{Objective: "fix", AcceptanceCriteria: []string{"correct"}}
+	task.Plan = &model.PlanSpecification{Objective: "fix", AcceptanceCriteria: []string{"correct"}}
 	if err := os.WriteFile(filepath.Join(repo, "first.txt"), []byte("first change\n"), 0600); err != nil {
 		t.Fatal(err)
 	}

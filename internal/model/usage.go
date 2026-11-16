@@ -7,7 +7,7 @@ type UsageEntry struct {
 	ExecutionProfile string `json:"execution_profile,omitempty"`
 	PlanVersion      int    `json:"plan_version,omitempty"`
 	AttemptID        string `json:"attempt_id"`
-	TaskID           string `json:"task_id"`
+	TaskID           string `json:"plan_id"`
 	ProjectID        string `json:"project_id"`
 	OperationID      string `json:"operation_id,omitempty"`
 	Provider         string `json:"provider"`
@@ -27,7 +27,7 @@ type UsageReport struct {
 	ActiveVerificationRuns int                 `json:"active_verification_runs"`
 	UncertainReservations  []BudgetReservation `json:"uncertain_reservations"`
 	CacheWriteTokens       int64               `json:"cache_write_tokens"`
-	TaskID                 string              `json:"task_id"`
+	TaskID                 string              `json:"plan_id"`
 	Attempts               int                 `json:"attempts"`
 	TotalTokens            int64               `json:"total_tokens"`
 	InputTokens            int64               `json:"input_tokens"`

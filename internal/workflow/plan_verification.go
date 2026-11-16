@@ -8,7 +8,7 @@ import (
 	"whirlwind/internal/model"
 )
 
-func planVerificationChecks(policy model.Policy, plan model.Plan) ([]model.Check, error) {
+func planVerificationChecks(policy model.Policy, plan model.PlanSpecification) ([]model.Check, error) {
 	checks := append([]model.Check{}, policy.Checks...)
 	seen := map[string]bool{}
 	for _, check := range checks {
@@ -25,7 +25,7 @@ func planVerificationChecks(policy model.Policy, plan model.Plan) ([]model.Check
 	if err := appendRepositoryCommands(&checks, seen, "build", plan.RepositoryBuildCommands); err != nil {
 		return nil, err
 	}
-	return includeMandatoryQltyChecks(checks)
+	return checks, nil
 }
 
 func appendApprovedPlanCheck(checks *[]model.Check, seen map[string]bool, check model.Check) error {
@@ -53,26 +53,4 @@ func appendRepositoryCommands(checks *[]model.Check, seen map[string]bool, kind 
 		*checks = append(*checks, model.Check{Name: name, Command: append([]string{}, command...)})
 	}
 	return nil
-}
-
-func includeMandatoryQltyChecks(checks []model.Check) ([]model.Check, error) {
-	mandatory := []model.Check{
-		{Name: "qlty-smells", Command: []string{"qlty", "smells", "--all", "--sarif"}},
-		{Name: "qlty-check", Command: []string{"qlty", "check", "--all", "--sarif"}},
-	}
-	seen := make(map[string]model.Check, len(checks))
-	for _, check := range checks {
-		seen[check.Name] = check
-	}
-	for _, required := range mandatory {
-		if configured, exists := seen[required.Name]; exists {
-			if strings.Join(configured.Command, "\x00") != strings.Join(required.Command, "\x00") {
-				return nil, fmt.Errorf("configured check %q conflicts with mandatory Qlty gate", required.Name)
-			}
-			continue
-		}
-		checks = append(checks, required)
-		seen[required.Name] = required
-	}
-	return checks, nil
 }

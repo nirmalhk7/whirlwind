@@ -8,7 +8,7 @@ import (
 	"whirlwind/internal/store"
 )
 
-func (e *Engine) measuredProgress(ctx context.Context, t *model.Task) (bool, error) {
+func (e *Engine) measuredProgress(ctx context.Context, t *model.ExecutionPlan) (bool, error) {
 	failing, err := e.progressFailingChecks(ctx, t)
 	if err != nil {
 		return false, err
@@ -21,11 +21,11 @@ func (e *Engine) measuredProgress(ctx context.Context, t *model.Task) (bool, err
 	observed := model.ProgressEvidence{ChecksKnown: t.VerificationID != "" || len(t.Handoff.FailingTests) > 0 || t.ChecksPassed, ReviewKnown: t.ReviewID != "", PlanVersion: t.PlanVersion, FailingChecks: len(failing), BlockingFindings: len(blockers), CompletedCriteria: len(criteria)}
 	improved := progressImproved(t.Progress, observed)
 	t.Progress = mergeProgress(t.Progress, observed)
-	evidence := map[string]any{"task": t.ID, "plan_version": t.PlanVersion, "observed": observed, "improved": improved, "diff_fingerprint": t.Fingerprint}
+	evidence := map[string]any{"plan_id": t.ID, "plan_version": t.PlanVersion, "observed": observed, "improved": improved, "diff_fingerprint": t.Fingerprint}
 	return improved, e.Store.Put(ctx, "progress", store.ID(), evidence, 0)
 }
 
-func (e *Engine) progressFailingChecks(ctx context.Context, t *model.Task) (map[string]bool, error) {
+func (e *Engine) progressFailingChecks(ctx context.Context, t *model.ExecutionPlan) (map[string]bool, error) {
 	failing := map[string]bool{}
 	for _, failure := range t.Handoff.FailingTests {
 		name, _, _ := strings.Cut(failure, ":")
@@ -57,7 +57,7 @@ func (e *Engine) progressFailingChecks(ctx context.Context, t *model.Task) (map[
 	return failing, nil
 }
 
-func (e *Engine) progressBlockingFindings(ctx context.Context, t *model.Task) (map[string]bool, error) {
+func (e *Engine) progressBlockingFindings(ctx context.Context, t *model.ExecutionPlan) (map[string]bool, error) {
 	blockers := map[string]bool{}
 	if t.ReviewID != "" {
 		record, err := e.Store.Get(ctx, "reviews", t.ReviewID)
@@ -77,7 +77,7 @@ func (e *Engine) progressBlockingFindings(ctx context.Context, t *model.Task) (m
 	return blockers, nil
 }
 
-func completedCriteria(t *model.Task) map[string]bool {
+func completedCriteria(t *model.ExecutionPlan) map[string]bool {
 	criteria := map[string]bool{}
 	for _, criterion := range t.Handoff.CompletedCriteria {
 		criteria[criterion] = true

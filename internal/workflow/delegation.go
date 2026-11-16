@@ -78,7 +78,7 @@ func scopePrefix(pattern string) string {
 	return strings.TrimSuffix(pattern, "/")
 }
 
-func planForUnit(plan model.Plan, n int) model.Plan {
+func planForUnit(plan model.PlanSpecification, n int) model.PlanSpecification {
 	plan.Units = []model.Unit{plan.Units[n]}
 	return plan
 }

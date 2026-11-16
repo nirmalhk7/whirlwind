@@ -21,7 +21,7 @@ func TestAgentContextNeverCallsEmbeddingEndpointDirectly(t *testing.T) {
 	run := &agentRun{
 		ctx:     context.Background(),
 		project: model.Project{Policy: model.Policy{Embeddings: &model.Embeddings{Endpoint: server.URL, Model: "test", Enabled: true}}},
-		task:    model.Task{Issue: model.Issue{Title: "Improve search", Body: "Current search repeats queries"}},
+		task:    model.ExecutionPlan{Issue: model.Issue{Title: "Improve search", Body: "Current search repeats queries"}},
 		index:   ctxengine.Index{EmbeddingValidated: true, Files: map[string]ctxengine.Entry{"search.go": {Path: "search.go", Vector: []float64{1, 0}}}},
 	}
 	if _, err := run.embeddingEntries(); err == nil {

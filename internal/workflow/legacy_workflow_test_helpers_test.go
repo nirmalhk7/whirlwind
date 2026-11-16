@@ -11,7 +11,7 @@ import (
 	"whirlwind/internal/store"
 )
 
-func completeAcceptedLocalDeliveryFixture(t *testing.T, engine *Engine, task model.Task, project model.Project, record model.Record) model.Task {
+func completeAcceptedLocalDeliveryFixture(t *testing.T, engine *Engine, task model.ExecutionPlan, project model.Project, record model.Record) model.ExecutionPlan {
 	t.Helper()
 	ctx := context.Background()
 	step := &taskStep{Engine: engine, ctx: ctx, project: project, task: task, record: record}
@@ -23,7 +23,7 @@ func completeAcceptedLocalDeliveryFixture(t *testing.T, engine *Engine, task mod
 		if finished {
 			break
 		}
-		if err := engine.Store.Put(ctx, "tasks", step.task.ID, step.task, step.record.Version); err != nil {
+		if err := engine.Store.Put(ctx, "execution_plans", step.task.ID, step.task, step.record.Version); err != nil {
 			t.Fatal(err)
 		}
 		step.record.Version++
@@ -34,7 +34,7 @@ func completeAcceptedLocalDeliveryFixture(t *testing.T, engine *Engine, task mod
 	return step.task
 }
 
-func approvedUnitCheckpointFixture(t *testing.T) (*Engine, model.Task, model.Project, []int) {
+func approvedUnitCheckpointFixture(t *testing.T) (*Engine, model.ExecutionPlan, model.Project, []int) {
 	t.Helper()
 	engine, task, _ := testEngine(t)
 	project, err := engine.Project(context.Background(), task.ProjectID)
@@ -49,7 +49,7 @@ func approvedUnitCheckpointFixture(t *testing.T) (*Engine, model.Task, model.Pro
 	return engine, task, project, []int{0, 1}
 }
 
-func approveCheckpointPlan(t *testing.T, engine *Engine, project model.Project, task model.Task, units []model.Unit) model.Task {
+func approveCheckpointPlan(t *testing.T, engine *Engine, project model.Project, task model.ExecutionPlan, units []model.Unit) model.ExecutionPlan {
 	t.Helper()
 	ctx := context.Background()
 	where := []string{resultFile}
@@ -65,7 +65,7 @@ func approveCheckpointPlan(t *testing.T, engine *Engine, project model.Project, 
 	task.Stage = "planning"
 	task.PlanVersion = 1
 	task.Worktree, task.Branch, task.Base = "", "", ""
-	task.Plan = &model.Plan{
+	task.Plan = &model.PlanSpecification{
 		Objective:                "Integrate independent implementation units",
 		What:                     "Create each unit's files and combine the committed results.",
 		Why:                      "The repository needs all scoped changes in one candidate.",
@@ -82,50 +82,36 @@ func approveCheckpointPlan(t *testing.T, engine *Engine, project model.Project, 
 		Requirements:             []model.Requirement{{ID: "REQ-UNITS", Outcome: "Every approved unit checkpoint is integrated once into this candidate.", EvidenceMethod: "Inspect the integrated commit tree and each persisted unit checkpoint."}},
 		Units:                    units,
 	}
-	record, err := engine.Store.Get(ctx, "tasks", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.Store.Put(ctx, "tasks", task.ID, task, record.Version); err != nil {
-		t.Fatal(err)
-	}
+	record, err := engine.Store.Get(ctx, "execution_plans", task.ID)
+	requireWorkflowSuccess(t, err)
+	requireWorkflowSuccess(t, engine.Store.Put(ctx, "execution_plans", task.ID, task, record.Version))
 	if err := engine.WriteLocalPlan(ctx, project, &task); err != nil {
 		t.Fatalf("publish local plan for human approval: %v", err)
 	}
-	record, err = engine.Store.Get(ctx, "tasks", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.Store.Put(ctx, "tasks", task.ID, task, record.Version); err != nil {
-		t.Fatal(err)
-	}
+	record, err = engine.Store.Get(ctx, "execution_plans", task.ID)
+	requireWorkflowSuccess(t, err)
+	requireWorkflowSuccess(t, engine.Store.Put(ctx, "execution_plans", task.ID, task, record.Version))
 	view, err := engine.ReadLocalPlan(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	record, err = engine.Store.Get(ctx, "tasks", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
+	record, err = engine.Store.Get(ctx, "execution_plans", task.ID)
+	requireWorkflowSuccess(t, err)
 	if err := engine.ReviewLocalPlan(ctx, task.ID, record.Version, "approve", view.Hash, ""); err != nil {
 		t.Fatalf("approve detailed plan: %v", err)
 	}
 	approved, _, err := localStoredTaskRecord(ctx, engine.Store, task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if approved.Stage != "coding" || approved.PlanDocument == nil || approved.PlanDocument.ApprovedHash != view.Hash {
 		t.Fatalf("human approval did not freeze the plan: %+v", approved)
 	}
 	return approved
 }
 
-func localStoredTaskRecord(ctx context.Context, database *store.Store, id string) (model.Task, int, error) {
-	record, err := database.Get(ctx, "tasks", id)
+func localStoredTaskRecord(ctx context.Context, database *store.Store, id string) (model.ExecutionPlan, int, error) {
+	record, err := database.Get(ctx, "execution_plans", id)
 	if err != nil {
-		return model.Task{}, 0, err
+		return model.ExecutionPlan{}, 0, err
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	return task, record.Version, err
 }
 
@@ -135,7 +121,7 @@ func (unexpectedUnitAdapter) Run(context.Context, provider.Input, provider.Hooks
 	return provider.Output{}, errors.New("completed durable unit was executed again")
 }
 
-func validateIntegratedUnitCommits(t *testing.T, task model.Task) {
+func validateIntegratedUnitCommits(t *testing.T, task model.ExecutionPlan) {
 	t.Helper()
 	if task.Plan == nil {
 		t.Fatal("approved unit plan missing")

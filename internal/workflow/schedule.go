@@ -8,21 +8,25 @@ import (
 )
 
 type IdeationSchedule struct {
-	MaxCandidates         int    `json:"max_candidates,omitempty"`
-	HistoryTokenBudget    int    `json:"history_token_budget,omitempty"`
-	HistoryRunTokenBudget int    `json:"history_run_token_budget,omitempty"`
-	HistoryRecordLimit    int    `json:"history_record_limit,omitempty"`
-	NoveltyRepairAttempts int    `json:"novelty_repair_attempts,omitempty"`
-	Enabled               bool   `json:"enabled"`
-	Time                  string `json:"time"`
-	Timezone              string `json:"timezone"`
+	MaxAttemptsPerDirection int    `json:"max_attempts_per_direction"`
+	MaxCandidates           int    `json:"max_candidates,omitempty"`
+	HistoryTokenBudget      int    `json:"history_token_budget,omitempty"`
+	HistoryRunTokenBudget   int    `json:"history_run_token_budget,omitempty"`
+	HistoryRecordLimit      int    `json:"history_record_limit,omitempty"`
+	NoveltyRepairAttempts   int    `json:"novelty_repair_attempts,omitempty"`
+	Enabled                 bool   `json:"enabled"`
+	Time                    string `json:"time"`
+	Timezone                string `json:"timezone"`
 }
 
 func DefaultSettings() Settings {
-	return Settings{GlobalSlots: 4, ProjectSlots: 2, ReconciliationSeconds: 300, ProviderStatusCheckSeconds: 30, Ideation: IdeationSchedule{Enabled: true, Time: "10:00", Timezone: "America/Denver", HistoryTokenBudget: 4000, HistoryRunTokenBudget: 12000, HistoryRecordLimit: 12, NoveltyRepairAttempts: 3}}
+	return Settings{GlobalSlots: 4, ProjectSlots: 2, ReconciliationSeconds: 300, ProviderStatusCheckSeconds: 30, Ideation: IdeationSchedule{MaxAttemptsPerDirection: 5, Enabled: true, Time: "10:00", Timezone: "America/Denver", HistoryTokenBudget: 4000, HistoryRunTokenBudget: 12000, HistoryRecordLimit: 12, NoveltyRepairAttempts: 3}}
 }
 
 func (s IdeationSchedule) Validate() error {
+	if s.MaxAttemptsPerDirection < 0 || s.MaxAttemptsPerDirection > 5 {
+		return fmt.Errorf("max_attempts_per_direction must be between 1 and 5 when configured")
+	}
 	if s.MaxCandidates < 0 || s.MaxCandidates > 12 {
 		return fmt.Errorf("max_candidates must be between 1 and 12 when configured")
 	}

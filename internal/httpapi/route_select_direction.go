@@ -29,24 +29,21 @@ func (q apiRequest) processDirectionSelection(d model.Direction, record model.Re
 	if err != nil {
 		return err
 	}
-	if err := q.unselectGroupPeers(d); err != nil {
-		return err
-	}
 	if err := q.saveSelectedDirectionTask(task); err != nil {
 		return err
 	}
 	return q.persistDirectionSelection(d, record, taskID)
 }
 
-func (q apiRequest) prepareDirectionTask(d model.Direction, record model.Record, taskID string) (model.Task, error) {
-	task := model.Task{Mode: q.Engine.WorkflowConfiguration(q.r.Context()).ActiveMode, ID: taskID, ProjectID: d.ProjectID, Issue: model.Issue{Title: d.Title, Body: d.Description}, PlanVersion: 1, Stage: "planning", Handoff: model.Handoff{Version: 1, NextAction: "plan selected direction"}}
+func (q apiRequest) prepareDirectionTask(d model.Direction, record model.Record, taskID string) (model.ExecutionPlan, error) {
+	task := model.ExecutionPlan{Mode: q.Engine.WorkflowConfiguration(q.r.Context()).ActiveMode, ID: taskID, ProjectID: d.ProjectID, Issue: model.Issue{Title: d.Title, Body: d.Description}, PlanVersion: 1, Stage: "planning", Handoff: model.Handoff{Version: 1, NextAction: "plan selected direction"}}
 	task.Sources = directionSourceRefs(d)
 	if d.SourceIssue != nil {
 		task.Issue = *d.SourceIssue
 	}
 	project, err := q.Engine.Project(q.r.Context(), d.ProjectID)
 	if err != nil {
-		return model.Task{}, err
+		return model.ExecutionPlan{}, err
 	}
 	scope := d.Scope
 	if len(scope) == 0 {
@@ -69,23 +66,23 @@ func (q apiRequest) persistDirectionSelection(d model.Direction, record model.Re
 	if err := q.Store.Put(q.r.Context(), "directions", q.id, d, record.Version); err != nil {
 		return err
 	}
-	saved, _ := q.Store.Get(q.r.Context(), "tasks", taskID)
+	saved, _ := q.Store.Get(q.r.Context(), "execution_plans", taskID)
 	reply(q.w, 202, saved)
 	return nil
 }
 
 func (q apiRequest) selectedDirectionTaskID(direction model.Direction) string {
-	taskID := directionTaskPrefix + direction.ID
+	taskID := model.PlanID(directionTaskPrefix + direction.ID)
 	if direction.TaskID != "" {
 		taskID = direction.TaskID
 	}
-	record, err := q.Store.Get(q.r.Context(), "tasks", taskID)
+	record, err := q.Store.Get(q.r.Context(), "execution_plans", taskID)
 	if err != nil {
 		return taskID
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err == nil && task.Cancelled() {
-		return directionTaskPrefix + direction.ID + "-" + store.ID()
+		return model.NewPlanID()
 	}
 	return taskID
 }
@@ -105,20 +102,20 @@ func directionSourceRefs(direction model.Direction) []model.SourceRef {
 	return sources
 }
 
-func (q apiRequest) saveSelectedDirectionTask(task model.Task) error {
+func (q apiRequest) saveSelectedDirectionTask(task model.ExecutionPlan) error {
 	taskID := task.ID
-	existing, loadErr := q.Store.Get(q.r.Context(), "tasks", taskID)
+	existing, loadErr := q.Store.Get(q.r.Context(), "execution_plans", taskID)
 	switch {
 	case errors.Is(loadErr, store.ErrNotFound):
-		return q.Store.Put(q.r.Context(), "tasks", taskID, task, 0)
+		return q.Store.Put(q.r.Context(), "execution_plans", taskID, task, 0)
 	case loadErr != nil:
 		return loadErr
 	}
 	return q.updateSelectedDirectionTask(task, existing)
 }
 
-func (q apiRequest) updateSelectedDirectionTask(task model.Task, existing model.Record) error {
-	current, err := store.Decode[model.Task](existing)
+func (q apiRequest) updateSelectedDirectionTask(task model.ExecutionPlan, existing model.Record) error {
+	current, err := store.Decode[model.ExecutionPlan](existing)
 	if err != nil {
 		return err
 	}
@@ -135,14 +132,14 @@ func (q apiRequest) updateSelectedDirectionTask(task model.Task, existing model.
 			current.ResumeStage = task.ResumeStage
 			current.Error = task.Error
 		}
-		return q.Store.Put(q.r.Context(), "tasks", task.ID, current, existing.Version)
+		return q.Store.Put(q.r.Context(), "execution_plans", task.ID, current, existing.Version)
 	}
 	if current.Stage == "paused" && current.Error == directionUnselectedReason {
 		current.Selection = task.Selection
 		current.Stage = current.ResumeStage
 		current.ResumeStage = ""
 		current.Error = ""
-		return q.Store.Put(q.r.Context(), "tasks", task.ID, current, existing.Version)
+		return q.Store.Put(q.r.Context(), "execution_plans", task.ID, current, existing.Version)
 	}
 	return nil
 }
@@ -179,15 +176,15 @@ func directionTask(d model.Direction) string {
 	if d.TaskID != "" {
 		return d.TaskID
 	}
-	return directionTaskPrefix + d.ID
+	return model.PlanID(directionTaskPrefix + d.ID)
 }
 
 func (q apiRequest) pauseDirectionTask(id string) error {
-	record, err := q.Store.Get(q.r.Context(), "tasks", id)
+	record, err := q.Store.Get(q.r.Context(), "execution_plans", id)
 	if err != nil {
 		return directionTaskLoadError(err)
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		return err
 	}
@@ -199,7 +196,7 @@ func (q apiRequest) pauseDirectionTask(id string) error {
 	}
 	task.Stage = "paused"
 	task.Error = directionUnselectedReason
-	if err := q.Store.Put(q.r.Context(), "tasks", id, task, record.Version); err != nil {
+	if err := q.Store.Put(q.r.Context(), "execution_plans", id, task, record.Version); err != nil {
 		return err
 	}
 	store.AfterCommit(q.r.Context(), func() { q.Engine.Stop(id) })

@@ -84,7 +84,33 @@ func registerCommandCapabilities(cmd *exec.Cmd, p Profile, token string, c *prox
 			return fmt.Errorf(capabilityRegistrationError, ErrSandbox, err)
 		}
 	}
-	return c.environment(cmd.Env, p.Environment)
+	if err := c.environment(cmd.Env, p.Environment); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, credential := range p.Credentials {
+		scheme, name, err := credentialReference(credential.CredentialKey)
+		if err != nil {
+			return err
+		}
+		if scheme != "env" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		for _, entry := range cmd.Env {
+			key, value, _ := strings.Cut(entry, "=")
+			if key != name {
+				continue
+			}
+			if len(value) < 16 {
+				return fmt.Errorf("%w: credential environment reference %s is too short to register safely", ErrSandbox, name)
+			}
+			if err := c.register(value); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 func bindCommandCapabilities(cmd *exec.Cmd, p Profile, token string, c *proxyCapabilities) error {
 	if err := process.OnCleanup(cmd, c.release); err != nil {

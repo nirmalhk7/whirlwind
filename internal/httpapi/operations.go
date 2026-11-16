@@ -2,9 +2,11 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"time"
 	"whirlwind/internal/model"
+	"whirlwind/internal/store"
 )
 
 func (q apiRequest) operation(kind, subject string, input any) model.Operation {
@@ -15,7 +17,27 @@ func (q apiRequest) finishOperation(id string, value any) {
 	defer cancel()
 	record, err := q.Store.Get(ctx, "operations", id)
 	if err == nil {
-		err = q.Store.Put(ctx, "operations", id, value, record.Version)
+		var current, result map[string]json.RawMessage
+		var encoded []byte
+		encoded, err = json.Marshal(value)
+		if err == nil {
+			err = json.Unmarshal(encoded, &result)
+		}
+		if err == nil {
+			err = json.Unmarshal(record.Data, &current)
+		}
+		if err == nil {
+			if string(current["stage"]) != `"running"` || string(current["owner"]) != string(result["owner"]) || string(current["kind"]) != string(result["kind"]) || string(current["subject"]) != string(result["subject"]) {
+				err = store.ErrConflict
+			} else {
+				for _, key := range []string{"repository_revision", "configuration_hash"} {
+					if pinned, ok := current[key]; ok {
+						result[key] = pinned
+					}
+				}
+				err = q.Store.Put(ctx, "operations", id, result, record.Version)
+			}
+		}
 	}
 	if err != nil {
 		log.Printf("persist operation %s completion: %v", id, err)

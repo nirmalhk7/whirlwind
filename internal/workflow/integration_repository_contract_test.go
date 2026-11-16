@@ -48,7 +48,7 @@ func TestIntegrationPRResultRequiresExactDestination(t *testing.T) {
 	}
 }
 
-func nativePublicationFixture(t *testing.T) (*Engine, model.Project, model.Task) {
+func nativePublicationFixture(t *testing.T) (*Engine, model.Project, model.ExecutionPlan) {
 	t.Helper()
 	e, task, _ := testEngine(t)
 	ctx := context.Background()
@@ -82,7 +82,7 @@ func nativeFixtureCatalog() []model.Integration {
 	return []model.Integration{{Provider: "fake", Ref: agenticFixtureConnection, Enabled: true, Callable: true, Tools: []model.IntegrationTool{{Name: "repo_info", ReadOnly: true}, {Name: "find_pr", ReadOnly: true}, {Name: "open_pr"}}}}
 }
 
-func prepareNativeFixtureCapabilities(t *testing.T, e *Engine, project model.Project, task model.Task) {
+func prepareNativeFixtureCapabilities(t *testing.T, e *Engine, project model.Project, task model.ExecutionPlan) {
 	t.Helper()
 	previous := e.Adapter
 	e.Adapter = func(model.Provider) provider.Adapter {

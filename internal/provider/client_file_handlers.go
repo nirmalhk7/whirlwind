@@ -99,7 +99,7 @@ func (c *Client) writablePath(filePath string) (string, string, string, error) {
 		return "", "", "", err
 	}
 	relative, err := filepath.Rel(root, path)
-	if err != nil || !policy.AllowedPath(c.input.Policy, relative) {
+	if err != nil || (!c.plannerOutputPath(path) && !policy.AllowedPath(c.input.Policy, relative)) {
 		return "", "", "", errors.New("ACP write outside committed scope")
 	}
 	return path, root, relative, nil

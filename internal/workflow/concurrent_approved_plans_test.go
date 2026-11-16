@@ -72,7 +72,7 @@ func TestApprovedPlansForSameRepositoryExecuteConcurrentlyInIndependentWorktrees
 		t.Fatal(err)
 	}
 
-	tasks := []model.Task{
+	tasks := []model.ExecutionPlan{
 		approveConcurrentPlan(t, e, project, first, "plan-a", "plan-a-unit", concurrentPlanAFile),
 		approveConcurrentPlan(t, e, project, first, "plan-b", "plan-b-unit", concurrentPlanBFile),
 	}
@@ -180,7 +180,7 @@ func TestApprovedPlansForSameRepositoryExecuteConcurrentlyInIndependentWorktrees
 	}
 }
 
-func approveConcurrentPlan(t *testing.T, e *Engine, project model.Project, template model.Task, id, unitID, file string) model.Task {
+func approveConcurrentPlan(t *testing.T, e *Engine, project model.Project, template model.ExecutionPlan, id, unitID, file string) model.ExecutionPlan {
 	t.Helper()
 	ctx := context.Background()
 	task := template
@@ -190,7 +190,7 @@ func approveConcurrentPlan(t *testing.T, e *Engine, project model.Project, templ
 	task.Stage = "planning"
 	task.Error = ""
 	task.Worktree, task.Branch, task.Base = "", "", ""
-	task.Plan = &model.Plan{
+	task.Plan = &model.PlanSpecification{
 		Objective:                "Implement independent change " + id,
 		What:                     "Add " + file,
 		Why:                      "This plan owns a separate proposed change.",
@@ -214,45 +214,33 @@ func approveConcurrentPlan(t *testing.T, e *Engine, project model.Project, templ
 			task.Selection = &selection
 		}
 	}
-	record, err := e.Store.Get(ctx, "tasks", task.ID)
+	record, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	expected := 0
 	if err == nil {
 		expected = record.Version
 	} else if err != store.ErrNotFound {
 		t.Fatal(err)
 	}
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, expected); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, task, expected))
 	if err := e.WriteLocalPlan(ctx, project, &task); err != nil {
 		t.Fatalf("write plan %s: %v", id, err)
 	}
-	stored, err := e.Store.Get(ctx, "tasks", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, stored.Version); err != nil {
-		t.Fatal(err)
-	}
+	stored, err := e.Store.Get(ctx, "execution_plans", task.ID)
+	requireWorkflowSuccess(t, err)
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, task, stored.Version))
 	view, err := e.ReadLocalPlan(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("read plan %s for human approval: %v", id, err)
 	}
-	stored, err = e.Store.Get(ctx, "tasks", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	stored, err = e.Store.Get(ctx, "execution_plans", task.ID)
+	requireWorkflowSuccess(t, err)
 	if err := e.ReviewLocalPlan(ctx, task.ID, stored.Version, "approve", view.Hash, ""); err != nil {
 		t.Fatalf("human approval for plan %s: %v", id, err)
 	}
-	stored, err = e.Store.Get(ctx, "tasks", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	approved, err := store.Decode[model.Task](stored)
-	if err != nil {
-		t.Fatal(err)
-	}
+	stored, err = e.Store.Get(ctx, "execution_plans", task.ID)
+	requireWorkflowSuccess(t, err)
+	approved, err := store.Decode[model.ExecutionPlan](stored)
+	requireWorkflowSuccess(t, err)
 	if approved.Stage != "coding" || approved.PlanDocument == nil || approved.PlanDocument.ApprovedHash != view.Hash {
 		t.Fatalf("plan %s was not frozen by explicit approval: %+v", id, approved)
 	}

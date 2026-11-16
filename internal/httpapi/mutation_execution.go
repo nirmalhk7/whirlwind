@@ -108,7 +108,7 @@ func (s *Server) commitMutation(r *http.Request, batch *store.Batch, buffer *res
 			return &apiError{409, "project_busy", err.Error()}
 		}
 	} else {
-		err = s.Store.Write(r.Context(), extras, receipt)
+		err = s.Store.Write(store.Unstaged(r.Context()), extras, receipt)
 	}
 	return mutationPersistenceError(err)
 }

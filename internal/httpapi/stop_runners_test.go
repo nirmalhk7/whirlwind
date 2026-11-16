@@ -23,7 +23,7 @@ func TestStopAllRunnersPausesUnfinishedTasksAndCanReplay(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
 	for _, stage := range []string{"planning", "coding", "questions", "approval", "paused", "complete", "pr_created", "cancelled"} {
-		if err := s.Store.Put(ctx, "tasks", stage, model.Task{ID: stage, Stage: stage, ResumeStage: "review"}, 0); err != nil {
+		if err := s.Store.Put(ctx, "execution_plans", stage, model.ExecutionPlan{ID: stage, Stage: stage, ResumeStage: "review"}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -59,11 +59,11 @@ func assertPausedRunnerCount(t *testing.T, response *httptest.ResponseRecorder, 
 func assertStoppedTaskStages(t *testing.T, db *store.Store, ctx context.Context) {
 	t.Helper()
 	for _, stage := range []string{"planning", "coding", "questions", "approval", "paused", "complete", "pr_created", "cancelled"} {
-		record, err := db.Get(ctx, "tasks", stage)
+		record, err := db.Get(ctx, "execution_plans", stage)
 		if err != nil {
 			t.Fatal(err)
 		}
-		task, _ := store.Decode[model.Task](record)
+		task, _ := store.Decode[model.ExecutionPlan](record)
 		if stage == "paused" || stage == "complete" || stage == "pr_created" || stage == "cancelled" {
 			if task.Stage != stage || record.Version != 1 {
 				t.Fatalf("changed %s: %+v", stage, task)
@@ -124,7 +124,7 @@ func TestKillReceiptFailureDoesNotPersistFlagOrPauseTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(file)
-	if err := s.Store.Put(ctx, "tasks", "active", model.Task{ID: "active", Stage: "coding"}, 0); err != nil {
+	if err := s.Store.Put(ctx, "execution_plans", "active", model.ExecutionPlan{ID: "active", Stage: "coding"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Store.DB.Exec("CREATE TRIGGER fail_kill_receipt BEFORE INSERT ON idempotency BEGIN SELECT RAISE(ABORT,'receipt failure'); END"); err != nil {
@@ -135,8 +135,8 @@ func TestKillReceiptFailureDoesNotPersistFlagOrPauseTasks(t *testing.T) {
 	response := httptest.NewRecorder()
 	s.Handler().ServeHTTP(response, req)
 	after, _ := os.ReadFile(file)
-	record, _ := s.Store.Get(ctx, "tasks", "active")
-	task, _ := store.Decode[model.Task](record)
+	record, _ := s.Store.Get(ctx, "execution_plans", "active")
+	task, _ := store.Decode[model.ExecutionPlan](record)
 	if response.Code != 503 || string(before) != string(after) || task.Stage != "coding" {
 		t.Fatalf("non-atomic kill: %d task=%+v file=%s", response.Code, task, after)
 	}
@@ -149,11 +149,11 @@ func TestResumeAllRunnersPersistsFlagAndRestoresOnlyGloballyStoppedTasks(t *test
 	if err := settingsfile.Attach(ctx, s.Store, file); err != nil {
 		t.Fatal(err)
 	}
-	for _, task := range []model.Task{
+	for _, task := range []model.ExecutionPlan{
 		{ID: "active", Stage: "coding"}, {ID: "question", Stage: "questions"}, {ID: "manual", Stage: "paused", ResumeStage: "review", Error: "Paused by user"}, {ID: "done", Stage: "complete"},
 	} {
 		task.Selection = &model.SelectionAuthorization{CandidateID: task.ID, SelectedAt: "2026-10-22T00:00:00Z"}
-		if err := s.Store.Put(ctx, "tasks", task.ID, task, 0); err != nil {
+		if err := s.Store.Put(ctx, "execution_plans", task.ID, task, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -179,11 +179,11 @@ func TestResumeAllRunnersPersistsFlagAndRestoresOnlyGloballyStoppedTasks(t *test
 func assertResumedTaskStages(t *testing.T, db *store.Store, ctx context.Context) {
 	t.Helper()
 	for id, want := range map[string]string{"active": "coding", "question": "questions", "manual": "paused", "done": "complete"} {
-		record, err := db.Get(ctx, "tasks", id)
+		record, err := db.Get(ctx, "execution_plans", id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		task, _ := store.Decode[model.Task](record)
+		task, _ := store.Decode[model.ExecutionPlan](record)
 		if task.Stage != want {
 			t.Fatalf("%s stage=%s want=%s", id, task.Stage, want)
 		}

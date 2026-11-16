@@ -54,14 +54,14 @@ func TestInboxPrefixesSavedTimestampsForEveryMessageKind(t *testing.T) {
 	legacy.UpdatedAt = stamp
 	d := New()
 	d.Present(control.Snapshot{
-		"projects":   {record("p", model.Project{ID: "p"})},
-		"directions": {idea},
-		"tasks":      {record("task", model.Task{ID: "task", ProjectID: "p"})},
-		"sessions":   {record("attempt", model.Attempt{AttemptID: "attempt", Task: "task", ProjectID: "p", Role: "code"})},
-		"questions":  {record("q", model.QuestionSet{ID: "q", TaskID: "task", AttemptID: "attempt"})},
-		"inbox":      {notice, legacy},
+		"projects":        {record("p", model.Project{ID: "p"})},
+		"directions":      {idea},
+		"execution_plans": {record("task", model.ExecutionPlan{ID: "task", ProjectID: "p"})},
+		"sessions":        {record("attempt", model.Attempt{AttemptID: "attempt", Task: "task", ProjectID: "p", Role: "code"})},
+		"questions":       {record("q", model.QuestionSet{ID: "q", TaskID: "task", AttemptID: "attempt"})},
+		"inbox":           {notice, legacy},
 	})
-	for i, want := range []string{"2026-11-09 14:20 · Ideation - Timestamped idea", "2026-11-09 13:10 · Reviewer - Recorded sender", "2026-11-09 14:20 · Coding - Agent clarification awaits answer: q"} {
+	for i, want := range []string{"2026-11-09 14:20 · Legacy · generation unknown · Ideation - Timestamped idea", "2026-11-09 13:10 · Reviewer - Recorded sender", "2026-11-09 14:20 · Coding - Agent clarification awaits answer: q"} {
 		got, _ := d.inbox.GetItemText(i)
 		if got != want {
 			t.Errorf("Inbox item %d: %q, want %q", i, got, want)

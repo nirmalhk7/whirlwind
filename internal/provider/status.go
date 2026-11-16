@@ -51,7 +51,7 @@ func checkProtocolConnection(ctx context.Context, p model.Provider, cwd, supervi
 	transferred = standalone
 	defer func() { err = errors.Join(err, rpc.Close()) }()
 	result, err = checkACPSession(ctx, rpc, cwd)
-	return result, authenticationACPError(p, err)
+	return result, metadataACPError(p, err)
 }
 
 func checkACPSession(ctx context.Context, rpc *RPC, cwd string) (string, error) {

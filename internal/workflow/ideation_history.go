@@ -9,6 +9,8 @@ import (
 )
 
 type proposalHistoryContext struct {
+	Where              string              `json:"where,omitempty"`
+	HowItHelps         string              `json:"how_it_helps,omitempty"`
 	ID                 string              `json:"id"`
 	Category           string              `json:"cat"`
 	Problem            string              `json:"problem"`
@@ -32,13 +34,22 @@ func compactProposalHistory(history []model.Direction) []proposalHistoryContext 
 		if reason == "" {
 			reason = proposal.DeferralReason
 		}
-		compact = append(compact, proposalHistoryContext{ID: proposal.ID, Category: proposal.Category, Problem: proposal.Problem, Mechanism: proposal.Mechanism, Title: proposal.Title, Components: proposal.Components, Evidence: proposal.Evidence, Revision: proposal.RepositoryRevision, Status: proposal.Status, Reason: reason, PredecessorID: proposal.PredecessorID, RevisitReason: proposal.RevisitReason, RelatedProposalIDs: proposal.RelatedProposalIDs, ApprovedPlanIDs: proposal.ApprovedPlanIDs})
+		where, benefit := "", ""
+		if proposal.IdeaFields != nil {
+			where, benefit = proposal.IdeaFields.Where, proposal.IdeaFields.HowItHelps
+		}
+		compact = append(compact, proposalHistoryContext{Where: where, HowItHelps: benefit, ID: proposal.ID, Category: proposal.Category, Problem: proposal.Problem, Mechanism: proposal.Mechanism, Title: proposal.Title, Components: proposal.Components, Evidence: proposal.Evidence, Revision: proposal.RepositoryRevision, Status: proposal.Status, Reason: reason, PredecessorID: proposal.PredecessorID, RevisitReason: proposal.RevisitReason, RelatedProposalIDs: proposal.RelatedProposalIDs, ApprovedPlanIDs: proposal.ApprovedPlanIDs})
 	}
 	return compact
 }
 
 // Ideate retains a generation lease while preparing, validating, and saving four directions.
 func (e *Engine) targetedProposalHistory(ctx context.Context, project string, candidates, recent []model.Direction, approvedPlans []approvedPlanContext, humanRequests []model.ProposalReconsideration) ([]model.Direction, []approvedPlanContext, error) {
+	var bindErr error
+	ctx, bindErr = e.withDurableIdeationHistoryBudget(ctx, project)
+	if bindErr != nil {
+		return nil, nil, bindErr
+	}
 	targeted, err := e.collectTargetedProposalHistory(ctx, project, candidates)
 	if err != nil {
 		return nil, nil, err
@@ -152,11 +163,11 @@ func containsAnyProposal(history, targeted []model.Direction) bool {
 }
 
 func proposalHistoryDirection(proposal model.Proposal) model.Direction {
-	return model.Direction{ID: proposal.ID, ProjectID: proposal.ProjectID, Category: proposal.Category, Problem: proposal.Problem, Mechanism: proposal.Mechanism, Components: proposal.Components, Evidence: proposal.Evidence, RepositoryRevision: proposal.RepositoryRevision, Status: proposal.Status, RejectionReason: proposal.RejectionReason, DeferralReason: proposal.DeferralReason, Title: proposal.Title, Description: proposal.Description, Fingerprint: proposal.Fingerprint, PredecessorID: proposal.PredecessorID, RevisitReason: proposal.RevisitReason, RelatedProposalIDs: proposal.RelatedProposalIDs, ApprovedPlanIDs: proposal.ApprovedPlanIDs}
+	return model.Direction{IdeaFields: proposal.IdeaFields, ID: proposal.ID, ProjectID: proposal.ProjectID, Category: proposal.Category, Problem: proposal.Problem, Mechanism: proposal.Mechanism, Components: proposal.Components, Evidence: proposal.Evidence, RepositoryRevision: proposal.RepositoryRevision, Status: proposal.Status, RejectionReason: proposal.RejectionReason, DeferralReason: proposal.DeferralReason, Title: proposal.Title, Description: proposal.Description, Fingerprint: proposal.Fingerprint, PredecessorID: proposal.PredecessorID, RevisitReason: proposal.RevisitReason, RelatedProposalIDs: proposal.RelatedProposalIDs, ApprovedPlanIDs: proposal.ApprovedPlanIDs}
 }
 
 func (e *Engine) recordRejectedIdeation(ctx context.Context, candidate model.Direction, reason string) error {
-	proposal := model.Proposal{ID: candidate.ID, ProjectID: candidate.ProjectID, Category: candidate.Category, Problem: candidate.Problem, Mechanism: candidate.Mechanism, Components: candidate.Components, Evidence: candidate.Evidence, RepositoryRevision: candidate.RepositoryRevision, Status: "rejected", Title: candidate.Title, Description: candidate.Description, Fingerprint: candidate.Fingerprint, PredecessorID: candidate.PredecessorID, RevisitReason: candidate.RevisitReason, RelatedProposalIDs: candidate.RelatedProposalIDs, ApprovedPlanIDs: candidate.ApprovedPlanIDs}
+	proposal := model.Proposal{IdeaFields: candidate.IdeaFields, ID: candidate.ID, ProjectID: candidate.ProjectID, Category: candidate.Category, Problem: candidate.Problem, Mechanism: candidate.Mechanism, Components: candidate.Components, Evidence: candidate.Evidence, RepositoryRevision: candidate.RepositoryRevision, Status: "rejected", Title: candidate.Title, Description: candidate.Description, Fingerprint: candidate.Fingerprint, PredecessorID: candidate.PredecessorID, RevisitReason: candidate.RevisitReason, RelatedProposalIDs: candidate.RelatedProposalIDs, ApprovedPlanIDs: candidate.ApprovedPlanIDs}
 	return e.Store.RecordProposalRejection(ctx, proposal, reason)
 }
 

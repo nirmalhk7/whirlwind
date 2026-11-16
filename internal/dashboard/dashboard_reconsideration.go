@@ -16,6 +16,10 @@ type reconsiderationTarget struct {
 }
 
 func (d *Dashboard) reconsiderDirectionHistory() {
+	if d.hasCanonicalIdeas() {
+		d.showIdeaHistory(true)
+		return
+	}
 	projectID := d.projectID
 	if projectID == "" {
 		d.status.SetText("Whirlwind | select a project before opening direction history")

@@ -23,6 +23,19 @@ func (s *Store) RecoverInterrupted(ctx context.Context, owner string) error {
 				return err
 			}
 			if change != nil {
+				if kind == "operations" {
+					value, ok := change.Value.(map[string]any)
+					if ok && value["kind"] == "ideation" && value["failure_kind"] == "interrupted" {
+						waiting, err := s.ideationHasPendingDecision(ctx, r.ID)
+						if err != nil {
+							return err
+						}
+						value["stage"], value["error"], value["finished_at"] = "queued", "", ""
+						if waiting {
+							value["stage"], value["error"] = "paused", "Pending human decision retained after restart"
+						}
+					}
+				}
 				changes = append(changes, *change)
 			}
 		}
@@ -122,7 +135,7 @@ func cancelPending(value map[string]any, field string) bool {
 }
 
 func (s *Store) commitRecovery(ctx context.Context, owner string, changes []Change) error {
-	return s.Transaction(ctx, func(tx *sql.Tx) error {
+	if err := s.Transaction(ctx, func(tx *sql.Tx) error {
 		for _, c := range changes {
 			if err := put(ctx, tx, c.Kind, c.ID, c.Value, c.Expected); err != nil {
 				return err
@@ -130,5 +143,14 @@ func (s *Store) commitRecovery(ctx context.Context, owner string, changes []Chan
 		}
 		_, err := tx.ExecContext(ctx, "UPDATE leases SET expires=0 WHERE owner<>?", owner)
 		return err
-	})
+	}); err != nil {
+		return err
+	}
+	return s.syncRunLogChanges(ctx, changes)
+}
+
+func (s *Store) ideationHasPendingDecision(ctx context.Context, run string) (bool, error) {
+	var count int
+	err := s.DB.QueryRowContext(ctx, `SELECT count(*) FROM resources q JOIN resources s ON s.kind='sessions' AND s.id=json_extract(q.data,'$.attempt_id') WHERE json_extract(s.data,'$.operation_id')=? AND ((q.kind='questions' AND json_extract(q.data,'$.status')='pending') OR (q.kind='permissions' AND json_extract(q.data,'$.decision')='pending'))`, run).Scan(&count)
+	return count > 0, err
 }

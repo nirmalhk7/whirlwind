@@ -1,107 +1,13 @@
 package dashboard
 
 import (
-	"context"
 	"encoding/json"
-	"fmt"
-	"time"
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 
 	"github.com/rivo/tview"
 )
-
-func (d *Dashboard) confirmDirection() {
-	index := d.directions.GetCurrentItem()
-	if index < 0 || index >= len(d.directionRows) {
-		return
-	}
-	direction := d.directionRows[index]
-	version := d.directionRecordVersion(direction.ID)
-
-	action, reason, ok := d.editDecision("# Proposal: "+direction.Title+"\n\n"+messageText(direction), []string{"approve", "reject"})
-	if !ok || action == "cancel" {
-		return
-	}
-	if action == "approve" && reason != "" {
-		d.status.SetText("Whirlwind | invalid decision: proposal reason applies to reject only")
-		return
-	}
-	request := directionApprovalRequest(direction, version)
-	if action == "reject" {
-		request.Operation = "direction.reject"
-		request.Payload, _ = json.Marshal(map[string]string{"reason": reason})
-	}
-	d.closeModal()
-	d.submit(request)
-}
-
-func (d *Dashboard) directionRecordVersion(id string) int {
-	for _, record := range d.snapshot["directions"] {
-		if record.ID == id {
-			return record.Version
-		}
-	}
-	return 0
-}
-
-func (d *Dashboard) reviewPlanForm() {
-	plan, version, ok := d.selectedPlanRecord()
-	if !ok {
-		return
-	}
-	_, currentPlan, ok := d.planRecord(plan.ID)
-	if !ok || currentPlan.PlanDocument == nil {
-		d.status.SetText("Whirlwind | plan changed since inspection; refresh before approval")
-		return
-	}
-	if !d.hasCommandHandler("Whirlwind | local supervisor unavailable; plan remains unchanged") {
-		return
-	}
-	d.openPlanContentReview(currentPlan, version, currentPlan.PlanDocument.Hash)
-}
-
-func (d *Dashboard) openPlanContentReview(plan model.Task, version int, hash string) {
-	d.status.SetText("Whirlwind | loading exact plan for review…")
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		response, err := d.commands(ctx, control.Request{RequestID: store.ID(), Operation: "inspect.plan", PlanID: plan.ID})
-		var view struct {
-			Path    string `json:"path"`
-			Hash    string `json:"hash"`
-			Content string `json:"content"`
-		}
-		if err == nil {
-			err = json.Unmarshal(response, &view)
-		}
-		d.QueueUpdateDraw(func() {
-			if !d.planStillCurrent(plan.ID, version, hash) {
-				return
-			}
-			if err != nil {
-				d.status.SetText("Whirlwind | could not load plan: " + tview.Escape(err.Error()))
-				return
-			}
-			if view.Hash == "" || view.Hash != hash {
-				d.status.SetText("Whirlwind | plan changed since inspection; refresh before approval")
-				return
-			}
-			d.showPlanReview(plan, view.Content, view.Hash, version)
-		})
-	}()
-}
-
-func (d *Dashboard) showPlanReview(plan model.Task, content, hash string, expectedVersion int) {
-	action, feedback, ok := d.editDecision("# Plan: "+plan.PlanDocument.Path+"\nHash: "+hash+"\nVersion: "+fmt.Sprint(expectedVersion)+"\n\n"+content, []string{"approve", "revise", "reject"})
-	if !ok || action == "cancel" {
-		return
-	}
-	payload, _ := json.Marshal(map[string]string{"action": action, "hash": hash, "feedback": feedback})
-	d.closeModal()
-	d.submit(planReviewRequest(plan, expectedVersion, hash, payload))
-}
 
 func (d *Dashboard) answerQuestionsForm() {
 	index := d.plans.GetCurrentItem()
@@ -156,7 +62,7 @@ func (d *Dashboard) permissionForm() {
 	}
 	for _, record := range d.snapshot["permissions"] {
 		var value struct {
-			Task     string `json:"task"`
+			Task     string `json:"plan_id"`
 			Attempt  string `json:"attempt_id"`
 			Decision string `json:"decision"`
 		}
@@ -179,7 +85,7 @@ func (d *Dashboard) permissionForm() {
 	d.status.SetText("Whirlwind | no pending permission request for this plan")
 }
 
-func currentPausedAttempt(plan model.Task) (string, bool) {
+func currentPausedAttempt(plan model.ExecutionPlan) (string, bool) {
 	if plan.Stage != "paused" || plan.Wait == nil || plan.Wait.AttemptID == "" {
 		return "", false
 	}
@@ -187,13 +93,8 @@ func currentPausedAttempt(plan model.Task) (string, bool) {
 }
 
 func (d *Dashboard) supervisorStatus(snapshot control.Snapshot) string {
-	for _, record := range snapshot["supervisor"] {
-		var value struct {
-			Online bool `json:"online"`
-		}
-		if json.Unmarshal(record.Data, &value) == nil && value.Online {
-			return "Whirlwind | local supervisor connected"
-		}
+	if supervisorOnline(snapshot) {
+		return "Whirlwind | local supervisor connected"
 	}
 	return "Whirlwind | supervisor offline · read-only database inspection"
 }
@@ -209,55 +110,10 @@ func (d *Dashboard) finalizationView() {
 	d.loadFinalizationReport(plan, version, 0, []int64{0})
 }
 
-func (d *Dashboard) loadLatestLog() {
-	plan, version, ok := d.selectedPlanRecord()
-	if !ok {
-		return
-	}
-	if !d.hasCommandHandler("Whirlwind | local supervisor unavailable; logs remain in saved artifacts") {
-		return
-	}
-	artifactID := latestOutputArtifact(d.snapshot["sessions"], plan.ID)
-	if artifactID == "" {
-		d.status.SetText("Whirlwind | no saved output artifact for this plan")
-		return
-	}
-	d.fetchArtifact(plan.ID, version, artifactID)
-}
-
-func (d *Dashboard) fetchArtifact(planID string, version int, artifactID string) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		response, err := d.commands(ctx, control.Request{RequestID: store.ID(), Operation: "inspect.artifact", PlanID: planID, ResourceID: artifactID})
-		d.QueueUpdateDraw(func() {
-			if !d.planStillCurrent(planID, version, "") {
-				return
-			}
-			if err != nil {
-				d.status.SetText("Whirlwind | log retrieval failed: " + tview.Escape(err.Error()))
-				return
-			}
-			var view struct {
-				Content   string `json:"content"`
-				Truncated bool   `json:"truncated"`
-			}
-			if json.Unmarshal(response, &view) != nil {
-				d.status.SetText("Whirlwind | saved log is invalid")
-				return
-			}
-			d.detail.SetText(view.Content)
-			if view.Truncated {
-				d.status.SetText("Whirlwind | showing bounded artifact prefix")
-			}
-		})
-	}()
-}
-
-func (d *Dashboard) selectedPlanRecord() (model.Task, int, bool) {
+func (d *Dashboard) selectedPlanRecord() (model.ExecutionPlan, int, bool) {
 	index := d.plans.GetCurrentItem()
 	if d.planID == "" || index < 0 || index >= len(d.planRows) {
-		return model.Task{}, 0, false
+		return model.ExecutionPlan{}, 0, false
 	}
 	plan := d.planRows[index]
 	record, _, ok := d.planRecord(plan.ID)
@@ -270,15 +126,4 @@ func (d *Dashboard) hasCommandHandler(message string) bool {
 	}
 	d.status.SetText(message)
 	return false
-}
-
-func latestOutputArtifact(records []model.Record, planID string) string {
-	artifact := ""
-	for _, record := range records {
-		attempt, err := store.Decode[model.Attempt](record)
-		if err == nil && attempt.Task == planID && attempt.OutputArtifact != "" {
-			artifact = attempt.OutputArtifact
-		}
-	}
-	return artifact
 }

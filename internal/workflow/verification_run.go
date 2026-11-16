@@ -12,12 +12,12 @@ import (
 	"whirlwind/internal/store"
 )
 
-const verificationPersistenceError = "%w: %v"
+const persistenceErrorFormat = "%w: %w"
 
 type verificationRun struct {
 	engine  *Engine
 	ctx     context.Context
-	task    *model.Task
+	task    *model.ExecutionPlan
 	id      string
 	head    string
 	value   map[string]any
@@ -25,10 +25,17 @@ type verificationRun struct {
 	owner   store.ArtifactOwner
 }
 
-func (e *Engine) startVerification(ctx context.Context, p model.Project, t *model.Task) (*verificationRun, error) {
+func (e *Engine) startVerification(ctx context.Context, p model.Project, t *model.ExecutionPlan) (*verificationRun, error) {
 	head, err := github.Run(ctx, t.Worktree, "git", "rev-parse", "HEAD")
 	if err != nil {
 		return nil, err
+	}
+	return e.startVerificationAt(ctx, p, t, head)
+}
+
+func (e *Engine) startVerificationAt(ctx context.Context, p model.Project, t *model.ExecutionPlan, head string) (*verificationRun, error) {
+	if recovered, err := e.recoverVerification(ctx, t, head); err != nil || recovered != nil {
+		return recovered, err
 	}
 	id := store.ID()
 	attempts, err := e.verificationAttempts(ctx, t)
@@ -36,23 +43,23 @@ func (e *Engine) startVerification(ctx context.Context, p model.Project, t *mode
 		return nil, err
 	}
 	evidence := model.Provenance{Task: t.ID, PlanVersion: t.PlanVersion, Base: t.Base, Head: head, PolicyHash: p.PolicyHash, VerificationID: id, AttemptIDs: attempts}
-	value := map[string]any{"provenance": evidence, "task": t.ID, "plan_version": t.PlanVersion, "attempt_id": t.LastAttemptID, "stage": "running", "owner": e.owner, "started_at": time.Now().UTC().Format(time.RFC3339Nano)}
+	value := map[string]any{"provenance": evidence, "plan_id": t.ID, "plan_version": t.PlanVersion, "attempt_id": t.LastAttemptID, "stage": "running", "owner": e.owner, "started_at": time.Now().UTC().Format(time.RFC3339Nano)}
 	if err = e.Store.Put(ctx, "verification", id, value, 0); err != nil {
-		return nil, fmt.Errorf(verificationPersistenceError, store.ErrPersistence, err)
+		return nil, fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
 	}
 	t.VerificationID = id
 	return &verificationRun{engine: e, ctx: ctx, task: t, id: id, head: head, value: value, version: 1}, nil
 }
 
-func (e *Engine) verificationAttempts(ctx context.Context, t *model.Task) ([]string, error) {
+func (e *Engine) verificationAttempts(ctx context.Context, t *model.ExecutionPlan) ([]string, error) {
 	attempts := append([]string{}, t.ImplementationAttempts...)
 	records, err := e.Store.List(ctx, "checkpoints")
 	if err != nil {
-		return nil, fmt.Errorf(verificationPersistenceError, store.ErrPersistence, err)
+		return nil, fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
 	}
 	for _, record := range records {
 		var checkpoint struct {
-			Task        string `json:"task"`
+			Task        string `json:"plan_id"`
 			PlanVersion int    `json:"plan_version"`
 			AttemptID   string `json:"attempt_id"`
 		}
@@ -82,7 +89,7 @@ func (run *verificationRun) save() error {
 		run.version++
 	}
 	if err != nil {
-		return fmt.Errorf(verificationPersistenceError, store.ErrPersistence, err)
+		return fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
 	}
 	return nil
 }

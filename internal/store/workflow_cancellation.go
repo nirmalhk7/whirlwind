@@ -9,7 +9,7 @@ import (
 )
 
 func cancelModeWork(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, "SELECT kind,id,data,version FROM resources WHERE kind IN ('tasks','sessions','operations','mutations','verification','publications','questions','permissions','budget_reservations')")
+	rows, err := tx.QueryContext(ctx, "SELECT kind,id,data,version FROM resources WHERE kind IN ('execution_plans','sessions','operations','mutations','verification','publications','questions','permissions','budget_reservations')")
 	if err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func modeCancellationChanges(rows *sql.Rows, now string) (changes []Change, resu
 	return changes, rows.Err()
 }
 func modeCancellationValue(kind string, data []byte, now string) (any, bool, error) {
-	if kind == "tasks" {
+	if kind == "execution_plans" {
 		return cancelledModeTask(data)
 	}
 	var value map[string]any
@@ -63,7 +63,7 @@ func modeCancellationValue(kind string, data []byte, now string) (any, bool, err
 	return value, changed, nil
 }
 func cancelledModeTask(data []byte) (any, bool, error) {
-	var task model.Task
+	var task model.ExecutionPlan
 	if err := json.Unmarshal(data, &task); err != nil {
 		return nil, false, err
 	}

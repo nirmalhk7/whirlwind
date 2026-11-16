@@ -81,6 +81,9 @@ func persistedAttemptStart(state model.Attempt) time.Time {
 
 func (a *agentAttempt) executionHooks() provider.Hooks {
 	hooks := provider.Hooks{Questions: a.questions, Event: a.event, Permission: a.permission, RunCheck: a.runCheck}
+	if a.input.Role == "finalizer" && a.input.Purpose == "local_finalization" {
+		hooks.FinalizeDelivery = a.finalizeDelivery
+	}
 	if a.budgetClock != nil {
 		hooks.Questions = a.pausedQuestions
 		hooks.Permission = a.pausedPermission
@@ -255,7 +258,7 @@ func (a *agentAttempt) finalMetric(output provider.Output, started time.Time, ru
 		tokens = nil
 		cost = nil
 	}
-	return map[string]any{"attempt_id": a.id, "project_id": a.project.ID, "task": a.task.ID, "unit_id": a.input.UnitID, "operation_id": a.input.OperationID, "role": a.input.Role, "provider": a.chosen.ID, "model": a.input.Model, "resolved_model": output.ResolvedModel, "tokens": tokens, "cost": cost, "usage": output.Usage, "elapsed_ms": time.Since(started).Milliseconds(), "success": runErr == nil, "review_attempts": a.task.ReviewPasses, "category": a.index.Category(), "risk": a.task.Risk}
+	return map[string]any{"attempt_id": a.id, "project_id": a.project.ID, "plan_id": a.task.ID, "unit_id": a.input.UnitID, "operation_id": a.input.OperationID, "role": a.input.Role, "provider": a.chosen.ID, "model": a.input.Model, "resolved_model": output.ResolvedModel, "tokens": tokens, "cost": cost, "usage": output.Usage, "elapsed_ms": time.Since(started).Milliseconds(), "success": runErr == nil, "review_attempts": a.task.ReviewPasses, "category": a.index.Category(), "risk": a.task.Risk}
 }
 
 func (a *agentAttempt) finalUsageEntry(output provider.Output, activeElapsed int64) model.UsageEntry {

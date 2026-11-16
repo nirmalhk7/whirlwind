@@ -67,7 +67,18 @@ func ValidateQltyResult(result Result) error {
 	if !completeQltyProcessEvidence(result) {
 		return errors.New("qlty evidence is incomplete")
 	}
-	if AcceptedQltyBaselineAdvisory(result) {
+	advisory := AcceptedQltyBaselineAdvisory(result)
+	if advisory && IsQltyHeadDiffCommand(result.Command) {
+		return errors.New("findings in Qlty HEAD diff cannot use an existing-debt advisory")
+	}
+	raw := result.Output
+	if advisory {
+		raw = baselineAdvisoryOutput(raw)
+	}
+	if err := validateJobEvidence("sarif", []byte(raw), result.Truncated, result.Passed); err != nil {
+		return err
+	}
+	if advisory {
 		return nil
 	}
 	if !cleanQltyProcess(result) {

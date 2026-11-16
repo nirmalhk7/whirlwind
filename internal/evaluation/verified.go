@@ -7,7 +7,7 @@ import (
 	"whirlwind/internal/store"
 )
 
-func verified(ctx context.Context, s *store.Store, t model.Task) bool {
+func verified(ctx context.Context, s *store.Store, t model.ExecutionPlan) bool {
 	if !verificationPrerequisites(t) {
 		return false
 	}
@@ -27,7 +27,7 @@ type verificationEvidence struct {
 	Provenance model.Provenance `json:"provenance"`
 }
 
-func verifiedEvidence(ctx context.Context, s *store.Store, task model.Task) (verificationEvidence, bool) {
+func verifiedEvidence(ctx context.Context, s *store.Store, task model.ExecutionPlan) (verificationEvidence, bool) {
 	v, err := s.Get(ctx, "verification", task.VerificationID)
 	if err != nil {
 		return verificationEvidence{}, false
@@ -42,15 +42,15 @@ func verifiedEvidence(ctx context.Context, s *store.Store, task model.Task) (ver
 	return evidence, true
 }
 
-func verificationMatchesTask(provenance model.Provenance, task model.Task) bool {
+func verificationMatchesTask(provenance model.Provenance, task model.ExecutionPlan) bool {
 	return verificationTaskPlanMatches(provenance, task) && verificationRevisionMatches(provenance, task)
 }
 
-func verificationTaskPlanMatches(provenance model.Provenance, task model.Task) bool {
+func verificationTaskPlanMatches(provenance model.Provenance, task model.ExecutionPlan) bool {
 	return provenance.Task == task.ID && provenance.PlanVersion == task.PlanVersion
 }
 
-func verificationRevisionMatches(provenance model.Provenance, task model.Task) bool {
+func verificationRevisionMatches(provenance model.Provenance, task model.ExecutionPlan) bool {
 	return provenance.Head == task.ReviewedCommit && provenance.Base == task.Base
 }
 
@@ -66,7 +66,7 @@ func completedReview(ctx context.Context, s *store.Store, id string) (model.Revi
 	return review, true
 }
 
-func sameVerificationReview(provenance model.Provenance, review model.Review, task model.Task) bool {
+func sameVerificationReview(provenance model.Provenance, review model.Review, task model.ExecutionPlan) bool {
 	return sameReviewRevision(provenance, *review.Provenance) && reviewVerificationID(*review.Provenance, task)
 }
 
@@ -86,7 +86,7 @@ func sameReviewHeadPolicyPlan(verification, review model.Provenance) bool {
 	return sameReviewHeadPolicy(verification, review) && verification.PlanVersion == review.PlanVersion
 }
 
-func reviewVerificationID(review model.Provenance, task model.Task) bool {
+func reviewVerificationID(review model.Provenance, task model.ExecutionPlan) bool {
 	return review.VerificationID == task.VerificationID
 }
 
@@ -99,18 +99,18 @@ func noBlockingFindings(findings []model.Finding) bool {
 	return true
 }
 
-func verificationPrerequisites(task model.Task) bool {
+func verificationPrerequisites(task model.ExecutionPlan) bool {
 	return verificationScoreEligible(task) && verificationIDsPresent(task)
 }
 
-func verificationScoreEligible(task model.Task) bool {
+func verificationScoreEligible(task model.ExecutionPlan) bool {
 	return task.ChecksPassed && task.Score >= 9
 }
 
-func verificationIDsPresent(task model.Task) bool {
+func verificationIDsPresent(task model.ExecutionPlan) bool {
 	return hasVerificationReviewIDs(task) && task.ReviewedCommit != ""
 }
 
-func hasVerificationReviewIDs(task model.Task) bool {
+func hasVerificationReviewIDs(task model.ExecutionPlan) bool {
 	return task.VerificationID != "" && task.ReviewID != ""
 }

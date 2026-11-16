@@ -37,7 +37,7 @@ func nativePublicationOperation(name string) bool {
 	return name == "lookup_pr" || name == "create_pr"
 }
 
-func (e *Engine) nativeRepositoryInput(ctx context.Context, project model.Project, task model.Task, operation nativeRepositoryOperation) (provider.Input, error) {
+func (e *Engine) nativeRepositoryInput(ctx context.Context, project model.Project, task model.ExecutionPlan, operation nativeRepositoryOperation) (provider.Input, error) {
 	input := nativeOperationInput(project, task, operation)
 	if !nativePublicationOperation(operation.Name) {
 		return input, nil

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"whirlwind/internal/model"
+	"whirlwind/internal/store"
 )
 
 const (
@@ -19,9 +20,9 @@ const (
 )
 
 var inspectableKinds = map[string]bool{
-	"projects": true, "tasks": true, "directions": true, "sessions": true,
+	"projects": true, "execution_plans": true, "ideas": true, "operations": true, "directions": true, "sessions": true,
 	"questions": true, "permissions": true, "verification": true,
-	"reviews": true, "inbox": true, "plans": true, "artifacts": true, "agents": true, "providers": true, "project_status": true,
+	"reviews": true, "inbox": true, "plan_versions": true, "artifacts": true, "agents": true, "providers": true, "project_status": true, "settings": true,
 }
 
 type CommandExecutor interface {
@@ -81,7 +82,7 @@ func (d SupervisorDispatcher) records(ctx context.Context, request Request) (pag
 	}
 	page = RecordPage{Kind: kind, ProjectID: request.ProjectID, Cursor: request.EventCursor, Records: make([]model.Record, 0, limit)}
 	pageBytes := 128
-	query := "SELECT rowid,id,version,data,updated_at FROM resources WHERE kind=? AND rowid>? AND (?='' OR json_extract(data,'$.project_id')=?) ORDER BY rowid LIMIT ?"
+	query := "SELECT rowid,id,version,data,updated_at FROM resources WHERE kind=? AND rowid>? AND (?='' OR CASE WHEN kind='operations' THEN json_extract(data,'$.subject') ELSE json_extract(data,'$.project_id') END=?) ORDER BY rowid LIMIT ?"
 	rows, err := d.DB.QueryContext(ctx, query, kind, request.EventCursor, request.ProjectID, request.ProjectID, limit+1)
 	if err != nil {
 		return page, err
@@ -124,6 +125,33 @@ func (d SupervisorDispatcher) records(ctx context.Context, request Request) (pag
 	}
 	if err := rows.Err(); err != nil {
 		return page, err
+	}
+	if err := rows.Close(); err != nil {
+		return page, err
+	}
+	if kind == "operations" {
+		if err := enrichIdeationProgress(ctx, page.Records, func(ctx context.Context, run string) ([]model.IdeationDirectionProgress, error) {
+			return store.ReadIdeationProgress(ctx, d.DB, run)
+		}); err != nil {
+			return page, err
+		}
+		pageBytes = 128
+		for n, record := range page.Records {
+			encoded, err := json.Marshal(record)
+			if err != nil {
+				return page, err
+			}
+			if pageBytes+len(encoded)+1 > maxInspectionPageBytes-1024 {
+				if n == 0 {
+					return page, errors.New("inspection record exceeds safe local page size")
+				}
+				page.Records = page.Records[:n]
+				page.NextCursor = page.Records[n-1].CreatedOrder
+				page.HasMore = true
+				break
+			}
+			pageBytes += len(encoded) + 1
+		}
 	}
 	return page, nil
 }
@@ -181,7 +209,7 @@ func (d SupervisorDispatcher) snapshot(ctx context.Context, request Request) (Sn
 		return nil, errors.New("supervisor state database unavailable")
 	}
 	snapshot := Snapshot{}
-	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "providers", "project_status"} {
+	for _, kind := range []string{"projects", "execution_plans", "ideas", "operations", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plan_versions", "agents", "providers", "project_status", "settings"} {
 		page, err := d.records(ctx, Request{ResourceID: kind, ProjectID: request.ProjectID, Limit: 100})
 		if err != nil {
 			return nil, err
@@ -208,7 +236,7 @@ func (d SupervisorDispatcher) Snapshot(ctx context.Context, limit int) (Snapshot
 		return nil, errors.New("snapshot limit must be between 1 and 100")
 	}
 	snapshot := Snapshot{}
-	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans", "agents", "providers", "project_status"} {
+	for _, kind := range []string{"projects", "execution_plans", "ideas", "operations", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plan_versions", "agents", "providers", "project_status", "settings"} {
 		records, err := d.allRecords(ctx, kind, limit)
 		if err != nil {
 			return nil, err

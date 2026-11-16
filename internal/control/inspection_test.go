@@ -17,8 +17,12 @@ func TestInspectionRestoresExistingPlanAndPendingDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans"} {
-		if err := db.Put(ctx, kind, "existing", map[string]any{"status": "pending", "deadline": "2026-11-06T23:05:00Z", "restarts": 2}, 0); err != nil {
+	for _, kind := range []string{"projects", "execution_plans", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plan_versions"} {
+		id := "existing"
+		if kind == "plan_versions" {
+			id = "existing:1"
+		}
+		if err := db.Put(ctx, kind, id, map[string]any{"status": "pending", "deadline": "2026-11-06T23:05:00Z", "restarts": 2}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -32,8 +36,12 @@ func TestInspectionRestoresExistingPlanAndPendingDecisions(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, kind := range []string{"projects", "tasks", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plans"} {
-			if len(snapshot[kind]) != 1 || snapshot[kind][0].ID != "existing" || snapshot[kind][0].Version != 1 {
+		for _, kind := range []string{"projects", "execution_plans", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plan_versions"} {
+			id := "existing"
+			if kind == "plan_versions" {
+				id = "existing:1"
+			}
+			if len(snapshot[kind]) != 1 || snapshot[kind][0].ID != id || snapshot[kind][0].Version != 1 {
 				t.Errorf("lost or changed %s state after reopening", kind)
 			}
 		}

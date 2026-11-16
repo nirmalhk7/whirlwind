@@ -35,8 +35,30 @@ func (e *Engine) index(ctx context.Context, p model.Project) (ctxengine.Index, e
 			return x, decode
 		}
 		old = &x
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return ctxengine.Index{}, err
 	}
-	base, err := e.base(ctx, p)
+	err = nil
+	base := ""
+	if run := operationID(ctx); run != "" {
+		record, readErr := e.Store.Get(ctx, "operations", run)
+		if readErr != nil {
+			return ctxengine.Index{}, readErr
+		}
+		operation, decodeErr := store.Decode[model.Operation](record)
+		if decodeErr != nil {
+			return ctxengine.Index{}, decodeErr
+		}
+		if operation.Kind == "ideation" {
+			if operation.Subject != p.ID || operation.RepositoryRevision == "" {
+				return ctxengine.Index{}, store.ErrConflict
+			}
+			base = operation.RepositoryRevision
+		}
+	}
+	if base == "" {
+		base, err = e.base(ctx, p)
+	}
 	if err != nil {
 		return ctxengine.Index{}, err
 	}
@@ -50,4 +72,12 @@ func (e *Engine) index(ctx context.Context, p model.Project) (ctxengine.Index, e
 		}
 	}
 	return idx, nil
+}
+
+func (e *Engine) discoveryIndex(ctx context.Context, p model.Project) (ctxengine.Index, error) {
+	idx, err := e.index(ctx, p)
+	if err != nil {
+		return ctxengine.Index{}, err
+	}
+	return ctxengine.CaptureWorkingTree(ctx, p.Path, idx)
 }

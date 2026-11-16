@@ -14,7 +14,7 @@ func TestHumanDecisionEndsAttemptAndPersistsPausedTask(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, err := e.Store.Get(ctx, "tasks", task.ID)
+	record, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,11 +45,11 @@ func TestHumanDecisionEndsAttemptAndPersistsPausedTask(t *testing.T) {
 	if err = step.pauseForHumanDecision(); err != nil {
 		t.Fatal(err)
 	}
-	record, err = e.Store.Get(ctx, "tasks", task.ID)
+	record, err = e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	paused, err := store.Decode[model.Task](record)
+	paused, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -15,7 +15,7 @@ func TestInvalidUnitScopeFailsBeforeWorkspaceCreation(t *testing.T) {
 			e, task, _ := testEngine(t)
 			p, _ := e.Project(context.Background(), task.ProjectID)
 			p.Policy.AllowedPaths = []string{"src/**"}
-			task.Plan = &model.Plan{Units: []model.Unit{{ID: "good", AllowedPaths: []string{"src/ok.ts"}}, {ID: "invalid", AllowedPaths: []string{scope}}}}
+			task.Plan = &model.PlanSpecification{Units: []model.Unit{{ID: "good", AllowedPaths: []string{"src/ok.ts"}}, {ID: "invalid", AllowedPaths: []string{scope}}}}
 			err := e.code(context.Background(), p, &task)
 			if err == nil || !strings.Contains(err.Error(), scope) || !strings.Contains(err.Error(), "invalid") {
 				t.Fatalf("missing actionable scope rejection: %v", err)

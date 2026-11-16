@@ -22,7 +22,7 @@ func (e *Engine) ReviewLocalPlan(ctx context.Context, id string, expected int, a
 	if err != nil {
 		return err
 	}
-	changes = append(changes, store.Change{Kind: "tasks", ID: id, Value: task, Expected: expected})
+	changes = append(changes, store.Change{Kind: "execution_plans", ID: id, Value: task, Expected: expected})
 	resolved, err := e.resolveLocalPlanNotices(ctx, id)
 	if err != nil {
 		return err
@@ -31,20 +31,20 @@ func (e *Engine) ReviewLocalPlan(ctx context.Context, id string, expected int, a
 		return err
 	}
 	if action != "approve" {
-		e.Stop(id)
+		store.AfterCommit(ctx, func() { e.Stop(id) })
 	}
 	return nil
 }
 
-func (e *Engine) localPlanForReview(ctx context.Context, id string, expected int) (model.Task, error) {
-	record, err := e.Store.Get(ctx, "tasks", id)
+func (e *Engine) localPlanForReview(ctx context.Context, id string, expected int) (model.ExecutionPlan, error) {
+	record, err := e.Store.Get(ctx, "execution_plans", id)
 	if err != nil {
-		return model.Task{}, err
+		return model.ExecutionPlan{}, err
 	}
 	if record.Version != expected {
-		return model.Task{}, store.ErrConflict
+		return model.ExecutionPlan{}, store.ErrConflict
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		return task, err
 	}
@@ -54,11 +54,21 @@ func (e *Engine) localPlanForReview(ctx context.Context, id string, expected int
 	return task, nil
 }
 
-func (e *Engine) reviewLocalPlanAction(ctx context.Context, task *model.Task, action, hash, feedback string) ([]store.Change, error) {
+func (e *Engine) reviewLocalPlanAction(ctx context.Context, task *model.ExecutionPlan, action, hash, feedback string) ([]store.Change, error) {
 	switch action {
 	case "approve":
 		return e.approveLocalPlan(ctx, task, hash)
 	case "revise":
+		if task.IdeaID != "" {
+			if strings.TrimSpace(feedback) == "" {
+				return nil, errors.New("revision feedback is required")
+			}
+			task.Stage, task.ResumeStage, task.Error = "plan_approval", "", strings.TrimSpace(feedback)
+			task.PlanDocument.ApprovedHash, task.PlanDocument.PolicyHash, task.PlanDocument.ApprovedAt = "", "", ""
+			clearLocalPlanExecution(task)
+			task.Handoff.NextAction = "Edit the saved Markdown and save a new unapproved version, then approve it separately. Planner authoring remains completed."
+			return nil, nil
+		}
 		return nil, reviseLocalPlan(task, feedback)
 	case "reject":
 		task.Stage, task.ResumeStage, task.Error = "cancelled", "", "Local plan rejected."
@@ -70,7 +80,7 @@ func (e *Engine) reviewLocalPlanAction(ctx context.Context, task *model.Task, ac
 	}
 }
 
-func (e *Engine) approveLocalPlan(ctx context.Context, task *model.Task, hash string) ([]store.Change, error) {
+func (e *Engine) approveLocalPlan(ctx context.Context, task *model.ExecutionPlan, hash string) ([]store.Change, error) {
 	content, plan, err := e.readLocalPlanApproval(*task, hash)
 	if err != nil {
 		return nil, err
@@ -85,31 +95,45 @@ func (e *Engine) approveLocalPlan(ctx context.Context, task *model.Task, hash st
 	if err != nil {
 		return nil, err
 	}
+	if task.IdeaID != "" {
+		if err := validatePairCapacity(e.settings(ctx), project); err != nil {
+			return nil, err
+		}
+		if err := validatePlanCommandReferences(project.Policy, plan); err != nil {
+			return nil, err
+		}
+	}
 	if err := e.freshLocalPlanVersion(ctx, task, content); err != nil {
 		return nil, err
 	}
+	references, guards, err := e.approvalConfiguration(ctx, task.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	plan.Approval = &model.PlanApproval{DocumentHash: hash, PlanVersion: task.PlanVersion, References: references, ConfigurationHash: evidenceDigest(references)}
+	plan.Specification = content
 	task.Plan = &plan
 	task.PlanDocument.Hash, task.PlanDocument.ApprovedHash = hash, hash
 	task.PlanDocument.PolicyHash = project.PolicyHash
 	task.PlanDocument.ApprovedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	task.Stage, task.ResumeStage, task.Error = "coding", "", ""
 	task.Handoff.NextAction = "Implement the immutable approved local plan."
-	return []store.Change{{Kind: "plans", ID: fmt.Sprintf("%s:%d", task.ID, task.PlanVersion), Value: plan}}, nil
+	return append(guards, store.Change{Kind: "plan_versions", ID: fmt.Sprintf("%s:%d", task.ID, task.PlanVersion), Value: plan}), nil
 }
 
-func (e *Engine) readLocalPlanApproval(task model.Task, hash string) (string, model.Plan, error) {
+func (e *Engine) readLocalPlanApproval(task model.ExecutionPlan, hash string) (string, model.PlanSpecification, error) {
 	content, err := e.readLocalPlanFile(task)
 	if err != nil {
-		return "", model.Plan{}, err
+		return "", model.PlanSpecification{}, err
 	}
 	if hash == "" || hash != localPlanHash(content) {
-		return "", model.Plan{}, store.ErrConflict
+		return "", model.PlanSpecification{}, store.ErrConflict
 	}
 	plan, err := ParsePlanDocument(content)
 	return content, plan, err
 }
 
-func (e *Engine) localPlanApprovalProject(ctx context.Context, id string, plan model.Plan) (model.Project, error) {
+func (e *Engine) localPlanApprovalProject(ctx context.Context, id string, plan model.PlanSpecification) (model.Project, error) {
 	project, err := e.Project(ctx, id)
 	if err != nil {
 		return project, err
@@ -122,8 +146,8 @@ func (e *Engine) localPlanApprovalProject(ctx context.Context, id string, plan m
 	return project, nil
 }
 
-func (e *Engine) freshLocalPlanVersion(ctx context.Context, task *model.Task, content string) error {
-	_, err := e.Store.Get(ctx, "plans", fmt.Sprintf("%s:%d", task.ID, task.PlanVersion))
+func (e *Engine) freshLocalPlanVersion(ctx context.Context, task *model.ExecutionPlan, content string) error {
+	_, err := e.Store.Get(ctx, "plan_versions", fmt.Sprintf("%s:%d", task.ID, task.PlanVersion))
 	if errors.Is(err, store.ErrNotFound) {
 		return nil
 	}
@@ -143,7 +167,7 @@ func (e *Engine) freshLocalPlanVersion(ctx context.Context, task *model.Task, co
 	return err
 }
 
-func reviseLocalPlan(task *model.Task, feedback string) error {
+func reviseLocalPlan(task *model.ExecutionPlan, feedback string) error {
 	if strings.TrimSpace(feedback) == "" {
 		return errors.New("revision feedback is required")
 	}
@@ -155,7 +179,7 @@ func reviseLocalPlan(task *model.Task, feedback string) error {
 	return nil
 }
 
-func (e *Engine) ValidateLocalPlan(ctx context.Context, task model.Task) error {
+func (e *Engine) ValidateLocalPlan(ctx context.Context, task model.ExecutionPlan) error {
 	if model.EffectiveMode(task.Mode) != model.AgenticMode && model.EffectiveMode(task.Mode) != model.PersonalMode {
 		return nil
 	}
@@ -172,11 +196,11 @@ func (e *Engine) ValidateLocalPlan(ctx context.Context, task model.Task) error {
 		return err
 	}
 	if err := validatePlanRequirements(view.Plan.Requirements); err != nil {
-		record, readErr := e.Store.Get(ctx, "tasks", task.ID)
+		record, readErr := e.Store.Get(ctx, "execution_plans", task.ID)
 		if readErr != nil {
 			return readErr
 		}
-		current, decodeErr := store.Decode[model.Task](record)
+		current, decodeErr := store.Decode[model.ExecutionPlan](record)
 		if decodeErr != nil {
 			return decodeErr
 		}
@@ -191,11 +215,11 @@ func (e *Engine) ValidateLocalPlan(ctx context.Context, task model.Task) error {
 }
 
 func (e *Engine) requireLegacyPlanApproval(ctx context.Context, project model.Project, id string) error {
-	record, err := e.Store.Get(ctx, "tasks", id)
+	record, err := e.Store.Get(ctx, "execution_plans", id)
 	if err != nil {
 		return err
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		return err
 	}
@@ -209,22 +233,22 @@ func (e *Engine) requireLegacyPlanApproval(ctx context.Context, project model.Pr
 	if err := e.WriteLocalPlan(ctx, project, &task); err != nil {
 		return err
 	}
-	if err := e.Store.Put(ctx, "tasks", id, task, record.Version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", id, task, record.Version); err != nil {
 		return err
 	}
 	return nil
 }
 
-func localPlanPolicyStale(task model.Task, policyHash string, projectErr error) bool {
+func localPlanPolicyStale(task model.ExecutionPlan, policyHash string, projectErr error) bool {
 	return projectErr != nil || task.PlanDocument != nil && task.PlanDocument.PolicyHash != policyHash
 }
 
 func (e *Engine) invalidateLocalPlanPolicy(ctx context.Context, id, policyHash string, projectErr error) {
-	record, err := e.Store.Get(ctx, "tasks", id)
+	record, err := e.Store.Get(ctx, "execution_plans", id)
 	if err != nil {
 		return
 	}
-	current, err := store.Decode[model.Task](record)
+	current, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || !localPlanApproved(current) {
 		return
 	}
@@ -233,12 +257,12 @@ func (e *Engine) invalidateLocalPlanPolicy(ctx context.Context, id, policyHash s
 	}
 }
 
-func (e *Engine) validateLocalPlanSnapshot(ctx context.Context, task model.Task, hash string) error {
-	current, err := e.Store.Get(ctx, "tasks", task.ID)
+func (e *Engine) validateLocalPlanSnapshot(ctx context.Context, task model.ExecutionPlan, hash string) error {
+	current, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		return err
 	}
-	stored, err := store.Decode[model.Task](current)
+	stored, err := store.Decode[model.ExecutionPlan](current)
 	if err != nil {
 		return err
 	}
@@ -248,13 +272,13 @@ func (e *Engine) validateLocalPlanSnapshot(ctx context.Context, task model.Task,
 	return nil
 }
 
-func localPlanSnapshotMatches(stored, task model.Task, hash string) bool {
+func localPlanSnapshotMatches(stored, task model.ExecutionPlan, hash string) bool {
 	if stored.Cancelled() || stored.PlanVersion != task.PlanVersion || !localPlanApproved(stored) {
 		return false
 	}
 	return stored.PlanDocument.ApprovedHash == hash && task.PlanDocument != nil && task.PlanDocument.ApprovedHash == hash
 }
 
-func localPlanApproved(task model.Task) bool {
+func localPlanApproved(task model.ExecutionPlan) bool {
 	return task.PlanDocument != nil && task.PlanDocument.ApprovedHash != ""
 }

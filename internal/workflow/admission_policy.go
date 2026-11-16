@@ -42,9 +42,16 @@ func (a *agentRun) taskBudgetPolicy() (model.BudgetPolicy, error) {
 		b = a.settings(a.ctx).Admission.DefaultBudget
 	}
 	if b == nil {
+		if a.task.IdeaID != "" {
+			return model.BudgetPolicy{}, nil
+		}
 		return model.BudgetPolicy{}, fmt.Errorf("%w: configure finite task attempt and active-runtime ceilings", store.ErrBudgetExceeded)
 	}
-	if err := b.Validate(); err != nil {
+	validation := b.Validate
+	if a.task.IdeaID != "" {
+		validation = b.ValidateAccounting
+	}
+	if err := validation(); err != nil {
 		return *b, fmt.Errorf("%w: %v", store.ErrBudgetExceeded, err)
 	}
 	return *b, nil

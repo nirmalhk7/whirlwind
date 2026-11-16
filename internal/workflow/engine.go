@@ -28,6 +28,7 @@ type Engine struct {
 	background               sync.WaitGroup
 	runnerWait               sync.WaitGroup
 	closing                  bool
+	wake                     chan struct{}
 	providerStatuses         providerStatusCache
 	retryWait                func(context.Context, time.Duration) error
 	attemptTimeout           time.Duration
@@ -37,7 +38,15 @@ type Engine struct {
 
 // New constructs the workflow engine with default process adapters, a unique lease owner, and execution tracking.
 func New(s *store.Store, g github.Client, root string) *Engine {
-	return &Engine{Store: s, GitHub: g, Root: root, Adapter: func(p model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: p} }, owner: store.ID(), running: map[string]context.CancelFunc{}, active: map[string]int{}}
+	return &Engine{Store: s, GitHub: g, Root: root, Adapter: func(p model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: p} }, owner: store.ID(), running: map[string]context.CancelFunc{}, active: map[string]int{}, wake: make(chan struct{}, 1)}
+}
+
+// Wake is a coalesced hint. Durable state remains the source of dispatch eligibility.
+func (e *Engine) Wake() {
+	select {
+	case e.wake <- struct{}{}:
+	default:
+	}
 }
 
 func (e *Engine) Owner() string { return e.owner }
@@ -54,6 +63,7 @@ func (e *Engine) Run(ctx context.Context) {
 	if !e.settings(ctx).Stopped {
 		e.background.Go(func() { e.Reconcile(ctx) })
 	}
+	lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
 	for {
 		select {
 		case <-ctx.Done():
@@ -65,6 +75,8 @@ func (e *Engine) Run(ctx context.Context) {
 			e.mu.Unlock()
 			return
 		case <-ticker.C:
+			lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
+		case <-e.wake:
 			lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
 		}
 	}
@@ -115,11 +127,11 @@ func (e *Engine) fail(ctx context.Context, id string, failure error) {
 }
 
 func (e *Engine) pauseFailure(ctx context.Context, id string, failure error) error {
-	r, err := e.Store.Get(ctx, "tasks", id)
+	r, err := e.Store.Get(ctx, "execution_plans", id)
 	if err != nil {
 		return err
 	}
-	task, err := store.Decode[model.Task](r)
+	task, err := store.Decode[model.ExecutionPlan](r)
 	if err != nil || task.Stage == "paused" || task.Stage == "plan_approval" || task.Cancelled() {
 		return err
 	}
@@ -129,7 +141,7 @@ func (e *Engine) pauseFailure(ctx context.Context, id string, failure error) err
 		if task.Stage == "waiting_quota" {
 			return nil
 		}
-		task.Wait = &model.TaskWait{Kind: wait.Kind, Reason: wait.Reason, Provider: wait.Provider, Pool: wait.Pool, Role: wait.Role, ResumeStage: task.Stage, NextCheckAt: wait.NextCheck.UTC().Format(time.RFC3339Nano), PlanVersion: task.PlanVersion}
+		task.Wait = &model.ExecutionPlanWait{Kind: wait.Kind, Reason: wait.Reason, Provider: wait.Provider, Pool: wait.Pool, Role: wait.Role, ResumeStage: task.Stage, NextCheckAt: wait.NextCheck.UTC().Format(time.RFC3339Nano), PlanVersion: task.PlanVersion}
 		if project, err := e.Project(ctx, task.ProjectID); err == nil {
 			task.Wait.PolicyHash = project.PolicyHash
 		}
@@ -141,7 +153,7 @@ func (e *Engine) pauseFailure(ctx context.Context, id string, failure error) err
 		task.ResumeStage, task.Stage, task.Error = task.Stage, "paused", failure.Error()
 	}
 	// Store.Put commits the structured transition notification in the same transaction.
-	return e.Store.Put(ctx, "tasks", id, task, r.Version)
+	return e.Store.Put(ctx, "execution_plans", id, task, r.Version)
 }
 
 // Project loads and decodes the registered project used by a task.

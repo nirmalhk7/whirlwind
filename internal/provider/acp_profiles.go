@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -111,4 +112,22 @@ func authenticationACPError(p model.Provider, err error) error {
 		auth += " or authorized reference " + strings.Join(profile.AuthReferences, ", ")
 	}
 	return fmt.Errorf("ACP provider %q requires authentication; %s: %w", p.ID, auth, err)
+}
+
+type metadataGuidanceError struct {
+	cause   error
+	message string
+}
+
+func (e *metadataGuidanceError) Error() string { return e.message }
+func (e *metadataGuidanceError) Unwrap() error { return e.cause }
+
+func metadataACPError(p model.Provider, err error) error {
+	cause := err
+	err = authenticationACPError(p, err)
+	var transport *TransportError
+	if errors.As(err, &transport) {
+		return &metadataGuidanceError{cause: cause, message: actionableACPError(p, err).Error()}
+	}
+	return err
 }

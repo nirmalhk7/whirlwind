@@ -26,7 +26,7 @@ func TestProvisionNativeIntegrationsKeepsBoundedProviderState(t *testing.T) {
 	}{
 		{model.Provider{ID: "codex", Kind: "codex"}, []string{"CODEX_HOME/config.toml", "CODEX_HOME/auth.json", "CODEX_HOME/.credentials.json", "CODEX_HOME/plugins/cache/team/ci/1.0/.codex-plugin/plugin.json", "CODEX_HOME/plugins/cache/team/ci/1.0/.mcp.json"}},
 		{model.Provider{ID: "claude", Kind: "claude"}, []string{"HOME/.claude.json", "CLAUDE_CONFIG_DIR/settings.json", "CLAUDE_CONFIG_DIR/.credentials.json"}},
-		{model.Provider{ID: "cursor", Kind: "acp"}, []string{"HOME/.cursor/mcp.json", "HOME/.cursor/cli-config.json"}},
+		{model.Provider{ID: "cursor", Kind: "acp"}, []string{"HOME/.cursor/mcp.json", "HOME/.cursor/cli-config.json", "HOME/.cursor/auth.json"}},
 	} {
 		t.Run(test.provider.ID, func(t *testing.T) {
 			profile := execution.Profile{CWD: project, RuntimeDir: "/isolated/runtime", Domains: []string{"existing.internal"}}
@@ -195,7 +195,7 @@ func nativeProvisionFixture(t *testing.T) (string, string) {
 		".codex/plugins/cache/team/ci/1.0/.mcp.json":                 "{}",
 		".codex/sessions/private.jsonl":                              "session history",
 		".claude.json":                                               "{}", ".claude/settings.json": "{}", ".claude/.credentials.json": "{}",
-		nativeFixtureCursorConfig: "{}", ".cursor/cli-config.json": "{}",
+		nativeFixtureCursorConfig: "{}", ".cursor/cli-config.json": "{}", ".cursor/auth.json": "{}",
 	}
 	for path, content := range files {
 		writeNativeFixture(t, filepath.Join(home, path), content)

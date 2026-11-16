@@ -22,7 +22,7 @@ func (a *agentAttempt) event(kind string, data any) {
 		if errors.Is(err, store.ErrBudgetExceeded) || errors.As(err, &wait) {
 			a.eventErr = err
 		} else {
-			a.eventErr = fmt.Errorf("%w: %v", store.ErrPersistence, err)
+			a.eventErr = fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
 		}
 	}
 	if a.eventErr != nil && a.cancel != nil {
@@ -146,7 +146,7 @@ func (a *agentAttempt) persistenceError(err error) error {
 	if err == nil {
 		return nil
 	}
-	wrapped := fmt.Errorf("%w: %v", store.ErrPersistence, err)
+	wrapped := fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
 	a.mu.Lock()
 	if a.eventErr == nil {
 		a.eventErr = wrapped

@@ -102,7 +102,7 @@ func (step *taskStep) verifyPublicationRisk() (bool, error) {
 	}
 	if step.task.Risk == "critical" && !step.task.Approved {
 		step.task.Stage = "approval"
-		return true, step.Store.Put(step.ctx, "tasks", step.task.ID, step.task, step.record.Version)
+		return true, step.Store.Put(step.ctx, "execution_plans", step.task.ID, step.task, step.record.Version)
 	}
 	return false, nil
 }
@@ -110,7 +110,7 @@ func (step *taskStep) revisitReview() error {
 	step.task.Stage = "review"
 	step.task.Approved = false
 	step.task.Approval = nil
-	return step.Store.Put(step.ctx, "tasks", step.task.ID, step.task, step.record.Version)
+	return step.Store.Put(step.ctx, "execution_plans", step.task.ID, step.task, step.record.Version)
 }
 func (step *taskStep) publicationBase() (string, error) {
 	base, err := github.Run(step.ctx, step.project.Path, "git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD")

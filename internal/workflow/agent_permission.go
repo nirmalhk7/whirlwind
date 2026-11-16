@@ -217,14 +217,14 @@ func (a *agentAttempt) requestPermission(ctx context.Context, perm provider.Perm
 		return false, a.persistenceError(err)
 	}
 	id := store.ID()
-	value := map[string]any{"id": id, "attempt_id": a.id, "task": a.task.ID, "provider": a.chosen.ID, "request": json.RawMessage(snapshot), "decision": "pending", "plan_version": a.task.PlanVersion}
+	value := map[string]any{"id": id, "attempt_id": a.id, "plan_id": a.task.ID, "provider": a.chosen.ID, "request": json.RawMessage(snapshot), "decision": "pending", "plan_version": a.task.PlanVersion}
 	notification := model.Notification{Role: a.input.Role, ID: store.ID(), TaskID: a.task.ID, Kind: "permission", Message: "Tool permission awaits decision: " + id}
 	persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := a.Store.Write(persistCtx, []store.Change{{Kind: "permissions", ID: id, Value: value}, {Kind: "inbox", ID: notification.ID, Value: notification}}, nil); err != nil {
 		return false, a.persistenceError(err)
 	}
-	return false, ErrHumanDecisionPending
+	return false, a.endForHumanDecision()
 }
 func (a *agentAttempt) autoPermission(perm provider.Permission) bool {
 	auto := len(perm.Command) > 0 && policy.AllowedCommand(a.project.Policy, perm.Command)

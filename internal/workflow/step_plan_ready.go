@@ -43,7 +43,7 @@ func (step *taskStep) publishReadyPlan() (model.Issue, error) {
 	return i, nil
 }
 
-func readyPlanBody(project model.Project, plan *model.Plan) (string, error) {
+func readyPlanBody(project model.Project, plan *model.PlanSpecification) (string, error) {
 	if plan == nil {
 		return "", errors.New("ready plan missing")
 	}
@@ -53,7 +53,7 @@ func readyPlanBody(project model.Project, plan *model.Plan) (string, error) {
 	return planIssueBody(*plan), nil
 }
 
-func planIssueBody(plan model.Plan) string {
+func planIssueBody(plan model.PlanSpecification) string {
 	var body strings.Builder
 	body.WriteString(RenderPlanDocument(plan))
 	body.WriteString("\n")

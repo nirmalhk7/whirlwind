@@ -86,7 +86,7 @@ func (a *agentAttempt) validateReviewerEvidence(ctx context.Context, current mod
 func reviewProofMatches(proof struct {
 	Provenance model.Provenance `json:"provenance"`
 	Stage      string           `json:"stage"`
-}, current model.Project, head string, task model.Task) bool {
+}, current model.Project, head string, task model.ExecutionPlan) bool {
 	return proof.Stage == "complete" && reviewProofRevision(proof.Provenance, current, head) && reviewProofTask(proof.Provenance, task)
 }
 
@@ -94,11 +94,22 @@ func reviewProofRevision(proof model.Provenance, current model.Project, head str
 	return proof.Head == head && proof.PolicyHash == current.PolicyHash
 }
 
-func reviewProofTask(proof model.Provenance, task model.Task) bool {
+func reviewProofTask(proof model.Provenance, task model.ExecutionPlan) bool {
 	return proof.Task == task.ID && proof.PlanVersion == task.PlanVersion
 }
 
 func (a *agentAttempt) executeReviewerCheck(ctx context.Context, id string, check model.Check, current model.Project, head string) (checkResult provider.CheckResult, resultErr error) {
+	if a.task.IdeaID != "" {
+		result, err := a.runIndependentBrokerCheck(ctx, a.input.CWD, head, check)
+		if err != nil {
+			return provider.CheckResult{}, err
+		}
+		profile, err := execution.ForPolicy(a.input.CWD, true, current.PolicyHash, current.Policy.Sandbox)
+		if err != nil {
+			return provider.CheckResult{}, err
+		}
+		return a.persistReviewerResult(ctx, reviewerResultEvidence{id: id, current: current, head: head, effective: profile, result: result})
+	}
 	scratch, err := os.MkdirTemp("", "whirlwind-review-check-")
 	if err != nil {
 		return provider.CheckResult{}, err
@@ -164,7 +175,7 @@ func (a *agentAttempt) persistReviewerResult(ctx context.Context, evidence revie
 	if result.Error != "" {
 		output.Output += "\n" + result.Error
 	}
-	value := map[string]any{"execution_profile": effective.Digest(), "task": a.task.ID, "attempt_id": a.id, "plan_version": a.task.PlanVersion, "policy_hash": current.PolicyHash, "head": head, "check_id": id, "result": result, "output_artifact": artifact.ID}
+	value := map[string]any{"execution_profile": effective.Digest(), "plan_id": a.task.ID, "attempt_id": a.id, "plan_version": a.task.PlanVersion, "policy_hash": current.PolicyHash, "head": head, "check_id": id, "result": result, "output_artifact": artifact.ID}
 	if err = a.Store.Put(ctx, "review_checks", store.ID(), value, 0); err != nil {
 		return output, a.persistenceError(err)
 	}

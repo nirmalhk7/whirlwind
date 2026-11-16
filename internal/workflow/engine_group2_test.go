@@ -125,7 +125,7 @@ func (a partialFailureAgent) Run(ctx context.Context, in provider.Input, h provi
 func TestUnitFailureWaitsForSiblingCheckpoint(t *testing.T) {
 	e, task, _ := testEngine(t)
 	task.Stage = "coding"
-	task.Plan = &model.Plan{Objective: "two units", Units: []model.Unit{{ID: "fail", Objective: "fail deliberately", AllowedPaths: []string{"failed.txt"}}, {ID: "keep", Objective: "complete sibling", AllowedPaths: []string{resultFile}}}}
+	task.Plan = &model.PlanSpecification{Objective: "two units", Units: []model.Unit{{ID: "fail", Objective: "fail deliberately", AllowedPaths: []string{"failed.txt"}}, {ID: "keep", Objective: "complete sibling", AllowedPaths: []string{resultFile}}}}
 	failure := errors.New("unit failed")
 	agent := partialFailureAgent{started: make(chan struct{}), err: failure}
 	e.Adapter = func(model.Provider) provider.Adapter { return agent }

@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"whirlwind/internal/model"
@@ -16,7 +17,7 @@ type acceptedReviewFixture struct {
 	evidence map[string]any
 	ctx      context.Context
 	engine   *Engine
-	task     model.Task
+	task     model.ExecutionPlan
 	project  model.Project
 	report   verification.Report
 	version  int
@@ -26,6 +27,14 @@ func newAcceptedReviewFixture(t *testing.T) *acceptedReviewFixture {
 	t.Helper()
 	ctx := context.Background()
 	e, task := localPlanFixture(t)
+	// Scanner evidence tests explicitly approve their scanner commands. The
+	// verifier no longer injects a fixed Qlty inventory into every project.
+	task.Plan.Checks = append(task.Plan.Checks,
+		model.Check{Name: "qlty-smells", Command: []string{"qlty", "smells", "--all", "--sarif"}},
+		model.Check{Name: "qlty-check", Command: []string{"qlty", "check", "--all", "--sarif"}})
+	if err := os.WriteFile(task.PlanDocument.Path, []byte(RenderPlanDocument(*task.Plan)), 0600); err != nil {
+		t.Fatal(err)
+	}
 	view, err := e.ReadLocalPlan(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -48,7 +57,7 @@ func newAcceptedReviewFixture(t *testing.T) *acceptedReviewFixture {
 	task.ChecksPassed = true
 	task.Base, task.ReviewedCommit, task.VerificationID = "base-sha", acceptedCandidateRevision, "verification-1"
 	task.ReviewID = task.ID + ":1:1"
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, version); err != nil {
 		t.Fatal(err)
 	}
 	project, err := e.Project(ctx, task.ProjectID)
@@ -69,7 +78,7 @@ func newAcceptedReviewFixture(t *testing.T) *acceptedReviewFixture {
 	return f
 }
 
-func acceptedReviewProvenance(task model.Task, policyHash string) model.Provenance {
+func acceptedReviewProvenance(task model.ExecutionPlan, policyHash string) model.Provenance {
 	return model.Provenance{Task: task.ID, PlanVersion: task.PlanVersion, Head: task.ReviewedCommit, Base: task.Base,
 		PolicyHash: policyHash, VerificationID: task.VerificationID, ReviewID: task.ReviewID}
 }
@@ -86,7 +95,7 @@ func (f *acceptedReviewFixture) completeReport(t *testing.T) verification.Report
 		identity := acceptedCheckRuntime(fmt.Sprintf("check-run-%d", index))
 		result := verification.Result{Name: check.Name, Command: append([]string(nil), check.Command...), Passed: true, ExitCode: &zero, Runtime: identity}
 		if isQltyVerification(&result) {
-			result.Output = `{"version":"2.1.0","runs":[{"results":[]}]}`
+			result.Output = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty"}},"invocations":[{"executionSuccessful":true}],"results":[]}]}`
 			artifact, err := f.engine.Store.CaptureResource(f.ctx, store.ArtifactOwner{Kind: "verification", ID: f.task.VerificationID}, "check:"+check.Name, "text/plain", []byte(result.Output), store.CaptureOptions{Limit: store.MessagePayloadLimit})
 			if err != nil {
 				t.Fatal(err)
@@ -231,7 +240,7 @@ func persistRawRuntimeError(t *testing.T, f *acceptedReviewFixture, executionID,
 	}
 }
 
-const unchangedQltySmellSARIF = `{"version":"2.1.0","runs":[{"results":[{"ruleId":"complexity","level":"warning","message":{"text":"Too complex"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/code.go"},"region":{"startLine":10,"snippet":{"text":"return largeFunction()"}}}}],"partialFingerprints":{"primaryLocationLineHash":"stable"},"properties":{"complexity":12}}]}]}`
+const unchangedQltySmellSARIF = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty"}},"invocations":[{"executionSuccessful":true}],"results":[{"ruleId":"complexity","level":"warning","message":{"text":"Too complex"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"src/code.go"},"region":{"startLine":10,"snippet":{"text":"return largeFunction()"}}}}],"partialFingerprints":{"primaryLocationLineHash":"stable"},"properties":{"complexity":12}}]}]}`
 
 func intPointer(value int) *int { return &value }
 

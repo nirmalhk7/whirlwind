@@ -168,11 +168,11 @@ func TestInterruptedCheckIsReconciledAndPausesBeforeReplacement(t *testing.T) {
 	if _, err := e.runOwnedCheck(context.Background(), cwd, model.Check{Name: "test", Command: []string{"/usr/bin/true"}}, profile, runtimeCheckOwner{TaskID: task.ID, Role: "verify"}); !errors.Is(err, ErrRuntimeCheckOutcomeUncertain) {
 		t.Fatalf("replacement check did not stop for uncertain prior effects: %v", err)
 	}
-	storedTask, err := e.Store.Get(context.Background(), "tasks", task.ID)
+	storedTask, err := e.Store.Get(context.Background(), "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	paused, err := store.Decode[model.Task](storedTask)
+	paused, err := store.Decode[model.ExecutionPlan](storedTask)
 	if err != nil || paused.Stage != "paused" || paused.Error != ErrRuntimeCheckOutcomeUncertain.Error() {
 		t.Fatalf("task did not preserve the uncertain check for human reconciliation: stage=%q error=%q decode=%v", paused.Stage, paused.Error, err)
 	}

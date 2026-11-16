@@ -64,6 +64,9 @@ func providerReadRoots(command []string, executable string) ([]string, error) {
 }
 
 func providerPackageRoot(path string) (string, bool) {
+	if root, ok := cursorRuntimeRoot(path); ok {
+		return root, true
+	}
 	switch filepath.Ext(path) {
 	case ".js", ".mjs", ".cjs":
 		dir := filepath.Dir(path)
@@ -79,6 +82,23 @@ func providerPackageRoot(path string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// Cursor's versioned shell launcher loads sibling Node chunks and native modules.
+// Bound the grant to that selected installation, never versions or the host home.
+func cursorRuntimeRoot(path string) (string, bool) {
+	dir := filepath.Dir(path)
+	versions := filepath.Dir(dir)
+	if filepath.Base(path) != "cursor-agent" || filepath.Base(versions) != "versions" || filepath.Base(filepath.Dir(versions)) != "cursor-agent" {
+		return "", false
+	}
+	for _, name := range []string{"package.json", "index.js", "node"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil || !info.Mode().IsRegular() {
+			return "", false
+		}
+	}
+	return dir, true
 }
 
 // Node resolves transitive dependencies through the containing installation's

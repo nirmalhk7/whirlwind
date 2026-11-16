@@ -70,7 +70,7 @@ func checkExpectedVersion(record model.Record, err error, expected int) error {
 }
 func (b *Batch) Commit(ctx context.Context, s *Store, receipt *Receipt, extra ...Change) error {
 	changes := append(append([]Change{}, b.changes...), extra...)
-	if err := s.Write(ctx, changes, receipt); err != nil {
+	if err := s.Write(Unstaged(ctx), changes, receipt); err != nil {
 		return err
 	}
 	for _, f := range b.after {
@@ -81,6 +81,24 @@ func (b *Batch) Commit(ctx context.Context, s *Store, receipt *Receipt, extra ..
 
 // Write commits aggregate changes, their SSE events, and optional HTTP receipt together.
 func (s *Store) Write(ctx context.Context, changes []Change, receipt *Receipt) error {
+	if batch := staged(ctx); batch != nil {
+		if receipt != nil {
+			return errors.New("nested mutation receipt is not supported")
+		}
+		for _, change := range changes {
+			if err := batch.put(ctx, s, change); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if err := s.persistChanges(ctx, changes, receipt); err != nil {
+		return err
+	}
+	return s.syncCommittedRunLogs(ctx, changes)
+}
+
+func (s *Store) persistChanges(ctx context.Context, changes []Change, receipt *Receipt) error {
 	if s.Source != nil && !bypassSource(ctx) {
 		for _, c := range changes {
 			if ConfigurationKind(c.Kind) {

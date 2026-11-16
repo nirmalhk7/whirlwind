@@ -9,18 +9,23 @@ import (
 	"whirlwind/internal/verification"
 )
 
-func (e *Engine) validateQltyEvidence(ctx context.Context, task model.Task, report verification.Report) error {
+func (e *Engine) validateQltyEvidence(ctx context.Context, task model.ExecutionPlan, report verification.Report) error {
+	foundCheck := false
 	for index := range report.Results {
 		result := &report.Results[index]
 		if !isQltyVerification(result) {
 			continue
 		}
+		foundCheck = foundCheck || result.Command[1] == "check"
 		if err := e.loadQltyArtifact(ctx, task, result); err != nil {
 			return err
 		}
 		if err := verification.ValidateQltyResult(*result); err != nil {
 			return fmt.Errorf("verification result %q has invalid Qlty evidence: %w", result.Name, err)
 		}
+	}
+	if !foundCheck {
+		return fmt.Errorf("mandatory Qlty check evidence is required before accepting agent code; configure the mandatory Qlty command and run verification")
 	}
 	return nil
 }
@@ -34,7 +39,7 @@ func isQltyCommand(command []string) bool {
 		(command[1] == "check" || command[1] == "smells")
 }
 
-func (e *Engine) loadQltyArtifact(ctx context.Context, task model.Task, result *verification.Result) error {
+func (e *Engine) loadQltyArtifact(ctx context.Context, task model.ExecutionPlan, result *verification.Result) error {
 	if result.OutputArtifact == "" {
 		return fmt.Errorf("verification result %q lacks its full Qlty output artifact", result.Name)
 	}
@@ -49,12 +54,12 @@ func (e *Engine) loadQltyArtifact(ctx context.Context, task model.Task, result *
 	return nil
 }
 
-func qltyArtifactBelongsToRun(artifact model.Artifact, task model.Task, result verification.Result) bool {
+func qltyArtifactBelongsToRun(artifact model.Artifact, task model.ExecutionPlan, result verification.Result) bool {
 	wantOwner, wantID, wantKind := expectedQltyArtifactOwner(task, result)
 	return artifact.OwnerKind == wantOwner && artifact.AttemptID == wantID && artifact.Kind == wantKind
 }
 
-func expectedQltyArtifactOwner(task model.Task, result verification.Result) (string, string, string) {
+func expectedQltyArtifactOwner(task model.ExecutionPlan, result verification.Result) (string, string, string) {
 	if result.ReusedFrom != "" {
 		return "verification", result.ReusedFrom, "cached_check:" + result.Name
 	}

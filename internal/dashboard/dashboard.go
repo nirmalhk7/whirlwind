@@ -19,34 +19,40 @@ const inboxTitle = " Inbox "
 
 type Dashboard struct {
 	*tview.Application
-	projects       *tview.List
-	directions     *tview.List
-	inbox          *tview.List
-	inboxIdeaCount int
-	inboxTaskIDs   []string
-	plans          *tview.List
-	runs           *tview.List
-	runRows        []runRow
-	runID          string
-	taskView       bool
-	detail         *tview.TextView
-	status         *tview.TextView
-	agents         *tview.TextView
-	focus          int
-	snapshot       control.Snapshot
-	root           tview.Primitive
-	modal          tview.Primitive
-	commands       func(context.Context, control.Request) (json.RawMessage, error)
-	projectRows    []model.Project
-	projectHealth  map[string]model.ProjectStatus
-	directionRows  []model.Direction
-	planRows       []model.Task
-	projectID      string
-	directionID    string
-	planID         string
-	updating       bool
-	dataDirectory  string
-	inboxMessages  []string
+	projects                     *tview.List
+	directions                   *tview.List
+	inbox                        *tview.List
+	inboxIdeaCount               int
+	inboxTaskIDs                 []string
+	plans                        *tview.List
+	runs                         *tview.List
+	runRows                      []runRow
+	runID                        string
+	taskView                     bool
+	detail                       *tview.TextView
+	status                       *tview.TextView
+	runnerStatus                 *tview.TextView
+	agents                       *tview.TextView
+	focus                        int
+	snapshot                     control.Snapshot
+	root                         tview.Primitive
+	modal                        tview.Primitive
+	ideaDetailView               *tview.TextView
+	planReviewView               *tview.TextView
+	planReviewForm               *tview.Form
+	planReviewVim                func()
+	directionChoiceFromRationale bool
+	commands                     func(context.Context, control.Request) (json.RawMessage, error)
+	projectRows                  []model.Project
+	projectHealth                map[string]model.ProjectStatus
+	directionRows                []model.Direction
+	planRows                     []model.ExecutionPlan
+	projectID                    string
+	directionID                  string
+	planID                       string
+	updating                     bool
+	dataDirectory                string
+	inboxMessages                []string
 }
 
 func New(dataDirectories ...string) *Dashboard {
@@ -57,7 +63,7 @@ func New(dataDirectories ...string) *Dashboard {
 	}
 	if d.dataDirectory == "" {
 		home, _ := os.UserHomeDir()
-		d.dataDirectory = filepath.Join(home, ".local", "share", "whirlwind")
+		d.dataDirectory = filepath.Join(home, ".local", "share", "whirlwind", "parity-v1")
 	}
 	d.EnableMouse(true)
 	d.inbox = tview.NewList().ShowSecondaryText(false).SetHighlightFullLine(true).SetSelectedBackgroundColor(tcell.ColorWhite).SetSelectedTextColor(tcell.ColorBlack)
@@ -110,12 +116,15 @@ func New(dataDirectories ...string) *Dashboard {
 	d.directions.AddItem("No inbox items", "", 0, nil)
 	d.plans.AddItem("No plans", "", 0, nil)
 	d.detail.SetText("Select a project, then a run to inspect agent history.")
-	d.status = tview.NewTextView().SetText("Whirlwind | q quit | x stop/resume runners | Tab panels | Inbox: a approve, h history, t tasks | Runs/Tasks: Enter details, r review, c Qs, p perms, f final, l logs")
-	navigation := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(d.projects, 0, 1, true).AddItem(d.agents, 0, 1, false).AddItem(&runListView{d.runs}, 0, 1, false)
+	d.status = tview.NewTextView().SetText("Whirlwind | waiting for local supervisor state")
+	d.runnerStatus = tview.NewTextView().SetTextAlign(tview.AlignCenter)
+	d.updateRunnerStatus(nil)
+	navigation := tview.NewFlex().SetDirection(tview.FlexRow).AddItem(d.projects, 0, 1, true).AddItem(d.agents, 0, 1, false).AddItem(&runListView{List: d.runs}, 0, 1, false)
 	d.detail.SetBorder(true).SetTitle(inboxTitle)
 	panels := tview.NewFlex().AddItem(navigation, 0, 3, true).AddItem(d.inbox, 0, 10, false)
-	help := tview.NewTextView().SetText("q quit | Tab panels | Enter open | v/click Vim | l/click run logs | a approve | d delete | ? all keys")
-	d.root = tview.NewFlex().SetDirection(tview.FlexRow).AddItem(panels, 0, 1, true).AddItem(d.status, 1, 0, false).AddItem(help, 1, 0, false)
+	help := tview.NewTextView().SetText(keyboardShortcuts).SetWrap(false)
+	statusRow := tview.NewFlex().AddItem(d.status, 0, 1, false).AddItem(d.runnerStatus, 8, 0, false)
+	d.root = &dashboardLayout{Flex: tview.NewFlex().SetDirection(tview.FlexRow).AddItem(panels, 0, 1, true).AddItem(statusRow, 1, 0, false).AddItem(help, 1, 0, false), help: help}
 
 	for _, panel := range []struct {
 		box   *tview.Box
@@ -141,105 +150,6 @@ func New(dataDirectories ...string) *Dashboard {
 
 func (d *Dashboard) SetCommandHandler(handler func(context.Context, control.Request) (json.RawMessage, error)) {
 	d.commands = handler
-}
-
-func (d *Dashboard) input(event *tcell.EventKey) *tcell.EventKey {
-	if event.Key() == tcell.KeyCtrlC {
-		d.Stop()
-		return nil
-	}
-	if d.modal != nil {
-		return d.modalInput(event)
-	}
-	if event.Rune() == 'q' {
-		d.Stop()
-		return nil
-	}
-	if d.focusPanel(event) {
-		return nil
-	}
-	if d.handlePanelAction(event) {
-		return nil
-	}
-	return event
-}
-
-func (d *Dashboard) modalInput(event *tcell.EventKey) *tcell.EventKey {
-	if event.Key() != tcell.KeyEscape {
-		return event
-	}
-	d.closeModal()
-	return nil
-}
-
-func (d *Dashboard) focusPanel(event *tcell.EventKey) bool {
-	if event.Key() != tcell.KeyTab && event.Key() != tcell.KeyBacktab {
-		return false
-	}
-	order := []int{0, 4, 2, 3}
-	position := 0
-	for i, panel := range order {
-		if panel == d.focus {
-			position = i
-		}
-	}
-	step := 1
-	if event.Key() == tcell.KeyBacktab {
-		step = len(order) - 1
-	}
-	d.focus = order[(position+step)%len(order)]
-	d.SetFocus(d.focusedPanel())
-	return true
-}
-
-func (d *Dashboard) focusedPanel() tview.Primitive {
-	return []tview.Primitive{d.projects, d.directions, d.runs, d.inbox, d.agents}[d.focus]
-}
-
-func (d *Dashboard) handlePanelAction(event *tcell.EventKey) bool {
-	switch {
-	case d.openRunDetails(event):
-	case event.Rune() == '?':
-		d.showKeyboardHelp()
-	case event.Rune() == 'v' && d.focus == 3:
-		d.viewMessage(d.inbox.GetCurrentItem())
-	case event.Rune() == 'd' && d.focus == 3:
-		d.deleteInboxProposal()
-	case event.Rune() == 'x':
-		d.submit(control.Request{Operation: "runners.toggle"})
-	case event.Rune() == 'a' && d.focus == 3:
-		d.chooseDirection()
-	case event.Rune() == 'a' && d.focus == 1:
-		d.confirmDirection()
-	case event.Rune() == 'h' && (d.focus == 1 || d.focus == 3):
-		d.reconsiderDirectionHistory()
-	case event.Rune() == 't' && d.focus == 3:
-		d.chooseTask()
-	case event.Rune() == 'r' && (d.focus == 2 || d.focus == 3):
-		d.reviewPlanForm()
-	case event.Rune() == 'c' && (d.focus == 2 || d.focus == 3):
-		d.answerQuestionsForm()
-	case event.Rune() == 'p' && (d.focus == 2 || d.focus == 3):
-		d.permissionForm()
-	case event.Rune() == 'f' && (d.focus == 2 || d.focus == 3):
-		d.finalizationView()
-	case event.Rune() == 'l' && d.focus == 2:
-		d.showRunLogs(d.runs.GetCurrentItem())
-	case event.Rune() == 'l' && d.focus == 3:
-		d.loadLatestLog()
-	default:
-		return false
-	}
-	return true
-}
-
-func (d *Dashboard) closeModal() {
-	if d.modal == d.directions {
-		d.directions.SetTitle(inboxTitle)
-	}
-	d.modal = nil
-	d.SetRoot(d.root, true)
-	d.SetFocus(d.focusedPanel())
 }
 
 func (d *Dashboard) submit(request control.Request) {
@@ -271,12 +181,4 @@ func (d *Dashboard) showForm(form *tview.Form) {
 	form.AddButton("Cancel", d.closeModal)
 	d.modal = form
 	d.SetRoot(form, true).SetFocus(form)
-}
-
-func (d *Dashboard) openRunDetails(event *tcell.EventKey) bool {
-	if event.Key() != tcell.KeyEnter || d.focus != 2 || len(d.runRows) == 0 {
-		return false
-	}
-	d.showRunLogs(d.runs.GetCurrentItem())
-	return true
 }

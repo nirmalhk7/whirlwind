@@ -9,7 +9,7 @@ import (
 	"whirlwind/internal/verification"
 )
 
-func PublicationEvidence(ctx context.Context, s *store.Store, t model.Task, policyHash string) (model.Provenance, error) {
+func PublicationEvidence(ctx context.Context, s *store.Store, t model.ExecutionPlan, policyHash string) (model.Provenance, error) {
 	if t.ReviewID == "" || t.VerificationID == "" {
 		return model.Provenance{}, errors.New("linked verification and review evidence required")
 	}
@@ -23,7 +23,7 @@ func PublicationEvidence(ctx context.Context, s *store.Store, t model.Task, poli
 	return proof, nil
 }
 
-func reviewedPublicationEvidence(ctx context.Context, s *store.Store, t model.Task, policyHash string) (model.Provenance, error) {
+func reviewedPublicationEvidence(ctx context.Context, s *store.Store, t model.ExecutionPlan, policyHash string) (model.Provenance, error) {
 	record, err := s.Get(ctx, "reviews", t.ReviewID)
 	if err != nil {
 		return model.Provenance{}, err
@@ -38,7 +38,7 @@ func reviewedPublicationEvidence(ctx context.Context, s *store.Store, t model.Ta
 	return *review.Provenance, nil
 }
 
-func validatePublicationVerification(ctx context.Context, s *store.Store, t model.Task, policyHash, checkID string) error {
+func validatePublicationVerification(ctx context.Context, s *store.Store, t model.ExecutionPlan, policyHash, checkID string) error {
 	record, err := s.Get(ctx, "verification", checkID)
 	if err != nil {
 		return err
@@ -62,11 +62,11 @@ type evidenceRevision struct {
 	planVersion                  int
 }
 
-func sameEvidence(p model.Provenance, t model.Task, hash string) bool {
+func sameEvidence(p model.Provenance, t model.ExecutionPlan, hash string) bool {
 	actual := evidenceRevision{task: p.Task, head: p.Head, base: p.Base, policyHash: p.PolicyHash, planVersion: p.PlanVersion}
 	expected := evidenceRevision{task: t.ID, head: t.ReviewedCommit, base: t.Base, policyHash: hash, planVersion: t.PlanVersion}
 	return actual == expected
 }
-func approvalMatches(t model.Task, hash string) bool {
+func approvalMatches(t model.ExecutionPlan, hash string) bool {
 	return t.Approved && t.Approval != nil && sameEvidence(*t.Approval, t, hash) && t.Approval.ReviewID == t.ReviewID
 }

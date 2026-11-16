@@ -62,7 +62,7 @@ func assertPreparationFallback(t *testing.T, role string) {
 	var deadline time.Time
 	h.engine.Adapter = func(model.Provider) provider.Adapter {
 		return connectionAdapterFunc(func(ctx context.Context, in provider.Input, hooks provider.Hooks) (provider.Output, error) {
-			deadline = assertFreshAttemptDeadline(t, ctx, deadline)
+			deadline = assertFreshAttemptDeadline(t, ctx, h.engine, in, deadline)
 			wantModel := "first"
 			if calls == 4 {
 				wantModel = "next"
@@ -85,7 +85,7 @@ func assertPreparationFallback(t *testing.T, role string) {
 		t.Fatalf("fallback blocked by old budget: %v", err)
 	}
 	if role == "plan" {
-		var plan model.Plan
+		var plan model.PlanSpecification
 		if err := json.Unmarshal([]byte(out.Text), &plan); err != nil || plan.Objective != "Add file" {
 			t.Fatalf("planner fallback output lost: %q %v", out.Text, err)
 		}
@@ -99,11 +99,11 @@ func assertPreparationFallback(t *testing.T, role string) {
 
 func assertPlannerCompleted(t *testing.T, h retryHarness) {
 	t.Helper()
-	record, err := h.engine.Store.Get(context.Background(), "tasks", h.task.ID)
+	record, err := h.engine.Store.Get(context.Background(), "execution_plans", h.task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var task model.Task
+	var task model.ExecutionPlan
 	if err := json.Unmarshal(record.Data, &task); err != nil {
 		t.Fatal(err)
 	}

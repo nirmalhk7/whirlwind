@@ -105,9 +105,26 @@ var proxyAuthorization = regexp.MustCompile(`(?i)(proxy-authorization\s*[:=]\s*(
 
 // RedactText removes credential literals from otherwise useful provider diagnostics.
 func RedactText(text string) string {
-	text = bearerSecret.ReplaceAllString(text, "Bearer [redacted]")
-	text = assignedSecret.ReplaceAllString(text, "${1}${2}[redacted]")
-	text = proxyAuthorization.ReplaceAllString(text, "${1}[redacted]")
-	text = proxyURLCredentials.ReplaceAllString(text, "${1}[redacted]@")
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "bearer") {
+		text = bearerSecret.ReplaceAllString(text, "Bearer [redacted]")
+	}
+	// Go's case-insensitive regexp also folds long s into ASCII s. Preserve
+	// that behavior while avoiding full regex scans of multi-megabyte logs.
+	folded := strings.ReplaceAll(lower, "ſ", "s")
+	for _, marker := range []string{"access_token", "refresh_token", "api_key", "client_secret", "password", "auth_token"} {
+		if strings.Contains(folded, marker) {
+			text = assignedSecret.ReplaceAllString(text, "${1}${2}[redacted]")
+			break
+		}
+	}
+	// Avoid scanning large analyzer output with the whitespace expression when
+	// no proxy header exists. The ASCII marker has no Unicode fold variants.
+	if strings.Contains(lower, "proxy-authorization") {
+		text = proxyAuthorization.ReplaceAllString(text, "${1}[redacted]")
+	}
+	if strings.Contains(text, "://") {
+		text = proxyURLCredentials.ReplaceAllString(text, "${1}[redacted]@")
+	}
 	return redaction.RedactText(text)
 }

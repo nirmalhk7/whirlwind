@@ -41,7 +41,7 @@ func TestMutationReceiptFailureRollsBackResource(t *testing.T) {
 
 func TestApprovalRejectsMissingProvenance(t *testing.T) {
 	q := apiRequest{}
-	task := model.Task{Stage: "approval", ChecksPassed: true, Score: 9, ReviewedCommit: "head"}
+	task := model.ExecutionPlan{Stage: "approval", ChecksPassed: true, Score: 9, ReviewedCommit: "head"}
 	if err := q.approveTask(&task); err == nil {
 		t.Fatal("approval accepted without linked check/review evidence")
 	}
@@ -49,7 +49,7 @@ func TestApprovalRejectsMissingProvenance(t *testing.T) {
 
 func TestRawApprovalRouteCannotBypassLocalFinalizationEvidence(t *testing.T) {
 	q := apiRequest{}
-	task := model.Task{ID: "critical", Stage: "approval", Risk: "critical"}
+	task := model.ExecutionPlan{ID: "critical", Stage: "approval", Risk: "critical"}
 	err := q.approveTask(&task)
 	apiErr, ok := err.(*apiError)
 	if !ok || apiErr.code != "local_finalization_required" {

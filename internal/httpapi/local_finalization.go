@@ -16,7 +16,7 @@ import (
 )
 
 type localFinalizationView struct {
-	Task             model.Task           `json:"task"`
+	Task             model.ExecutionPlan  `json:"plan_id"`
 	Review           model.Review         `json:"review"`
 	Adherence        model.Adherence      `json:"adherence"`
 	ApprovedPlanHash string               `json:"approved_plan_hash"`
@@ -109,11 +109,11 @@ func (s *Server) inspectFinalization(ctx context.Context, command LocalCommand) 
 	if command.DiffOffset < 0 || command.DiffOffset > finalizationDiffScanLimit {
 		return nil, errors.New("finalization diff offset is outside the supported range")
 	}
-	record, err := s.Store.Get(ctx, "tasks", command.PlanID)
+	record, err := s.Store.Get(ctx, "execution_plans", command.PlanID)
 	if err != nil {
 		return nil, err
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil {
 		return nil, err
 	}
@@ -143,14 +143,14 @@ func (s *Server) inspectFinalization(ctx context.Context, command LocalCommand) 
 	return json.Marshal(view)
 }
 
-func approvedPlanHash(task model.Task) string {
+func approvedPlanHash(task model.ExecutionPlan) string {
 	if task.PlanDocument == nil {
 		return ""
 	}
 	return task.PlanDocument.ApprovedHash
 }
 
-func exactCandidateDiffPage(ctx context.Context, task model.Task, offset int64) (finalizationDiffPage, error) {
+func exactCandidateDiffPage(ctx context.Context, task model.ExecutionPlan, offset int64) (finalizationDiffPage, error) {
 	if task.Worktree == "" || !pinnedGitCommit.MatchString(task.Base) || !pinnedGitCommit.MatchString(task.ReviewedCommit) {
 		return finalizationDiffPage{}, errors.New("critical candidate is missing its worktree or pinned commit identities")
 	}
@@ -171,7 +171,7 @@ func exactCandidateDiffPage(ctx context.Context, task model.Task, offset int64) 
 	return runCandidateDiffPage(ctx, task, offset)
 }
 
-func runCandidateDiffPage(ctx context.Context, task model.Task, offset int64) (finalizationDiffPage, error) {
+func runCandidateDiffPage(ctx context.Context, task model.ExecutionPlan, offset int64) (finalizationDiffPage, error) {
 	output := &diffPageWriter{offset: offset}
 	diagnostics := &boundedOutput{limit: 4096}
 	command := process.Command(ctx, "git", "-c", "core.pager=cat", "-c", "diff.external=", "diff", "--no-ext-diff", "--no-textconv", "--binary", task.Base+"..."+task.ReviewedCommit)

@@ -38,7 +38,7 @@ type runtimeCheckJob struct {
 	Workspace           string `json:"workspace,omitempty"`
 	CleanupVerified     bool   `json:"cleanup_verified,omitempty"`
 	Error               string `json:"error,omitempty"`
-	TaskID              string `json:"task_id,omitempty"`
+	TaskID              string `json:"plan_id,omitempty"`
 	AttemptID           string `json:"attempt_id,omitempty"`
 	VerificationID      string `json:"verification_id,omitempty"`
 	Role                string `json:"role,omitempty"`
@@ -167,18 +167,18 @@ func (e *Engine) pauseRuntimeCheckTask(ctx context.Context, job runtimeCheckJob,
 	if job.TaskID == "" {
 		return nil
 	}
-	record, err := e.Store.Get(ctx, "tasks", job.TaskID)
+	record, err := e.Store.Get(ctx, "execution_plans", job.TaskID)
 	if err != nil {
 		return err
 	}
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || task.Stage == "paused" || task.Stage == "plan_approval" || task.Cancelled() {
 		return err
 	}
 	task.ResumeStage = task.Stage
 	task.Stage = "paused"
 	task.Error = failure.Error()
-	return e.Store.Put(context.WithoutCancel(ctx), "tasks", task.ID, task, record.Version)
+	return e.Store.Put(context.WithoutCancel(ctx), "execution_plans", task.ID, task, record.Version)
 }
 
 func (e *Engine) beginRuntimeCheck(ctx context.Context, check model.Check, owner runtimeCheckOwner) (runtimeCheckJob, int, error) {

@@ -3,7 +3,6 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +10,13 @@ import (
 	"whirlwind/internal/model"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+)
+
+const (
+	dashboardFixtureAttemptID        = "attempt-1"
+	dashboardFixtureCurrentAttemptID = "attempt-current"
+	dashboardFixtureApprovedPlanID   = "approved-plan"
 )
 
 const (
@@ -95,9 +101,9 @@ func TestAttemptInspectionRendersPersistedHealthQueueAndEffectiveSettings(t *tes
 	legacyRecord := record("legacy", model.Attempt{AttemptID: "legacy", Task: "plan", Role: "plan", Provider: "codex", Model: "legacy-model", Thinking: &model.ThinkingChoice{ConfigID: "effort", Value: "low"}, Status: "complete", Finished: true, DeadlineAt: futureDeadline})
 	d := New()
 	d.Present(control.Snapshot{
-		"projects": {record("project", model.Project{ID: "project", Name: "Repo"})},
-		"tasks":    {record("plan", model.Task{ID: "plan", ProjectID: "project", Stage: "coding"})},
-		"sessions": {activeRecord, expiredRecord, legacyRecord},
+		"projects":        {record("project", model.Project{ID: "project", Name: "Repo"})},
+		"execution_plans": {record("plan", model.ExecutionPlan{ID: "plan", ProjectID: "project", Stage: "coding"})},
+		"sessions":        {activeRecord, expiredRecord, legacyRecord},
 		// Current configuration changed after the active attempt was recorded.
 		"agents": {record("code", model.AgentConfig{Role: "code", Chain: []model.AgentChoice{{Provider: "other", Model: "changed-model"}}})},
 	})
@@ -144,7 +150,7 @@ func TestFourDirectionsAreNavigableAndUnchangedVimDoesNotApprove(t *testing.T) {
 
 }
 
-func TestApprovalRequestsRetainVersionsReviewedInVim(t *testing.T) {
+func TestApprovalRequestsRetainCapturedVersions(t *testing.T) {
 	decisionVim(t, "approve", "")
 	d := New()
 	dashboardScreen(t, d)
@@ -154,11 +160,11 @@ func TestApprovalRequestsRetainVersionsReviewedInVim(t *testing.T) {
 		return json.RawMessage(`{}`), nil
 	})
 	direction := model.Direction{ID: "direction-1", ProjectID: dashboardProjectOne, Title: "Improve the repo", Status: "proposed"}
-	plan := model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Path: "PLAN.md", Hash: dashboardReviewHash}}
+	plan := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Path: "PLAN.md", Hash: dashboardReviewHash}}
 	snapshot := control.Snapshot{
-		"projects":   {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
-		"directions": {record(direction.ID, direction)},
-		"tasks":      {record(plan.ID, plan)},
+		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
+		"directions":      {record(direction.ID, direction)},
+		"execution_plans": {record(plan.ID, plan)},
 	}
 	d.Present(snapshot)
 	d.focus = 1
@@ -171,12 +177,18 @@ func TestApprovalRequestsRetainVersionsReviewedInVim(t *testing.T) {
 	}
 
 	d.showPlanReview(plan, "reviewed text", dashboardReviewHash, 1)
-	snapshot["tasks"][0].Version = 2
-	d.Present(snapshot)
+	form, ok := d.modal.(*tview.Form)
+	if !ok {
+		t.Fatalf("plan review did not open decision controls: %T", d.modal)
+	}
+	form.InputHandler()(tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone), func(p tview.Primitive) { d.SetFocus(p) })
+	form.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(p tview.Primitive) { d.SetFocus(p) })
 	review := <-requests
 	if review.ExpectedVersion != 1 || review.ContentHash != dashboardReviewHash {
-		t.Fatalf("plan review adopted a refreshed record version: %+v", review)
+		t.Fatalf("plan review did not retain the inspected ID/hash/version: %+v", review)
 	}
+	snapshot["execution_plans"][0].Version = 2
+	d.Present(snapshot)
 }
 
 func TestPermissionConfirmationShowsSavedActionAndScope(t *testing.T) {
@@ -186,17 +198,17 @@ func TestPermissionConfirmationShowsSavedActionAndScope(t *testing.T) {
 	t.Cleanup(screen.Fini)
 	screen.SetSize(120, 35)
 	d.Present(control.Snapshot{
-		"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
-		"tasks":    {record(dashboardPlanOne, model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "paused", Wait: &model.TaskWait{AttemptID: "attempt-1"}, Issue: model.Issue{Title: "Saved plan"}})},
+		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
+		"execution_plans": {record(dashboardPlanOne, model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "paused", Wait: &model.ExecutionPlanWait{AttemptID: dashboardFixtureAttemptID}, Issue: model.Issue{Title: "Saved plan"}})},
 		"permissions": {record("permission-1", map[string]any{
-			"task": dashboardPlanOne, "decision": "pending", "provider": "codex", "attempt_id": "attempt-1", "plan_version": 4,
+			"plan_id": dashboardPlanOne, "decision": "pending", "provider": "codex", "attempt_id": dashboardFixtureAttemptID, "plan_version": 4,
 			"request": map[string]any{"tool": "fs.write", "command": []string{"git", "status", "--short"}, "paths": []string{"internal/control/ipc.go"}},
 		})},
 	})
 	d.permissionForm()
 	d.ForceDraw()
 	text := screenText(screen)
-	for _, expected := range []string{"fs.write", "git status --short", "internal/control/ipc.go", "codex", "attempt-1", "Plan version: 4"} {
+	for _, expected := range []string{"fs.write", "git status --short", "internal/control/ipc.go", "codex", dashboardFixtureAttemptID, "Plan version: 4"} {
 		if !strings.Contains(text, expected) {
 			t.Errorf("permission confirmation omitted saved action detail %q:\n%s", expected, text)
 		}
@@ -204,15 +216,17 @@ func TestPermissionConfirmationShowsSavedActionAndScope(t *testing.T) {
 }
 
 func TestPlanReviewKeepsExactUntrustedContentAndCapturedVersion(t *testing.T) {
-	capture := decisionVim(t, "cancel", "")
+	decisionVim(t, "cancel", "")
 	d := New()
-	dashboardScreen(t, d)
-	plan := model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Path: "PLAN.md", Hash: dashboardHashOne}}
+	screen := dashboardScreen(t, d)
+	screen.SetSize(120, 35)
+	plan := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Path: "PLAN.md", Hash: dashboardHashOne}}
 	content := "# Exact heading [red] literal\n\nSecond line"
 	d.showPlanReview(plan, content, dashboardHashOne, 6)
-	body, err := os.ReadFile(capture)
-	if err != nil || !strings.Contains(string(body), content) {
-		t.Fatalf("plan review changed exact content: %v", err)
+	d.ForceDraw()
+	view := screenText(screen)
+	if !strings.Contains(view, "# Exact heading [red] literal") || !strings.Contains(view, "Second line") {
+		t.Fatal("plan review did not display exact saved plan content")
 	}
 
 	if request := planReviewRequest(plan, 6, dashboardHashOne, json.RawMessage(`{"action":"approve"}`)); request.ExpectedVersion != 6 {
@@ -224,9 +238,9 @@ func TestInspectionResponseIsDiscardedAfterSelectionOrRecordChanges(t *testing.T
 	d := New()
 	snapshot := control.Snapshot{
 		"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
-		"tasks": {
-			record(dashboardPlanOne, model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Hash: dashboardHashOne}}),
-			record("plan-2", model.Task{ID: "plan-2", ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Hash: "hash-2"}}),
+		"execution_plans": {
+			record(dashboardPlanOne, model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Hash: dashboardHashOne}}),
+			record("plan-2", model.ExecutionPlan{ID: "plan-2", ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Hash: "hash-2"}}),
 		},
 	}
 	d.Present(snapshot)
@@ -238,7 +252,7 @@ func TestInspectionResponseIsDiscardedAfterSelectionOrRecordChanges(t *testing.T
 		t.Fatal("response for prior selection remained current")
 	}
 	d.Present(snapshot)
-	snapshot["tasks"][0] = record(dashboardPlanOne, model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Hash: "changed"}})
+	snapshot["execution_plans"][0] = record(dashboardPlanOne, model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanDocument: &model.PlanDocument{Hash: "changed"}})
 	d.Present(snapshot)
 	if d.planStillCurrent(dashboardPlanOne, 1, dashboardHashOne) {
 		t.Fatal("response survived a changed plan hash")
@@ -251,17 +265,17 @@ func TestHumanDecisionFormsSelectOnlyCurrentPausedAttempt(t *testing.T) {
 	d.SetScreen(screen)
 	t.Cleanup(screen.Fini)
 	screen.SetSize(120, 35)
-	current := model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "paused", Wait: &model.TaskWait{AttemptID: "attempt-current"}}
+	current := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "paused", Wait: &model.ExecutionPlanWait{AttemptID: dashboardFixtureCurrentAttemptID}}
 	d.Present(control.Snapshot{
-		"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
-		"tasks":    {record(dashboardPlanOne, current)},
+		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
+		"execution_plans": {record(dashboardPlanOne, current)},
 		"questions": {
 			record("question-old", model.QuestionSet{ID: "question-old", TaskID: dashboardPlanOne, AttemptID: "attempt-old", Status: "pending", Questions: []model.Question{{ID: "old", Text: "Old attempt question"}}}),
-			record("question-current", model.QuestionSet{ID: "question-current", TaskID: dashboardPlanOne, AttemptID: "attempt-current", Status: "pending", Questions: []model.Question{{ID: "current", Text: "Current attempt question"}}}),
+			record("question-current", model.QuestionSet{ID: "question-current", TaskID: dashboardPlanOne, AttemptID: dashboardFixtureCurrentAttemptID, Status: "pending", Questions: []model.Question{{ID: "current", Text: "Current attempt question"}}}),
 		},
 		"permissions": {
-			record("permission-old", map[string]any{"task": dashboardPlanOne, "attempt_id": "attempt-old", "decision": "pending", "request": map[string]any{"tool": "old-tool"}}),
-			record("permission-current", map[string]any{"task": dashboardPlanOne, "attempt_id": "attempt-current", "decision": "pending", "request": map[string]any{"tool": "current-tool"}}),
+			record("permission-old", map[string]any{"plan_id": dashboardPlanOne, "attempt_id": "attempt-old", "decision": "pending", "request": map[string]any{"tool": "old-tool"}}),
+			record("permission-current", map[string]any{"plan_id": dashboardPlanOne, "attempt_id": dashboardFixtureCurrentAttemptID, "decision": "pending", "request": map[string]any{"tool": "current-tool"}}),
 		},
 	})
 	d.answerQuestionsForm()
@@ -283,12 +297,12 @@ func TestDashboardLabelsRawScoresAndShowsComputedAcceptanceEvidence(t *testing.T
 	d := New()
 	d.Present(control.Snapshot{
 		"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
-		"tasks": {record(dashboardPlanOne, model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Score: 9, Delivery: &model.LocalDelivery{
+		"execution_plans": {record(dashboardPlanOne, model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Score: 9, Delivery: &model.LocalDelivery{
 			Stage: "accepted", Score: 9, Adherence: &model.Adherence{Score: 92.5}, UnmetRequirements: []string{"WW-055"},
 		}})},
 	})
 	view := d.detail.GetText(false)
-	for _, expected := range []string{"Stored task score (raw; not acceptance evidence): 9", "Computed adherence: 92.5%", "WW-055"} {
+	for _, expected := range []string{"Stored plan score (raw; not acceptance evidence): 9", "Computed adherence: 92.5%", "WW-055"} {
 		if !strings.Contains(view, expected) {
 			t.Errorf("inspection omitted correct acceptance score provenance %q: %s", expected, view)
 		}
@@ -298,16 +312,27 @@ func TestDashboardLabelsRawScoresAndShowsComputedAcceptanceEvidence(t *testing.T
 	}
 }
 
+func TestParityFinalizerInspectionDistinguishesDeliveryFromAcceptedCommit(t *testing.T) {
+	d := New()
+	d.Present(control.Snapshot{"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})}, "execution_plans": {record(dashboardPlanOne, model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, PlanVersion: 2, Stage: "complete", PlanDocument: &model.PlanDocument{Path: "/plans/repo.md", ApprovedHash: "approved-document"}, Delivery: &model.LocalDelivery{Stage: "complete", Branch: "codex/delivery/plan", ReviewedCommit: "accepted-internal-commit", DeliveryCommit: "final-delivery-commit", Tree: "accepted-tree", VerificationID: "complete-verification", ReviewID: "accepted-review", Adherence: &model.Adherence{Score: 83.33333333333333}, UnmetRequirements: []string{"REQ-6"}, Diff: "+accepted source"}})}})
+	view := d.detail.GetText(false)
+	for _, expected := range []string{"commit: final-delivery-commit", "Accepted source commit: accepted-internal-commit", "Accepted tree: accepted-tree", "Verification: complete-verification", "Review: accepted-review", "/plans/repo.md", "approved-document", "REQ-6", "+accepted source"} {
+		if !strings.Contains(view, expected) {
+			t.Errorf("delivery inspection omitted %q: %s", expected, view)
+		}
+	}
+}
+
 func TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery(t *testing.T) {
 	provenance := &model.Provenance{Task: dashboardPlanOne, PlanVersion: 3, Head: "candidate-commit", Base: "base-commit", PolicyHash: "policy-hash", VerificationID: "verification-1", ReviewID: "review-1"}
-	task := model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", PlanVersion: 3, ReviewedCommit: provenance.Head, VerificationID: provenance.VerificationID, ReviewID: provenance.ReviewID, Score: 9}
+	task := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", PlanVersion: 3, ReviewedCommit: provenance.Head, VerificationID: provenance.VerificationID, ReviewID: provenance.ReviewID, Score: 9}
 	adherenceProvenance := *provenance
 	review := model.Review{Provenance: provenance, Adherence: &model.Adherence{Score: 87.5, Total: 2, Provenance: adherenceProvenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}, {ID: "WW-055", Status: "fail"}}}}
 	d := New()
 	d.Present(control.Snapshot{
-		"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo", PolicyHash: provenance.PolicyHash})},
-		"tasks":    {record(dashboardPlanOne, task)},
-		"reviews":  {record(provenance.ReviewID, review)},
+		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo", PolicyHash: provenance.PolicyHash})},
+		"execution_plans": {record(dashboardPlanOne, task)},
+		"reviews":         {record(provenance.ReviewID, review)},
 	})
 	view := d.detail.GetText(false)
 	for _, expected := range []string{"Computed adherence: 87.5%", "WW-055"} {
@@ -321,9 +346,9 @@ func TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery(t *test
 	stale := review
 	stale.Adherence = &model.Adherence{Score: 100, Total: 2, Provenance: model.Provenance{Task: dashboardPlanOne, PlanVersion: 2, Head: "older-candidate", PolicyHash: provenance.PolicyHash, VerificationID: provenance.VerificationID, ReviewID: provenance.ReviewID}, Results: []model.RequirementResult{{ID: "WW-055", Status: "pass"}}}
 	d.Present(control.Snapshot{
-		"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo", PolicyHash: provenance.PolicyHash})},
-		"tasks":    {record(dashboardPlanOne, task)},
-		"reviews":  {record(provenance.ReviewID, stale)},
+		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo", PolicyHash: provenance.PolicyHash})},
+		"execution_plans": {record(dashboardPlanOne, task)},
+		"reviews":         {record(provenance.ReviewID, stale)},
 	})
 	if strings.Contains(d.detail.GetText(false), "Computed adherence: 100%") {
 		t.Fatal("stale review report provenance was displayed as current acceptance evidence")
@@ -332,8 +357,8 @@ func TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery(t *test
 
 func TestFinalizationApprovalRequestBindsExactCandidateAndReview(t *testing.T) {
 	provenance := model.Provenance{Task: dashboardPlanOne, PlanVersion: 4, Head: "reviewed-candidate", PolicyHash: "policy-current", VerificationID: "verification-current", ReviewID: "review-current"}
-	plan := model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", Risk: "critical", PlanVersion: 4, ReviewedCommit: provenance.Head, ReviewID: provenance.ReviewID, VerificationID: provenance.VerificationID, PlanDocument: &model.PlanDocument{ApprovedHash: "approved-plan"}}
-	view := finalizationReport{Task: plan, Review: model.Review{Provenance: &provenance, Adherence: &model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}}, Adherence: model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}, ApprovedPlanHash: "approved-plan", PolicyHash: "policy-current", Diff: finalizationDiffPage{Content: "diff --git a/file b/file\n+approved candidate\n"}, Accepted: true}
+	plan := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", Risk: "critical", PlanVersion: 4, ReviewedCommit: provenance.Head, ReviewID: provenance.ReviewID, VerificationID: provenance.VerificationID, PlanDocument: &model.PlanDocument{ApprovedHash: dashboardFixtureApprovedPlanID}}
+	view := finalizationReport{Task: plan, Review: model.Review{Provenance: &provenance, Adherence: &model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}}, Adherence: model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: "policy-current", Diff: finalizationDiffPage{Content: "diff --git a/file b/file\n+approved candidate\n"}, Accepted: true}
 	request, err := finalizationApprovalRequest(plan, 17, "policy-current", view)
 	if err != nil {
 		t.Fatal(err)
@@ -345,7 +370,7 @@ func TestFinalizationApprovalRequestBindsExactCandidateAndReview(t *testing.T) {
 	if err := json.Unmarshal(request.Payload, &approval); err != nil {
 		t.Fatal(err)
 	}
-	if approval.PlanVersion != plan.PlanVersion || approval.ApprovedPlanHash != "approved-plan" || approval.ReviewedCommit != plan.ReviewedCommit || approval.ReviewID != plan.ReviewID || approval.VerificationID != plan.VerificationID || approval.PolicyHash != "policy-current" {
+	if approval.PlanVersion != plan.PlanVersion || approval.ApprovedPlanHash != dashboardFixtureApprovedPlanID || approval.ReviewedCommit != plan.ReviewedCommit || approval.ReviewID != plan.ReviewID || approval.VerificationID != plan.VerificationID || approval.PolicyHash != "policy-current" {
 		t.Fatalf("approval request did not bind the exact reviewed candidate: %+v", approval)
 	}
 	view.Task.ReviewedCommit = "newer-candidate"
@@ -356,16 +381,16 @@ func TestFinalizationApprovalRequestBindsExactCandidateAndReview(t *testing.T) {
 
 func TestCriticalFinalizationFormShowsExactDiffReportAndLocalOnlyAction(t *testing.T) {
 	provenance := model.Provenance{Task: dashboardPlanOne, PlanVersion: 4, Head: "reviewed-candidate", PolicyHash: "policy-current", VerificationID: "verification-current", ReviewID: "review-current"}
-	plan := model.Task{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", Risk: "critical", PlanVersion: 4, ReviewedCommit: provenance.Head, ReviewID: provenance.ReviewID, VerificationID: provenance.VerificationID, PlanDocument: &model.PlanDocument{ApprovedHash: "approved-plan"}}
-	report := finalizationReport{Task: plan, Review: model.Review{Summary: "Candidate review summary", Provenance: &provenance, Adherence: &model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}}, Adherence: model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}, ApprovedPlanHash: "approved-plan", PolicyHash: "policy-current", Diff: finalizationDiffPage{Content: "diff --git a/file b/file\n+exact reviewed code\n"}, Accepted: true}
+	plan := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", Risk: "critical", PlanVersion: 4, ReviewedCommit: provenance.Head, ReviewID: provenance.ReviewID, VerificationID: provenance.VerificationID, PlanDocument: &model.PlanDocument{ApprovedHash: dashboardFixtureApprovedPlanID}}
+	report := finalizationReport{Task: plan, Review: model.Review{Summary: "Candidate review summary", Provenance: &provenance, Adherence: &model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}}, Adherence: model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: "policy-current", Diff: finalizationDiffPage{Content: "diff --git a/file b/file\n+exact reviewed code\n"}, Accepted: true}
 	d := New()
 	screen := tcell.NewSimulationScreen("UTF-8")
 	d.SetScreen(screen)
 	t.Cleanup(screen.Fini)
 	screen.SetSize(140, 45)
 	d.Present(control.Snapshot{
-		"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, PolicyHash: "policy-current"})},
-		"tasks":    {record(dashboardPlanOne, plan)},
+		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, PolicyHash: "policy-current"})},
+		"execution_plans": {record(dashboardPlanOne, plan)},
 	})
 	d.showFinalizationApproval(plan, 1, report, []int64{0})
 	d.ForceDraw()

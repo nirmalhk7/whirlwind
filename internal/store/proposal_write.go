@@ -101,6 +101,26 @@ func pendingProposalReconsideration(ctx context.Context, query proposalReconside
 		if request.ID != candidate.id || request.ProjectID != project || request.PredecessorID != predecessor || request.Status != "pending" || strings.TrimSpace(request.Reason) == "" || (reason != "" && request.Reason != strings.TrimSpace(reason)) {
 			continue
 		}
+
+		if request.RequestedIdeaVersion > 0 {
+			var raw []byte
+			var version int
+			err := query.QueryRowContext(ctx, "SELECT version,data FROM resources WHERE kind='ideas' AND id=?", predecessor).Scan(&version, &raw)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return model.ProposalReconsideration{}, 0, err
+			}
+			var idea model.Idea
+			if err := json.Unmarshal(raw, &idea); err != nil {
+				return model.ProposalReconsideration{}, 0, err
+			}
+			if idea.ProjectID == project && idea.ArchivedAt != "" && idea.ReconsiderationID == request.ID && version == request.RequestedIdeaVersion {
+				return request, candidate.version, nil
+			}
+			continue
+		}
 		var directionData []byte
 		var directionVersion int
 		err := query.QueryRowContext(ctx, "SELECT version,data FROM resources WHERE kind='directions' AND id=?", predecessor).Scan(&directionVersion, &directionData)

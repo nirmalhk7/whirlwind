@@ -10,7 +10,7 @@ import (
 
 // refreshQuotaWaits performs metadata-only wake checks. Optimistic task versions fence a concurrent pause.
 func (e *Engine) refreshQuotaWaits(ctx context.Context) {
-	records, err := e.Store.List(ctx, "tasks")
+	records, err := e.Store.List(ctx, "execution_plans")
 	if err != nil {
 		return
 	}
@@ -20,7 +20,7 @@ func (e *Engine) refreshQuotaWaits(ctx context.Context) {
 }
 
 func (e *Engine) refreshQuotaWait(ctx context.Context, record model.Record) {
-	task, err := store.Decode[model.Task](record)
+	task, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || task.Stage != "waiting_quota" || task.Wait == nil || !quotaWaitIsDue(task.Wait.NextCheckAt) {
 		return
 	}
@@ -45,7 +45,7 @@ func (e *Engine) refreshQuotaWait(ctx context.Context, record model.Record) {
 		err = e.capacityWaitError(ctx, p, reserve, wait)
 	}
 	if updateQuotaWaitResult(&task, err, wait) {
-		_ = e.Store.Put(ctx, "tasks", task.ID, task, record.Version)
+		_ = e.Store.Put(ctx, "execution_plans", task.ID, task, record.Version)
 	}
 }
 
@@ -54,11 +54,11 @@ func quotaWaitIsDue(nextCheck string) bool {
 	return err != nil || !time.Now().Before(due)
 }
 
-func pauseChangedQuotaWait(ctx context.Context, s *store.Store, record model.Record, task *model.Task) {
+func pauseChangedQuotaWait(ctx context.Context, s *store.Store, record model.Record, task *model.ExecutionPlan) {
 	task.Stage = "paused"
 	task.Error = "Waiting task intent or policy changed; review before resuming"
 	task.Wait = nil
-	_ = s.Put(ctx, "tasks", task.ID, *task, record.Version)
+	_ = s.Put(ctx, "execution_plans", task.ID, *task, record.Version)
 }
 
 func (e *Engine) refreshWaitingProvider(ctx context.Context, run *agentRun, providerID string) (model.Provider, error) {
@@ -79,7 +79,7 @@ func (e *Engine) refreshWaitingProvider(ctx context.Context, run *agentRun, prov
 	return provider, err
 }
 
-func (e *Engine) capacityWaitError(ctx context.Context, provider model.Provider, reserve model.QuotaReserve, wait *model.TaskWait) error {
+func (e *Engine) capacityWaitError(ctx context.Context, provider model.Provider, reserve model.QuotaReserve, wait *model.ExecutionPlanWait) error {
 	records, err := e.Store.List(ctx, "budget_reservations")
 	if err != nil {
 		return err
@@ -109,7 +109,7 @@ func activeReservations(records []model.Record, pool string) int {
 	return active
 }
 
-func updateQuotaWaitResult(task *model.Task, err error, wait *model.TaskWait) bool {
+func updateQuotaWaitResult(task *model.ExecutionPlan, err error, wait *model.ExecutionPlanWait) bool {
 	if err == nil {
 		task.Stage = wait.ResumeStage
 		task.Wait = nil

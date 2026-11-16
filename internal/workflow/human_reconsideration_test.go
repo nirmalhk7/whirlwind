@@ -119,18 +119,44 @@ func TestHumanReconsiderationFlowsThroughIdeationOnce(t *testing.T) {
 		t.Fatalf("human authorization was not consumed by its one publication: %+v err=%v", consumed, err)
 	}
 
-	if err := prepared.engine.Store.SaveDirections(ctx, prepared.project.ID, "2026-11-07", []model.Direction{published}); err != nil {
-		t.Fatalf("ordinary selection/save path could not update the published revisit: %v", err)
+	assertHumanRevisitSelectionUpdatesOwner(t, prepared, published, request)
+}
+
+func assertHumanRevisitSelectionUpdatesOwner(t *testing.T, prepared noveltyTestFixture, published model.Direction, request model.ProposalReconsideration) {
+	t.Helper()
+	ctx := context.Background()
+	publishedRecord, err := prepared.engine.Store.Get(ctx, "ideas", published.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	var uniqueness struct {
-		Status string `json:"status"`
+	idea, err := store.Decode[model.Idea](publishedRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idea.DecisionStatus = "approved"
+	if err := prepared.engine.Store.Put(ctx, "ideas", published.ID, idea, publishedRecord.Version); err != nil {
+		t.Fatalf("ordinary versioned selection could not update the published revisit: %v", err)
 	}
 	proposal, err := prepared.engine.Store.ProposalByFingerprint(ctx, prepared.project.ID, published.Fingerprint)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if proposal.ID != published.ID {
+		t.Fatalf("published fingerprint owner changed after selection: got %q want %q", proposal.ID, published.ID)
+	}
+	var uniqueness struct {
+		Status string `json:"status"`
+	}
 	data, _ := json.Marshal(proposal)
-	if err := json.Unmarshal(data, &uniqueness); err != nil || uniqueness.Status != "proposed" {
-		t.Fatalf("published fingerprint owner was not preserved after direction update: %+v err=%v", uniqueness, err)
+	if err := json.Unmarshal(data, &uniqueness); err != nil || uniqueness.Status != "approved" {
+		t.Fatalf("published fingerprint owner was not preserved after idea approval: %+v err=%v", uniqueness, err)
+	}
+	requestRecord, err := prepared.engine.Store.Get(ctx, "proposal_reconsiderations", request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumed, err := store.Decode[model.ProposalReconsideration](requestRecord)
+	if err != nil || consumed.Status != "consumed" || consumed.CandidateID != published.ID {
+		t.Fatalf("selection changed the consumed human authorization: %+v err=%v", consumed, err)
 	}
 }

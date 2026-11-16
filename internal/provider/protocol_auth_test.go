@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const protocolCursorCredentialPath = ".cursor/cli-config.json"
+const protocolCursorCredentialPath = ".cursor/auth.json"
 
 type protocolAuthExpectation struct {
 	Home     string

@@ -58,7 +58,7 @@ func TestInterruptedIntegrationUsesDurableUnitCheckpoints(t *testing.T) {
 		t.Fatalf("second unit checkpoint was not left complete for restart: %+v", task.Plan.Units[ready[1]])
 	}
 
-	latest, err := e.Store.Get(ctx, "tasks", task.ID)
+	latest, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestInterruptedIntegrationUsesDurableUnitCheckpoints(t *testing.T) {
 			return provider.Output{Text: "continued"}, nil
 		})
 	}
-	resumed, err := store.Decode[model.Task](latest)
+	resumed, err := store.Decode[model.ExecutionPlan](latest)
 	if err != nil {
 		t.Fatal(err)
 	}

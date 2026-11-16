@@ -63,7 +63,7 @@ func (step *taskStep) supplementReview(prompt, commit string, review *model.Revi
 	return nil
 }
 
-func mergeSpecialistRequirements(primary, specialist []model.RequirementResult, plan *model.Plan) ([]model.RequirementResult, error) {
+func mergeSpecialistRequirements(primary, specialist []model.RequirementResult, plan *model.PlanSpecification) ([]model.RequirementResult, error) {
 	if plan == nil {
 		if len(specialist) > 0 {
 			return nil, errors.New("specialist judgments require the frozen approved plan")
@@ -87,31 +87,7 @@ func mergeSpecialistRequirements(primary, specialist []model.RequirementResult, 
 		if judgment.Status != "pass" && judgment.Status != "fail" && judgment.Status != "unverified" {
 			return nil, fmt.Errorf("invalid specialist judgment status: %s", judgment.Status)
 		}
-		index := -1
-		for candidate := range merged {
-			if merged[candidate].ID == judgment.ID {
-				index = candidate
-				break
-			}
-		}
-		if index < 0 {
-			if judgment.Status == "pass" {
-				judgment.Status = "unverified"
-				judgment.Explanation = "Specialist pass cannot establish a requirement omitted by the primary review. " + judgment.Explanation
-			}
-			merged = append(merged, judgment)
-			continue
-		}
-		if judgment.Status == "pass" {
-			continue
-		}
-		current := &merged[index]
-		if judgment.Status == "fail" || current.Status != "fail" {
-			current.Status = judgment.Status
-		}
-		current.Explanation += " Specialist finding: " + judgment.Explanation
-		current.Code = append(current.Code, judgment.Code...)
-		current.Evidence = append(current.Evidence, judgment.Evidence...)
+		merged = mergeSpecialistJudgment(merged, judgment)
 	}
 	return merged, nil
 }
@@ -174,8 +150,37 @@ func (step *taskStep) saveReviewPart(review model.Review, perspective, attempt s
 	review.Provenance = &v.Provenance
 	review.Provenance.AttemptIDs = append(review.Provenance.AttemptIDs, attempt)
 	if err = step.Store.Put(step.ctx, "review_parts", attempt, review, 0); err != nil {
-		return fmt.Errorf("%w: %v", store.ErrPersistence, err)
+		return fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
 	}
 	step.reviewAttempts = append(step.reviewAttempts, attempt)
 	return nil
+}
+
+func mergeSpecialistJudgment(merged []model.RequirementResult, judgment model.RequirementResult) []model.RequirementResult {
+	index := -1
+	for candidate := range merged {
+		if merged[candidate].ID == judgment.ID {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		if judgment.Status == "pass" {
+			judgment.Status = "unverified"
+			judgment.Explanation = "Specialist pass cannot establish a requirement omitted by the primary review. " + judgment.Explanation
+		}
+		merged = append(merged, judgment)
+		return merged
+	}
+	if judgment.Status == "pass" {
+		return merged
+	}
+	current := &merged[index]
+	if judgment.Status == "fail" || current.Status != "fail" {
+		current.Status = judgment.Status
+	}
+	current.Explanation += " Specialist finding: " + judgment.Explanation
+	current.Code = append(current.Code, judgment.Code...)
+	current.Evidence = append(current.Evidence, judgment.Evidence...)
+	return merged
 }

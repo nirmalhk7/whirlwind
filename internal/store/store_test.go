@@ -54,7 +54,7 @@ func TestIssueDeduplicationAndReplan(t *testing.T) {
 	events, e := s.Events(ctx, 0, 100)
 	taskEvents := 0
 	for _, event := range events {
-		if event.Kind == "tasks" {
+		if event.Kind == "execution_plans" {
 			taskEvents++
 		}
 	}
@@ -144,8 +144,8 @@ func TestReplanInvalidatesOldWorktreeAndAcceptance(t *testing.T) {
 	task.Base = "old"
 	task.Approved = true
 	task.ChecksPassed = true
-	r, _ := s.Get(ctx, "tasks", task.ID)
-	if err := s.Put(ctx, "tasks", task.ID, task, r.Version); err != nil {
+	r, _ := s.Get(ctx, "execution_plans", task.ID)
+	if err := s.Put(ctx, "execution_plans", task.ID, task, r.Version); err != nil {
 		t.Fatal(err)
 	}
 	issue.Body = "updated"
@@ -204,9 +204,9 @@ func TestPlanIssueWebhookBindsExistingPlannerTask(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	p := model.Project{ID: "p", Repo: "o/r"}
-	task := model.Task{ID: "direction-one", ProjectID: "p", PlanVersion: 1, Stage: "plan_ready", Plan: &model.Plan{Objective: "feature"}}
+	task := model.ExecutionPlan{ID: "direction-one", ProjectID: "p", PlanVersion: 1, Stage: "plan_ready", Plan: &model.PlanSpecification{Objective: "feature"}}
 	task.Selection = &model.SelectionAuthorization{CandidateID: "one", SelectedAt: "2026-10-22T00:00:00Z"}
-	if err := s.Put(ctx, "tasks", task.ID, task, 0); err != nil {
+	if err := s.Put(ctx, "execution_plans", task.ID, task, 0); err != nil {
 		t.Fatal(err)
 	}
 	issue := model.Issue{Number: 9, Body: "feature\n<!-- whirlwind-plan:direction-one -->", State: "OPEN", Labels: []string{testPlanLabel}}
@@ -219,7 +219,7 @@ func TestPlanIssueWebhookBindsExistingPlannerTask(t *testing.T) {
 // TestForeignKeyRejectsOrphanIssueIdentity verifies SQLite rejects repository/issue mappings without a stored task.
 func TestForeignKeyRejectsOrphanIssueIdentity(t *testing.T) {
 	s := openTest(t)
-	if _, e := s.DB.Exec("INSERT INTO issue_tasks(repo,issue,task_id) VALUES('o/r',1,'missing')"); e == nil {
+	if _, e := s.DB.Exec("INSERT INTO issue_plans(repo,issue,plan_id) VALUES('o/r',1,'missing')"); e == nil {
 		t.Fatal("orphan task reference accepted")
 	}
 }

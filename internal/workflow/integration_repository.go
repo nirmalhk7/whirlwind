@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
@@ -63,7 +62,7 @@ type nativeRepositoryOperation struct {
 	Setup     bool
 }
 
-func (e *Engine) integrationOperation(ctx context.Context, p model.Project, t model.Task, operation nativeRepositoryOperation) (json.RawMessage, error) {
+func (e *Engine) integrationOperation(ctx context.Context, p model.Project, t model.ExecutionPlan, operation nativeRepositoryOperation) (json.RawMessage, error) {
 	input, err := e.nativeRepositoryInput(ctx, p, t, operation)
 	if err != nil {
 		return nil, err
@@ -75,7 +74,7 @@ func (e *Engine) integrationOperation(ctx context.Context, p model.Project, t mo
 	return e.checkedIntegrationOperation(ctx, p.RemoteURL, operation, out)
 }
 
-func nativeOperationInput(p model.Project, t model.Task, operation nativeRepositoryOperation) provider.Input {
+func nativeOperationInput(p model.Project, t model.ExecutionPlan, operation nativeRepositoryOperation) provider.Input {
 	prompt := "Use only the explicitly selected native integration. Never invoke gh, curl, shell network clients, or a different connection. Perform operation " + operation.Name + " for repository " + p.RemoteURL + ". Return ONLY JSON matching operation contract below, derived from actual successful native tool results. Do not invent data or URLs. lookup_pr: {found:boolean,repository:string,url?:string,head?:string,head_sha?:string,base?:string}; create_pr: {url:string,head:string,head_sha:string,base:string,repository:string}; pr_state: {state:OPEN|CLOSED|MERGED}; repository_metadata: {default_branch:string,repository:string,lookup_pr_tool:string,create_pr_tool:string}. repository must be the exact canonical repository URL. Metadata discovery is read-only: return exact native tool names for PR lookup and creation without invoking any write tool. Names must come from the selected connection inventory, with lookup read-only and creation a write tool. For lookup_pr, search the exact repository/head/base and return the existing PR even if an earlier create timed out. create_pr must first recheck existing head/base to avoid duplicates. Never merge or close a PR.\nConnection: " + jsonText(operation.Target) + "\nArguments: " + jsonText(operation.Arguments)
 	input := provider.Input{Role: "finalizer", Purpose: "integration:" + operation.Name, CWD: p.Path, Prompt: prompt, ReadOnly: operation.Name != "create_pr", NativeIntegrations: true, RequiredIntegrations: []model.IntegrationTarget{operation.Target}}
 	if t.Worktree != "" {
@@ -84,7 +83,7 @@ func nativeOperationInput(p model.Project, t model.Task, operation nativeReposit
 	return input
 }
 
-func (e *Engine) executeRepositoryOperation(ctx context.Context, p model.Project, task model.Task, input provider.Input, setup bool) (provider.Output, error) {
+func (e *Engine) executeRepositoryOperation(ctx context.Context, p model.Project, task model.ExecutionPlan, input provider.Input, setup bool) (provider.Output, error) {
 	if setup {
 		run := &agentRun{Engine: e, ctx: store.Unstaged(ctx), project: p, task: task, input: input}
 		return run.run()
@@ -112,7 +111,7 @@ func (e *Engine) InspectIntegrationRepository(ctx context.Context, p model.Proje
 	if err != nil {
 		return "", err
 	}
-	raw, err := e.integrationOperation(ctx, p, model.Task{ID: "onboard-" + p.ID, ProjectID: p.ID, Mode: model.AgenticMode, PlanVersion: 1, Issue: model.Issue{Title: "Inspect repository metadata"}}, nativeRepositoryOperation{Target: target, Name: "repository_metadata", Arguments: map[string]string{"repository": p.RemoteURL}, Setup: true})
+	raw, err := e.integrationOperation(ctx, p, model.ExecutionPlan{ID: "onboard-" + p.ID, ProjectID: p.ID, Mode: model.AgenticMode, PlanVersion: 1, Issue: model.Issue{Title: "Inspect repository metadata"}}, nativeRepositoryOperation{Target: target, Name: "repository_metadata", Arguments: map[string]string{"repository": p.RemoteURL}, Setup: true})
 	if err != nil {
 		return "", err
 	}
@@ -123,30 +122,6 @@ func (e *Engine) reconcileAgenticProject(ctx context.Context, p model.Project) {
 	// delivery does not poll remote pull requests or infer a human decision.
 }
 
-func integrationTaskNeedsObservation(task model.Task, projectID string) bool {
-	sameProject := task.ProjectID == projectID
-	hasPR := task.PR != ""
-	active := !task.Cancelled() && task.Stage != "complete"
-	return sameProject && hasPR && active
-}
-
-func (e *Engine) observeIntegrationOutcome(ctx context.Context, p model.Project, task model.Task, version int) {
-	target, err := e.publicationTarget(ctx, p)
-	if err != nil {
-		_ = e.Store.Notify(ctx, task.ID, "integration_setup", err.Error())
-		return
-	}
-	raw, err := e.integrationOperation(ctx, p, task, nativeRepositoryOperation{Target: target, Name: "pr_state", Arguments: map[string]string{"url": task.PR}})
-	if err != nil {
-		_ = e.Store.Notify(ctx, task.ID, "integration_error", err.Error())
-		return
-	}
-	var state struct{ State string }
-	if json.Unmarshal(raw, &state) == nil && (state.State == "MERGED" || state.State == "CLOSED") {
-		task.Stage = "complete"
-		_ = e.Store.Write(ctx, []store.Change{{Kind: "tasks", ID: task.ID, Value: task, Expected: version}, {Kind: "outcomes", ID: store.ID(), Value: map[string]any{"task": task.ID, "pr": task.PR, "human_decision": strings.ToLower(state.State), "observed_at": time.Now().UTC().Format(time.RFC3339Nano)}}}, nil)
-	}
-}
 func (e *Engine) IntegrationInventory(ctx context.Context, providerID string) ([]model.Integration, error) {
 	record, err := e.Store.Get(ctx, "providers", providerID)
 	if err != nil {

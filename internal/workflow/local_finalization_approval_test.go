@@ -36,7 +36,7 @@ func TestApproveLocalFinalizationBindsExactReviewAndCommitsReceipt(t *testing.T)
 	if err != nil || status != 200 {
 		t.Fatalf("approval receipt missing: status=%d err=%v", status, err)
 	}
-	var receipted model.Task
+	var receipted model.ExecutionPlan
 	if err := json.Unmarshal(body, &receipted); err != nil || receipted.Stage != "submitting" {
 		t.Fatalf("approval receipt has wrong result: task=%+v err=%v", receipted, err)
 	}
@@ -70,10 +70,11 @@ func TestApproveLocalFinalizationRejectsStaleTupleAndRollsBackReceiptFailure(t *
 	}
 }
 
-func criticalApprovalFixture(t *testing.T) (*Engine, model.Task, int, LocalFinalizationApproval) {
+func criticalApprovalFixture(t *testing.T) (*Engine, model.ExecutionPlan, int, LocalFinalizationApproval) {
 	t.Helper()
 	ctx := context.Background()
 	e, task := localPlanFixture(t)
+	includeFixturePlanQlty(t, &task)
 	project, err := e.Project(ctx, task.ProjectID)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +85,7 @@ func criticalApprovalFixture(t *testing.T) (*Engine, model.Task, int, LocalFinal
 	}
 	task, version := localStoredTask(t, e, task.ID)
 	task.Risk, task.Worktree, task.Base = "critical", project.Path, candidate
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, version); err != nil {
 		t.Fatal(err)
 	}
 	task, version = localStoredTask(t, e, task.ID)
@@ -101,7 +102,7 @@ func criticalApprovalFixture(t *testing.T) (*Engine, model.Task, int, LocalFinal
 	task.ReviewedCommit = candidate
 	task.VerificationID = "verification-critical"
 	task.ReviewID = task.ID + ":1:1"
-	if err := e.Store.Put(ctx, "tasks", task.ID, task, version); err != nil {
+	if err := e.Store.Put(ctx, "execution_plans", task.ID, task, version); err != nil {
 		t.Fatal(err)
 	}
 	task, version = localStoredTask(t, e, task.ID)

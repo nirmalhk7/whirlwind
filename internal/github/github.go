@@ -154,9 +154,7 @@ func (c CLI) Sources(ctx context.Context, repo string) (any, error) {
 	if e != nil {
 		return nil, e
 	}
-	parts := strings.Split(repo, "/")
-	query := fmt.Sprintf(`query { repository(owner: %q,name: %q) { discussions(first: 30) { nodes { title body url } } } }`, parts[0], parts[1])
-	discussions, de := ghRead(ctx, "api", "graphql", "-f", "query="+query)
+	discussions, de := discussionSources(ctx, repo)
 	return map[string]any{"issues": json.RawMessage(issues), "discussions": discussions, "discussions_available": de == nil}, nil
 }
 

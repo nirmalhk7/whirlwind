@@ -47,7 +47,7 @@ func defaultData() string {
 	if err != nil {
 		return ".whirlwind-state"
 	}
-	return filepath.Join(home, ".local", "share", "whirlwind")
+	return filepath.Join(home, ".local", "share", "whirlwind", "parity-v1")
 }
 
 func defaultSettingsFile() string {

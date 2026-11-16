@@ -87,11 +87,11 @@ func TestMalformedPlannerRecoveryBudgetSurvivesSupervisorReopen(t *testing.T) {
 		}
 		return nil
 	}
-	taskRecord, err := reopened.Get(context.Background(), "tasks", task.ID)
+	taskRecord, err := reopened.Get(context.Background(), "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	currentTask, err := store.Decode[model.Task](taskRecord)
+	currentTask, err := store.Decode[model.ExecutionPlan](taskRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestMalformedPlannerRecoveryBudgetSurvivesSupervisorReopen(t *testing.T) {
 	assertMalformedPlannerEpisode(t, restarted, currentTask, firstChoice, 4)
 }
 
-func assertMalformedPlannerEpisode(t *testing.T, engine *Engine, task model.Task, choice model.AgentChoice, expectedRestarts int) {
+func assertMalformedPlannerEpisode(t *testing.T, engine *Engine, task model.ExecutionPlan, choice model.AgentChoice, expectedRestarts int) {
 	t.Helper()
 	run := &agentRun{Engine: engine, ctx: context.Background(), project: model.Project{ID: "p"}, task: task, input: provider.Input{Role: "plan"}}
 	entryID := recoveryEntryID(recoveryEpisodeID(run), choice)

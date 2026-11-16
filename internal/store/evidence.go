@@ -75,6 +75,9 @@ func (s *Store) CaptureResource(ctx context.Context, owner ArtifactOwner, kind, 
 		_, err = tx.ExecContext(ctx, "INSERT INTO events(kind,resource_id,data,created_at) VALUES('attempt_events',?,?,?)", owner.ID, string(data), a.CreatedAt)
 		return err
 	})
+	if err == nil {
+		err = s.syncRunLogChange(ctx, owner.Kind, owner.ID)
+	}
 	return a, err
 }
 

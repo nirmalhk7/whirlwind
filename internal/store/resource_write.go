@@ -17,6 +17,9 @@ func put(ctx context.Context, tx *sql.Tx, kind, id string, v any, expected int) 
 }
 
 func putResource(ctx context.Context, tx *sql.Tx, kind, id string, v any, expected int) error {
+	if (kind == "plan_versions" || kind == "finalization_intents" || kind == "finalizations") && expected != 0 {
+		return ErrConflict
+	}
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -25,6 +28,12 @@ func putResource(ctx context.Context, tx *sql.Tx, kind, id string, v any, expect
 	if err != nil {
 		return err
 	}
+	if kind == "ideas" {
+		data, err = prepareIdea(id, before, data)
+		if err != nil {
+			return err
+		}
+	}
 	if err = writeResource(ctx, tx, Change{kind, id, v, expected}, data); err != nil {
 		return err
 	}
@@ -32,11 +41,11 @@ func putResource(ctx context.Context, tx *sql.Tx, kind, id string, v any, expect
 }
 
 func previousTaskData(ctx context.Context, tx *sql.Tx, kind, id string) ([]byte, error) {
-	if kind != "tasks" {
+	if kind != "execution_plans" && kind != "ideas" && kind != "sessions" {
 		return nil, nil
 	}
 	var before []byte
-	err := tx.QueryRowContext(ctx, "SELECT data FROM resources WHERE kind='tasks' AND id=?", id).Scan(&before)
+	err := tx.QueryRowContext(ctx, "SELECT data FROM resources WHERE kind=? AND id=?", kind, id).Scan(&before)
 	if err != nil && err != sql.ErrNoRows {
 		return nil, err
 	}
@@ -44,13 +53,51 @@ func previousTaskData(ctx context.Context, tx *sql.Tx, kind, id string) ([]byte,
 }
 
 func notifyResourceChange(ctx context.Context, tx *sql.Tx, kind, id string, value any, before, data []byte) error {
-	if kind == "tasks" {
+	if kind == "projects" || kind == "project_status" {
+		_, err := tx.ExecContext(ctx, `UPDATE projects SET status=CASE WHEN EXISTS (
+		 SELECT 1 FROM resources r,json_each(r.data) health
+		 WHERE r.kind='project_status' AND
+		 (json_extract(health.value,'$.project_id')=projects.project_id OR json_extract(health.value,'$.path')=projects.project_path OR json_extract(health.value,'$.canonical_path')=projects.project_path)
+		 AND json_extract(health.value,'$.status') IN ('ERR','error')
+		) THEN 'error' WHEN status='complete' THEN status ELSE COALESCE((SELECT json_extract(r.data,'$.status') FROM resources r WHERE r.kind='projects' AND r.id=projects.project_id),'draft') END`)
+		return err
+	}
+	if kind == "sessions" {
+		return syncPlannerAttemptTx(ctx, tx, id, before, data)
+	}
+	if kind == "operations" {
+		return syncIdeationRunTx(ctx, tx, id, data)
+	}
+	if kind == "ideas" {
+		return syncIdeaTx(ctx, tx, id, data)
+	}
+	if kind == "execution_plans" {
+		if err := syncExecutionPlanTx(ctx, tx, id, data); err != nil {
+			return err
+		}
+		if err := syncPlannerPublicationTx(ctx, tx, before, data); err != nil {
+			return err
+		}
 		return notifyTaskTransition(ctx, tx, before, data)
+	}
+	if kind == "plan_versions" {
+		return syncPlanVersionTx(ctx, tx, id, data)
 	}
 	if kind == "directions" {
 		if direction, ok := value.(model.Direction); ok && direction.ProjectID != "" {
 			if direction.ID == "" {
 				direction.ID = id
+			}
+			var canonicalProject string
+			err := tx.QueryRowContext(ctx, "SELECT project_id FROM ideas WHERE idea_id=?", direction.ID).Scan(&canonicalProject)
+			if err == nil {
+				if canonicalProject != direction.ProjectID {
+					return ErrConflict
+				}
+				return nil
+			}
+			if err != sql.ErrNoRows {
+				return err
 			}
 			return syncProposalTx(ctx, tx, direction)
 		}
@@ -60,6 +107,8 @@ func notifyResourceChange(ctx context.Context, tx *sql.Tx, kind, id string, valu
 
 func putRemoval(ctx context.Context, tx *sql.Tx, kind, id string, value any, expected int) (bool, error) {
 	switch value.(type) {
+	case resourceVersionAssertion:
+		return true, assertResourceVersionTx(ctx, tx, kind, id, expected)
 	case directionRemoval:
 		return true, removeDirection(ctx, tx, id, expected)
 	case ConfigurationRemoval:

@@ -10,7 +10,7 @@ import (
 )
 
 func (e *Engine) discoveryDiagnostics(ctx context.Context, project string) (map[string]string, []model.EvidenceRef, error) {
-	tasks, err := e.Store.List(ctx, "tasks")
+	tasks, err := e.Store.List(ctx, "execution_plans")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -32,7 +32,7 @@ func (e *Engine) discoveryDiagnostics(ctx context.Context, project string) (map[
 func discoveryTaskIDs(records []model.Record, project string) (map[string]bool, error) {
 	owned := map[string]bool{}
 	for _, record := range records {
-		task, err := store.Decode[model.Task](record)
+		task, err := store.Decode[model.ExecutionPlan](record)
 		if err != nil {
 			return nil, err
 		}

@@ -31,35 +31,36 @@ type MCPBroker struct {
 	Path       string `json:"path"`
 }
 type Profile struct {
-	MCPBrokerToken      string       `json:"-"`
-	SupervisorDir       string       `json:"-"`
-	StandaloneRuntime   bool         `json:"-"`
-	ExecutionID         string       `json:"execution_id,omitempty"`
-	SandboxName         string       `json:"sandbox_name,omitempty"`
-	SandboxID           string       `json:"sandbox_id,omitempty"`
-	LifecycleFile       string       `json:"lifecycle_file,omitempty"`
-	GatewayName         string       `json:"gateway_name,omitempty"`
-	GatewayEndpoint     string       `json:"gateway_endpoint,omitempty"`
-	Workspace           string       `json:"workspace,omitempty"`
-	DeadlineAt          string       `json:"deadline_at,omitempty"`
-	ExecutionGeneration int          `json:"execution_generation,omitempty"`
-	ExecutionLabelValue string       `json:"execution_label_value,omitempty"`
-	NativeConfigDigest  string       `json:"native_config_digest,omitempty"`
-	NativeFiles         []NativeFile `json:"native_files,omitempty"`
-	MCPBroker           *MCPBroker   `json:"mcp_broker,omitempty"`
-	Version             string       `json:"version"`
-	CommandHash         string       `json:"command_hash,omitempty"`
-	AllowedPaths        []string     `json:"allowed_paths,omitempty"`
-	CWD                 string       `json:"cwd"`
-	ReadOnly            bool         `json:"read_only"`
-	PolicyHash          string       `json:"policy_hash"`
-	ReadRoots           []string     `json:"read_roots"`
-	WriteRoots          []string     `json:"write_roots,omitempty"`
-	Domains             []string     `json:"domains"`
-	Environment         []string     `json:"environment"`
-	Launcher            string       `json:"-"`
-	RuntimeDir          string       `json:"runtime_dir,omitempty"`
-	Sockets             []string     `json:"sockets,omitempty"`
+	Credentials         map[string]model.NetworkCredential `json:"credentials,omitempty"`
+	MCPBrokerToken      string                             `json:"-"`
+	SupervisorDir       string                             `json:"-"`
+	StandaloneRuntime   bool                               `json:"-"`
+	ExecutionID         string                             `json:"execution_id,omitempty"`
+	SandboxName         string                             `json:"sandbox_name,omitempty"`
+	SandboxID           string                             `json:"sandbox_id,omitempty"`
+	LifecycleFile       string                             `json:"lifecycle_file,omitempty"`
+	GatewayName         string                             `json:"gateway_name,omitempty"`
+	GatewayEndpoint     string                             `json:"gateway_endpoint,omitempty"`
+	Workspace           string                             `json:"workspace,omitempty"`
+	DeadlineAt          string                             `json:"deadline_at,omitempty"`
+	ExecutionGeneration int                                `json:"execution_generation,omitempty"`
+	ExecutionLabelValue string                             `json:"execution_label_value,omitempty"`
+	NativeConfigDigest  string                             `json:"native_config_digest,omitempty"`
+	NativeFiles         []NativeFile                       `json:"native_files,omitempty"`
+	MCPBroker           *MCPBroker                         `json:"mcp_broker,omitempty"`
+	Version             string                             `json:"version"`
+	CommandHash         string                             `json:"command_hash,omitempty"`
+	AllowedPaths        []string                           `json:"allowed_paths,omitempty"`
+	CWD                 string                             `json:"cwd"`
+	ReadOnly            bool                               `json:"read_only"`
+	PolicyHash          string                             `json:"policy_hash"`
+	ReadRoots           []string                           `json:"read_roots"`
+	WriteRoots          []string                           `json:"write_roots,omitempty"`
+	Domains             []string                           `json:"domains"`
+	Environment         []string                           `json:"environment"`
+	Launcher            string                             `json:"-"`
+	RuntimeDir          string                             `json:"runtime_dir,omitempty"`
+	Sockets             []string                           `json:"sockets,omitempty"`
 }
 
 var envName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -70,7 +71,7 @@ func ForPolicy(cwd string, readOnly bool, hash string, policy *model.SandboxPoli
 	if err != nil {
 		return Profile{}, err
 	}
-	p := Profile{Version: "nono-0.81.0-v1", CWD: root, ReadOnly: readOnly, PolicyHash: hash, ReadRoots: []string{}, Domains: []string{}, Environment: []string{}}
+	p := Profile{Version: "nono-0.81.0-v2", CWD: root, ReadOnly: readOnly, PolicyHash: hash, ReadRoots: []string{}, Domains: []string{}, Environment: []string{}}
 	if err := applyPolicy(&p, policy); err != nil {
 		return Profile{}, err
 	}
@@ -82,6 +83,9 @@ func ForPolicy(cwd string, readOnly bool, hash string, policy *model.SandboxPoli
 	// Grant those Git metadata directories read-only, never their parent repository.
 	p.ReadRoots = append(p.ReadRoots, gitMetadataReadRoots(root)...)
 	slices.Sort(p.ReadRoots)
+	if err := validateCredentialGrants(p); err != nil {
+		return Profile{}, err
+	}
 	return p, nil
 }
 
@@ -112,6 +116,22 @@ func applyPolicy(profile *Profile, policy *model.SandboxPolicy) error {
 	profile.ReadRoots = append(profile.ReadRoots, readRoots...)
 	profile.Domains = append(profile.Domains, policy.AllowedDomains...)
 	profile.Environment = append(profile.Environment, environment...)
+	if len(policy.Credentials) > 32 {
+		return errors.New("too many credential routes")
+	}
+	if len(policy.Credentials) > 0 {
+		profile.Credentials = map[string]model.NetworkCredential{}
+	}
+	for service, credential := range policy.Credentials {
+		if err := model.ValidateNetworkCredential(service, credential); err != nil {
+			return err
+		}
+		if !safeCredentialEnvironment(credential.EnvVar) {
+			return errors.New("credential phantom environment cannot replace runtime bootstrap")
+		}
+		credential.EndpointRules = slices.Clone(credential.EndpointRules)
+		profile.Credentials[service] = credential
+	}
 	return nil
 }
 

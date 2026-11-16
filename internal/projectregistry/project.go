@@ -2,8 +2,6 @@ package projectregistry
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -28,6 +26,9 @@ func Root(ctx context.Context, path string) (string, error) {
 }
 
 func Load(ctx context.Context, name, inputPath string) (model.Project, error) {
+	if strings.TrimSpace(name) == "" {
+		return model.Project{}, errors.New("project name is required")
+	}
 	path, err := Root(ctx, inputPath)
 	if err != nil {
 		return model.Project{}, err
@@ -41,8 +42,11 @@ func Load(ctx context.Context, name, inputPath string) (model.Project, error) {
 	if err != nil {
 		return model.Project{}, err
 	}
-	sum := sha256.Sum256([]byte(repo))
-	return model.Project{ID: hex.EncodeToString(sum[:8]), Name: name, Repo: repo, RemoteURL: remoteURL, DefaultBranch: branch, Path: path, Policy: rules, PolicyHash: policyHash}, nil
+	status := "draft"
+	if policyHash != "" {
+		status = "approved"
+	}
+	return model.Project{Status: status, ID: model.ProjectID(repo), Name: name, Repo: repo, RemoteURL: remoteURL, DefaultBranch: branch, Path: path, Policy: rules, PolicyHash: policyHash}, nil
 }
 
 func repositoryIdentity(ctx context.Context, path string) (string, string, error) {

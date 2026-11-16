@@ -11,6 +11,7 @@ import (
 // Present updates widgets on the terminal event loop, keeping durable identities
 // selected even when polling changes the order of repository records.
 func (d *Dashboard) Present(snapshot control.Snapshot) {
+	d.updateRunnerStatus(snapshot)
 	projects, err := decodeRecords[model.Project](snapshot["projects"])
 	if err != nil {
 		d.detail.SetText("Cannot read project state: " + err.Error())
@@ -42,7 +43,7 @@ func (d *Dashboard) Present(snapshot control.Snapshot) {
 	d.refreshDirections()
 	d.refreshPlans()
 	d.refreshRuns()
-	d.refreshInbox()
+	d.refreshCurrentInbox()
 	d.showProjectHealth()
 }
 
@@ -67,12 +68,15 @@ func (d *Dashboard) selectProject(index int, _, _ string, _ rune) {
 	d.refreshDirections()
 	d.refreshPlans()
 	d.refreshRuns()
-	d.refreshInbox()
+	d.refreshCurrentInbox()
 	d.showProjectHealth()
 }
 
 func (d *Dashboard) refreshDirections() {
-	directions, err := decodeRecords[model.Direction](d.snapshot["directions"])
+	if d.refreshIdeas() {
+		return
+	}
+	state, err := directionGenerationState(d.snapshot["directions"], d.snapshot["inbox"], d.projectRows, d.projectID)
 	if err != nil {
 		d.detail.SetText("Cannot read direction state: " + err.Error())
 		return
@@ -80,33 +84,103 @@ func (d *Dashboard) refreshDirections() {
 	d.updating = true
 	d.directions.Clear()
 	d.directionRows = nil
-	selected := 0
-	for _, direction := range directions {
-		if direction.ProjectID != d.projectID || (direction.Status != "" && direction.Status != "proposed" && direction.Status != "selected") {
-			continue
-		}
-		if direction.ID == d.directionID {
-			selected = len(d.directionRows)
-		}
-		d.directionRows = append(d.directionRows, direction)
-		label := "Ideation"
-		if direction.Category != "" {
-			label += " (" + strings.ToUpper(direction.Category[:1]) + direction.Category[1:] + ")"
-		}
-		label += " - " + direction.Title
-		if direction.Status == "selected" {
-			label += " · selected"
-		}
-		d.directions.AddItem(tview.Escape(label), "", 0, nil)
-	}
+	selected := d.appendDirectionRows(state)
 	if len(d.directionRows) == 0 {
-		d.directions.AddItem("No inbox items", "", 0, nil)
+		d.directions.AddItem("No current directions", "", 0, nil)
 		d.directionID = ""
 	} else {
 		d.directionID = d.directionRows[selected].ID
 		d.directions.SetCurrentItem(selected)
 	}
 	d.updating = false
+}
+
+func (d *Dashboard) appendDirectionRows(state directionGenerationView) int {
+	if state.current == nil {
+		return 0
+	}
+	selected := 0
+	for _, entry := range state.current.entries {
+		direction := entry.direction
+		if !isCurrentProposal(direction) {
+			continue
+		}
+		if direction.ID == d.directionID {
+			selected = len(d.directionRows)
+		}
+		d.directionRows = append(d.directionRows, direction)
+		d.directions.AddItem(tview.Escape(directionLabel(direction, state.current.legacy)), "", 0, nil)
+	}
+	return selected
+}
+
+func isCurrentProposal(direction model.Direction) bool {
+	return direction.Status == "" || direction.Status == "proposed" || direction.Status == "selected"
+}
+
+func directionLabel(direction model.Direction, legacy bool) string {
+	label := "Ideation"
+	if direction.Category != "" {
+		label += " (" + strings.ToUpper(direction.Category[:1]) + direction.Category[1:] + ")"
+	}
+	if legacy {
+		label = "Legacy · generation unknown · " + label
+	}
+	label += " - " + direction.Title
+	if direction.Status == "selected" {
+		label += " · selected"
+	}
+	return label
+}
+
+func (d *Dashboard) refreshCurrentInbox() {
+	d.refreshInbox()
+	d.updateDirectionInboxMessages()
+	if d.hasCanonicalIdeas() {
+		return
+	}
+	state, err := directionGenerationState(d.snapshot["directions"], d.snapshot["inbox"], d.projectRows, d.projectID)
+	if err != nil || state.marker == "" {
+		return
+	}
+	selected := d.inbox.GetCurrentItem()
+	if d.inbox.GetItemCount() == 1 {
+		first, _ := d.inbox.GetItemText(0)
+		if first == "No inbox items" {
+			d.inbox.RemoveItem(0)
+			selected = 0
+		}
+	}
+	insertAt := d.inbox.GetItemCount()
+	d.inbox.InsertItem(insertAt, state.marker, "", 0, nil)
+	d.inboxTaskIDs = append(d.inboxTaskIDs, "")
+	copy(d.inboxTaskIDs[insertAt+1:], d.inboxTaskIDs[insertAt:len(d.inboxTaskIDs)-1])
+	d.inboxTaskIDs[insertAt] = ""
+	message := state.marker
+	if state.paused != nil {
+		message = state.paused.Message
+	}
+	d.inboxMessages = append(d.inboxMessages, "")
+	copy(d.inboxMessages[insertAt+1:], d.inboxMessages[insertAt:len(d.inboxMessages)-1])
+	d.inboxMessages[insertAt] = message
+	if selected >= insertAt {
+		selected++
+	}
+	if selected < d.inbox.GetItemCount() {
+		d.inbox.SetCurrentItem(selected)
+	}
+}
+
+func (d *Dashboard) updateDirectionInboxMessages() {
+	for index, direction := range d.directionRows {
+		if index < len(d.inboxMessages) {
+			if idea, _, ok := d.ideaRecord(direction.ID); ok {
+				d.inboxMessages[index] = ideaDetails(idea)
+			} else {
+				d.inboxMessages[index] = directionRationale(direction)
+			}
+		}
+	}
 }
 
 func (d *Dashboard) selectDirection(index int, _, _ string, _ rune) {
@@ -117,7 +191,7 @@ func (d *Dashboard) selectDirection(index int, _, _ string, _ rune) {
 }
 
 func (d *Dashboard) refreshPlans() {
-	plans, err := decodeRecords[model.Task](d.snapshot["tasks"])
+	plans, err := decodeRecords[model.ExecutionPlan](d.snapshot["execution_plans"])
 	if err != nil {
 		d.detail.SetText("Cannot read plan state: " + err.Error())
 		return
@@ -146,7 +220,7 @@ func (d *Dashboard) refreshPlans() {
 	d.selectPlan(selected, "", "", 0)
 }
 
-func planTitle(plan model.Task) string {
+func planTitle(plan model.ExecutionPlan) string {
 	if plan.Plan != nil && plan.Plan.Objective != "" {
 		return plan.Plan.Objective
 	}

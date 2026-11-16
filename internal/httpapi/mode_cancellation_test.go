@@ -26,10 +26,10 @@ func TestCancelledMutationJournalCannotBeRetried(t *testing.T) {
 func TestModeCancellationRejectsPendingQuestionAndPermissionReplies(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
-	task := model.Task{ID: "waiting", Stage: "questions", PlanVersion: 1, Plan: &model.Plan{Questions: []model.Question{{ID: "target", Text: "Which target?"}}}}
-	cancellationFixturePut(t, s, "tasks", task.ID, task)
+	task := model.ExecutionPlan{ID: "waiting", Stage: "questions", PlanVersion: 1, Plan: &model.PlanSpecification{Questions: []model.Question{{ID: "target", Text: "Which target?"}}}}
+	cancellationFixturePut(t, s, "execution_plans", task.ID, task)
 	cancellationFixturePut(t, s, "questions", "native", model.QuestionSet{ID: "native", TaskID: task.ID, Status: "pending", Questions: task.Plan.Questions})
-	cancellationFixturePut(t, s, "permissions", "native", map[string]any{"task": task.ID, "decision": "pending", "attempt_id": "old-attempt"})
+	cancellationFixturePut(t, s, "permissions", "native", map[string]any{"plan_id": task.ID, "decision": "pending", "attempt_id": "old-attempt"})
 	if err := s.Store.ActivateMode(ctx, model.AgenticMode); err != nil {
 		t.Fatal(err)
 	}
@@ -39,11 +39,11 @@ func TestModeCancellationRejectsPendingQuestionAndPermissionReplies(t *testing.T
 	if err := s.Engine.Step(ctx, task.ID); err != nil {
 		t.Fatal(err)
 	}
-	record, err := s.Store.Get(ctx, "tasks", task.ID)
+	record, err := s.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cancelled, err := store.Decode[model.Task](record)
+	cancelled, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || !cancelled.Cancelled() || cancelled.Plan.Questions[0].Answer != "" {
 		t.Fatalf("stale response revived cancelled task: %+v %v", cancelled, err)
 	}
@@ -79,12 +79,12 @@ func assertCancelledReplyRejected(t *testing.T, s *Server, kind, id, action stri
 
 func assertCancelledTaskActionsRejected(t *testing.T, s *Server, id string) {
 	t.Helper()
-	record, err := s.Store.Get(context.Background(), "tasks", id)
+	record, err := s.Store.Get(context.Background(), "execution_plans", id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, action := range []string{"resume", "adopt", "answers", "approve"} {
-		response := workflowModeRequest(t, s, "POST", "tasks/"+id+"/"+action, strconv.Itoa(record.Version), map[string]any{"answers": map[string]string{"target": "production"}})
+		response := workflowModeRequest(t, s, "POST", "execution_plans/"+id+"/"+action, strconv.Itoa(record.Version), map[string]any{"answers": map[string]string{"target": "production"}})
 		if response.Code != 409 || !strings.Contains(response.Body.String(), "task_cancelled") {
 			t.Fatalf("cancelled task accepted %s: %d %s", action, response.Code, response.Body)
 		}
@@ -103,17 +103,17 @@ func assertCancelledDirectionReselection(t *testing.T, linked bool) {
 	ctx := context.Background()
 	cancellationFixturePut(t, s, "projects", "p", model.Project{ID: "p", PolicyHash: "confirmed"})
 	direction := model.Direction{ID: "legacy", ProjectID: "p", Title: "Preserve objective", Description: "Implement selected scope", Scope: []string{"result.txt"}, Status: "selected", Selected: true}
-	old := model.Task{ID: "direction-legacy", ProjectID: "p", Stage: "coding", Worktree: "/preserved-worktree", PlanVersion: 3}
+	old := model.ExecutionPlan{ID: "direction-legacy", ProjectID: "p", Stage: "coding", Worktree: "/preserved-worktree", PlanVersion: 3}
 	if linked {
 		old.ID = "linked-task"
 		direction.TaskID = old.ID
 	}
 	cancellationFixturePut(t, s, "directions", direction.ID, direction)
-	cancellationFixturePut(t, s, "tasks", old.ID, old)
+	cancellationFixturePut(t, s, "execution_plans", old.ID, old)
 	if err := s.Store.ActivateMode(ctx, model.AgenticMode); err != nil {
 		t.Fatal(err)
 	}
-	before, err := s.Store.Get(ctx, "tasks", old.ID)
+	before, err := s.Store.Get(ctx, "execution_plans", old.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,14 +122,14 @@ func assertCancelledDirectionReselection(t *testing.T, linked bool) {
 	if err := json.Unmarshal(response.Body.Bytes(), &record); err != nil || response.Code != 202 {
 		t.Fatalf("explicit reselection failed: %d %s %v", response.Code, response.Body, err)
 	}
-	fresh, err := store.Decode[model.Task](record)
+	fresh, err := store.Decode[model.ExecutionPlan](record)
 	if err != nil || fresh.ID == old.ID || fresh.Mode != model.AgenticMode || fresh.Stage != "planning" || fresh.Worktree != "" || fresh.PlanVersion != 1 {
 		t.Fatalf("selection reused cancelled execution: %+v %v", fresh, err)
 	}
 	if fresh.Selection == nil || fresh.Selection.Objective != direction.Title || fresh.Selection.PolicyHash != "confirmed" || fresh.Selection.CandidateVersion != 1 {
 		t.Fatalf("new task missing fresh authorization: %+v", fresh.Selection)
 	}
-	after, err := s.Store.Get(ctx, "tasks", old.ID)
+	after, err := s.Store.Get(ctx, "execution_plans", old.ID)
 	if err != nil || after.Version != before.Version || !bytes.Equal(after.Data, before.Data) {
 		t.Fatalf("new selection altered cancelled history: %+v %v", after, err)
 	}

@@ -161,7 +161,7 @@ func TestExpiredWorkerLeaseCannotBeRenewed(t *testing.T) {
 	if err := e.Store.Put(context.Background(), "sessions", attempt.id, state, record.Version); err != nil {
 		t.Fatal(err)
 	}
-	if err := attempt.recordWorkerHeartbeat(context.Background(), time.Now().UTC()); !errors.Is(err, store.ErrConflict) {
+	if err := attempt.recordWorkerHeartbeat(context.Background(), time.Now().UTC()); !runtimeConflictHasReason(err, "runtime lease expired") {
 		t.Fatalf("expired execution lease was revived by a late heartbeat: %v", err)
 	}
 }
@@ -406,7 +406,7 @@ func TestDelayedWorkerHeartbeatCannotRenewFromOldTickerSample(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldSample := time.Now().UTC().Add(-10 * time.Second)
-	if err := attempt.recordWorkerHeartbeat(context.Background(), oldSample); !errors.Is(err, store.ErrConflict) {
+	if err := attempt.recordWorkerHeartbeat(context.Background(), oldSample); !runtimeConflictHasReason(err, "stale heartbeat sample") {
 		t.Fatalf("late heartbeat sample renewed an owner lease: %v", err)
 	}
 }
@@ -438,7 +438,7 @@ func TestWorkerHeartbeatRunsIndependentlyOfProviderOutput(t *testing.T) {
 	}
 }
 
-func newLeaseTestAttempt(e *Engine, task model.Task, project model.Project, cwd, id string) *agentAttempt {
+func newLeaseTestAttempt(e *Engine, task model.ExecutionPlan, project model.Project, cwd, id string) *agentAttempt {
 	run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "code", Purpose: "primary", Model: "fixture-model", CWD: cwd, ExecutionProfile: "fixture-profile"}}
 	return &agentAttempt{agentRun: run, id: id, chosen: model.Provider{ID: "fixture", Name: "Fixture", Kind: "acp"}}
 }

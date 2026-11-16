@@ -17,7 +17,7 @@ const supervisorToken = "WHIRLWIND_SUPERVISOR_TOKEN";
 
 export async function localConfiguration() {
   const root = await realRoot();
-  const data = resolve(root, process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind"));
+  const data = resolve(root, process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind/parity-v1"));
   const settings = resolve(root, process.env.WHIRLWIND_SETTINGS_FILE || "settings.yaml");
   const owner = typeof process.getuid === "function" ? process.getuid() : "unknown";
   const key = createHash("sha256").update(data).digest("hex").slice(0, 16);
@@ -85,13 +85,17 @@ async function buildSupervisor(config) {
   await mkdir(runtime, { recursive: true, mode: 0o700 });
   const temporary = join(runtime, `.whirlwind-supervisor-${process.pid}`);
   const binary = join(runtime, "whirlwind-supervisor");
+  const verifierTemporary=join(runtime,`.whirlwind-verify-${process.pid}`);
+  const verifier=join(runtime,"whirlwind-verify");
   try {
     await exec("go", ["build", "-o", temporary, "./cmd/whirlwind"], { cwd: config.root, timeout: 300_000, maxBuffer: 4 * 1024 * 1024 });
+    await exec("go", ["build", "-o", verifierTemporary, "./cmd/whirlwind-verify"], { cwd: config.root, timeout: 300_000, maxBuffer: 4 * 1024 * 1024 });
+    await rename(verifierTemporary,verifier);
     await rename(temporary, binary);
   } catch (error) {
     await recordBuildFailure(config, error);
     throw new Error(`Supervisor build failed. Logs: ${config.log}`);
-  } finally { await rm(temporary, { force: true }); }
+  } finally { await Promise.all([rm(temporary, { force: true }),rm(verifierTemporary,{force:true})]); }
   return binary;
 }
 
@@ -124,7 +128,7 @@ async function startLocked(config) {
   const state = { version: 1, token: randomBytes(16).toString("hex"), pid: 0, root: config.root, startedAt: new Date().toISOString() };
   try {
     const child = spawn(binary, ["--supervisor", "--data", config.data, "--settings", config.settings], {
-      cwd: config.root, env: { ...process.env, WHIRLWIND_DATA_DIR: config.data, WHIRLWIND_SETTINGS_FILE: config.settings, [supervisorToken]: state.token },
+      cwd: config.root, env: { ...process.env, WHIRLWIND_DATA_DIR: config.data, WHIRLWIND_SETTINGS_FILE: config.settings, WHIRLWIND_VERIFY_BIN:process.env.WHIRLWIND_VERIFY_BIN||join(config.data,"runtime","whirlwind-verify"), [supervisorToken]: state.token },
       detached: true, stdio: ["ignore", log.fd, log.fd],
     });
     await new Promise((resolve, reject) => {
@@ -181,10 +185,20 @@ export async function stopSupervisor() {
 
 async function stopLocked(config) {
   if (await isHealthy(config)) {
+    const state = await readSupervisorState(config);
     try { await request(config, "supervisor.stop"); } catch (error) { if (!/connect|socket|closed/i.test(error.message)) throw error; }
     const deadline = Date.now() + 15_000;
-    while (Date.now() < deadline && await isHealthy(config)) await wait(100);
-    if (await isHealthy(config)) throw new Error(`Supervisor did not stop. Inspect ${config.log}`);
+    // Closing IPC begins shutdown; it does not prove process-tree cleanup.
+    // Keep ownership state until both the socket and token-owned processes end.
+    let pending;
+    do {
+      const [socketActive, processes] = await Promise.all([
+        socketIsActive(config.socket), ownedProcesses(state, supervisorToken),
+      ]);
+      pending = socketActive || processes.length > 0;
+      if (pending) await wait(100);
+    } while (pending && Date.now() < deadline);
+    if (pending) throw new Error(`Supervisor did not stop. Inspect ${config.log}`);
     await rm(config.state, { force: true });
     console.log("Whirlwind supervisor stopped.");
     return 0;

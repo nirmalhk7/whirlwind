@@ -19,7 +19,7 @@ func (q apiRequest) evaluationReport() error {
 }
 
 func (q apiRequest) taskOutcome() error {
-	task, record, err := readCurrent[model.Task](q, "tasks")
+	task, record, err := readCurrent[model.ExecutionPlan](q, "execution_plans")
 	if err != nil {
 		return err
 	}
@@ -33,11 +33,11 @@ func (q apiRequest) taskOutcome() error {
 	if !slices.Contains([]string{"accepted", "rejected", "regression", "reverted"}, input.Decision) {
 		return &apiError{422, "invalid_outcome", "decision must be accepted, rejected, regression, or reverted"}
 	}
-	outcome := map[string]any{"task": task.ID, "pr": task.PR, "human_decision": input.Decision, "reason": input.Reason, "source": "local_operator", "observed_at": time.Now().UTC().Format(time.RFC3339Nano)}
+	outcome := map[string]any{"plan_id": task.ID, "pr": task.PR, "human_decision": input.Decision, "reason": input.Reason, "source": "local_operator", "observed_at": time.Now().UTC().Format(time.RFC3339Nano)}
 	audit := model.Audit{Task: task.ID, Source: "local_operator", Action: "record_outcome", Target: task.ID, Version: record.Version, Reason: input.Reason}
 	if err = q.Store.Write(q.r.Context(), []store.Change{{Kind: "outcomes", ID: store.ID(), Value: outcome}, {Kind: "audit", ID: store.ID(), Value: audit}}, nil); err != nil {
 		return err
 	}
-	q.save(q.w, q.r, "tasks", task.ID, task, record.Version, 200)
+	q.save(q.w, q.r, "execution_plans", task.ID, task, record.Version, 200)
 	return nil
 }

@@ -44,13 +44,13 @@ func (q apiRequest) runnerSettings() (workflow.Settings, int, error) {
 }
 
 func (q apiRequest) pauseRunners() error {
-	records, err := q.Store.List(q.r.Context(), "tasks")
+	records, err := q.Store.List(q.r.Context(), "execution_plans")
 	if err != nil {
 		return err
 	}
 	paused := 0
 	for _, record := range records {
-		task, err := store.Decode[model.Task](record)
+		task, err := store.Decode[model.ExecutionPlan](record)
 		if err != nil {
 			return err
 		}
@@ -61,7 +61,7 @@ func (q apiRequest) pauseRunners() error {
 		task.ResumeStage = task.Stage
 		task.Stage = "paused"
 		task.Error = globalStopReason
-		if err := q.Store.Put(q.r.Context(), "tasks", record.ID, task, record.Version); err != nil {
+		if err := q.Store.Put(q.r.Context(), "execution_plans", record.ID, task, record.Version); err != nil {
 			return err
 		}
 		paused++
@@ -76,13 +76,13 @@ func (q apiRequest) pauseRunners() error {
 
 // resumeRunners restores only tasks suspended by the global stop action.
 func (q apiRequest) resumeRunners() error {
-	records, err := q.Store.List(q.r.Context(), "tasks")
+	records, err := q.Store.List(q.r.Context(), "execution_plans")
 	if err != nil {
 		return err
 	}
 	resumed := 0
 	for _, record := range records {
-		task, err := store.Decode[model.Task](record)
+		task, err := store.Decode[model.ExecutionPlan](record)
 		if err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func (q apiRequest) resumeRunners() error {
 		if err := q.resumeTask(&task); err != nil {
 			return err
 		}
-		if err := q.Store.Put(q.r.Context(), "tasks", record.ID, task, record.Version); err != nil {
+		if err := q.Store.Put(q.r.Context(), "execution_plans", record.ID, task, record.Version); err != nil {
 			return err
 		}
 		resumed++

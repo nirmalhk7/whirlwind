@@ -5,7 +5,8 @@ import (
 	"math"
 )
 
-// BudgetPolicy has no inferred allowances. Finite attempts and runtime are required at admission.
+// BudgetPolicy retains legacy ceilings and optional token/cost reservations.
+// Canonical execution uses per-attempt deadlines without a whole-plan ceiling.
 type BudgetPolicy struct {
 	VerificationAttempts       int     `json:"verification_attempts,omitempty" yaml:"verification_attempts"`
 	VerificationRuntimeSeconds int     `json:"verification_runtime_seconds,omitempty" yaml:"verification_runtime_seconds"`
@@ -26,6 +27,8 @@ func (b BudgetPolicy) Validate() error {
 	}
 	return validateBudgetAllowances(b)
 }
+
+func (b BudgetPolicy) ValidateAccounting() error { return validateBudgetAllowances(b) }
 
 func validateBudgetCeilings(b BudgetPolicy) error {
 	if b.MaxAttempts <= 0 || b.MaxRuntimeSeconds <= 0 {
@@ -80,7 +83,7 @@ type BudgetReservation struct {
 	RuntimeUnknown  bool    `json:"runtime_unknown,omitempty"`
 	Kind            string  `json:"kind,omitempty"`
 	AttemptID       string  `json:"attempt_id"`
-	TaskID          string  `json:"task_id"`
+	TaskID          string  `json:"plan_id"`
 	Owner           string  `json:"owner"`
 	Provider        string  `json:"provider"`
 	Model           string  `json:"model"`

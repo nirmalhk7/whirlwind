@@ -14,7 +14,7 @@ func (q apiRequest) resource() error {
 			return err
 		}
 	}
-	kinds := map[string]bool{"workflow_config": true, "integrations": true, "tdd_checks": true, "review_checks": true, "quota_observations": true, "review_parts": true, "audit": true, "publications": true, "mutations": true, "projects": true, "providers": true, "directions": true, "tasks": true, "plans": true, "reviews": true, "findings": true, "permissions": true, "questions": true, "inbox": true, "metrics": true, "outcomes": true, "sessions": true, "checkpoints": true, "units": true, "indexes": true, "index_history": true, "verification": true, "operations": true}
+	kinds := map[string]bool{"workflow_config": true, "integrations": true, "tdd_checks": true, "review_checks": true, "quota_observations": true, "review_parts": true, "audit": true, "publications": true, "mutations": true, "projects": true, "providers": true, "directions": true, "execution_plans": true, "plan_versions": true, "reviews": true, "findings": true, "permissions": true, "questions": true, "inbox": true, "metrics": true, "outcomes": true, "sessions": true, "checkpoints": true, "units": true, "indexes": true, "index_history": true, "verification": true, "operations": true}
 	if !kinds[q.kind] || q.action != "" {
 		return &apiError{404, "route_not_found", "Unsupported route"}
 	}

@@ -14,7 +14,7 @@ import (
 
 const integrationRevParse = "rev-parse"
 
-func (e *Engine) integrateUnits(ctx context.Context, p model.Project, t *model.Task, ready []int, completed map[string]bool) error {
+func (e *Engine) integrateUnits(ctx context.Context, p model.Project, t *model.ExecutionPlan, ready []int, completed map[string]bool) error {
 	for _, n := range ready {
 		unit := &t.Plan.Units[n]
 		beforeAttempt := t.LastAttemptID
@@ -45,7 +45,7 @@ func (e *Engine) integrateUnits(ctx context.Context, p model.Project, t *model.T
 }
 
 // mergeUnit reports existing or empty ranges separately to preserve legacy checkpoint bookkeeping.
-func (e *Engine) mergeUnit(ctx context.Context, p model.Project, t *model.Task, u *model.Unit) (bool, error) {
+func (e *Engine) mergeUnit(ctx context.Context, p model.Project, t *model.ExecutionPlan, u *model.Unit) (bool, error) {
 	matching, ancestor, err := integrationStatus(ctx, t.Worktree, u.Commit)
 	if err != nil {
 		return false, err
@@ -62,7 +62,7 @@ func (e *Engine) mergeUnit(ctx context.Context, p model.Project, t *model.Task, 
 	}
 	return false, e.cherryPickUnit(ctx, p, t, u, commits)
 }
-func (e *Engine) cherryPickUnit(ctx context.Context, p model.Project, t *model.Task, u *model.Unit, commits string) error {
+func (e *Engine) cherryPickUnit(ctx context.Context, p model.Project, t *model.ExecutionPlan, u *model.Unit, commits string) error {
 	_, err := github.Run(ctx, t.Worktree, "git", append([]string{"cherry-pick", "--keep-redundant-commits"}, strings.Fields(commits)...)...)
 	if err == nil {
 		return nil
@@ -70,7 +70,7 @@ func (e *Engine) cherryPickUnit(ctx context.Context, p model.Project, t *model.T
 	return e.resolveIntegrationConflict(ctx, p, t, u)
 }
 
-func (e *Engine) resolveIntegrationConflict(ctx context.Context, p model.Project, t *model.Task, u *model.Unit) error {
+func (e *Engine) resolveIntegrationConflict(ctx context.Context, p model.Project, t *model.ExecutionPlan, u *model.Unit) error {
 	prompt, err := agents.Render("integrate", map[string]string{"Unit": jsonText(u)})
 	if err != nil {
 		return err
@@ -88,7 +88,7 @@ func (e *Engine) resolveIntegrationConflict(ctx context.Context, p model.Project
 	if headErr != nil {
 		return headErr
 	}
-	return e.Store.Put(ctx, "checkpoints", store.ID(), map[string]any{"task": t.ID, "unit": u.ID, "plan_version": t.PlanVersion, "attempt_id": out.AttemptID, "commit": head, "kind": "integration"}, 0)
+	return e.Store.Put(ctx, "checkpoints", store.ID(), map[string]any{"plan_id": t.ID, "unit": u.ID, "plan_version": t.PlanVersion, "attempt_id": out.AttemptID, "commit": head, "kind": "integration"}, 0)
 }
 
 func integrationStatus(ctx context.Context, path, commit string) (bool, bool, error) {

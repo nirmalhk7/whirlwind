@@ -34,7 +34,7 @@ func TestSelectionPersistsAuthorizationBeforePlanning(t *testing.T) {
 	if response.Code != 202 {
 		t.Fatalf("%d %s", response.Code, response.Body)
 	}
-	record, err := s.Store.Get(ctx, "tasks", "direction-idea")
+	record, err := s.Store.Get(ctx, "execution_plans", model.PlanID("direction-idea"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestIdeationBriefPersistsWithoutAuthorizingPlanning(t *testing.T) {
 	if brief["goal"] != "Reduce missed work" || brief["constraints"] != "Keep data on this machine" || brief["priorities"] != "Recovery before expansion" || brief["max_candidates"] != float64(2) {
 		t.Fatalf("brief missing: %s", record.Data)
 	}
-	tasks, _ := s.Store.List(ctx, "tasks")
+	tasks, _ := s.Store.List(ctx, "execution_plans")
 	if len(tasks) != 0 {
 		t.Fatal("brief authorized planning")
 	}
@@ -98,7 +98,7 @@ func TestIdeationBriefPersistsWithoutAuthorizingPlanning(t *testing.T) {
 func TestGlobalRunnerToggleDoesNotAdoptUnselectedIntake(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
-	if err := s.Store.Put(ctx, "tasks", "intake", model.Task{ID: "intake", Stage: "awaiting_selection"}, 0); err != nil {
+	if err := s.Store.Put(ctx, "execution_plans", "intake", model.ExecutionPlan{ID: "intake", Stage: "awaiting_selection"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	for _, action := range []string{"stop", "resume"} {
@@ -110,8 +110,8 @@ func TestGlobalRunnerToggleDoesNotAdoptUnselectedIntake(t *testing.T) {
 			t.Fatalf("%s: %d %s", action, response.Code, response.Body)
 		}
 	}
-	record, _ := s.Store.Get(ctx, "tasks", "intake")
-	task, _ := store.Decode[model.Task](record)
+	record, _ := s.Store.Get(ctx, "execution_plans", "intake")
+	task, _ := store.Decode[model.ExecutionPlan](record)
 	if task.Stage != "awaiting_selection" || task.HasSelection() {
 		t.Fatalf("runner toggle changed selection: %+v", task)
 	}

@@ -13,7 +13,7 @@ import (
 )
 
 type runtimeProofInput struct {
-	task       model.Task
+	task       model.ExecutionPlan
 	provenance model.Provenance
 	check      model.Check
 	result     verification.Result
@@ -27,6 +27,9 @@ type runtimeCheckProof struct {
 }
 
 func (e *Engine) validateApprovedCheckRuntime(ctx context.Context, input runtimeProofInput) error {
+	if input.task.IdeaID != "" {
+		return e.validateStandaloneCheckProof(ctx, input)
+	}
 	proof, err := e.loadRuntimeCheckProof(ctx, input)
 	if err != nil {
 		return err
@@ -119,7 +122,7 @@ func runtimeVerificationID(input runtimeProofInput) string {
 	return input.task.VerificationID
 }
 
-func (e *Engine) validateReusedCheck(ctx context.Context, task model.Task, provenance model.Provenance, check model.Check, reused verification.Result) error {
+func (e *Engine) validateReusedCheck(ctx context.Context, task model.ExecutionPlan, provenance model.Provenance, check model.Check, reused verification.Result) error {
 	record, err := e.Store.Get(ctx, "verification", reused.ReusedFrom)
 	if err != nil {
 		return fmt.Errorf("reused verification %q is unavailable: %w", check.Name, err)
@@ -141,12 +144,12 @@ func (e *Engine) validateReusedCheck(ctx context.Context, task model.Task, prove
 	return nil
 }
 
-func reusedProvenanceMatches(stage string, source, current model.Provenance, task model.Task, reusedID string) bool {
+func reusedProvenanceMatches(stage string, source, current model.Provenance, task model.ExecutionPlan, reusedID string) bool {
 	return reusedRecordIdentityMatches(stage, source, task, reusedID) &&
 		reusedCandidateMatches(source, current) && source.PolicyHash == current.PolicyHash
 }
 
-func reusedRecordIdentityMatches(stage string, source model.Provenance, task model.Task, reusedID string) bool {
+func reusedRecordIdentityMatches(stage string, source model.Provenance, task model.ExecutionPlan, reusedID string) bool {
 	return reusedVerificationMatches(stage, source, reusedID) && reusedTaskMatches(source, task)
 }
 
@@ -154,7 +157,7 @@ func reusedVerificationMatches(stage string, source model.Provenance, reusedID s
 	return stage == "complete" && source.VerificationID == reusedID
 }
 
-func reusedTaskMatches(source model.Provenance, task model.Task) bool {
+func reusedTaskMatches(source model.Provenance, task model.ExecutionPlan) bool {
 	return source.Task == task.ID && source.PlanVersion == task.PlanVersion
 }
 
@@ -215,7 +218,7 @@ func runtimeJobExecutionMatches(job runtimeCheckJob, identity verification.Runti
 	return job.ExecutionID == identity.ExecutionID && job.ExecutionGeneration == identity.Generation && job.LifecycleFile == identity.LifecycleFile
 }
 
-func runtimeJobOwnerMatches(job runtimeCheckJob, task model.Task, proof runtimeCheckProof, check model.Check) bool {
+func runtimeJobOwnerMatches(job runtimeCheckJob, task model.ExecutionPlan, proof runtimeCheckProof, check model.Check) bool {
 	return job.TaskID == task.ID && job.VerificationID == proof.verificationID && job.Role == "verify" && job.CheckID == check.Name
 }
 

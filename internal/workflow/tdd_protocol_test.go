@@ -56,18 +56,18 @@ func tddCommit(t *testing.T, path string) string {
 	return tddGit(t, path, "rev-parse", "HEAD")
 }
 
-func tddEvidenceFixture(t *testing.T) (*Engine, model.Task, string) {
+func tddEvidenceFixture(t *testing.T) (*Engine, model.ExecutionPlan, string) {
 	t.Helper()
 	e, task, path := testEngine(t)
 	tddWrite(t, path, tddFirstSourceFile, "package sample\nvar One = false\n")
 	tddWrite(t, path, tddSecondSourceFile, "package sample\nvar Two = false\n")
 	task.Base = tddCommit(t, path)
 	task.Worktree = path
-	task.Plan = &model.Plan{Units: []model.Unit{{ID: "one", Base: task.Base}}}
+	task.Plan = &model.PlanSpecification{Units: []model.Unit{{ID: "one", Base: task.Base}}}
 	return e, task, path
 }
 
-func tddSaveCheck(t *testing.T, e *Engine, task model.Task, path, unit, phase string) {
+func tddSaveCheck(t *testing.T, e *Engine, task model.ExecutionPlan, path, unit, phase string) {
 	t.Helper()
 	snapshot, production, tests, files, err := codingSnapshotManifest(context.Background(), path)
 	if err != nil {
@@ -79,7 +79,7 @@ func tddSaveCheck(t *testing.T, e *Engine, task model.Task, path, unit, phase st
 	}
 }
 
-func tddCompleteOne(t *testing.T, e *Engine, task *model.Task, path string) {
+func tddCompleteOne(t *testing.T, e *Engine, task *model.ExecutionPlan, path string) {
 	t.Helper()
 	tddWrite(t, path, "one_test.go", "package sample\n// one regression\n")
 	tddSaveCheck(t, e, *task, path, "one", "red")

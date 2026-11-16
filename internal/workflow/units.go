@@ -19,7 +19,7 @@ type unitRun struct {
 	*Engine
 	ctx      context.Context
 	project  model.Project
-	task     model.Task
+	task     model.ExecutionPlan
 	unit     *model.Unit
 	planText string
 }
@@ -29,7 +29,7 @@ func unitKey(task string, version int, unit string) string {
 }
 
 // codeUnit implements one isolated unit or recovers its completed checkpoint, preserving its lease and policy bounds.
-func (e *Engine) codeUnit(ctx context.Context, p model.Project, t model.Task, u *model.Unit, plan string) error {
+func (e *Engine) codeUnit(ctx context.Context, p model.Project, t model.ExecutionPlan, u *model.Unit, plan string) error {
 	run := &unitRun{Engine: e, ctx: ctx, project: p, task: t, unit: u, planText: plan}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -107,7 +107,7 @@ func (r *unitRun) restoreCheckpoint() (bool, error) {
 	return false, nil
 }
 
-func unitWorktreeIdentity(task model.Task, unitID string) (string, string) {
+func unitWorktreeIdentity(task model.ExecutionPlan, unitID string) (string, string) {
 	unitName := safe(unitID)
 	return task.Branch + "-" + unitName, filepath.Join(filepath.Dir(task.Worktree), unitName)
 }
@@ -168,37 +168,10 @@ func (r *unitRun) validateCheckpointCommit(previous model.Unit) error {
 	return nil
 }
 
-func (e *Engine) validateIntegratedUnitCheckpoints(ctx context.Context, p model.Project, task model.Task) error {
+func (e *Engine) validateIntegratedUnitCheckpoints(ctx context.Context, p model.Project, task model.ExecutionPlan) error {
 	for _, unit := range task.Plan.Units {
-		record, err := e.Store.Get(ctx, "units", unitKey(task.ID, task.PlanVersion, unit.ID))
-		if err != nil {
-			if !errors.Is(err, store.ErrNotFound) {
-				return fmt.Errorf("load durable unit checkpoint %s: %w", unit.ID, err)
-			}
-			if unit.Stage == "integrated" {
-				return fmt.Errorf("integrated unit %s has no durable checkpoint", unit.ID)
-			}
-			continue
-		}
-		previous, err := store.Decode[model.Unit](record)
-		if err != nil {
-			return fmt.Errorf("decode durable unit checkpoint %s: %w", unit.ID, err)
-		}
-		if previous.Stage != "integrated" {
-			if unit.Stage == "integrated" {
-				return fmt.Errorf("approved unit %s claims integration without a matching durable checkpoint", unit.ID)
-			}
-			continue
-		}
-		if !unitSpecificationMatches(previous, unit) {
-			return fmt.Errorf("integrated unit %s differs from its approved specification", unit.ID)
-		}
-		check := unitRun{Engine: e, ctx: ctx, project: p, task: task, unit: &unit}
-		if err := check.validateCheckpointIdentity(previous); err != nil {
-			return fmt.Errorf("validate integrated unit %s: %w", unit.ID, err)
-		}
-		if err := check.validateCheckpointCommit(previous); err != nil {
-			return fmt.Errorf("validate integrated unit %s: %w", unit.ID, err)
+		if err := e.validateIntegratedUnitCheckpoint(ctx, p, task, unit); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -246,5 +219,39 @@ func (r *unitRun) implement(p model.Project) error {
 	r.unit.Stage = "complete"
 	key := unitKey(r.task.ID, r.task.PlanVersion, r.unit.ID)
 	record, _ := r.Store.Get(r.ctx, "units", key)
-	return r.Store.Write(r.ctx, []store.Change{{Kind: "units", ID: key, Value: *r.unit, Expected: record.Version}, {Kind: "checkpoints", ID: store.ID(), Value: map[string]any{"task": r.task.ID, "unit": r.unit.ID, "commit": r.unit.Commit, "session": out.SessionID, "attempt_id": out.AttemptID, "plan_version": r.task.PlanVersion}}}, nil)
+	return r.Store.Write(r.ctx, []store.Change{{Kind: "units", ID: key, Value: *r.unit, Expected: record.Version}, {Kind: "checkpoints", ID: store.ID(), Value: map[string]any{"plan_id": r.task.ID, "unit": r.unit.ID, "commit": r.unit.Commit, "session": out.SessionID, "attempt_id": out.AttemptID, "plan_version": r.task.PlanVersion}}}, nil)
+}
+
+func (e *Engine) validateIntegratedUnitCheckpoint(ctx context.Context, p model.Project, task model.ExecutionPlan, unit model.Unit) error {
+	record, err := e.Store.Get(ctx, "units", unitKey(task.ID, task.PlanVersion, unit.ID))
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("load durable unit checkpoint %s: %w", unit.ID, err)
+		}
+		if unit.Stage == "integrated" {
+			return fmt.Errorf("integrated unit %s has no durable checkpoint", unit.ID)
+		}
+		return nil
+	}
+	previous, err := store.Decode[model.Unit](record)
+	if err != nil {
+		return fmt.Errorf("decode durable unit checkpoint %s: %w", unit.ID, err)
+	}
+	if previous.Stage != "integrated" {
+		if unit.Stage == "integrated" {
+			return fmt.Errorf("approved unit %s claims integration without a matching durable checkpoint", unit.ID)
+		}
+		return nil
+	}
+	if !unitSpecificationMatches(previous, unit) {
+		return fmt.Errorf("integrated unit %s differs from its approved specification", unit.ID)
+	}
+	check := unitRun{Engine: e, ctx: ctx, project: p, task: task, unit: &unit}
+	if err := check.validateCheckpointIdentity(previous); err != nil {
+		return fmt.Errorf("validate integrated unit %s: %w", unit.ID, err)
+	}
+	if err := check.validateCheckpointCommit(previous); err != nil {
+		return fmt.Errorf("validate integrated unit %s: %w", unit.ID, err)
+	}
+	return nil
 }

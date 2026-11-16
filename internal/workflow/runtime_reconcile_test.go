@@ -151,7 +151,7 @@ func TestLegacyLocalProcessInspectionFailureBlocksRecovery(t *testing.T) {
 }
 
 func TestRuntimeOwnershipUsesDurableOperationForTasklessRuns(t *testing.T) {
-	run := &agentRun{project: model.Project{ID: "project"}, task: model.Task{PlanVersion: 1}, input: provider.Input{OperationID: "operation-a", Role: "ideate", Purpose: "primary", UnitID: "unit"}}
+	run := &agentRun{project: model.Project{ID: "project"}, task: model.ExecutionPlan{PlanVersion: 1}, input: provider.Input{OperationID: "operation-a", Role: "ideate", Purpose: "primary", UnitID: "unit"}}
 	other := model.Attempt{ProjectID: "project", PlanVersion: 1, OperationID: "operation-b", Role: "ideate", Purpose: "primary", UnitID: "unit"}
 	same := other
 	same.OperationID = "operation-a"

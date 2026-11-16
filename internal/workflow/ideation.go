@@ -11,7 +11,7 @@ import (
 
 const ideationPrefix = "ideation:"
 
-func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) error {
+func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) (resultErr error) {
 	ctx, release, err := e.projectRunnerContext(ctx, p.ID)
 	if err != nil {
 		return err
@@ -23,6 +23,7 @@ func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) error 
 		return err
 	}
 	defer func() { _ = e.Store.Release(context.Background(), key, e.owner, lease.Fence) }()
+	ctx = store.WithLeaseFence(ctx, key, lease)
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ctx = withIdeationHistoryBudget(ctx, e.settings(ctx).Ideation)
@@ -30,7 +31,19 @@ func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) error 
 	if _, err := e.Project(ctx, p.ID); err != nil {
 		return err
 	}
+	ctx, finish, err := e.ensureIdeationOperation(ctx, p, day)
+	if err != nil {
+		return err
+	}
+	defer func() { resultErr = errors.Join(resultErr, finish(resultErr)) }()
 	e.renewLease(ctx, cancel, key, lease.Fence, nil)
+	if err := e.pinIdeationRunIdentity(ctx, p); err != nil {
+		return err
+	}
+	ctx, err = e.withDurableIdeationHistoryBudget(ctx, p.ID)
+	if err != nil {
+		return err
+	}
 	if err := e.generateAndSaveIdeation(ctx, p, day); err != nil {
 		return err
 	}
@@ -107,7 +120,7 @@ func (e *Engine) searchPreviousDirections(ctx context.Context, project, terms st
 	}
 	previous := make([]model.Direction, 0, len(proposals))
 	for _, proposal := range proposals {
-		previous = append(previous, model.Direction{ID: proposal.ID, ProjectID: proposal.ProjectID, Category: proposal.Category, Problem: proposal.Problem, Mechanism: proposal.Mechanism, Components: proposal.Components, Evidence: proposal.Evidence, RepositoryRevision: proposal.RepositoryRevision, Status: proposal.Status, RejectionReason: proposal.RejectionReason, DeferralReason: proposal.DeferralReason, Title: proposal.Title, Description: proposal.Description, Fingerprint: proposal.Fingerprint, PredecessorID: proposal.PredecessorID, RevisitReason: proposal.RevisitReason, RelatedProposalIDs: proposal.RelatedProposalIDs, ApprovedPlanIDs: proposal.ApprovedPlanIDs})
+		previous = append(previous, proposalHistoryDirection(proposal))
 	}
 	return boundProposalHistory(previous, perRequest, limit), nil
 }

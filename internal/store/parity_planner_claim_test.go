@@ -1,0 +1,103 @@
+package store
+
+import (
+	"context"
+	"errors"
+	"testing"
+)
+
+func TestParityPlannerAttemptClaimsIdeaAtomically(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	idea := parityIdea(t, s)
+	if err := s.Put(ctx, "ideas", "i", idea, 0); err != nil {
+		t.Fatal(err)
+	}
+	idea["decision_status"] = "approved"
+	if err := s.Put(ctx, "ideas", "i", idea, 1); err != nil {
+		t.Fatal(err)
+	}
+	plan := map[string]any{"id": "plan", "project_id": "p", "idea_id": "i", "ideation_run_id": "source", "stage": "planning"}
+	if err := s.Put(ctx, "execution_plans", "plan", plan, 0); err != nil {
+		t.Fatal(err)
+	}
+	attempt := map[string]any{"attempt_id": "a", "plan_id": "plan", "project_id": "p", "idea_id": "i", "operation_id": "source", "role": "plan", "status": "running", "started_at": "now"}
+	if err := s.Put(ctx, "sessions", "a", attempt, 0); err != nil {
+		t.Fatal(err)
+	}
+	var state, run string
+	if err := s.DB.QueryRow("SELECT status FROM ideas WHERE idea_id='i'").Scan(&state); err != nil || state != "in_process" {
+		t.Fatalf("attempt launched without atomic claim: %q %v", state, err)
+	}
+	if err := s.DB.QueryRow("SELECT planner_run_id FROM planner_runs WHERE idea_id='i' AND status='in_process'").Scan(&run); err != nil || run != "a" {
+		t.Fatalf("planner did not reuse ACP attempt ID: %q %v", run, err)
+	}
+	attempt["attempt_id"] = "duplicate"
+	if err := s.Put(ctx, "sessions", "duplicate", attempt, 0); !errors.Is(err, ErrConflict) {
+		t.Fatalf("concurrent claim accepted: %v", err)
+	}
+	if _, err := s.Get(ctx, "sessions", "duplicate"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("failed claim leaked attempt: %v", err)
+	}
+}
+
+func TestParityPlannerCannotClaimArchivedIdea(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	idea := parityIdea(t, s)
+	if err := s.Put(ctx, "ideas", "i", idea, 0); err != nil {
+		t.Fatal(err)
+	}
+	idea["decision_status"] = "approved"
+	idea["archived_at"] = "now"
+	idea["archive_reason"] = "Human rejected"
+	if err := s.Put(ctx, "ideas", "i", idea, 1); err != nil {
+		t.Fatal(err)
+	}
+	attempt := map[string]any{"attempt_id": "a", "plan_id": "plan", "project_id": "p", "idea_id": "i", "operation_id": "source", "role": "plan", "status": "running", "started_at": "now"}
+	if err := s.Put(ctx, "sessions", "a", attempt, 0); !errors.Is(err, ErrConflict) {
+		t.Fatalf("archived idea launched: %v", err)
+	}
+}
+
+func TestParityPlannerPublicationLinksAllProvenance(t *testing.T) {
+	s := openTest(t)
+	ctx := context.Background()
+	idea := parityIdea(t, s)
+	if err := s.Put(ctx, "ideas", "i", idea, 0); err != nil {
+		t.Fatal(err)
+	}
+	idea["decision_status"] = "approved"
+	if err := s.Put(ctx, "ideas", "i", idea, 1); err != nil {
+		t.Fatal(err)
+	}
+	plan := map[string]any{"id": "plan", "project_id": "p", "idea_id": "i", "ideation_run_id": "source", "stage": "planning"}
+	if err := s.Put(ctx, "execution_plans", "plan", plan, 0); err != nil {
+		t.Fatal(err)
+	}
+	attempt := map[string]any{"attempt_id": "a", "plan_id": "plan", "project_id": "p", "idea_id": "i", "operation_id": "source", "role": "plan", "status": "running", "started_at": "now"}
+	if err := s.Put(ctx, "sessions", "a", attempt, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PlannerRunLocation(ctx, "a", "/assigned/plan.md"); err != nil {
+		t.Fatal(err)
+	}
+	attempt["status"], attempt["finished"], attempt["success"] = "complete", true, true
+	attempt["finished_at"] = "2026-11-11T00:00:00Z"
+	if err := s.Put(ctx, "sessions", "a", attempt, 1); err != nil {
+		t.Fatal(err)
+	}
+	plan["stage"], plan["last_attempt_id"] = "plan_approval", "a"
+	plan["plan_document"] = map[string]any{"path": "/assigned/plan.md", "hash": "verified-hash"}
+	plan["plan"] = map[string]any{"requirements": []map[string]string{{"id": "R1", "outcome": "Export invoices", "evidence_method": "behavior test"}}}
+	if err := s.Put(ctx, "execution_plans", "plan", plan, 1); err != nil {
+		t.Fatal(err)
+	}
+	var status, linked string
+	if err := s.DB.QueryRow("SELECT i.status,json_extract(r.data,'$.plan_id') FROM ideas i JOIN resources r ON r.kind='ideas' AND r.id=i.idea_id WHERE i.idea_id='i'").Scan(&status, &linked); err != nil || status != "complete" || linked != "plan" {
+		t.Fatalf("publication did not atomically complete idea: %s %s %v", status, linked, err)
+	}
+	if err := s.DB.QueryRow("SELECT status,plan_id FROM planner_runs WHERE planner_run_id='a'").Scan(&status, &linked); err != nil || status != "completed" || linked != "plan" {
+		t.Fatalf("publication did not complete ACP run: %s %s %v", status, linked, err)
+	}
+}

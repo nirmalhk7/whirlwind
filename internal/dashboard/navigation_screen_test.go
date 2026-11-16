@@ -25,8 +25,8 @@ func TestDashboardOpensProjectAndPlanNavigation(t *testing.T) {
 func TestRefreshPreservesSelectedProjectAndPlan(t *testing.T) {
 	d := New()
 	snapshot := control.Snapshot{
-		"projects": {record("first", model.Project{ID: "first", Name: "First"}), record("second", model.Project{ID: "second", Name: "Second"})},
-		"tasks":    {record("one", model.Task{ID: "one", ProjectID: "second", Plan: &model.Plan{Objective: "One"}}), record("two", model.Task{ID: "two", ProjectID: "second", Plan: &model.Plan{Objective: "Two"}})},
+		"projects":        {record("first", model.Project{ID: "first", Name: "First"}), record("second", model.Project{ID: "second", Name: "Second"})},
+		"execution_plans": {record("one", model.ExecutionPlan{ID: "one", ProjectID: "second", Plan: &model.PlanSpecification{Objective: "One"}}), record("two", model.ExecutionPlan{ID: "two", ProjectID: "second", Plan: &model.PlanSpecification{Objective: "Two"}})},
 	}
 	d.Present(snapshot)
 	d.projects.SetCurrentItem(1)

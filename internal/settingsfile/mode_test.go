@@ -16,7 +16,7 @@ func TestModeChangeWaitsForRestartAndCancelsOnlyUnfinishedWork(t *testing.T) {
 	s := editorSource(t)
 	ctx := context.Background()
 	for id, stage := range map[string]string{"pending": "coding", "done": "complete"} {
-		if err := s.store.Put(ctx, "tasks", id, model.Task{ID: id, Stage: stage}, 0); err != nil {
+		if err := s.store.Put(ctx, "execution_plans", id, model.ExecutionPlan{ID: id, Stage: stage}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -36,21 +36,21 @@ func TestModeChangeWaitsForRestartAndCancelsOnlyUnfinishedWork(t *testing.T) {
 	if state["active_mode"] != "personal" || state["configured_mode"] != "agentic" || state["restart_required"] != true {
 		t.Fatalf("mode activated early: %s", r.Data)
 	}
-	task, _ := s.store.Get(ctx, "tasks", "pending")
-	before, _ := store.Decode[model.Task](task)
+	task, _ := s.store.Get(ctx, "execution_plans", "pending")
+	before, _ := store.Decode[model.ExecutionPlan](task)
 	if before.Stage != "coding" {
 		t.Fatal("disk edit stopped running task")
 	}
 	if err := Attach(ctx, s.store, s.path); err != nil {
 		t.Fatal(err)
 	}
-	task, _ = s.store.Get(ctx, "tasks", "pending")
-	after, _ := store.Decode[model.Task](task)
+	task, _ = s.store.Get(ctx, "execution_plans", "pending")
+	after, _ := store.Decode[model.ExecutionPlan](task)
 	if after.Stage != "cancelled" || after.ResumeStage != "" {
 		t.Fatalf("unfinished task resumed: %+v", after)
 	}
-	done, _ := s.store.Get(ctx, "tasks", "done")
-	completed, _ := store.Decode[model.Task](done)
+	done, _ := s.store.Get(ctx, "execution_plans", "done")
+	completed, _ := store.Decode[model.ExecutionPlan](done)
 	if completed.Stage != "complete" {
 		t.Fatal("completed task changed")
 	}
@@ -58,7 +58,7 @@ func TestModeChangeWaitsForRestartAndCancelsOnlyUnfinishedWork(t *testing.T) {
 	if err := Attach(ctx, s.store, s.path); err != nil {
 		t.Fatal(err)
 	}
-	task, _ = s.store.Get(ctx, "tasks", "pending")
+	task, _ = s.store.Get(ctx, "execution_plans", "pending")
 	if task.Version != revision {
 		t.Fatal("same-mode restart cancelled again")
 	}

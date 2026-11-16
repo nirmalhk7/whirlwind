@@ -12,6 +12,10 @@ import (
 	"strings"
 )
 
+const (
+	localRunnerToggleOperation = "runners.toggle"
+)
+
 type LocalCommand struct {
 	Operation       string
 	ProjectID       string
@@ -25,7 +29,7 @@ type LocalCommand struct {
 }
 
 const (
-	localTaskRoutePrefix     = "/api/v1/tasks/"
+	localTaskRoutePrefix     = "/api/v1/execution_plans/"
 	projectRegisterOperation = "project.register"
 )
 
@@ -40,6 +44,22 @@ func localPayload(payload json.RawMessage) json.RawMessage {
 // versioned and idempotent domain handlers. It starts no HTTP listener.
 func (s *Server) ExecuteLocal(ctx context.Context, command LocalCommand) (json.RawMessage, error) {
 	switch command.Operation {
+	case localRunnerToggleOperation:
+		return s.executeRunnerActivity(ctx, command)
+	case "ideation.start":
+		return s.executeIdeationStart(ctx, command)
+	case "plan.pause", "plan.resume":
+		return s.executePlanActivity(ctx, command)
+	case "idea.reconsider":
+		return s.executeIdeaReconsider(ctx, command)
+	case "planner.cancel":
+		return s.executePlannerCancel(ctx, command)
+	case "idea.update":
+		return s.executeIdeaUpdate(ctx, command)
+	case "idea.approve", "idea.archive", "idea.retry_planning":
+		return s.executeIdeaDecision(ctx, command)
+	case "inspect.plan", "plan.document.read", "plan.document.save", "plan.approve", "plan.request_changes", "plan.reject", "plan.review":
+		return s.executePlanCommand(ctx, command)
 	case projectRegisterOperation:
 		return s.registerLocalProject(ctx, command)
 	case "finalization.inspect":
@@ -86,8 +106,8 @@ func localRoute(command LocalCommand) (string, string, []byte, error) {
 	switch command.Operation {
 	case "inspect.plan":
 		return localTaskRoute(command.PlanID, "plan-document", http.MethodGet, nil)
-	case projectRegisterOperation, "runners.toggle":
-		paths := map[string]string{projectRegisterOperation: "/api/v1/projects", "runners.toggle": "/api/v1/runners/toggle"}
+	case projectRegisterOperation, localRunnerToggleOperation:
+		paths := map[string]string{projectRegisterOperation: "/api/v1/projects", localRunnerToggleOperation: "/api/v1/runners/toggle"}
 		return http.MethodPost, paths[command.Operation], payload, nil
 	case "ideation.start":
 		return localProjectRoute(command.ProjectID, "ideation", payload)

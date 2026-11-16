@@ -29,7 +29,7 @@ func checkUsageLimitTx(ctx context.Context, tx *sql.Tx, entry model.UsageEntry, 
 }
 
 func taskBudgetForRole(ctx context.Context, tx *sql.Tx, taskID, role string, budget model.BudgetPolicy) (model.BudgetPolicy, error) {
-	task, _, err := txResource[model.Task](ctx, tx, "tasks", taskID)
+	task, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", taskID)
 	if errors.Is(err, ErrNotFound) {
 		return budget, nil
 	}

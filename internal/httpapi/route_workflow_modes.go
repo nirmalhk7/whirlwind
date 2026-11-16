@@ -28,7 +28,7 @@ func (q apiRequest) reviewLocalPlan() error {
 	if err = q.Engine.ReviewLocalPlan(q.r.Context(), q.id, version, input.Action, input.Hash, input.Feedback); err != nil {
 		return err
 	}
-	record, err := q.Store.Get(q.r.Context(), "tasks", q.id)
+	record, err := q.Store.Get(q.r.Context(), "execution_plans", q.id)
 	if err != nil {
 		return err
 	}

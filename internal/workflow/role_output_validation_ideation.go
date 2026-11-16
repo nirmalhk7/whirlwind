@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 )
 
@@ -28,8 +27,7 @@ func validateGenerationOutput(text string) error {
 	if trimmed == "" || trimmed[0] != '[' {
 		return errors.New("ideation generation must return a JSON direction array")
 	}
-	var directions []model.Direction
-	if err := provider.JSON(text, &directions); err != nil {
+	if _, err := decodeGeneratedIdeas(text); err != nil {
 		return fmt.Errorf("ideation generation returned invalid JSON: %w", err)
 	}
 	return nil

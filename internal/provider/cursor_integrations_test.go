@@ -104,7 +104,7 @@ func TestCursorIntegrationsProbeRunsNativeCLIInsideSandbox(t *testing.T) {
 	writeNativeFixture(t, filepath.Join(home, ".cursor/mcp.json"), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
 	command := filepath.Join(project, "agent-fixture")
 	writeNativeFixture(t, command, `#!/bin/sh
-if [ "$(cat "$HOME/.cursor/cli-config.json")" != 'synthetic test credential' ]; then exit 13; fi
+if [ "$(cat "$HOME/.cursor/auth.json")" != 'synthetic test credential' ]; then exit 13; fi
 if [ -e "$HOME/.codex/auth.json" ] || [ -e "$CLAUDE_CONFIG_DIR/.credentials.json" ]; then exit 14; fi
 if [ "$1" = mcp ] && [ "$2" = list-tools ] && [ "$3" = ci ]; then
   printf '%s' '{"tools":[{"name":"read_ci","annotations":{"readOnlyHint":true}}]}'
@@ -241,7 +241,7 @@ func TestCursorIntegrationProbeFailureRedactsBothOutputStreams(t *testing.T) {
 	project := t.TempDir()
 	provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
 	command := filepath.Join(project, "agent-fixture")
-	writeNativeFixture(t, command, "#!/bin/sh\nif [ \"$(cat \"$HOME/.cursor/cli-config.json\")\" != 'synthetic test credential' ]; then exit 13; fi\nprintf '%s' 'stdout-private-token'\nprintf '%s' 'stderr-private-token' >&2\nexit 9\n")
+	writeNativeFixture(t, command, "#!/bin/sh\nif [ \"$(cat \"$HOME/.cursor/auth.json\")\" != 'synthetic test credential' ]; then exit 13; fi\nprintf '%s' 'stdout-private-token'\nprintf '%s' 'stderr-private-token' >&2\nexit 9\n")
 	if err := os.Chmod(command, 0700); err != nil {
 		t.Fatal(err)
 	}

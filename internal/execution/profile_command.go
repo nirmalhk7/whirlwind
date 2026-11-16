@@ -12,6 +12,10 @@ import (
 	"whirlwind/internal/process"
 )
 
+const (
+	sandboxWrappedErrorFormat = "%w: %v"
+)
+
 // Command never starts the target directly. Missing runtime or unsupported hosts fail closed.
 func Command(ctx context.Context, command []string, p Profile) (*exec.Cmd, error) {
 	node, args, err := prepareSandboxCommand(command, p)
@@ -22,6 +26,10 @@ func Command(ctx context.Context, command []string, p Profile) (*exec.Cmd, error
 	cmd.Dir = p.CWD
 	// Preserve process recovery token, but not ambient credentials or loader injection.
 	cmd.Env = filteredEnvironment(cmd.Env, p)
+	cmd.Env, err = credentialSupervisorEnvironment(cmd.Env, p)
+	if err != nil {
+		return nil, fmt.Errorf(sandboxWrappedErrorFormat, ErrSandbox, err)
+	}
 	cmd.Env = append(cmd.Env, "PWD="+p.CWD)
 	if proxyLauncher(p.Launcher) {
 		if err := registerProxyCapabilities(cmd, p); err != nil {
@@ -87,11 +95,17 @@ func prepareSandboxCommand(command []string, profile Profile) (string, []string,
 }
 
 func validateCommandSetup(command []string, profile Profile) error {
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		return fmt.Errorf("%w: unsupported operating system", ErrSandbox)
+	if runtime.GOOS != "darwin" {
+		return fmt.Errorf("%w: execution requires macOS; inspection remains available", ErrSandbox)
 	}
 	if len(command) == 0 || profile.CWD == "" || profile.Launcher == "" {
 		return fmt.Errorf("%w: command and execution profile required", ErrSandbox)
+	}
+	if len(profile.Credentials) > 0 && !IsNonoLauncher(profile.Launcher) {
+		return fmt.Errorf("%w: scoped credential routes require native nono", ErrSandbox)
+	}
+	if err := validateCredentialGrants(profile); err != nil {
+		return fmt.Errorf(sandboxWrappedErrorFormat, ErrSandbox, err)
 	}
 	if err := validateMCPBroker(profile); err != nil {
 		return err
@@ -137,7 +151,7 @@ func pathInside(root, path string) bool {
 func sandboxRuntime(profile Profile) (string, string, error) {
 	launcher, err := filepath.EvalSymlinks(profile.Launcher)
 	if err != nil {
-		return "", "", fmt.Errorf("%w: %v", ErrSandbox, err)
+		return "", "", fmt.Errorf(sandboxWrappedErrorFormat, ErrSandbox, err)
 	}
 	node, err := exec.LookPath("node")
 	if err != nil {
