@@ -17,7 +17,7 @@ Human mutations include an idempotency key and expected resource version. Plan r
 
 ## Existing state and legacy service cutover
 
-The supervisor initializes the current schema directly in `~/.local/share/whirlwind/whirlwind.db`. There are no schema versions or upgrade migrations. Reopening a current database preserves pending records; older development database layouts require a fresh start. Stop the supervisor and archive its state before resetting it. Dashboard reads do not initialize, recover, or create a database.
+The supervisor initializes the current schema directly in `~/.local/share/whirlwind/whirlwind.db`. There are no schema versions or data migrations. Reopening a current database preserves pending records. Opening an obsolete development layout deletes its database state and recreates the current schema. See [SQL persistence details](persistence.md) for the `projects`, `ideas`, and `plans` tables. Dashboard reads do not initialize, recover, or create a database.
 
 If an older browser/HTTP instance owns the same state directory, `start` fails with an actionable message. Stop that owned instance explicitly with `./bin/whirlwind stop`, then run `start`. Process ownership uses the saved launcher token; unrelated listeners and processes are left alone.
 

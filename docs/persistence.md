@@ -1,9 +1,51 @@
 # Durable execution evidence
 
 Whirlwind keeps workflow aggregates in SQLite `resources`, with version-checked
-writes and ordered SSE events. A single current schema creates `artifacts` and
-`attempt_events` directly. Schema versions and old-database upgrades are not
-supported. Reopening current state preserves saved payloads and events.
+writes and ordered SSE events. A single current schema creates the physical
+`projects`, `ideas`, and `plans` tables, plus supporting workflow/evidence tables.
+Schema versions and data migrations are not supported. Opening an obsolete
+layout discards all state in that database and creates the current layout in one
+transaction. Reopening the current layout preserves saved payloads and events.
+
+## Project, idea, and plan tables
+
+- `projects` has exactly `project_id`, `project_name`, `project_path`, `status`,
+  `timestamp`. Status is `draft`, `approved`, `error`, or `complete`.
+- `ideas` has exactly `idea_id`, `project_id`, `run_id`, `idea_title`, `idea_type`,
+  `what`, `why`, `where`, `how`, `status`, `timestamp`. Status is `draft`,
+  `approved`, `in_process`, `error`, or `complete`. The database restricts
+  `idea_type` to `expand`, `optimize`, `harden`, or `simplify`.
+- `plans` has exactly `plan_id`, `idea_id`, `plan_path`, `status`, `timestamp`.
+  Status is `draft`, `approved`, `error`, or `complete`. Each idea has at most
+  one core plan; its required path is absolute and nonempty.
+
+App-generated IDs contain canonical UUIDs prefixed with `project_`, `idea_`, or
+`plan_`. Project and source-derived plan UUIDs remain deterministic for idempotent
+registration and intake. Independent ideas and plans receive random UUIDs.
+Creation timestamps use UTC RFC 3339 and remain unchanged by resource updates.
+
+Operational metadata stays in versioned `resources` and linked evidence tables:
+archive reasons, source claims, plan versions, approval hashes, execution stages,
+waits and verification evidence do not add core columns. The resource kind
+`execution_plans` still identifies orchestration records. Those records can exist
+before Markdown publication; the core `plans` row appears only when a source idea
+and verified document identity are available. Planner-attempt SQL status
+`completed` remains separate from domain status `complete`.
+
+A published draft still needs human approval. Approved active plans retain
+`approved`; ordinary human pauses preserve `draft` or `approved`; terminal
+failure is `error`; successful local finalization becomes `complete`. Projects
+start `draft` until committed valid execution policy is confirmed, then become
+`approved`; health errors become `error`. `complete` is reserved for explicit
+human action. Unregistering removes active configuration while retaining a
+project row needed by historical idea foreign keys.
+
+Component history uses the existing `proposals.components` JSON array.
+`proposal_components` and its lookup index are removed, including on reopen of a
+database that still contains that derived copy. Component filters and counts
+preserve whitespace normalization, per-proposal deduplication and project scope.
+The remaining proposal ledger, fingerprint history and FTS index still support
+novelty checks and history search.
 
 ## Attempts and inspection
 

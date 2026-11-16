@@ -67,11 +67,13 @@ SQLite retains execution records, fenced ownership, pending decisions, mutation 
 - CLI executable: `bin/whirlwind`; backend-only executable: `go run ./cmd/whirlwind`.
 - State directory: `~/.local/share/whirlwind`, overridden by `WHIRLWIND_DATA_DIR` or `--data`.
 - Database: `whirlwind.db` within the state directory.
-- Project policy: `.whirlwind.yml` (execution policy generated and committed during onboarding with required Qlty configuration); existing `.whirlwind.yaml` also supported. Existing app-generated empty starters upgrade through Finish execution setup; custom policies remain operator-managed.
+- Project policy: human-reviewed, committed `.whirlwind.yml` or `.whirlwind.yaml`. Local onboarding reads existing policy; the operator supplies verification commands before approving execution.
 - GitHub labels: `whirlwind:ready` and `whirlwind:work`.
 - Optional webhook secret: `WHIRLWIND_WEBHOOK_SECRET`.
 
-Whirlwind creates one current SQLite schema directly, without schema versions or upgrade migrations. Reopening a current database preserves its records. Databases from older development layouts are unsupported; stop the supervisor and archive the old state before starting fresh. See [local supervisor setup](docs/local-supervisor.md).
+Whirlwind creates one current SQLite schema directly, without schema versions or data migrations. Reopening a current database preserves its records. Opening an obsolete development layout deletes its database state and recreates the current schema, including `projects`, `ideas`, and `plans`. See [local supervisor setup](docs/local-supervisor.md) and [SQL persistence details](docs/persistence.md).
+
+Target repositories may use any language. The Go supervisor runs each project's approved verification commands through the separate local runner; it does not add Go tests or Go analyzer settings. The approved Qlty command is `qlty check --upstream HEAD --fix --no-progress --sarif`, run in isolated staging with the approved base exposed as `HEAD`. Qlty findings in that diff block acceptance at every severity. Scanner configuration and generated state belong under the external per-project quality directory. Default Semgrep/Gitleaks preparation and actual scanner/version/rule qualification remain incomplete; catalog availability alone does not establish a working scanner.
 
 ## Visual identity
 
