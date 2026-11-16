@@ -33,7 +33,7 @@ func (d *Dashboard) refreshRuns() {
 			d.detail.SetText("Cannot read ideation history: " + err.Error())
 			continue
 		}
-		if operation.Kind != "ideation" || (d.projectID != "" && operation.Subject != d.projectID) {
+		if (operation.Kind != "ideation" && operation.Kind != "project_setup") || (d.projectID != "" && operation.Subject != d.projectID) {
 			continue
 		}
 		started, err := time.Parse(time.RFC3339Nano, operation.StartedAt)
@@ -87,7 +87,11 @@ func (d *Dashboard) refreshRuns() {
 			selected = i
 		}
 		if row.operation != nil {
-			d.runs.AddItem(tview.Escape("Ideation · "+row.operation.Stage), tview.Escape(row.id+" · "+recordedRuntimeValue(row.operation.StartedAt)), 0, nil)
+			label := "Ideation"
+			if row.operation.Kind == "project_setup" {
+				label = "Project setup: " + projectSetupPhaseLabel(row.operation.Input)
+			}
+			d.runs.AddItem(tview.Escape(label+" · "+row.operation.Stage), tview.Escape(row.id+" · "+recordedRuntimeValue(row.operation.StartedAt)), 0, nil)
 			continue
 		}
 		attempt := row.attempt
@@ -147,7 +151,7 @@ func (d *Dashboard) selectRun(index int, _, _ string, _ rune) {
 	d.runID = row.id
 	d.planID = ""
 	if row.operation != nil {
-		d.detail.SetText(ideationRunDetails(row.id, *row.operation))
+		d.detail.SetText(operationRunDetails(row.id, *row.operation))
 		return
 	}
 	taskDetails := ""

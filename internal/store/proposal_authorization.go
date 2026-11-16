@@ -9,13 +9,13 @@ import (
 )
 
 func authorizeProposalWrite(tx *sql.Tx, proposal model.Proposal, enforceFingerprint bool) error {
-	if !enforceFingerprint {
-		return nil
-	}
 	if proposal.PredecessorID != "" {
 		if err := authorizeProposalRevisit(tx, proposal); err != nil {
 			return err
 		}
+	}
+	if !enforceFingerprint || proposal.IdeaFields != nil {
+		return nil
 	}
 	return authorizeProposalFingerprint(tx, proposal)
 }

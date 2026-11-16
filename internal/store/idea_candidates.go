@@ -63,7 +63,7 @@ func (s *Store) CompleteIdeaCandidate(ctx context.Context, id string, idea *mode
 	})
 }
 
-// RecordGeneratedIdeaCandidates freezes model output before novelty calls. The
+// RecordGeneratedIdeaCandidates freezes model output before content validation. The
 // candidate allowance already exists; no model-provided identity creates one.
 func (s *Store) RecordGeneratedIdeaCandidates(ctx context.Context, candidates map[string]model.Direction) error {
 	return s.Transaction(ctx, func(tx *sql.Tx) error {

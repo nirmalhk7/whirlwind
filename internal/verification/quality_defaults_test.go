@@ -170,3 +170,11 @@ func TestProjectSetupDefaultsRetainRegistryRuleContent(t *testing.T) {
 		})
 	}
 }
+
+func TestProjectSetupDefaultsRetainRawYAMLRegistryRules(t *testing.T) {
+	rules := "rules:\n  - id: ci-raw-yaml\n    languages: [python]\n    severity: WARNING\n    message: harmless test\n    pattern: eval($VALUE)\n"
+	snapshot, err := prepareQualityDefaults(t, defaultQualityManifest(t), defaultQualityCatalog, rules)
+	if err != nil || snapshot.Files[defaultPreparedSemgrepPath] != rules {
+		t.Fatalf("raw registry YAML was rejected or changed: %q %v", snapshot.Files[defaultPreparedSemgrepPath], err)
+	}
+}

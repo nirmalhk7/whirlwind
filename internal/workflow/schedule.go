@@ -8,15 +8,17 @@ import (
 )
 
 type IdeationSchedule struct {
-	MaxAttemptsPerDirection int    `json:"max_attempts_per_direction"`
-	MaxCandidates           int    `json:"max_candidates,omitempty"`
-	HistoryTokenBudget      int    `json:"history_token_budget,omitempty"`
-	HistoryRunTokenBudget   int    `json:"history_run_token_budget,omitempty"`
-	HistoryRecordLimit      int    `json:"history_record_limit,omitempty"`
-	NoveltyRepairAttempts   int    `json:"novelty_repair_attempts,omitempty"`
-	Enabled                 bool   `json:"enabled"`
-	Time                    string `json:"time"`
-	Timezone                string `json:"timezone"`
+	MaxAttemptsPerDirection int `json:"max_attempts_per_direction"`
+	MaxCandidates           int `json:"max_candidates,omitempty"`
+	HistoryTokenBudget      int `json:"history_token_budget,omitempty"`
+	HistoryRunTokenBudget   int `json:"history_run_token_budget,omitempty"`
+	HistoryRecordLimit      int `json:"history_record_limit,omitempty"`
+	// NoveltyRepairAttempts preserves the persisted settings key; it bounds
+	// content-validation repair attempts and does not run uniqueness checks.
+	NoveltyRepairAttempts int    `json:"novelty_repair_attempts,omitempty"`
+	Enabled               bool   `json:"enabled"`
+	Time                  string `json:"time"`
+	Timezone              string `json:"timezone"`
 }
 
 func DefaultSettings() Settings {
@@ -31,7 +33,7 @@ func (s IdeationSchedule) Validate() error {
 		return fmt.Errorf("max_candidates must be between 1 and 12 when configured")
 	}
 	if s.HistoryTokenBudget < 0 || s.HistoryTokenBudget > 4000 || s.HistoryRunTokenBudget < 0 || s.HistoryRecordLimit < 0 || s.HistoryRecordLimit > 12 || s.NoveltyRepairAttempts < 0 || s.NoveltyRepairAttempts > 10 {
-		return fmt.Errorf("ideation history must not exceed 4000 tokens per retrieval or 12 records; novelty repairs must not exceed 10")
+		return fmt.Errorf("ideation history must not exceed 4000 tokens per retrieval or 12 records; repair attempts must not exceed 10")
 	}
 	perRetrieval, attempts := s.HistoryTokenBudget, s.NoveltyRepairAttempts
 	if perRetrieval == 0 {
@@ -40,8 +42,8 @@ func (s IdeationSchedule) Validate() error {
 	if attempts == 0 {
 		attempts = 3
 	}
-	if s.HistoryRunTokenBudget > perRetrieval*attempts*2 {
-		return fmt.Errorf("ideation total history budget cannot exceed %d tokens for %d generation and novelty retrieval pairs", perRetrieval*attempts*2, attempts)
+	if s.HistoryRunTokenBudget > perRetrieval*attempts {
+		return fmt.Errorf("ideation total history budget cannot exceed %d tokens for %d bounded generation attempts", perRetrieval*attempts, attempts)
 	}
 	if _, err := time.Parse("15:04", s.Time); err != nil {
 		return fmt.Errorf("ideation time must be HH:MM")

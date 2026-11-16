@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -50,9 +49,9 @@ func TestValidateDirections(t *testing.T) {
 		{name: "four categories"},
 		{name: "missing category", mutate: func(d []model.Direction) { d[0] = model.Direction{Title: d[0].Title, Description: d[0].Description} }, invalid: true},
 		{name: "blank description", mutate: func(d []model.Direction) { d[0].Description = " \n\t" }, invalid: true},
-		{name: "repeated description", mutate: func(d []model.Direction) { d[1].Description = d[0].Description }, invalid: true},
-		{name: "normalized historical title", previous: []model.Direction{{Title: " SLACK--integration!! "}}, invalid: true},
-		{name: "renamed historical description", previous: []model.Direction{{Title: "Different name", Description: "Send TASK completion notifications to Slack!"}}, invalid: true},
+		{name: "repeated description", mutate: func(d []model.Direction) { d[1].Description = d[0].Description }},
+		{name: "normalized historical title", previous: []model.Direction{{Title: " SLACK--integration!! "}}},
+		{name: "renamed historical description", previous: []model.Direction{{Title: "Different name", Description: "Send TASK completion notifications to Slack!"}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -145,15 +144,13 @@ func TestIdeationRepairsOnlyMissingCategoriesAndPreservesAcceptedCandidates(t *t
 }
 
 type ideationFixture struct {
-	batch          []model.Direction
-	batches        [][]model.Direction
-	generations    int
-	reviews        []string
-	calls          int
-	reviewPrompts  []string
-	reviewSessions []string
-	worktrees      []string
-	commits        []string
+	batch             []model.Direction
+	batches           [][]model.Direction
+	generations       int
+	calls             int
+	generationPrompts []string
+	worktrees         []string
+	commits           []string
 }
 
 func (f *ideationFixture) Run(_ context.Context, in provider.Input, _ provider.Hooks) (provider.Output, error) {
@@ -163,16 +160,7 @@ func (f *ideationFixture) Run(_ context.Context, in provider.Input, _ provider.H
 	if err == nil {
 		f.commits = append(f.commits, strings.TrimSpace(string(commit)))
 	}
-	if strings.Contains(in.Prompt, "Candidate ideas:") {
-		f.reviewPrompts = append(f.reviewPrompts, in.Prompt)
-		f.reviewSessions = append(f.reviewSessions, in.SessionID)
-		if len(f.reviews) == 0 {
-			return provider.Output{}, errors.New("review unavailable")
-		}
-		out := f.reviews[0]
-		f.reviews = f.reviews[1:]
-		return provider.Output{Text: out}, nil
-	}
+	f.generationPrompts = append(f.generationPrompts, in.Prompt)
 	batch := f.batch
 	if f.generations < len(f.batches) {
 		batch = f.batches[f.generations]
@@ -182,19 +170,13 @@ func (f *ideationFixture) Run(_ context.Context, in provider.Input, _ provider.H
 	return provider.Output{Text: string(raw), SessionID: "generator-session"}, nil
 }
 
-func TestGenerationAndNoveltyUseDistinctPinnedGitWorktrees(t *testing.T) {
+func TestGenerationUsesOnePinnedGitWorktreeWithoutNoveltyJudge(t *testing.T) {
 	prepared := prepareNoveltyTest(t, []string{`{"unique":true}`})
 	if err := prepared.engine.Ideate(context.Background(), prepared.project, "2026-10-31"); err != nil {
 		t.Fatal(err)
 	}
-	if len(prepared.fixture.worktrees) != 2 || len(prepared.fixture.commits) != 2 {
-		t.Fatalf("expected generator and novelty worktree calls, paths=%v commits=%v", prepared.fixture.worktrees, prepared.fixture.commits)
-	}
-	if prepared.fixture.worktrees[0] == prepared.fixture.worktrees[1] {
-		t.Fatalf("generation and novelty shared working directory %q", prepared.fixture.worktrees[0])
-	}
-	if prepared.fixture.commits[0] != prepared.fixture.commits[1] {
-		t.Fatalf("agent worktrees were not pinned to same revision: %v", prepared.fixture.commits)
+	if len(prepared.fixture.worktrees) != 1 || len(prepared.fixture.commits) != 1 || prepared.fixture.generations != 1 {
+		t.Fatalf("expected one generation worktree call, paths=%v commits=%v generations=%d", prepared.fixture.worktrees, prepared.fixture.commits, prepared.fixture.generations)
 	}
 	for _, path := range prepared.fixture.worktrees {
 		if filepath.Clean(path) == filepath.Clean(prepared.project.Path) {
@@ -203,26 +185,35 @@ func TestGenerationAndNoveltyUseDistinctPinnedGitWorktrees(t *testing.T) {
 	}
 }
 
-func TestIdeationNoveltyGate(t *testing.T) {
-	for _, tc := range []noveltyTestCase{
-		{"unique", []string{`{"unique":true}`}, true},
-		{"rephrase rejected", []string{`{"unique":false,"reason":"Same outcome as historical idea"}`, `{"unique":false}`, `{"unique":false}`}, false},
-		{"regenerate after rejection", []string{`{"unique":false}`, `{"unique":true}`}, true},
-		{"missing verdict", []string{`{}`}, false},
-		{"malformed review", []string{`not JSON`}, false},
-		{"null verdict", []string{`{"unique":null}`}, false},
-		{"unavailable", nil, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			verifyNoveltyGate(t, tc)
-		})
+func TestIdeationPublishesHistoricalFingerprintMatchWithoutComparison(t *testing.T) {
+	prepared := prepareNoveltyTest(t, nil)
+	ctx := context.Background()
+	candidate := prepared.fixture.batch[2]
+	fingerprint := model.ProposalFingerprint(prepared.project.ID, candidate.Problem, candidate.Mechanism, candidate.Components)
+	historical := model.Proposal{ID: "historical-fingerprint-match", ProjectID: prepared.project.ID, Category: candidate.Category, Problem: candidate.Problem, Mechanism: candidate.Mechanism, Components: candidate.Components, Fingerprint: fingerprint, Title: "Previously recorded idea", Description: candidate.Description, Status: "implemented"}
+	if err := prepared.engine.Store.RecordProposalRejection(ctx, historical, "historical record retained"); err != nil {
+		t.Fatal(err)
 	}
-}
-
-type noveltyTestCase struct {
-	name    string
-	reviews []string
-	success bool
+	if err := prepared.engine.Ideate(ctx, prepared.project, "2026-10-13"); err != nil {
+		t.Fatalf("historical fingerprint match blocked ideation: %v", err)
+	}
+	ideas, err := prepared.engine.Store.List(ctx, "ideas")
+	if err != nil || len(ideas) != 4 {
+		t.Fatalf("generated ideas not published: count=%d err=%v", len(ideas), err)
+	}
+	var matching *model.Idea
+	for _, record := range ideas {
+		idea, decodeErr := store.Decode[model.Idea](record)
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if idea.Direction == candidate.Category {
+			matching = &idea
+		}
+	}
+	if matching == nil || matching.NoveltyMethod != "not_checked" || matching.NoveltyOutcome != "deferred" {
+		t.Fatalf("generated comparison state is inaccurate: %+v", matching)
+	}
 }
 
 type noveltyTestFixture struct {
@@ -252,94 +243,12 @@ func prepareNoveltyTest(t *testing.T, reviews []string) noveltyTestFixture {
 	if err := e.Store.Put(ctx, "directions", other.ID, other, 0); err != nil {
 		t.Fatal(err)
 	}
-	fixture := &ideationFixture{batch: ideaBatch(t), reviews: reviews}
+	_ = reviews // Retained as a fixture signature for tests sharing older setup helpers.
+	fixture := &ideationFixture{batch: ideaBatch(t)}
 	e.Adapter = func(model.Provider) provider.Adapter { return fixture }
 	project, err := e.Project(ctx, task.ProjectID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return noveltyTestFixture{engine: e, project: project, fixture: fixture, historical: historical, other: other}
-}
-
-func verifyNoveltyGate(t *testing.T, tc noveltyTestCase) {
-	t.Helper()
-	prepared := prepareNoveltyTest(t, tc.reviews)
-	e, project, fixture, historical, other := prepared.engine, prepared.project, prepared.fixture, prepared.historical, prepared.other
-	if tc.name == "regenerate after rejection" {
-		regenerated := ideaBatch(t)
-		for index := range regenerated {
-			regenerated[index].Problem = "Newly observed " + regenerated[index].Category + " issue in the repository"
-			regenerated[index].Mechanism = "Use a distinct " + regenerated[index].Category + " remediation path"
-			regenerated[index].Components = []string{"internal/recovery/" + regenerated[index].Category}
-		}
-		fixture.batches = [][]model.Direction{fixture.batch, regenerated}
-	}
-	ctx := context.Background()
-	err := e.Ideate(ctx, project, "2026-10-13")
-	if (err == nil) != tc.success {
-		t.Fatalf("success=%v error=%v", tc.success, err)
-	}
-	records, _ := e.Store.List(ctx, "directions")
-	want := 2
-	if tc.success {
-		want = 6
-	}
-	if len(records) != want {
-		t.Fatalf("saved %d directions, want %d", len(records), want)
-	}
-	assertNoveltyReviewInputs(t, fixture, historical, other)
-	if tc.success {
-		assertNoveltyHistoryNotRepeated(t, e, project)
-	}
-	if !tc.success {
-		record, err := e.Store.Get(ctx, "schedules", project.ID+":2026-10-13")
-		if err != nil {
-			t.Fatalf("incomplete batch state not retained: %v", err)
-		}
-		var state struct {
-			Stage string `json:"stage"`
-		}
-		if err := json.Unmarshal(record.Data, &state); err != nil {
-			t.Fatal(err)
-		}
-		if state.Stage != "incomplete" {
-			t.Fatalf("invalid batch stage=%q", state.Stage)
-		}
-	}
-}
-
-func assertNoveltyReviewInputs(t *testing.T, fixture *ideationFixture, historical, other model.Direction) {
-	t.Helper()
-	if len(fixture.reviewPrompts) == 0 {
-		t.Fatal("missing semantic review")
-	}
-	for _, session := range fixture.reviewSessions {
-		if session != "" {
-			t.Fatalf("novelty review reused generation session %q", session)
-		}
-	}
-	for _, prompt := range fixture.reviewPrompts {
-		if strings.Contains(prompt, other.Title) {
-			t.Fatalf("wrong project history: %s", prompt)
-		}
-	}
-}
-
-func assertNoveltyHistoryNotRepeated(t *testing.T, e *Engine, project model.Project) {
-	t.Helper()
-	ctx := context.Background()
-	// Reusing the same batch on a later day must be rejected against saved history.
-	if err := e.Ideate(ctx, project, "2026-10-14"); err == nil || !strings.Contains(err.Error(), "categories:") {
-		t.Fatalf("unchanged discovery was treated as a successful four-category run: %v", err)
-	} else {
-		for _, category := range directionCategories {
-			if !strings.Contains(err.Error(), category) {
-				t.Fatalf("incomplete repeat omitted category %q: %v", category, err)
-			}
-		}
-	}
-	after, err := e.Store.List(ctx, "directions")
-	if err != nil || len(after) != 6 {
-		t.Fatalf("repeat changed saved history: %d %v", len(after), err)
-	}
 }

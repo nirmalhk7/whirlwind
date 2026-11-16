@@ -227,7 +227,7 @@ func TestWhirlwindPlanIdeaRejectsMissingLinkedPlan(t *testing.T) {
 	}
 }
 
-func TestWhirlwindPlanTitleChangeCannotBypassExactDuplicate(t *testing.T) {
+func TestWhirlwindPlanAllowsRepeatedIdeaContentWithDifferentTitle(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
 	idea := parityIdea(t, s)
@@ -235,11 +235,13 @@ func TestWhirlwindPlanTitleChangeCannotBypassExactDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	idea["idea_id"], idea["idea_title"] = "duplicate", "A renamed export"
-	if err := s.Put(ctx, "ideas", "duplicate", idea, 0); err == nil {
-		t.Fatal("different display title bypassed exact-duplicate protection")
+	if err := s.Put(ctx, "ideas", "duplicate", idea, 0); err != nil {
+		t.Fatalf("historical fingerprint match blocked new idea record: %v", err)
 	}
-	if _, err := s.Get(ctx, "ideas", "duplicate"); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("duplicate leaked into saved ideas: %v", err)
+	for _, id := range []string{"i", "duplicate"} {
+		if _, err := s.Get(ctx, "ideas", id); err != nil {
+			t.Fatalf("idea %q was not retained: %v", id, err)
+		}
 	}
 }
 

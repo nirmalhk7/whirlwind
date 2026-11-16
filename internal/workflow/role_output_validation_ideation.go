@@ -13,8 +13,6 @@ func validateIdeationOutput(purpose, text string) error {
 	switch {
 	case purpose == "generation":
 		return validateGenerationOutput(text)
-	case strings.HasPrefix(purpose, "novelty:"):
-		return validateNoveltyOutput(text)
 	case purpose == "integration_context":
 		return validateIntegrationContextOutput(text)
 	default:
@@ -29,19 +27,6 @@ func validateGenerationOutput(text string) error {
 	}
 	if _, err := decodeGeneratedIdeas(text); err != nil {
 		return fmt.Errorf("ideation generation returned invalid JSON: %w", err)
-	}
-	return nil
-}
-
-func validateNoveltyOutput(text string) error {
-	var verdict struct {
-		Unique *bool `json:"unique"`
-	}
-	if err := provider.JSON(text, &verdict); err != nil {
-		return fmt.Errorf("ideation novelty review returned invalid JSON: %w", err)
-	}
-	if verdict.Unique == nil {
-		return errors.New("ideation novelty review is missing its unique verdict")
 	}
 	return nil
 }

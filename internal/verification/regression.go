@@ -82,6 +82,9 @@ func compareBaselineResult(base *Result, head *Result) error {
 		return err
 	}
 	quality := baselineQlty(*head)
+	if quality && base != nil && !IsQltyHeadDiffCommand(head.Command) && !model.SameQualityIdentity(base.QualityIdentity, head.QualityIdentity) {
+		return errors.New("baseline comparison blocked: Qlty runtime identity differs from baseline")
+	}
 	if head.Passed && !quality {
 		return nil
 	}

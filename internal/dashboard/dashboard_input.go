@@ -89,6 +89,9 @@ func (d *Dashboard) handlePanelAction(event *tcell.EventKey) bool {
 	case 1:
 		return d.handleDirectionPanelAction(event)
 	case 2, 3:
+		if d.focus == 2 && event.Rune() == 'r' {
+			return d.retrySelectedProjectSetup()
+		}
 		return d.handlePlanPanelAction(event)
 	default:
 		return false

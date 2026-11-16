@@ -90,6 +90,18 @@ func baselineSARIF(output string) ([]baselineFinding, error) {
 	return findings, nil
 }
 
+// ValidateJobSARIF verifies complete SARIF 2.1 evidence, including successful
+// invocations and structurally valid findings. It does not require zero findings.
+func ValidateJobSARIF(output []byte) error {
+	if len(output) == 0 {
+		return errors.New("Qlty SARIF evidence is empty")
+	}
+	if _, err := baselineSARIF(string(output)); err != nil {
+		return fmt.Errorf("invalid Qlty SARIF evidence: %w", err)
+	}
+	return nil
+}
+
 func (run baselineSARIFRun) findings() ([]baselineFinding, error) {
 	if run.Tool.Driver.Name == "" || len(run.Invocations) == 0 {
 		return nil, errors.New("SARIF report lacks tool identity or completed invocation evidence")
@@ -230,6 +242,14 @@ func baselineQlty(r Result) bool {
 }
 
 func baselineProcessEvidence(r Result) error {
+	if baselineQlty(r) {
+		if r.QualityIdentity == nil {
+			return errors.New("baseline comparison blocked: Qlty runtime identity missing")
+		}
+		if err := r.QualityIdentity.Validate(); err != nil {
+			return fmt.Errorf("baseline comparison blocked: Qlty runtime identity invalid: %w", err)
+		}
+	}
 	if r.Truncated {
 		return errors.New("baseline comparison blocked: truncated report")
 	}

@@ -22,7 +22,7 @@ func writeProposalTx(tx *sql.Tx, proposal model.Proposal, enforceFingerprint boo
 	if err := replaceProposalSearchTx(tx, proposal); err != nil {
 		return err
 	}
-	return saveProposalFingerprintTx(tx, proposal, enforceFingerprint)
+	return saveProposalFingerprintTx(tx, proposal, enforceFingerprint && proposal.IdeaFields == nil)
 }
 
 func encodeProposal(proposal model.Proposal) (string, string, error) {

@@ -26,8 +26,8 @@ func TestParityPartialGenerationPublishesIdeaBeforeLaterFailures(t *testing.T) {
 		t.Fatalf("successful direction lost after later failures: %d %v", len(ideas), err)
 	}
 	idea, err := store.Decode[model.Idea](ideas[0])
-	if err != nil || idea.RunID != registrySourceRunID || idea.DecisionStatus != "draft" || idea.NoveltyMethod != "legacy_llm" {
-		t.Fatalf("idea provenance or temporary gate missing: %+v %v", idea, err)
+	if err != nil || idea.RunID != registrySourceRunID || idea.DecisionStatus != "draft" || idea.NoveltyMethod != "not_checked" || idea.NoveltyOutcome != "deferred" {
+		t.Fatalf("idea provenance or deferred comparison state missing: %+v %v", idea, err)
 	}
 	var count int
 	if err := e.Store.DB.QueryRow("SELECT count(*) FROM idea_candidates WHERE run_id='source-run' AND status='accepted'").Scan(&count); err != nil || count != 1 {

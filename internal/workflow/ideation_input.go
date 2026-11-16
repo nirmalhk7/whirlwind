@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	ctxengine "whirlwind/internal/context"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
@@ -36,5 +35,5 @@ func frozenIdeationPurpose(input provider.Input) bool {
 	if input.Role != "ideate" {
 		return false
 	}
-	return input.Purpose == "generation" || strings.HasPrefix(input.Purpose, "novelty:")
+	return input.Purpose == "generation"
 }

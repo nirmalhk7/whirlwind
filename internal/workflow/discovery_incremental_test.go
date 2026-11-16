@@ -18,7 +18,7 @@ const (
 	discoveryPolicyFile = ".whirlwind.yaml"
 )
 
-func TestZeroCandidatesAreIncompleteAndReportedWithoutNoveltyCall(t *testing.T) {
+func TestZeroCandidatesAreIncompleteAndReportedWithoutExtraInference(t *testing.T) {
 	openshell.Install(t)
 	e, task, _ := testEngine(t)
 	ctx := context.Background()
@@ -36,8 +36,8 @@ func TestZeroCandidatesAreIncompleteAndReportedWithoutNoveltyCall(t *testing.T) 
 	if err == nil || !strings.Contains(err.Error(), "expand, optimize, harden, simplify") {
 		t.Fatalf("empty result was treated as a completed ideation run: %v", err)
 	}
-	if len(fixture.reviewPrompts) != 0 {
-		t.Fatalf("empty candidate batch consumed %d semantic review calls", len(fixture.reviewPrompts))
+	if fixture.generations != 1 {
+		t.Fatalf("empty candidate batch made unexpected inference calls: %d", fixture.generations)
 	}
 	rows, err := e.Store.List(ctx, "inbox")
 	if err != nil {
@@ -131,7 +131,7 @@ func TestDefaultHistoryAllocationFitsLongMatchAndBoundsTotalRun(t *testing.T) {
 	settings := DefaultSettings().Ideation
 	history, plans := discoveryHistoryBudgets(settings)
 	perCall := history + plans
-	attempts := settings.NoveltyRepairAttempts * 2
+	attempts := settings.NoveltyRepairAttempts
 	if history < 1000 || plans == 0 || perCall*attempts > settings.HistoryRunTokenBudget {
 		t.Fatalf("default allocation starves candidate matches or exceeds total run cap: history=%d plans=%d calls=%d run=%d", history, plans, attempts, settings.HistoryRunTokenBudget)
 	}
@@ -250,7 +250,7 @@ func TestChangedEvidenceCanReopenPreviouslyDismissedProblem(t *testing.T) {
 	previous := batch[0]
 	previous.Status = "dismissed"
 	previous.Evidence = []model.EvidenceRef{{Kind: "code", Ref: discoveryPolicyFile, Revision: "old"}}
-	fixture := &ideationFixture{batch: batch, reviews: []string{`{"unique":true}`}}
+	fixture := &ideationFixture{batch: batch}
 	e.Adapter = func(model.Provider) provider.Adapter { return fixture }
 	project, _ := e.Project(ctx, task.ProjectID)
 	commit, err := exec.Command("git", "-C", project.Path, "rev-parse", "HEAD").Output()

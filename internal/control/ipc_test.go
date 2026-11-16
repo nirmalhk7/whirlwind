@@ -107,3 +107,14 @@ func TestSingleProposalDeleteRequiresVersionAndRetryIdentity(t *testing.T) {
 		t.Fatal("delete without retry identity accepted")
 	}
 }
+
+func TestProjectSetupRetryIsAValidVersionedSupervisorCommand(t *testing.T) {
+	request := Request{RequestID: "setup-retry", Operation: "project.setup.retry", ProjectID: "project-a", ExpectedVersion: 4, IdempotencyKey: "retry-once"}
+	if err := validateRequest(request); err != nil {
+		t.Fatalf("project setup retry command rejected: %v", err)
+	}
+	request.ExpectedVersion = 0
+	if err := validateRequest(request); err == nil {
+		t.Fatal("unversioned project setup retry accepted")
+	}
+}

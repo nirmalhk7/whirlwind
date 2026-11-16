@@ -70,19 +70,14 @@ func TestOverlongIdeationRetriesWithoutSaving(t *testing.T) {
 	batch := ideaBatch(t)
 	const overlongMarker = "overlong-description-marker "
 	batch[0].Description = strings.Repeat(overlongMarker, 36)
-	fixture := &ideationFixture{batch: batch, reviews: []string{`{"unique":true}`}}
+	fixture := &ideationFixture{batch: batch}
 	e.Adapter = func(model.Provider) provider.Adapter { return fixture }
 	project, _ := e.Project(ctx, task.ProjectID)
 	if err := e.Ideate(ctx, project, "2026-10-14"); err == nil || !strings.Contains(err.Error(), "no worthwhile new direction") {
 		t.Fatalf("overlong ideas accepted: %v", err)
 	}
-	if fixture.generations != 5 || len(fixture.reviewPrompts) != 1 {
-		t.Fatalf("generation retries=%d novelty reviews=%d", fixture.generations, len(fixture.reviewPrompts))
-	}
-	for _, prompt := range fixture.reviewPrompts {
-		if strings.Contains(prompt, overlongMarker) {
-			t.Fatal("overlong candidate reached novelty review instead of being rejected during generation")
-		}
+	if fixture.generations != 5 {
+		t.Fatalf("generation repair attempts=%d", fixture.generations)
 	}
 	directions, _ := e.Store.List(ctx, "directions")
 	if len(directions) != 3 {

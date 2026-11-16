@@ -3,10 +3,9 @@ package workflow
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
+	"time"
 	"whirlwind/internal/model"
-	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
 )
 
@@ -31,19 +30,24 @@ func editableIdeaFixture(t *testing.T, verdict string) (noveltyTestFixture, mode
 	return f, records[0], i
 }
 
-func TestParityIdeaSimilarDraftEditPreservesContentVersionAndHistory(t *testing.T) {
-	f, r, i := editableIdeaFixture(t, `{"unique":false,"reason":"Same outcome as an earlier idea"}`)
+func TestParityIdeaSimilarDraftEditSavesWithoutNoveltyComparison(t *testing.T) {
+	f, r, i := editableIdeaFixture(t, `{"unique":true}`)
 	editor, ok := any(f.engine).(ideaEditor)
 	if !ok {
 		t.Fatal("draft edit novelty validation is unavailable")
 	}
 	draft := model.IdeaDraft{What: "Reword an earlier outcome", Why: i.Why, Where: i.Where, HowItHelps: i.HowItHelps}
-	if err := editor.UpdateIdea(context.Background(), i.ID, r.Version, draft, nil); err == nil {
-		t.Fatal("similar draft edit accepted")
+	calls := f.fixture.calls
+	if err := editor.UpdateIdea(context.Background(), i.ID, r.Version, draft, nil); err != nil {
+		t.Fatalf("draft edit was blocked by novelty comparison: %v", err)
 	}
 	after, err := f.engine.Store.Get(context.Background(), "ideas", i.ID)
-	if err != nil || after.Version != r.Version || string(after.Data) != string(r.Data) {
-		t.Fatalf("rejected edit changed saved idea: %+v %v", after, err)
+	if err != nil || after.Version != r.Version+1 || f.fixture.calls != calls {
+		t.Fatalf("draft edit version or provider call mismatch: v%d err=%v calls=%d want=%d", after.Version, err, f.fixture.calls, calls)
+	}
+	saved, err := store.Decode[model.Idea](after)
+	if err != nil || saved.What != draft.What || saved.NoveltyMethod != "not_checked" || saved.NoveltyOutcome != "deferred" {
+		t.Fatalf("draft edit comparison state is inaccurate: %+v %v", saved, err)
 	}
 }
 
@@ -51,9 +55,10 @@ func TestParityIdeaUniqueDraftEditUpdatesSearchAndRetainsSourceRun(t *testing.T)
 	f, r, i := editableIdeaFixture(t, `{"unique":true}`)
 	editor, ok := any(f.engine).(ideaEditor)
 	if !ok {
-		t.Fatal("draft edit novelty validation is unavailable")
+		t.Fatal("draft edit service is unavailable")
 	}
 	draft := model.IdeaDraft{What: "QuasarExport monthly invoices", Why: i.Why, Where: i.Where, HowItHelps: i.HowItHelps}
+	calls := f.fixture.calls
 	if err := editor.UpdateIdea(context.Background(), i.ID, r.Version, draft, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -62,72 +67,36 @@ func TestParityIdeaUniqueDraftEditUpdatesSearchAndRetainsSourceRun(t *testing.T)
 		t.Fatal(err)
 	}
 	saved, err := store.Decode[model.Idea](after)
-	if err != nil || saved.What != draft.What || saved.Fingerprint == i.Fingerprint || saved.RunID != i.RunID || after.Version != r.Version+1 || saved.DecisionStatus != "draft" {
+	if err != nil || saved.What != draft.What || saved.Fingerprint == i.Fingerprint || saved.RunID != i.RunID || after.Version != r.Version+1 || saved.DecisionStatus != "draft" || saved.NoveltyMethod != "not_checked" || saved.NoveltyOutcome != "deferred" || f.fixture.calls != calls {
 		t.Fatalf("edit lost content, identity or decision: %+v %v", saved, err)
 	}
 	assertIdeaSearchContent(t, f.engine, i, draft.What)
-	prompt := f.fixture.reviewPrompts[len(f.fixture.reviewPrompts)-1]
-	_, history, ok := strings.Cut(prompt, "Bounded project proposal history:\n")
-	if !ok {
-		t.Fatal("novelty history section missing")
-	}
-	history, _, _ = strings.Cut(history, "Current approved plans for this project:")
-	if strings.Contains(history, i.ID) {
-		t.Fatal("edited idea compared against itself")
-	}
 	if err := editor.UpdateIdea(context.Background(), i.ID, r.Version, draft, nil); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale edit accepted: %v", err)
 	}
 }
 
-type ideaEditRaceAdapter struct {
-	provider.Adapter
-	before func()
-}
-
-func (a ideaEditRaceAdapter) Run(ctx context.Context, input provider.Input, hooks provider.Hooks) (provider.Output, error) {
-	if strings.HasPrefix(input.Purpose, "novelty:") {
-		a.before()
-	}
-	return a.Adapter.Run(ctx, input, hooks)
-}
-
-func TestParityIdeaApprovalRacingWithEditRejectsStalePublication(t *testing.T) {
+func TestParityIdeaEditRespectsProjectGenerationLease(t *testing.T) {
 	f, r, i := editableIdeaFixture(t, `{"unique":true}`)
-	f.engine.Adapter = func(model.Provider) provider.Adapter {
-		return ideaEditRaceAdapter{Adapter: f.fixture, before: func() {
-			approved := i
-			approved.DecisionStatus = "approved"
-			if err := f.engine.Store.Put(context.Background(), "ideas", i.ID, approved, r.Version); err != nil {
-				t.Fatal(err)
-			}
-		}}
+	ctx := context.Background()
+	leaseID := "generation:" + i.ProjectID
+	lease, err := f.engine.Store.Claim(ctx, leaseID, "other-editor", time.Minute)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer func() { _ = f.engine.Store.Release(context.Background(), leaseID, "other-editor", lease.Fence) }()
 	draft := model.IdeaDraft{What: "Changed while being approved", Why: i.Why, Where: i.Where, HowItHelps: i.HowItHelps}
-	if err := f.engine.UpdateIdea(context.Background(), i.ID, r.Version, draft, nil); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("approval did not invalidate edit: %v", err)
+	calls := f.fixture.calls
+	if err := f.engine.UpdateIdea(ctx, i.ID, r.Version, draft, nil); !errors.Is(err, store.ErrLeased) {
+		t.Fatalf("active generation lease did not serialize draft edit: %v", err)
 	}
 	after, err := f.engine.Store.Get(context.Background(), "ideas", i.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	saved, err := store.Decode[model.Idea](after)
-	if err != nil || saved.What != i.What || saved.Fingerprint != i.Fingerprint || saved.DecisionStatus != "approved" {
-		t.Fatalf("stale edit replaced approved idea: %+v %v", saved, err)
-	}
-}
-
-func TestParityIdeaNoveltyInfrastructureFailureDoesNotBecomeDuplicate(t *testing.T) {
-	f, r, i := editableIdeaFixture(t, `not valid JSON`)
-	draft := model.IdeaDraft{What: "Distinct outcome", Why: i.Why, Where: i.Where, HowItHelps: i.HowItHelps}
-	err := f.engine.UpdateIdea(context.Background(), i.ID, r.Version, draft, nil)
-	var similar *IdeaSimilarityError
-	if err == nil || errors.As(err, &similar) {
-		t.Fatalf("infrastructure failure fabricated a novelty decision: %v", err)
-	}
-	after, err := f.engine.Store.Get(context.Background(), "ideas", i.ID)
-	if err != nil || after.Version != r.Version || string(after.Data) != string(r.Data) {
-		t.Fatalf("failed gate changed saved draft: %+v %v", after, err)
+	if err != nil || saved.What != i.What || saved.Fingerprint != i.Fingerprint || saved.DecisionStatus != "draft" || after.Version != r.Version || f.fixture.calls != calls {
+		t.Fatalf("leased edit changed saved draft or launched model: %+v v%d calls=%d err=%v", saved, after.Version, f.fixture.calls, err)
 	}
 }
 

@@ -7,7 +7,7 @@ import (
 
 func ideationRunDetails(id string, run ideationRunView) string {
 	var text strings.Builder
-	fmt.Fprintf(&text, "Ideation run: %s\nProject: %s\nStatus: %s\nStarted: %s\nFinished: %s\nRepository snapshot: %s\nConfiguration: %s\nNovelty: Temporary ACP/LLM novelty\n", id, run.Subject, run.Stage, recordedRuntimeValue(run.StartedAt), recordedRuntimeValue(run.FinishedAt), recordedRuntimeValue(run.RepositoryRevision), recordedRuntimeValue(run.ConfigurationHash))
+	fmt.Fprintf(&text, "Ideation run: %s\nProject: %s\nStatus: %s\nStarted: %s\nFinished: %s\nRepository snapshot: %s\nConfiguration: %s\nCurrent uniqueness policy: Deferred\n", id, run.Subject, run.Stage, recordedRuntimeValue(run.StartedAt), recordedRuntimeValue(run.FinishedAt), recordedRuntimeValue(run.RepositoryRevision), recordedRuntimeValue(run.ConfigurationHash))
 	for _, direction := range run.Directions {
 		fmt.Fprintf(&text, "\n%s: %d/5 · %s\n", direction.Direction, direction.CandidateCount, direction.Status)
 		if direction.IdeaID != "" {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"whirlwind/internal/model"
 )
 
 const complexityFinding = "Too complex"
@@ -33,6 +34,17 @@ func TestQltyHeadDiffRejectsPreviouslyGrandfatheredEvidence(t *testing.T) {
 	result.Command = []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", regressionSARIFArgument}
 	if err := ValidateQltyResult(result); err == nil {
 		t.Fatal("old advisory marker waived a finding in the HEAD diff")
+	}
+}
+
+func TestCompareBaselineQltyRequiresFrozenRuntimeIdentity(t *testing.T) {
+	output := regressionSARIF("lint", "note", "stable", "Existing issue", 10, 0)
+	base := regressionQuality(output, 1)
+	head := regressionQuality(output, 1)
+	base.QualityIdentity, head.QualityIdentity = nil, nil
+	report := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{head}})
+	if report.Passed || !strings.Contains(report.Results[0].Error, "runtime identity") {
+		t.Fatalf("Qlty evidence without frozen runtime identity was accepted: %+v", report)
 	}
 }
 
@@ -93,10 +105,37 @@ func regressionSARIF(rule, level, fingerprint, message string, line, metric int)
 func regressionQuality(output string, exit int) Result {
 	r := regressionResult("qlty-check", output, exit)
 	r.Command = []string{"qlty", "check", "--all", regressionSARIFArgument}
+	r.QualityIdentity = regressionFixtureIdentity()
 	if exit != 0 {
 		r.Error = "exit status 1"
 	}
 	return r
+}
+
+func regressionFixtureIdentity() *model.QualityIdentity {
+	return &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 fixture", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: "/tmp/approved-runtime/tools", Tools: []model.QualityToolIdentity{{Name: "semgrep", Version: "1.179.0", Fingerprint: "c5011bfd1d76"}}}
+}
+
+func TestCompareBaselineQltyRejectsDifferentRuntimeIdentity(t *testing.T) {
+	output := regressionSARIF("lint", "note", "stable", "Existing issue", 10, 0)
+	base, head := regressionQuality(output, 1), regressionQuality(output, 1)
+	head.QualityIdentity = regressionFixtureIdentity()
+	head.QualityIdentity.QltyBinarySHA256 = strings.Repeat("d", 64)
+	report := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{head}})
+	if report.Passed || !strings.Contains(report.Results[0].Error, "runtime identity") {
+		t.Fatalf("Qlty debt passed under a different scanner runtime: %+v", report)
+	}
+}
+
+func TestValidateJobSARIFAcceptsValidFindingsButRequiresSuccessfulInvocations(t *testing.T) {
+	findings := regressionSARIF("lint", "warning", "stable", "Existing finding", 10, 0)
+	if err := ValidateJobSARIF([]byte(findings)); err != nil {
+		t.Fatalf("complete SARIF with valid findings rejected: %v", err)
+	}
+	failed := strings.Replace(findings, `"executionSuccessful":true`, `"executionSuccessful":false`, 1)
+	if err := ValidateJobSARIF([]byte(failed)); err == nil {
+		t.Fatal("SARIF with unsuccessful scanner invocation accepted")
+	}
 }
 
 func TestCompareBaselineSARIFDistinguishesDebtFromRegressions(t *testing.T) {

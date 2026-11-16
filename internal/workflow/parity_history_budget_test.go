@@ -25,9 +25,12 @@ func TestParityIdeationHistoryBudgetSurvivesDatabaseReopen(t *testing.T) {
 	if err := e.Store.Put(ctx, "operations", historyFixtureRunID, model.Operation{Kind: "ideation", Subject: "p", Stage: "running"}, 0); err != nil {
 		t.Fatal(err)
 	}
-	requests := []model.ProposalReconsideration{{ID: "human-request", ProjectID: "p", PredecessorID: "archived-idea", Reason: strings.Repeat("x", 550), Status: "pending"}}
 	first := withIdeationHistoryBudget(WithOperation(ctx, historyFixtureRunID), settings.Ideation)
-	if _, _, err := e.targetedProposalHistory(first, "p", nil, nil, nil, requests); err != nil {
+	first, err := e.withDurableIdeationHistoryBudget(first, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := historyBudgetFrom(first).consume(400); err != nil {
 		t.Fatal(err)
 	}
 	reopened, err := store.Open(filepath.Join(e.Root, "state.db"))
@@ -37,11 +40,15 @@ func TestParityIdeationHistoryBudgetSurvivesDatabaseReopen(t *testing.T) {
 	t.Cleanup(func() { _ = reopened.Close() })
 	replacement := New(reopened, e.GitHub, e.Root)
 	resumed := withIdeationHistoryBudget(WithOperation(ctx, historyFixtureRunID), settings.Ideation)
-	if _, _, err := replacement.targetedProposalHistory(resumed, "p", nil, nil, nil, requests); err == nil || !strings.Contains(err.Error(), "history budget exhausted") {
+	resumed, err = replacement.withDurableIdeationHistoryBudget(resumed, "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := historyBudgetFrom(resumed).consume(601); err == nil || !strings.Contains(err.Error(), "history budget exhausted") {
 		t.Fatalf("restart reset consumed run history allowance: %v", err)
 	}
 	var limit, used int
-	if err := reopened.DB.QueryRow("SELECT history_token_limit,history_tokens_used FROM ideation_runs WHERE run_id='history-run'").Scan(&limit, &used); err != nil || limit != 1000 || used <= 550 || used >= 1000 {
+	if err := reopened.DB.QueryRow("SELECT history_token_limit,history_tokens_used FROM ideation_runs WHERE run_id='history-run'").Scan(&limit, &used); err != nil || limit != 1000 || used != 400 {
 		t.Fatalf("history accounting not durable/bounded: limit=%d used=%d err=%v", limit, used, err)
 	}
 }

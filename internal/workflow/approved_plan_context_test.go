@@ -100,7 +100,7 @@ func TestDiscoveryRotatesTowardLessExploredRepositoryAreas(t *testing.T) {
 	}
 }
 
-func TestDiscoveryProvidesCurrentFileContentForNoveltyComparison(t *testing.T) {
+func TestDiscoveryProvidesCurrentFileContentForIdeaGeneration(t *testing.T) {
 	engine, task, _ := testEngine(t)
 	project, err := engine.Project(context.Background(), task.ProjectID)
 	if err != nil {

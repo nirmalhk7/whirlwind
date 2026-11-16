@@ -17,7 +17,7 @@ func historyBudgetFitError(reconsiderationCount, reconsiderationBytes, historyBu
 		return nil
 	}
 	if reconsiderationCount == 0 {
-		return fmt.Errorf("%w before comparison context", errIdeationHistoryBudget)
+		return fmt.Errorf("%w before historical context", errIdeationHistoryBudget)
 	}
 	return fmt.Errorf("%w: cannot fit all pending human reconsideration requests", errIdeationHistoryBudget)
 }

@@ -20,7 +20,7 @@ func TestParityRunsDisplayDurableIdeationProgressWithoutActiveAgent(t *testing.T
 		t.Fatalf("durable ideation run disappears without an ACP process: %d", len(d.runRows))
 	}
 	d.selectRun(0, "", "", 0)
-	for _, want := range []string{"source", "partial", "expand: 2/5", "harden: 5/5", "accepted-idea", "No qualifying candidate", "Temporary ACP/LLM novelty"} {
+	for _, want := range []string{"source", "partial", "expand: 2/5", "harden: 5/5", "accepted-idea", "No qualifying candidate", "Current uniqueness policy: Deferred"} {
 		if !strings.Contains(d.detail.GetText(false), want) {
 			t.Fatalf("run progress missing %q: %s", want, d.detail.GetText(false))
 		}

@@ -46,7 +46,7 @@ func externalQualitySnapshot(project model.Project) (model.QualitySnapshot, erro
 	if err != nil {
 		return model.QualitySnapshot{}, err
 	}
-	snapshot := model.QualitySnapshot{Root: root, Files: map[string]string{}}
+	snapshot := model.QualitySnapshot{Root: root, Files: map[string]string{}, Identity: project.QualityIdentity}
 	var total int
 	for _, path := range paths {
 		if !model.QualityConfigurationPathAllowed(path) {

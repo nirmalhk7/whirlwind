@@ -70,6 +70,23 @@ func TestParityIdeaProjectionAndReadOnlyApproval(t *testing.T) {
 	}
 }
 
+func TestParityIdeaAllowsDeferredNoveltyComparisonState(t *testing.T) {
+	s := openTest(t)
+	idea := parityIdea(t, s)
+	idea["novelty_method"], idea["novelty_outcome"] = "not_checked", "deferred"
+	if err := s.Put(context.Background(), "ideas", "i", idea, 0); err != nil {
+		t.Fatalf("deferred novelty status rejected: %v", err)
+	}
+	record, err := s.Get(context.Background(), "ideas", "i")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := Decode[model.Idea](record)
+	if err != nil || saved.NoveltyMethod != "not_checked" || saved.NoveltyOutcome != "deferred" {
+		t.Fatalf("deferred novelty status was not preserved: %+v %v", saved, err)
+	}
+}
+
 func TestParityArchivedDraftRetainsItsContentAndEligibility(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()

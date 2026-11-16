@@ -145,10 +145,8 @@ CREATE TABLE IF NOT EXISTS ideas (
     UNIQUE(idea_id,run_id)
 );
 CREATE INDEX IF NOT EXISTS ideas_intake ON ideas(status,timestamp);
--- Supporting envelopes retain the novelty index without adding core columns.
-CREATE UNIQUE INDEX IF NOT EXISTS ideas_scope_fingerprint ON resources(
-    json_extract(data,'$.project_id'),json_extract(data,'$.direction'),json_extract(data,'$.fingerprint'))
-    WHERE kind='ideas' AND COALESCE(json_extract(data,'$.fingerprint'),'')<>'' AND COALESCE(json_extract(data,'$.predecessor_id'),'')='';
+-- Novelty comparisons are deferred, so historical fingerprints cannot block idea records.
+DROP INDEX IF EXISTS ideas_scope_fingerprint;
 CREATE TABLE IF NOT EXISTS ideation_directions (
     run_id TEXT NOT NULL REFERENCES ideation_runs(run_id),
     direction TEXT NOT NULL CHECK(direction IN ('expand','optimize','harden','simplify')),

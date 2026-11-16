@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -87,9 +86,6 @@ func TestHumanReconsiderationFlowsThroughIdeationOnce(t *testing.T) {
 	if len(capture.generationPrompts) != 1 || !strings.Contains(capture.generationPrompts[0], humanReason) || !strings.Contains(capture.generationPrompts[0], request.ID) {
 		t.Fatalf("generator did not receive bounded trusted human request context: prompts=%q", capture.generationPrompts)
 	}
-	if len(prepared.fixture.reviewPrompts) != 1 || !strings.Contains(prepared.fixture.reviewPrompts[0], humanReason) || !strings.Contains(prepared.fixture.reviewPrompts[0], request.ID) {
-		t.Fatalf("novelty evaluator did not receive trusted human request context: prompts=%q", prepared.fixture.reviewPrompts)
-	}
 
 	rows, err := prepared.engine.Store.List(ctx, "directions")
 	if err != nil {
@@ -137,19 +133,12 @@ func assertHumanRevisitSelectionUpdatesOwner(t *testing.T, prepared noveltyTestF
 	if err := prepared.engine.Store.Put(ctx, "ideas", published.ID, idea, publishedRecord.Version); err != nil {
 		t.Fatalf("ordinary versioned selection could not update the published revisit: %v", err)
 	}
-	proposal, err := prepared.engine.Store.ProposalByFingerprint(ctx, prepared.project.ID, published.Fingerprint)
+	proposal, err := prepared.engine.Store.ProposalByID(ctx, prepared.project.ID, published.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if proposal.ID != published.ID {
-		t.Fatalf("published fingerprint owner changed after selection: got %q want %q", proposal.ID, published.ID)
-	}
-	var uniqueness struct {
-		Status string `json:"status"`
-	}
-	data, _ := json.Marshal(proposal)
-	if err := json.Unmarshal(data, &uniqueness); err != nil || uniqueness.Status != "approved" {
-		t.Fatalf("published fingerprint owner was not preserved after idea approval: %+v err=%v", uniqueness, err)
+	if proposal.Status != "approved" || proposal.PredecessorID != request.PredecessorID {
+		t.Fatalf("published reconsideration did not preserve its own status and link: %+v", proposal)
 	}
 	requestRecord, err := prepared.engine.Store.Get(ctx, "proposal_reconsiderations", request.ID)
 	if err != nil {

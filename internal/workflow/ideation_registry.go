@@ -77,14 +77,14 @@ func (e *Engine) publishDirectionCandidates(ctx context.Context, request directi
 	for category, id := range request.candidateIDs {
 		d, ok := accepted[category]
 		if !ok {
-			if err := e.Store.CompleteIdeaCandidate(ctx, id, nil, "no qualifying candidate from completed generation and legacy LLM novelty review"); err != nil {
+			if err := e.Store.CompleteIdeaCandidate(ctx, id, nil, "no valid candidate from bounded generation and content validation"); err != nil {
 				return err
 			}
 			continue
 		}
 		// Supporting mechanism/components/evidence remain independent from the
 		// four human fields. Source identities are always supervisor-owned.
-		i := model.Idea{Title: d.Title, ID: id, ProjectID: request.project.ID, ProjectName: request.project.Name, RunID: request.runID, Direction: category, What: d.Title, Why: d.Problem, Where: strings.Join(d.Components, ", "), HowItHelps: d.Description, Mechanism: d.Mechanism, Components: d.Components, Evidence: d.Evidence, RepositoryRevision: d.RepositoryRevision, NoveltyMethod: "legacy_llm", NoveltyOutcome: "accepted", DecisionStatus: "draft", PredecessorID: d.PredecessorID}
+		i := model.Idea{Title: d.Title, ID: id, ProjectID: request.project.ID, ProjectName: request.project.Name, RunID: request.runID, Direction: category, What: d.Title, Why: d.Problem, Where: strings.Join(d.Components, ", "), HowItHelps: d.Description, Mechanism: d.Mechanism, Components: d.Components, Evidence: d.Evidence, RepositoryRevision: d.RepositoryRevision, NoveltyMethod: "not_checked", NoveltyOutcome: "deferred", DecisionStatus: "draft", PredecessorID: d.PredecessorID}
 		if d.IdeaFields != nil {
 			i.What, i.Why, i.Where, i.HowItHelps = d.IdeaFields.What, d.IdeaFields.Why, d.IdeaFields.Where, d.IdeaFields.HowItHelps
 		}

@@ -85,11 +85,11 @@ func TestWaitForDrainSeparatesOutputDrainFromCredentialRelease(t *testing.T) {
 
 func TestManagedStartPromotesCredentialRedactionUntilCleanup(t *testing.T) {
 	const secret = "managed-process-secret-0123456789"
-	releaseSecret, err := redaction.RegisterSecret(secret, 30*time.Millisecond)
+	releaseSecret, err := redaction.RegisterSecret(secret, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := Command(context.Background(), "sh", "-c", "sleep 0.05")
+	cmd := Command(context.Background(), "sh", "-c", "sleep 1.1")
 	if err := OnCleanup(cmd, releaseSecret); err != nil {
 		releaseSecret()
 		t.Fatal(err)
@@ -101,7 +101,7 @@ func TestManagedStartPromotesCredentialRedactionUntilCleanup(t *testing.T) {
 	if err := Start(cmd); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(1200 * time.Millisecond)
 	if got := redaction.RedactText("event=" + secret); strings.Contains(got, secret) {
 		t.Fatalf("started child lost credential redaction before cleanup: %q", got)
 	}

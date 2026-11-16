@@ -41,8 +41,7 @@ func prepareIdea(id string, before, data []byte) ([]byte, error) {
 	} else if idea.DecisionStatus != "draft" {
 		return nil, ErrConflict
 	}
-	// The retained model gate does not provide vector certification.
-	if idea.NoveltyMethod != "legacy_llm" {
+	if idea.NoveltyMethod != "legacy_llm" && idea.NoveltyMethod != "not_checked" {
 		return nil, fmt.Errorf("%w: unsupported novelty method", ErrConflict)
 	}
 	fingerprint := sha256.Sum256([]byte(ideaContent(idea)))
@@ -146,15 +145,12 @@ func updateIdeaHistoryTx(tx *sql.Tx, previous []byte, d model.Direction, at stri
 	if p.RejectionReason == "" {
 		p.RejectionReason = old.RejectionReason
 	}
-	if err := authorizeProposalFingerprint(tx, p); err != nil {
-		return err
-	}
 	// The canonical idea already owns its human reconsideration identity;
 	// an authorized draft edit must not consume that authorization again.
 	if err := writeProposalTx(tx, p, false); err != nil {
 		return err
 	}
-	if err := saveProposalFingerprintTx(tx, p, true); err != nil {
+	if err := saveProposalFingerprintTx(tx, p, false); err != nil {
 		return err
 	}
 	return nil

@@ -123,16 +123,15 @@ func frozenSemgrepRules(raw []byte) (string, error) {
 		return "", errors.New("semgrep rule response exceeds retained limit")
 	}
 	var response map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return "", fmt.Errorf("read Semgrep rule response: %w", err)
-	}
 	content := raw
-	if wrapped, ok := response["rule_config"]; ok {
-		var text string
-		if err := json.Unmarshal(wrapped, &text); err == nil {
-			content = []byte(text)
-		} else {
-			content = wrapped
+	if err := json.Unmarshal(raw, &response); err == nil {
+		if wrapped, ok := response["rule_config"]; ok {
+			var text string
+			if err := json.Unmarshal(wrapped, &text); err == nil {
+				content = []byte(text)
+			} else {
+				content = wrapped
+			}
 		}
 	}
 	var configuration struct {

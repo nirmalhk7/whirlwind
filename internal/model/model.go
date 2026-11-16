@@ -49,17 +49,18 @@ type Policy struct {
 	Embeddings         *Embeddings    `json:"embeddings,omitempty" yaml:"embeddings"`
 }
 type Project struct {
-	Status        string `json:"status,omitempty"`
-	RemoteURL     string `json:"remote_url,omitempty"`
-	Paused        bool   `json:"paused"`
-	DefaultBranch string `json:"default_branch"`
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	Repo          string `json:"repo"`
-	Path          string `json:"path"`
-	Policy        Policy `json:"policy"`
-	PolicyHash    string `json:"policy_hash"`
-	WebhookURL    string `json:"webhook_url,omitempty"`
+	Status          string           `json:"status,omitempty"`
+	RemoteURL       string           `json:"remote_url,omitempty"`
+	Paused          bool             `json:"paused"`
+	DefaultBranch   string           `json:"default_branch"`
+	ID              string           `json:"id"`
+	Name            string           `json:"name"`
+	Repo            string           `json:"repo"`
+	Path            string           `json:"path"`
+	Policy          Policy           `json:"policy"`
+	PolicyHash      string           `json:"policy_hash"`
+	QualityIdentity *QualityIdentity `json:"quality_identity,omitempty"`
+	WebhookURL      string           `json:"webhook_url,omitempty"`
 }
 type Provider struct {
 	NativeIntegrations bool           `json:"-"`

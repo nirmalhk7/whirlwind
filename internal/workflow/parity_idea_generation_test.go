@@ -39,7 +39,7 @@ func TestParityGeneratorPreservesExplicitFourFieldsAndSeparateEvidence(t *testin
 			t.Fatalf("source run missing pinned repository/configuration identity: %s %s %v", revision, configuration, err)
 		}
 
-		assertExplicitIdeaNoveltyHistory(t, ctx, f.engine, f.project.ID, idea)
+		assertExplicitIdeaHistoryContext(t, ctx, f.engine, f.project.ID, idea)
 
 	}
 }
@@ -62,10 +62,10 @@ func explicitIdeaGenerationOutput(t *testing.T) provider.Output {
 	return provider.Output{Text: string(raw)}
 }
 
-func assertExplicitIdeaNoveltyHistory(t *testing.T, ctx context.Context, engine *Engine, projectID string, idea model.Idea) {
+func assertExplicitIdeaHistoryContext(t *testing.T, ctx context.Context, engine *Engine, projectID string, idea model.Idea) {
 	t.Helper()
 	history, err := engine.previousDirections(ctx, projectID, idea.Where)
 	if err != nil || !strings.Contains(jsonText(compactProposalHistory(history)), idea.Where) || !strings.Contains(jsonText(compactProposalHistory(history)), idea.HowItHelps) {
-		t.Fatalf("explicit location/benefit missing from novelty history: %s %v", jsonText(compactProposalHistory(history)), err)
+		t.Fatalf("explicit location/benefit missing from generation history context: %s %v", jsonText(compactProposalHistory(history)), err)
 	}
 }

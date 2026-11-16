@@ -47,7 +47,6 @@ func TestValidateRoleOutputRejectsMalformedIdeationAndEmptyCode(t *testing.T) {
 		role, purpose, text string
 	}{
 		{role: "ideate", purpose: "generation", text: `{"directions":[]}`},
-		{role: "ideate", purpose: "novelty:check", text: `{"reason":"unclear"}`},
 		{role: "ideate", purpose: "integration_context", text: `{"sources":[]}`},
 		{role: "code", purpose: "primary", text: "  "},
 	} {
@@ -57,14 +56,11 @@ func TestValidateRoleOutputRejectsMalformedIdeationAndEmptyCode(t *testing.T) {
 	}
 }
 
-func TestValidateRoleOutputAllowsPartialDirectionsAndNoveltyRepair(t *testing.T) {
+func TestValidateRoleOutputAllowsPartialDirections(t *testing.T) {
 	if err := validateRoleOutput("ideate", "generation", `[]`); err != nil {
 		t.Fatalf("empty direction batch should remain an incomplete repair input: %v", err)
 	}
 	if err := validateRoleOutput("ideate", "generation", `[{"category":"optimize","title":"Improve cache","description":"Reduce repeated reads"}]`); err != nil {
 		t.Fatalf("valid partial direction batch should remain a repair input: %v", err)
-	}
-	if err := validateRoleOutput("ideate", "novelty:check", `{"unique":false,"reason":"duplicate","duplicate_categories":["optimize"]}`); err != nil {
-		t.Fatalf("valid duplicate verdict should remain a correction-loop input: %v", err)
 	}
 }

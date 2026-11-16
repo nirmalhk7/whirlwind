@@ -35,7 +35,7 @@ func validateCompleteDirections(directions []model.Direction) error {
 	return nil
 }
 
-func validateDirections(directions, previous []model.Direction, maximum ...int) error {
+func validateDirections(directions, _ []model.Direction, maximum ...int) error {
 	limit := 4
 	if len(maximum) > 0 && maximum[0] > 0 {
 		limit = maximum[0]
@@ -43,20 +43,14 @@ func validateDirections(directions, previous []model.Direction, maximum ...int) 
 	if len(directions) > limit {
 		return fmt.Errorf("ideation must produce at most %d directions", limit)
 	}
-	titles, descriptions, categories := map[string]bool{}, map[string]bool{}, map[string]bool{}
-	for _, direction := range previous {
-		titles[directionKey(direction.Title)] = true
-		descriptions[directionKey(direction.Description)] = true
-	}
+	categories := map[string]bool{}
 	for _, direction := range directions {
 		if err := validateDirectionContent(direction); err != nil {
 			return err
 		}
-		title, description := directionKey(direction.Title), directionKey(direction.Description)
-		if title == "" || description == "" || titles[title] || descriptions[description] || categories[direction.Category] {
-			return errors.New("duplicate or incomplete direction; retry ideation")
+		if strings.TrimSpace(direction.Title) == "" || strings.TrimSpace(direction.Description) == "" || categories[direction.Category] {
+			return errors.New("incomplete direction or repeated category; retry ideation")
 		}
-		titles[title], descriptions[description] = true, true
 		categories[direction.Category] = true
 	}
 	return nil
@@ -76,7 +70,7 @@ func validateDirectionContent(direction model.Direction) error {
 	}
 }
 
-// directionKey ignores case, punctuation, and whitespace when checking repeated wording.
+// directionKey normalizes wording for diagnostic topic extraction.
 func directionKey(value string) string {
 	return strings.Join(strings.FieldsFunc(strings.ToLower(value), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsNumber(r) }), " ")
 }

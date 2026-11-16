@@ -119,10 +119,24 @@ func TestParityApprovedIdeaIsReadOnlyAndShowsProvenance(t *testing.T) {
 	if d.ideaDetailView == nil {
 		t.Fatal("idea details unavailable")
 	}
-	for _, text := range []string{"source-run", "approved", "Awaiting Planner", "Temporary ACP/LLM novelty", "billing"} {
+	for _, text := range []string{"source-run", "approved", "Awaiting Planner", "Recorded legacy assessment ()", "billing"} {
 		if !strings.Contains(d.ideaDetailView.GetText(false), text) {
 			t.Fatalf("missing provenance %q", text)
 		}
+	}
+}
+
+func TestParityDeferredIdeaShowsUniquenessWasNotChecked(t *testing.T) {
+	body := ideaDetails(model.Idea{NoveltyMethod: "not_checked", NoveltyOutcome: "deferred"})
+	if !strings.Contains(body, "Uniqueness: Not checked (deferred)") {
+		t.Fatalf("deferred comparison status is unclear: %s", body)
+	}
+}
+
+func TestParityLegacyIdeaShowsItsRecordedAssessment(t *testing.T) {
+	body := ideaDetails(model.Idea{NoveltyMethod: "legacy_llm", NoveltyOutcome: "accepted"})
+	if !strings.Contains(body, "Uniqueness: Recorded legacy assessment (accepted)") {
+		t.Fatalf("legacy assessment was reinterpreted: %s", body)
 	}
 }
 

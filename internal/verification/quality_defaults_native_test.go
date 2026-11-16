@@ -19,6 +19,14 @@ func TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks(t *testing.T) 
 	binary, base := parityRunnerFixture(t)
 	manifest := projectSetupFixture(t, base, nil)
 	root := t.TempDir()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(filepath.Join(root, "jobs"), func(path string, entry os.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				_ = os.Chmod(path, 0700)
+			}
+			return nil
+		})
+	})
 	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
 	manifest.Quality = &model.QualitySnapshot{Root: root, Files: map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n[[source]]\nname = \"default\"\ndefault = true\n"}}
 	manifest.Commands = []JobCommand{{Name: "catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
@@ -30,6 +38,17 @@ func TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks(t *testing.T) 
 	requireVerificationSuccess(t, err)
 	snapshot, err := manifest.PrepareQualityDefaults([]byte(catalog), []byte(defaultQualityRules))
 	requireVerificationSuccess(t, err)
+	manifest.JobID, manifest.OperationID = "effective-catalog", "effective-catalog"
+	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
+	manifest.Quality = &snapshot
+	manifest.Commands = []JobCommand{{Name: "effective-catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
+	report, err = RunLocalJob(context.Background(), binary, manifest, nil)
+	if err != nil || !report.Passed {
+		t.Fatalf("effective catalog discovery failed: %+v %v", report, err)
+	}
+	effectiveCatalog, _, err := ReadJobStreams(manifest.Root, 0)
+	requireVerificationSuccess(t, err)
+	snapshot.PluginCatalog = []byte(effectiveCatalog)
 	writeNativeDefaultProbe(t, &manifest)
 	manifest.JobID, manifest.OperationID = "qualification", "qualification"
 	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
@@ -48,6 +67,15 @@ func TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks(t *testing.T) 
 	output, _, err := ReadJobStreams(manifest.Root, 0)
 	requireVerificationSuccess(t, err)
 	assertNativeDefaultCanaries(t, output)
+	qualifiedSnapshot := snapshot
+	qualifiedSnapshot.Identity = report.QualityIdentity
+	manifest.JobID, manifest.OperationID = "candidate", "candidate"
+	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
+	manifest.Quality = &qualifiedSnapshot
+	candidateReport, candidateErr := RunLocalJob(context.Background(), binary, manifest, nil)
+	if candidateErr != nil || candidateReport.QualityIdentity == nil || !model.SameQualityIdentity(report.QualityIdentity, candidateReport.QualityIdentity) {
+		t.Fatalf("candidate did not reuse qualified runtime identity: %+v %v", candidateReport, candidateErr)
+	}
 	if _, err := os.Lstat(filepath.Join(manifest.Repository, ".qlty")); !os.IsNotExist(err) {
 		t.Fatalf("default scanner preparation polluted original source: %v", err)
 	}

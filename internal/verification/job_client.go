@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"whirlwind/internal/model"
 	"whirlwind/internal/process"
 )
 
@@ -80,14 +81,34 @@ func (report JobReport) Validate(m JobManifest) error {
 		return errors.New("verification report identity or command coverage mismatch")
 	}
 	passed := true
+	var observedIdentity *model.QualityIdentity
 	for index, result := range report.Results {
 		command := m.Commands[index]
 		if err := validateJobResult(m, index, result); err != nil {
 			return err
 		}
+		if baselineQlty(result.Result) {
+			if result.QualityIdentity == nil || result.QualityIdentity.Validate() != nil {
+				if result.Error != "" {
+					return fmt.Errorf("Qlty report lacks complete actual runtime identity: %s", result.Error)
+				}
+				return errors.New("Qlty report lacks complete actual runtime identity")
+			}
+			if m.Quality != nil && m.Quality.Identity != nil && !model.SameQualityIdentity(m.Quality.Identity, result.QualityIdentity) {
+				return errors.New("Qlty runtime identity does not match approved setup")
+			}
+			if observedIdentity == nil {
+				observedIdentity = result.QualityIdentity
+			} else if !model.SameQualityIdentity(observedIdentity, result.QualityIdentity) {
+				return errors.New("Qlty checks produced incompatible runtime identities")
+			}
+		}
 		if requiredJobCommandFailed(command, result) {
 			passed = false
 		}
+	}
+	if (observedIdentity == nil) != (report.QualityIdentity == nil) || observedIdentity != nil && !model.SameQualityIdentity(observedIdentity, report.QualityIdentity) {
+		return errors.New("verification report quality identity mismatch")
 	}
 	if report.Passed != passed {
 		return errors.New("verification aggregate contradicts required command results")

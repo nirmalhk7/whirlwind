@@ -66,18 +66,19 @@ type JobResult struct {
 }
 
 type JobReport struct {
-	Purpose           string      `json:"purpose,omitempty"`
-	ProjectID         string      `json:"project_id,omitempty"`
-	OperationID       string      `json:"operation_id,omitempty"`
-	ManifestHash      string      `json:"manifest_hash"`
-	PlanID            string      `json:"plan_id"`
-	PlanVersion       int         `json:"plan_version"`
-	PlanHash          string      `json:"plan_hash"`
-	ConfigurationHash string      `json:"configuration_hash"`
-	CandidateCommit   string      `json:"candidate_commit"`
-	CandidateTree     string      `json:"candidate_tree"`
-	Passed            bool        `json:"passed"`
-	Results           []JobResult `json:"results"`
+	QualityIdentity   *model.QualityIdentity `json:"quality_identity,omitempty"`
+	Purpose           string                 `json:"purpose,omitempty"`
+	ProjectID         string                 `json:"project_id,omitempty"`
+	OperationID       string                 `json:"operation_id,omitempty"`
+	ManifestHash      string                 `json:"manifest_hash"`
+	PlanID            string                 `json:"plan_id"`
+	PlanVersion       int                    `json:"plan_version"`
+	PlanHash          string                 `json:"plan_hash"`
+	ConfigurationHash string                 `json:"configuration_hash"`
+	CandidateCommit   string                 `json:"candidate_commit"`
+	CandidateTree     string                 `json:"candidate_tree"`
+	Passed            bool                   `json:"passed"`
+	Results           []JobResult            `json:"results"`
 }
 
 type JobEvent struct {
@@ -124,6 +125,12 @@ func (m JobManifest) validateDefinition() error {
 		if err := m.Quality.Validate(); err != nil {
 			return err
 		}
+		if m.Purpose != ProjectSetupPurpose && m.Quality.Identity == nil && hasQltyCheck(m.Commands) {
+			return errors.New("Qlty verification requires an approved runtime identity; rerun project setup")
+		}
+		if m.Purpose != ProjectSetupPurpose && m.Quality.Identity == nil && hasQltyCheck(m.Commands) {
+			return errors.New("Qlty verification requires an approved runtime identity; rerun project setup")
+		}
 		if filepath.Clean(m.Root) != filepath.Join(m.Quality.Root, "jobs", m.JobID) {
 			return errors.New("quality staging must stay under approved external quality root")
 		}
@@ -131,7 +138,22 @@ func (m JobManifest) validateDefinition() error {
 	if len(m.Commands) == 0 || len(m.Commands) > 128 {
 		return errors.New("verification requires 1 to 128 approved commands")
 	}
-	return validateJobCommands(m.Commands)
+	if err := validateJobCommands(m.Commands); err != nil {
+		return err
+	}
+	if hasQltyCheck(m.Commands) && m.Quality == nil {
+		return errors.New("Qlty verification requires frozen external quality configuration")
+	}
+	return nil
+}
+
+func hasQltyCheck(commands []JobCommand) bool {
+	for _, command := range commands {
+		if len(command.Command) > 1 && filepath.Base(command.Command[0]) == "qlty" && (command.Command[1] == "check" || command.Command[1] == "smells") {
+			return true
+		}
+	}
+	return false
 }
 
 func RunJob(ctx context.Context, m JobManifest, observe func(JobEvent) error) (JobReport, error) {

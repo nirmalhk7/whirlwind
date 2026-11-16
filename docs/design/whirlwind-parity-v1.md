@@ -4,6 +4,8 @@ Baseline: [Whirlwind Plan](https://chatgpt.com/space/page_3a18b09675088191bbed2c
 
 Implementation status: **incomplete**. The foundation below is implemented and tested; the remaining work packages are still binding. Neither the current branch nor passing regression checks establish v1 delivery or full Whirlwind Plan parity.
 
+Current scope overrides (2026-11-16): the user waived database migrations and permits breaking schema changes. All idea uniqueness comparison is now deferred, including the temporary ACP/LLM judge and fingerprint rejection; retaining that judge is no longer a delivery requirement. Existing ideas and bounded history remain. Changed plans wait for active approved execution to finish or be explicitly paused. ACP onboarding remains configured through `settings.yaml`. See `whirlwind-plan-source.md` and the acceptance ledger for current work and verification; earlier checkpoints below are historical evidence, not current completion claims.
+
 Latest verification (2026-11-12): shared SARIF validation rejects malformed notification/completion evidence; clean full scans require usable baseline evidence while the approved HEAD-diff command requires no separate scan baseline. Full Go race regression passed across 21 packages (workflow 777.729s), with temporary host-sleep inhibition after two earlier runs lost wall-clock ownership leases during confirmed macOS sleep. Production leases/deadlines were unchanged. Vet/build and native Qlty HEAD-diff checks passed with zero new findings. Default analyzer qualification, scanner/rule identity freezing, deferred vector novelty and real authenticated ACP compatibility remain open; see the acceptance ledger for exact commands, logs and requirement coverage.
 
 Current source reconciliation (2026-11-12): the full-goal audit uses Page sequence 3035 and is tracked in `whirlwind-plan-acceptance.json`. Its block IDs and hashes match sequence 3033. Later chat decisions select its exact 11-column ideas and 5-column projects/plans contract, `project_` UUIDs and `complete` domain statuses. Older schema notes below are historical and superseded. The user retained discard-old-state policy and skipped the embedding model/runtime decision; D01 remains an unresolved full-parity requirement, not a completed feature. Full Go race, vet/build, 75 Node tests and real-PTY dashboard acceptance passed at the HEAD-diff checkpoint. A later required-name validation change passed affected registration/HTTP/settings race suites and full vet/build. Native and private uncapped HEAD-diff checks report zero findings; source configuration and saved baseline remain unchanged. Full Page acceptance remains incomplete.
@@ -14,12 +16,12 @@ Current source reconciliation (2026-11-12): the full-goal audit uses Page sequen
 - macOS execution first; other platforms may inspect state but must fail closed for execution.
 - Local verification subprocess only; no remote runner or SSH transport.
 - D01: vector novelty, embeddings, sqlite-vec, vector backfill and the <0.60 gate are deferred. No runtime/model installation or vector dependency upgrade.
-- Retain the existing ACP/LLM novelty checker temporarily, including draft edit checks. Reject duplicate edits without changing saved content/index.
+- Defer all uniqueness comparison, including ACP/LLM novelty and historical fingerprint rejection. Keep content validation, draft-only edits, bounded history, durable publication and the four directions; label new comparison results as deferred.
 - Later human command decision (updated 2026-11-12 with explicit approval for structured evidence): use exactly `qlty check --upstream HEAD --fix --no-progress --sarif` in separate writable fix staging. Do not inject filename arguments or rewrite flags. Expose the approved base as staging HEAD while retaining submitted source bytes, so HEAD is local scope rather than a remote upstream requirement.
 - Target repositories may use any language. Whirlwind's Go implementation does not authorize Go-specific analyzer overrides in generic verification. Use the target project's approved plugins and commands. The private golangci-lint completeness check used to review this Go repository is not runtime policy for agent projects.
 - Exclude three-band novelty and comprehensive detection of externally implemented features.
 - Preserve user changes and unrelated assets. Delete obsolete code only after replacement acceptance and consumer removal.
-- Completion of this work does not establish full baseline parity while D01 remains deferred.
+- D01 is explicitly outside the current delivery scope; it is not a completed feature. Remaining in-scope requirements still need complete acceptance evidence.
 
 ## Architecture and interfaces
 

@@ -62,6 +62,8 @@ func (s *Server) ExecuteLocal(ctx context.Context, command LocalCommand) (json.R
 		return s.executePlanCommand(ctx, command)
 	case projectRegisterOperation:
 		return s.registerLocalProject(ctx, command)
+	case "project.setup.retry":
+		return s.retryLocalProjectSetup(ctx, command)
 	case "finalization.inspect":
 		return s.inspectFinalization(ctx, command)
 	case "finalization.approve":

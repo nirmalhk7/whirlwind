@@ -62,7 +62,7 @@ func (d *Dashboard) refreshIdeas() bool {
 
 func ideaDetails(idea model.Idea) string {
 	planning := map[string]string{"draft": "Not queued", "approved": "Awaiting Planner", "in_process": "Planner running", "complete": "Planner completed", "error": "Planner error: " + idea.ErrorReason}[idea.DecisionStatus]
-	body := fmt.Sprintf("Idea: %s\nSource run: %s\nDirection: %s\nLifecycle: %s\nPlanning: %s\nLinked plan: %s\nNovelty: Temporary ACP/LLM novelty\n\nWhat\n%s\n\nWhy\n%s\n\nWhere\n%s\n\nHow it helps\n%s", idea.ID, idea.RunID, idea.Direction, idea.DecisionStatus, planning, idea.PlanID, idea.What, idea.Why, idea.Where, idea.HowItHelps)
+	body := fmt.Sprintf("Idea: %s\nSource run: %s\nDirection: %s\nLifecycle: %s\nPlanning: %s\nLinked plan: %s\n%s\n\nWhat\n%s\n\nWhy\n%s\n\nWhere\n%s\n\nHow it helps\n%s", idea.ID, idea.RunID, idea.Direction, idea.DecisionStatus, planning, idea.PlanID, ideaUniquenessStatus(idea), idea.What, idea.Why, idea.Where, idea.HowItHelps)
 	if idea.ArchivedAt != "" {
 		body += "\n\nArchived: " + idea.ArchivedAt + "\nReason: " + idea.ArchiveReason
 	}
@@ -70,6 +70,16 @@ func ideaDetails(idea model.Idea) string {
 		body += "\nPredecessor: " + idea.PredecessorID + "\nReconsideration reason: " + idea.RevisitReason
 	}
 	return body
+}
+
+func ideaUniquenessStatus(idea model.Idea) string {
+	if idea.NoveltyMethod == "legacy_llm" {
+		return "Uniqueness: Recorded legacy assessment (" + idea.NoveltyOutcome + ")"
+	}
+	if idea.NoveltyMethod == "not_checked" || idea.NoveltyOutcome == "deferred" {
+		return "Uniqueness: Not checked (deferred)"
+	}
+	return "Uniqueness: Status unavailable"
 }
 
 func (d *Dashboard) showIdeaRecord(idea model.Idea, version int) {

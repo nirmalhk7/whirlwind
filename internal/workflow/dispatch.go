@@ -13,6 +13,7 @@ func (e *Engine) dispatch(ctx context.Context) {
 	if e.settings(ctx).Stopped {
 		return
 	}
+	e.dispatchProjectSetup(ctx)
 	e.intakeApprovedIdeas(ctx)
 	records, err := e.Store.List(ctx, "execution_plans")
 	if err != nil {

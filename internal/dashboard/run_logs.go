@@ -16,8 +16,12 @@ func (d *Dashboard) showRunLogs(index int) {
 	d.selectRun(index, "", "", 0)
 	row := d.runRows[index]
 	if row.operation != nil {
-		view := tview.NewTextView().SetText(ideationRunDetails(row.id, *row.operation))
-		view.SetBorder(true).SetTitle(" Ideation run · Esc to close ")
+		view := tview.NewTextView().SetText(operationRunDetails(row.id, *row.operation))
+		title := " Ideation run · Esc to close "
+		if row.operation.Kind == "project_setup" {
+			title = " Project setup · Esc to close "
+		}
+		view.SetBorder(true).SetTitle(title)
 		d.modal = view
 		d.SetRoot(view, true).SetFocus(view)
 		return

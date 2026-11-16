@@ -3,13 +3,14 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
 
 // SaveLocalPlan publishes a new unapproved document. Previous versions and
-// delivered branches remain available; running execution is fenced by the
-// version change before its next result can commit.
+// delivered branches remain available; edits to approved plans wait until
+// their active execution finishes or is explicitly paused.
 func (e *Engine) SaveLocalPlan(ctx context.Context, id string, expected int, hash, content string) error {
 	record, task, err := e.localPlanForRead(ctx, id)
 	if err != nil {
@@ -24,6 +25,12 @@ func (e *Engine) SaveLocalPlan(ctx context.Context, id string, expected int, has
 	}
 	if localPlanHash(old) != hash {
 		return store.ErrConflict
+	}
+	if localPlanApproved(task) && activeApprovedPlanStage(task.Stage) {
+		if content == old {
+			return nil
+		}
+		return fmt.Errorf("%w: approved plan version is still active; wait until it finishes or explicitly pause it before saving changes", store.ErrConflict)
 	}
 	plan, err := parseEditedLocalPlan(content)
 	if err != nil {
@@ -58,6 +65,15 @@ func (e *Engine) SaveLocalPlan(ctx context.Context, id string, expected int, has
 	}
 	store.AfterCommit(ctx, func() { e.Stop(id) })
 	return nil
+}
+
+func activeApprovedPlanStage(stage string) bool {
+	switch stage {
+	case "coding", "review", "repair", "publishing", "submitting", "waiting_quota":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseEditedLocalPlan(content string) (model.PlanSpecification, error) {

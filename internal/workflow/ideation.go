@@ -89,7 +89,7 @@ func discoveryHistoryBudgets(settings IdeationSchedule) (int, int) {
 	if attempts <= 0 {
 		attempts = 3
 	}
-	perCallBudget := runBudget / (attempts * 2)
+	perCallBudget := runBudget / attempts
 	if perCallBudget <= 0 {
 		perCallBudget = 1
 	}
