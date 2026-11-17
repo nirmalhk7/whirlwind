@@ -17,3 +17,8 @@
 .DS_Store
 __pycache__/
 *.pyc
+
+# Local development tooling.
+/node_modules/
+/.tools/
+/.venv/
