@@ -1,5 +1,7 @@
 # Go backend
 
+> Compatibility reference: provider/UI/publication descriptions below include older paths. For current settings, independent five-role ACP queues, macOS-only native execution, and local finalization, use [workflow modes](workflow-modes.md), [nono setup](nono-setup.md), and [local supervisor setup](local-supervisor.md). Retained API or policy support is not proof that an older path is used by the current supervisor.
+
 Whirlwind runs locally on macOS or Linux. Go owns scheduling, worktrees, verification, provider routing, and GitHub writes. SQLite stores versioned JSON aggregates and immutable commit-keyed context index snapshots plus indexed issue identities, fenced leases, webhook receipts, mutation receipts, and ordered events. Existing Python files remain deleted; this is a fresh database without legacy migration.
 
 ## Run

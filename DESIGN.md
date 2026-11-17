@@ -158,6 +158,8 @@ components:
 
 # Design System: Whirlwind
 
+> Visual reference with historical browser layouts. Current interaction is the Go/tview terminal dashboard in `internal/dashboard`; browser component descriptions below are not instructions to restore a web frontend. See [development guidance](docs/development.md).
+
 ## Overview
 
 **Creative North Star: "Engineering in motion"**
