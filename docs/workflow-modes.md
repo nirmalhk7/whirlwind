@@ -24,7 +24,7 @@ Selecting and approving a direction starts planning. The planner writes a collis
 
 Press `h` to open the selected project's dismissed/rejected direction history. Request reconsideration with a reason to authorize one linked revisit, even when its evidence is unchanged. The supervisor records that human request separately from model output. The resulting proposal still requires content validation, direction selection and human plan approval; requesting reconsideration does not start coding.
 
-Approval binds the current document hash, record version, approved requirements, and project policy. Changed saves wait while an approved version is executing; explicitly pause the plan or wait for completion before editing. Unchanged saves leave active execution untouched. Editing an inactive plan produces an unapproved version and retains older frozen snapshots. Revision feedback returns to planning; rejection ends that plan.
+Approval binds the current document hash, record version, approved requirements, and project policy. External Markdown edits or deletion do not change those frozen bytes, acceptance evidence, or active execution; document reads still report edited content or file errors. Execution and finalization validate the immutable approved snapshot, while policy and execution configuration changes still require reapproval. Changed saves wait while an approved version is executing; explicitly pause the plan or wait for completion before editing. Unchanged saves leave active execution untouched. Editing an inactive plan produces an unapproved version and retains older frozen snapshots. Revision feedback returns to planning; rejection ends that plan.
 
 ## Connections and authentication
 

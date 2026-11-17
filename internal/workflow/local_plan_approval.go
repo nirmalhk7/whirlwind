@@ -191,27 +191,18 @@ func (e *Engine) ValidateLocalPlan(ctx context.Context, task model.ExecutionPlan
 	if task.PlanDocument == nil {
 		return e.requireLegacyPlanApproval(ctx, project, task.ID)
 	}
-	view, err := e.ReadLocalPlan(ctx, task.ID)
+	record, current, err := e.localPlanForRead(ctx, task.ID)
 	if err != nil {
 		return err
 	}
-	if err := validatePlanRequirements(view.Plan.Requirements); err != nil {
-		record, readErr := e.Store.Get(ctx, "execution_plans", task.ID)
-		if readErr != nil {
-			return readErr
-		}
-		current, decodeErr := store.Decode[model.ExecutionPlan](record)
-		if decodeErr != nil {
-			return decodeErr
-		}
-		if localPlanApproved(current) {
-			if invalidateErr := e.invalidateLocalApproval(ctx, record, &current, "", "Legacy plan requirements lack stable evidence methods; add them and approve the plan again."); invalidateErr != nil {
-				return invalidateErr
-			}
-		}
-		return errors.New("local plan requires human review of stable requirement IDs and evidence methods")
+	if err := e.refreshLocalPlanApproval(ctx, record, &current); err != nil {
+		return err
 	}
-	return e.validateLocalPlanSnapshot(ctx, task, view.Hash)
+	frozen, err := e.approvedLocalPlanSnapshot(ctx, current)
+	if err != nil {
+		return err
+	}
+	return e.validateLocalPlanSnapshot(ctx, task, localPlanHash(frozen.Specification))
 }
 
 func (e *Engine) requireLegacyPlanApproval(ctx context.Context, project model.Project, id string) error {
@@ -253,7 +244,7 @@ func (e *Engine) invalidateLocalPlanPolicy(ctx context.Context, id, policyHash s
 		return
 	}
 	if localPlanPolicyStale(current, policyHash, projectErr) {
-		_ = e.invalidateLocalApproval(ctx, record, &current, "", "Project policy changed; review the local plan against current policy.")
+		_ = e.invalidateLocalApproval(ctx, record, &current, "Project policy changed; review the local plan against current policy.")
 	}
 }
 
@@ -276,9 +267,28 @@ func localPlanSnapshotMatches(stored, task model.ExecutionPlan, hash string) boo
 	if stored.Cancelled() || stored.PlanVersion != task.PlanVersion || !localPlanApproved(stored) {
 		return false
 	}
-	return stored.PlanDocument.ApprovedHash == hash && task.PlanDocument != nil && task.PlanDocument.ApprovedHash == hash
+	return stored.PlanDocument.ApprovedHash == hash && task.PlanDocument != nil && task.PlanDocument.ApprovedHash == hash && stored.Plan != nil && task.Plan != nil && sameApprovedPlanSpecification(*stored.Plan, *task.Plan)
 }
 
 func localPlanApproved(task model.ExecutionPlan) bool {
 	return task.PlanDocument != nil && task.PlanDocument.ApprovedHash != ""
+}
+
+// approvedLocalPlanSnapshot validates durable approved bytes, never the editable
+// Markdown path. Runtime unit progress is excluded by loadFrozenPlan.
+func (e *Engine) approvedLocalPlanSnapshot(ctx context.Context, task model.ExecutionPlan) (model.PlanSpecification, error) {
+	if !localPlanApproved(task) || task.Plan == nil {
+		return model.PlanSpecification{}, errors.New("local plan approval is missing or stale; review the current document in Inbox")
+	}
+	frozen, err := e.loadFrozenPlan(ctx, task)
+	if err != nil {
+		return frozen, err
+	}
+	if frozen.Approval == nil || frozen.Approval.PlanVersion != task.PlanVersion || frozen.Approval.DocumentHash != task.PlanDocument.ApprovedHash || localPlanHash(frozen.Specification) != task.PlanDocument.ApprovedHash {
+		return frozen, errors.New("immutable local plan approval identity is invalid")
+	}
+	if err := validatePlanRequirements(frozen.Requirements); err != nil {
+		return frozen, err
+	}
+	return frozen, nil
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -126,39 +127,56 @@ func TestLegacyCodingPlanPausesForExplicitRequirementApproval(t *testing.T) {
 	}
 }
 
-func TestLocalPlanEditRevokesApprovalAndRetainsImmutableSnapshot(t *testing.T) {
+// Catches file-driven revocation, lost acceptance evidence, and execution using
+// edited bytes instead of the immutable approved specification.
+func TestLocalPlanExternalChangesPreserveActiveApproval(t *testing.T) {
+	for _, change := range []string{"modified", "malformed", "deleted"} {
+		t.Run(change, func(t *testing.T) {
+			assertExternalPlanChangePreservesActiveApproval(t, change)
+		})
+	}
+}
+
+func assertExternalPlanChangePreservesActiveApproval(t *testing.T, change string) {
+	t.Helper()
 	ctx := context.Background()
 	e, task := localPlanFixture(t)
-	view, _ := e.ReadLocalPlan(ctx, task.ID)
+	view, err := e.ReadLocalPlan(ctx, task.ID)
+	requireWorkflowSuccess(t, err)
 	_, version := localStoredTask(t, e, task.ID)
-	if err := e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, ""); err != nil {
-		t.Fatal(err)
-	}
-	approved, _ := localStoredTask(t, e, task.ID)
+	requireWorkflowSuccess(t, e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, ""))
+	approved, version := localStoredTask(t, e, task.ID)
+	approved.ChecksPassed, approved.Approved, approved.Score = true, true, 100
+	approved.VerificationID, approved.ReviewID, approved.ReviewedCommit = "verification", "review", "commit"
+	approved.Approval = &model.Provenance{Task: task.ID, PlanVersion: 1}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, approved, version))
+	approved, version = localStoredTask(t, e, task.ID)
+	frozen, err := e.Store.Get(ctx, "plan_versions", task.ID+":1")
+	requireWorkflowSuccess(t, err)
 	stopped := false
 	e.running[task.ID] = func() { stopped = true }
-	if err := os.WriteFile(view.Path, []byte(strings.Replace(view.Content, localPlanObjective, "Improve revised result", 1)), 0600); err != nil {
-		t.Fatal(err)
+	edited := strings.Replace(view.Content, localPlanObjective, "Unapproved result", 1)
+	switch change {
+	case "modified":
+		err = os.WriteFile(view.Path, []byte(edited), 0600)
+	case "malformed":
+		err = os.WriteFile(view.Path, []byte("not a valid plan"), 0600)
+	case "deleted":
+		err = os.Remove(view.Path)
 	}
-	if err := e.ValidateLocalPlan(ctx, approved); err == nil {
-		t.Fatal("edited approved document accepted")
+	requireWorkflowSuccess(t, err)
+	currentView, readErr := e.ReadLocalPlan(ctx, task.ID)
+	if change == "modified" && (readErr != nil || currentView.Content != edited || currentView.Hash == view.Hash || currentView.ApprovedHash != view.Hash) {
+		t.Fatalf("editable view lost external edits or frozen identity: %+v %v", currentView, readErr)
 	}
-	changed, version := localStoredTask(t, e, task.ID)
-	if changed.Stage != "plan_approval" || changed.PlanDocument.ApprovedHash != "" || changed.PlanVersion != 2 || !stopped {
-		t.Fatalf("edited approval not revoked: %+v stopped=%v", changed, stopped)
+	if err := e.ValidateLocalPlan(ctx, approved); err != nil {
+		t.Fatalf("external %s blocked approved execution: %v", change, err)
 	}
-	updated, err := e.ReadLocalPlan(ctx, task.ID)
-	if err != nil {
-		t.Fatal(err)
+	current, currentVersion := localStoredTask(t, e, task.ID)
+	if currentVersion != version || !reflect.DeepEqual(current, approved) || stopped {
+		t.Fatalf("external %s changed approval/evidence or stopped execution: v%d stopped=%v", change, currentVersion, stopped)
 	}
-	if err := e.ReviewLocalPlan(ctx, task.ID, version, "approve", updated.Hash, ""); err != nil {
-		t.Fatal(err)
-	}
-	old, _ := e.Store.Get(ctx, "plan_versions", task.ID+":1")
-	oldPlan, _ := store.Decode[model.PlanSpecification](old)
-	if oldPlan.Objective != localPlanObjective {
-		t.Fatal("reapproval overwrote prior immutable snapshot")
-	}
+	assertFrozenApprovalUnchanged(t, ctx, e.Store, task.ID, frozen.Data)
 }
 
 func TestLocalPlanRevisionAndRejection(t *testing.T) {
@@ -224,30 +242,6 @@ func TestLocalPlanApprovalRejectsOutOfPolicyEdits(t *testing.T) {
 	_, version := localStoredTask(t, e, task.ID)
 	if err := e.ReviewLocalPlan(context.Background(), task.ID, version, "approve", edited.Hash, ""); err == nil {
 		t.Fatal("out of policy edited scope approved")
-	}
-}
-
-func TestLocalPlanEditRevokesApprovalWhenNextSnapshotCannotBeWritten(t *testing.T) {
-	ctx := context.Background()
-	e, task := localPlanFixture(t)
-	view, _ := e.ReadLocalPlan(ctx, task.ID)
-	_, version := localStoredTask(t, e, task.ID)
-	if err := e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, ""); err != nil {
-		t.Fatal(err)
-	}
-	approved, _ := localStoredTask(t, e, task.ID)
-	if err := os.WriteFile(view.Path, []byte(strings.Replace(view.Content, localPlanObjective, "Changed result", 1)), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(filepath.Dir(view.Path), "v2.md"), []byte("other retained edits"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.ValidateLocalPlan(ctx, approved); err == nil {
-		t.Fatal("blocked edited snapshot accepted")
-	}
-	changed, _ := localStoredTask(t, e, task.ID)
-	if changed.PlanDocument.ApprovedHash != "" || changed.Stage != "plan_approval" {
-		t.Fatal("file write failure retained stale approval")
 	}
 }
 
@@ -341,7 +335,7 @@ func TestLocalPlanPublicationRetainsIdentityWhenRequestBatchIsDiscarded(t *testi
 	}
 }
 
-func TestLocalPlanInvalidationRemainsApprovableAfterFailureHandler(t *testing.T) {
+func TestLocalPlanPolicyInvalidationRemainsApprovableAfterFailureHandler(t *testing.T) {
 	ctx := context.Background()
 	e, task := localPlanFixture(t)
 	view, err := e.ReadLocalPlan(ctx, task.ID)
@@ -353,7 +347,16 @@ func TestLocalPlanInvalidationRemainsApprovableAfterFailureHandler(t *testing.T)
 		t.Fatal(err)
 	}
 	approved, _ := localStoredTask(t, e, task.ID)
-	if err := os.WriteFile(view.Path, []byte(strings.Replace(view.Content, localPlanObjective, "Edited result", 1)), 0600); err != nil {
+	project, err := e.Project(ctx, task.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	project.PolicyHash = "changed-policy"
+	record, err := e.Store.Get(ctx, "projects", project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Store.Put(ctx, "projects", project.ID, project, record.Version); err != nil {
 		t.Fatal(err)
 	}
 	err = e.ValidateLocalPlan(ctx, approved)
@@ -374,7 +377,7 @@ func TestLocalPlanInvalidationRemainsApprovableAfterFailureHandler(t *testing.T)
 	}
 }
 
-func TestLocalPlanCycleDetectsEditsAndCancelsRunningTask(t *testing.T) {
+func TestLocalPlanCyclePreservesRunningApprovedTaskAfterExternalEdit(t *testing.T) {
 	ctx := context.Background()
 	e, task := localPlanFixture(t)
 	defer e.background.Wait()
@@ -395,12 +398,12 @@ func TestLocalPlanCycleDetectsEditsAndCancelsRunningTask(t *testing.T) {
 	e.runCycle(ctx, "", time.Now().Add(time.Hour))
 	select {
 	case <-run.Done():
+		t.Fatal("external edit cancelled approved execution")
 	default:
-		t.Fatal("edited plan left coding operation running")
 	}
 	current, _ := localStoredTask(t, e, task.ID)
-	if current.Stage != "plan_approval" || current.PlanDocument.ApprovedHash != "" {
-		t.Fatalf("cycle retained stale execution authorization: %+v", current)
+	if current.Stage != "coding" || current.PlanDocument.ApprovedHash != view.Hash || current.Plan.Specification != view.Content {
+		t.Fatalf("cycle changed frozen execution authorization: %+v", current)
 	}
 }
 
@@ -428,5 +431,32 @@ func TestLocalPlanStalePolicyValidationCannotReviveCancelledTask(t *testing.T) {
 	current, _ := localStoredTask(t, e, task.ID)
 	if current.Stage != "cancelled" {
 		t.Fatalf("stale policy validation resurrected cancelled task: %+v", current)
+	}
+}
+
+// Catches trusting mutable task fields or an approval hash without frozen bytes.
+func TestLocalPlanValidationRejectsChangedSnapshot(t *testing.T) {
+	for _, change := range []string{"task-plan", "hash", "version"} {
+		t.Run(change, func(t *testing.T) {
+			ctx := context.Background()
+			e, task := localPlanFixture(t)
+			view, err := e.ReadLocalPlan(ctx, task.ID)
+			requireWorkflowSuccess(t, err)
+			_, version := localStoredTask(t, e, task.ID)
+			requireWorkflowSuccess(t, e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, ""))
+			approved, version := localStoredTask(t, e, task.ID)
+			switch change {
+			case "task-plan":
+				approved.Plan.Objective = "Unapproved objective"
+			case "hash":
+				approved.PlanDocument.ApprovedHash = "unapproved-hash"
+			case "version":
+				approved.PlanVersion++
+			}
+			requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, approved, version))
+			if err := e.ValidateLocalPlan(ctx, approved); err == nil {
+				t.Fatal("changed frozen identity accepted")
+			}
+		})
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"whirlwind/internal/github"
@@ -133,4 +135,29 @@ func hasApprovalAudit(records []model.Record, taskID, reviewID string) bool {
 		}
 	}
 	return false
+}
+
+// Catches critical finalization depending on the mutable Markdown file.
+func TestApproveLocalFinalizationUsesFrozenPlanAfterExternalChange(t *testing.T) {
+	for _, change := range []string{"modified", "deleted"} {
+		t.Run(change, func(t *testing.T) {
+			e, task, version, approval := criticalApprovalFixture(t)
+			var err error
+			if change == "deleted" {
+				err = os.Remove(task.PlanDocument.Path)
+			} else {
+				err = os.WriteFile(task.PlanDocument.Path, []byte(strings.Replace(task.Plan.Specification, localPlanObjective, "Unapproved result", 1)), 0600)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved, err := e.ApproveLocalFinalization(context.Background(), task.ID, version, approval, "approve-after-external-change")
+			if err != nil {
+				t.Fatalf("external %s blocked frozen finalization: %v", change, err)
+			}
+			if approved.Stage != "submitting" || approved.Plan.Specification != task.Plan.Specification || approved.ReviewID != task.ReviewID || approved.VerificationID != task.VerificationID {
+				t.Fatal("finalization lost approved bytes/evidence")
+			}
+		})
+	}
 }

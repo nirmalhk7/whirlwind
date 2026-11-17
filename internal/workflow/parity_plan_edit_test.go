@@ -50,7 +50,7 @@ func TestParityPlanSavePublishesMarkdownWithoutApproval(t *testing.T) {
 }
 
 func TestParityActiveApprovedPlanWaitsBeforeSavingChanges(t *testing.T) {
-	for _, stage := range []string{"coding", "review", "repair", "publishing", "submitting", "waiting_quota"} {
+	for _, stage := range []string{"coding", "review", "repair", "publishing", "submitting", "waiting_quota", "questions", "approval"} {
 		t.Run(stage, func(t *testing.T) {
 			e, task := localPlanFixture(t)
 			ctx := context.Background()
@@ -117,9 +117,15 @@ func TestParityPausedAndFinishedApprovedPlansCanBeEdited(t *testing.T) {
 				t.Fatal(err)
 			}
 			approved, version := localStoredTask(t, e, task.ID)
-			approved.Stage = stage
-			if err := e.Store.Put(ctx, "execution_plans", task.ID, approved, version); err != nil {
-				t.Fatal(err)
+			if stage == "paused" {
+				if err := e.SetPlanPaused(ctx, task.ID, version, true); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				approved.Stage = stage
+				if err := e.Store.Put(ctx, "execution_plans", task.ID, approved, version); err != nil {
+					t.Fatal(err)
+				}
 			}
 			version++
 			edited := strings.Replace(view.Content, "# Improve result", "# Improve monthly result", 1)
@@ -129,6 +135,26 @@ func TestParityPausedAndFinishedApprovedPlansCanBeEdited(t *testing.T) {
 			current, currentVersion := localStoredTask(t, e, task.ID)
 			if currentVersion != version+1 || current.Stage != "plan_approval" || current.PlanVersion != task.PlanVersion+1 || current.PlanDocument.ApprovedHash != "" {
 				t.Fatalf("inactive plan edit did not publish a new unapproved version: v%d %+v", currentVersion, current)
+			}
+			if err := e.ValidateLocalPlan(ctx, current); err == nil {
+				t.Fatal("unapproved revision authorized execution")
+			}
+			revised, err := e.ReadLocalPlan(ctx, task.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := e.ReviewLocalPlan(ctx, task.ID, currentVersion, "approve", view.Hash, ""); !errors.Is(err, store.ErrConflict) {
+				t.Fatalf("old document approved revision: %v", err)
+			}
+			if err := e.ReviewLocalPlan(ctx, task.ID, currentVersion, "approve", revised.Hash, ""); err != nil {
+				t.Fatal(err)
+			}
+			reapproved, _ := localStoredTask(t, e, task.ID)
+			if err := e.ValidateLocalPlan(ctx, reapproved); err != nil {
+				t.Fatalf("new approval cannot execute: %v", err)
+			}
+			if reapproved.Plan.Specification != edited || reapproved.PlanDocument.ApprovedHash != revised.Hash {
+				t.Fatal("new approval lost revised bytes")
 			}
 			snapshot, err := e.Store.Get(ctx, "plan_versions", task.ID+":1")
 			if err != nil {
@@ -172,5 +198,50 @@ func TestParityPlanParserRetainsExactApprovedSourceBytes(t *testing.T) {
 	parsed, err := ParsePlanDocument(view.Content)
 	if err != nil || parsed.Specification != view.Content {
 		t.Fatal("parser changed approved source bytes", err)
+	}
+}
+
+// Catches approval and edit commands committing over a competing decision.
+func TestLocalPlanEditApprovalRaceRejectsStaleCommit(t *testing.T) {
+	for _, first := range []string{"save", "approve"} {
+		t.Run(first, func(t *testing.T) {
+			assertLocalPlanEditApprovalRace(t, first)
+		})
+	}
+}
+
+func assertLocalPlanEditApprovalRace(t *testing.T, first string) {
+	t.Helper()
+	ctx := context.Background()
+	e, task := localPlanFixture(t)
+	view, err := e.ReadLocalPlan(ctx, task.ID)
+	requireWorkflowSuccess(t, err)
+	_, version := localStoredTask(t, e, task.ID)
+	edited := strings.Replace(view.Content, localPlanObjective, "Revised result", 1)
+	staged, batch := store.Stage(ctx)
+	if first == "save" {
+		err = e.SaveLocalPlan(staged, task.ID, version, view.Hash, edited)
+	} else {
+		err = e.ReviewLocalPlan(staged, task.ID, version, "approve", view.Hash, "")
+	}
+	requireWorkflowSuccess(t, err)
+	if first == "save" {
+		err = e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, "")
+	} else {
+		err = e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
+	}
+	requireWorkflowSuccess(t, err)
+	winner, winnerVersion := localStoredTask(t, e, task.ID)
+	if err := batch.Commit(staged, e.Store, nil); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("competing decision committed: %v", err)
+	}
+	current, currentVersion := localStoredTask(t, e, task.ID)
+	if currentVersion != winnerVersion || !reflect.DeepEqual(current, winner) {
+		t.Fatal("losing decision changed winner")
+	}
+	if first == "approve" {
+		if _, err := e.Store.Get(ctx, "plan_versions", task.ID+":1"); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("losing approval published frozen version: %v", err)
+		}
 	}
 }

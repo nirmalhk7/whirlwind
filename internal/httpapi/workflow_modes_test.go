@@ -234,9 +234,9 @@ func TestWorkflowPlanAPIEditsRequireFreshApproval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	invalidated, err := store.Decode[model.ExecutionPlan](record)
-	if err != nil || invalidated.Stage != "plan_approval" || invalidated.PlanDocument.ApprovedHash != "" || invalidated.PlanVersion != 2 {
-		t.Fatalf("document edit retained approval: %+v %v", invalidated, err)
+	active, err := store.Decode[model.ExecutionPlan](record)
+	if err != nil || active.Stage != "coding" || active.PlanDocument.ApprovedHash != view.Hash || active.PlanVersion != 1 || record.Version != 2 {
+		t.Fatalf("external edit changed active approval: %+v %v", active, err)
 	}
 	snapshot, err := s.Store.Get(context.Background(), "plan_versions", "task:1")
 	if err != nil {

@@ -69,7 +69,7 @@ func (e *Engine) SaveLocalPlan(ctx context.Context, id string, expected int, has
 
 func activeApprovedPlanStage(stage string) bool {
 	switch stage {
-	case "coding", "review", "repair", "publishing", "submitting", "waiting_quota":
+	case "coding", "review", "repair", "publishing", "submitting", "waiting_quota", "questions", "approval":
 		return true
 	default:
 		return false

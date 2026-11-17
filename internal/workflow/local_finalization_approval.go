@@ -70,24 +70,12 @@ func validateFinalizationTuple(approval LocalFinalizationApproval) error {
 	return nil
 }
 
-func validateFinalizationPlan(e *Engine, task model.ExecutionPlan, approval LocalFinalizationApproval) error {
+func validateFinalizationPlan(ctx context.Context, e *Engine, task model.ExecutionPlan, approval LocalFinalizationApproval) error {
 	if task.PlanDocument == nil || task.Plan == nil || task.PlanVersion != approval.PlanVersion || task.PlanDocument.PlanVersion != approval.PlanVersion || task.PlanDocument.ApprovedHash != approval.ApprovedPlanHash || task.PlanDocument.Hash != approval.ApprovedPlanHash {
 		return errors.New("approved plan version or hash changed after the approval form was displayed")
 	}
-	content, err := e.readLocalPlanFile(task)
-	if err != nil {
+	if _, err := e.approvedLocalPlanSnapshot(ctx, task); err != nil {
 		return err
-	}
-	if localPlanHash(content) != approval.ApprovedPlanHash {
-		return errors.New("approved plan file changed after the approval form was displayed")
-	}
-	current, err := ParsePlanDocument(content)
-	if err != nil {
-		return err
-	}
-	current.Approval = task.Plan.Approval
-	if !sameApprovedPlanSpecification(*task.Plan, current) {
-		return errors.New("approved plan contents differ from the immutable reviewed specification")
 	}
 	return nil
 }
@@ -171,7 +159,7 @@ func (e *Engine) criticalFinalizationCandidate(ctx context.Context, taskID strin
 	if err != nil {
 		return model.Record{}, model.ExecutionPlan{}, model.Provenance{}, err
 	}
-	if err = validateFinalizationPlan(e, task, approval); err != nil {
+	if err = validateFinalizationPlan(ctx, e, task, approval); err != nil {
 		return model.Record{}, model.ExecutionPlan{}, model.Provenance{}, err
 	}
 	review, report, accepted, err := e.LoadAcceptedReviewReport(ctx, taskID)

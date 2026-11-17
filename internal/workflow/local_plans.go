@@ -106,18 +106,18 @@ func (e *Engine) recoverLocalPlanContent(task *model.ExecutionPlan, content stri
 	return existing, err
 }
 
-// ReadLocalPlan returns the current editable file and revokes stale approvals
-// before exposing it as approved. Coding continues to consume task.Plan only.
+// ReadLocalPlan returns the current editable file with its separate approved
+// hash. External file changes never revise the immutable execution snapshot.
 func (e *Engine) ReadLocalPlan(ctx context.Context, id string) (PlanDocumentView, error) {
 	record, task, err := e.localPlanForRead(ctx, id)
 	if err != nil {
 		return PlanDocumentView{}, err
 	}
-	content, err := e.readLocalPlanContent(ctx, record, &task)
-	if err != nil {
+	if err := e.refreshLocalPlanApproval(ctx, record, &task); err != nil {
 		return PlanDocumentView{}, err
 	}
-	if err := e.refreshLocalPlanApproval(ctx, record, &task, content); err != nil {
+	content, err := e.readLocalPlanFile(task)
+	if err != nil {
 		return PlanDocumentView{}, err
 	}
 	plan, err := ParsePlanDocument(content)
@@ -137,29 +137,19 @@ func (e *Engine) localPlanForRead(ctx context.Context, id string) (model.Record,
 	return record, task, nil
 }
 
-func (e *Engine) readLocalPlanContent(ctx context.Context, record model.Record, task *model.ExecutionPlan) (string, error) {
-	content, err := e.readLocalPlanFile(*task)
-	if err != nil && localPlanApproved(*task) {
-		if invalidationErr := e.invalidateLocalApproval(ctx, record, task, "", "Local plan is inaccessible; review is required."); invalidationErr != nil {
-			return "", invalidationErr
-		}
-	}
-	return content, err
-}
-
-func (e *Engine) refreshLocalPlanApproval(ctx context.Context, record model.Record, task *model.ExecutionPlan, content string) error {
+func (e *Engine) refreshLocalPlanApproval(ctx context.Context, record model.Record, task *model.ExecutionPlan) error {
 	if !localPlanApproved(*task) {
 		return nil
 	}
 	if err := e.validateApprovalConfiguration(ctx, *task); err != nil {
-		return e.invalidateLocalApproval(ctx, record, task, content, err.Error())
+		return e.invalidateLocalApproval(ctx, record, task, err.Error())
 	}
 	project, err := e.Project(ctx, task.ProjectID)
 	if err != nil {
 		return err
 	}
-	if localPlanHash(content) != task.PlanDocument.ApprovedHash || project.PolicyHash != task.PlanDocument.PolicyHash {
-		return e.invalidateLocalApproval(ctx, record, task, content, "Local plan or project policy changed; review is required.")
+	if project.PolicyHash != task.PlanDocument.PolicyHash {
+		return e.invalidateLocalApproval(ctx, record, task, "Project policy changed; review is required.")
 	}
 	return nil
 }
@@ -171,25 +161,9 @@ func clearLocalPlanExecution(task *model.ExecutionPlan) {
 	task.ImplementationAttempts, task.LastAttemptID = nil, ""
 }
 
-func (e *Engine) invalidateLocalApproval(ctx context.Context, record model.Record, task *model.ExecutionPlan, content, reason string) error {
+func (e *Engine) invalidateLocalApproval(ctx context.Context, record model.Record, task *model.ExecutionPlan, reason string) error {
 	if localPlanFinished(*task) {
 		return nil
-	}
-	var snapshotError error
-	if content != "" {
-		next := *task
-		next.PlanVersion++
-		if next.PlanDocument != nil && next.PlanDocument.PlanVersion != 0 {
-			next.PlanDocument.PlanVersion = next.PlanVersion
-		}
-		path, err := e.writeLocalPlanFile(next, content)
-		if err != nil {
-			snapshotError = err
-			reason += " Cannot save next document version: " + err.Error()
-		} else {
-			task.PlanVersion = next.PlanVersion
-			task.PlanDocument.Path, task.PlanDocument.Hash = path, localPlanHash(content)
-		}
 	}
 	task.PlanDocument.ApprovedHash, task.PlanDocument.PolicyHash, task.PlanDocument.ApprovedAt = "", "", ""
 	clearLocalPlanExecution(task)
@@ -200,7 +174,7 @@ func (e *Engine) invalidateLocalApproval(ctx context.Context, record model.Recor
 		return err
 	}
 	e.Stop(task.ID)
-	return snapshotError
+	return nil
 }
 
 func (e *Engine) resolveLocalPlanNotices(ctx context.Context, id string) ([]store.Change, error) {
