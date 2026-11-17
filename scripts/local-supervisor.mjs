@@ -3,9 +3,9 @@ import { execFile } from "node:child_process";
 import { createConnection } from "node:net";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { launcherPaths } from "./launcher-paths.mjs";
 import { promisify } from "node:util";
 import { readState } from "./launcher-config.mjs";
 import { ownedProcesses, signal } from "./launcher-processes.mjs";
@@ -16,12 +16,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const supervisorToken = "WHIRLWIND_SUPERVISOR_TOKEN";
 
 export async function localConfiguration() {
-  const root = await realRoot();
-  const data = resolve(
-    root,
-    process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind/parity-v1"),
-  );
-  const settings = resolve(root, process.env.WHIRLWIND_SETTINGS_FILE || "settings.yaml");
+  const { root, data, settings } = await launcherPaths();
   const owner = typeof process.getuid === "function" ? process.getuid() : "unknown";
   const key = createHash("sha256").update(data).digest("hex").slice(0, 16);
   return {
@@ -33,11 +28,6 @@ export async function localConfiguration() {
     state: join(data, "control", "supervisor.json"),
     commandDirectory: join(data, "launcher"),
   };
-}
-
-async function realRoot() {
-  const { realpath } = await import("node:fs/promises");
-  return realpath(process.env.WHIRLWIND_ROOT || dirname(dirname(fileURLToPath(import.meta.url))));
 }
 
 function connect(path, timeout = 500) {

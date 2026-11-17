@@ -1,20 +1,9 @@
-import { access, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
-import { execFile } from "node:child_process";
-
-const exec = promisify(execFile);
+import { access, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { launcherPaths } from "./launcher-paths.mjs";
 
 export async function configuration() {
-  const root = await realpath(
-    process.env.WHIRLWIND_ROOT || dirname(dirname(fileURLToPath(import.meta.url))),
-  );
-  const data = resolve(
-    root,
-    process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind/parity-v1"),
-  );
+  const { root, data, settings } = await launcherPaths();
   const listen = process.env.WHIRLWIND_LISTEN || "127.0.0.1:9877";
   const match = /^(127\.0\.0\.1|localhost|\[::1\]):(\d+)$/.exec(listen);
   const webPort = process.env.WHIRLWIND_WEB_PORT || "9876";
@@ -40,10 +29,7 @@ export async function configuration() {
     env: {
       ...process.env,
       WHIRLWIND_DATA_DIR: data,
-      WHIRLWIND_SETTINGS_FILE: resolve(
-        root,
-        process.env.WHIRLWIND_SETTINGS_FILE || "settings.yaml",
-      ),
+      WHIRLWIND_SETTINGS_FILE: settings,
       WHIRLWIND_LISTEN: listen,
       WHIRLWIND_WEB_PORT: webPort,
       WHIRLWIND_BACKEND_URL: `http://${listen}`,

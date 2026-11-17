@@ -1,8 +1,8 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { launcherPaths } from "./launcher-paths.mjs";
 
 function foreground(command, args, options) {
   return new Promise((resolve, reject) => {
@@ -27,13 +27,7 @@ function foreground(command, args, options) {
 }
 
 export async function dashboard() {
-  const root = await realpath(
-    process.env.WHIRLWIND_ROOT || dirname(dirname(fileURLToPath(import.meta.url))),
-  );
-  const data = resolve(
-    root,
-    process.env.WHIRLWIND_DATA_DIR || join(homedir(), ".local/share/whirlwind/parity-v1"),
-  );
+  const { root, data } = await launcherPaths();
   const temporary = await mkdtemp(join(tmpdir(), "whirlwind-dashboard-"));
   const binary = join(temporary, "dashboard");
   const options = { cwd: root, env: { ...process.env, WHIRLWIND_DATA_DIR: data } };
