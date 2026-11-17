@@ -1,8 +1,10 @@
 package dashboard
 
 import (
-	"github.com/rivo/tview"
 	"strings"
+
+	"github.com/rivo/tview"
+
 	"whirlwind/internal/model"
 )
 

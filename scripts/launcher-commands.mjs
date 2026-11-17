@@ -1,6 +1,8 @@
 import { startSupervisor, supervisorStatus } from "./local-supervisor.mjs";
 
-export async function start() { return startSupervisor(); }
+export async function start() {
+  return startSupervisor();
+}
 
 export async function doctor() {
   const result = await startSupervisor();

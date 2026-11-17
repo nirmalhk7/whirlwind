@@ -3,8 +3,9 @@ package dashboard
 import (
 	"context"
 	"fmt"
-	"github.com/rivo/tview"
 	"path/filepath"
+
+	"github.com/rivo/tview"
 
 	"whirlwind/internal/store"
 )

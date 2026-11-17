@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 )

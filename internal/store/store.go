@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	_ "modernc.org/sqlite"
 	"os"
 	"path/filepath"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"whirlwind/internal/model"
 )

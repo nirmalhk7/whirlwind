@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+
 	"whirlwind/internal/control"
 )
 

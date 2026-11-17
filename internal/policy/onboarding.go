@@ -2,12 +2,14 @@ package policy
 
 import (
 	"errors"
-	"go.yaml.in/yaml/v3"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
+
 	"whirlwind/internal/model"
 )
 

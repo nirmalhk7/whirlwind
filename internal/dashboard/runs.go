@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )

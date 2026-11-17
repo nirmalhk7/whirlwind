@@ -18,11 +18,18 @@ async function fixture(t, exitCode = 0) {
   const go = `#!${process.execPath}\nconst fs=require('node:fs');fs.writeFileSync(${JSON.stringify(join(root, "build.json"))},JSON.stringify(process.argv.slice(2)));fs.writeFileSync(process.argv[process.argv.indexOf('-o')+1],${JSON.stringify(program)},{mode:0o755});\n`;
   await writeFile(join(root, "tools/go"), go);
   await chmod(join(root, "tools/go"), 0o755);
-  const env = { ...process.env, PATH: `${join(root, "tools")}:${process.env.PATH}`, WHIRLWIND_ROOT: root, WHIRLWIND_DATA_DIR: "saved state", WHIRLWIND_LISTEN: "unused", WHIRLWIND_WEB_PORT: "unused" };
+  const env = {
+    ...process.env,
+    PATH: `${join(root, "tools")}:${process.env.PATH}`,
+    WHIRLWIND_ROOT: root,
+    WHIRLWIND_DATA_DIR: "saved state",
+    WHIRLWIND_LISTEN: "unused",
+    WHIRLWIND_WEB_PORT: "unused",
+  };
   return { root, env };
 }
 
-test("dashboard builds and opens terminal process without frontend or HTTP configuration", async t => {
+test("dashboard builds and opens terminal process without frontend or HTTP configuration", async (t) => {
   const { root, env } = await fixture(t);
   const result = await exec(process.execPath, [entry, "dashboard"], { cwd: tmpdir(), env });
   const opened = JSON.parse(result.stdout.trim());
@@ -34,15 +41,21 @@ test("dashboard builds and opens terminal process without frontend or HTTP confi
   assert.equal(build.at(-1), "./cmd/whirlwind-dashboard");
 });
 
-test("dashboard returns terminal application's failure status", async t => {
+test("dashboard returns terminal application's failure status", async (t) => {
   const { env } = await fixture(t, 7);
-  await assert.rejects(exec(process.execPath, [entry, "dashboard"], { env }), error => error.code === 7);
+  await assert.rejects(
+    exec(process.execPath, [entry, "dashboard"], { env }),
+    (error) => error.code === 7,
+  );
 });
 
 test("Makefile does not expose the retired browser UI target", async () => {
-  await assert.rejects(exec("make", ["web"], { cwd: dirname(dirname(fileURLToPath(import.meta.url))) }), error => {
-    assert.equal(error.code, 2);
-    assert.match(error.stderr, /No rule to make target .*web/);
-    return true;
-  });
+  await assert.rejects(
+    exec("make", ["web"], { cwd: dirname(dirname(fileURLToPath(import.meta.url))) }),
+    (error) => {
+      assert.equal(error.code, 2);
+      assert.match(error.stderr, /No rule to make target .*web/);
+      return true;
+    },
+  );
 });

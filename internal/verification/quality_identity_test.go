@@ -214,16 +214,32 @@ func TestJobCommandResolutionUsesExecutionCwdAndEnvironmentPath(t *testing.T) {
 	root := t.TempDir()
 	stage := filepath.Join(root, "stage")
 	bin := filepath.Join(root, "bin")
-	if err := os.MkdirAll(stage, 0700); err != nil { t.Fatal(err) }
-	if err := os.MkdirAll(bin, 0700); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(filepath.Join(bin, "tool"), []byte("#!/bin/sh\nprintf overridden\n"), 0700); err != nil { t.Fatal(err) }
-	if err := os.WriteFile(filepath.Join(stage, "tool"), []byte("#!/bin/sh\nprintf stage\n"), 0700); err != nil { t.Fatal(err) }
+	if err := os.MkdirAll(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "tool"), []byte("#!/bin/sh\nprintf overridden\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stage, "tool"), []byte("#!/bin/sh\nprintf stage\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	resolved, err := resolveJobCommand(stage, JobCommand{Command: []string{"tool"}, Environment: map[string]string{"PATH": bin}})
-	if err != nil { t.Fatal(err) }
-	if resolved[0] != filepath.Join(bin, "tool") { t.Fatalf("resolved wrong PATH executable: %q", resolved[0]) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved[0] != filepath.Join(bin, "tool") {
+		t.Fatalf("resolved wrong PATH executable: %q", resolved[0])
+	}
 	local, err := resolveJobCommand(stage, JobCommand{Command: []string{"./tool"}})
-	if err != nil { t.Fatal(err) }
-	if local[0] != filepath.Join(stage, "tool") { t.Fatalf("relative executable did not resolve under stage: %q", local[0]) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local[0] != filepath.Join(stage, "tool") {
+		t.Fatalf("relative executable did not resolve under stage: %q", local[0])
+	}
 }
 
 func TestCopyApprovedQualityTreeVerifiesSourceAndCopy(t *testing.T) {

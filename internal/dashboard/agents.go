@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/workflow"
 )

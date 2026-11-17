@@ -63,7 +63,9 @@ class PTYSession:
                     return status
                 self.read_available(0.05)
                 time.sleep(0.01)
-        raise RuntimeError(f"owned PTY process group {self.pid} did not reap; output={bytes(self.output)[-4000:]!r}")
+        raise RuntimeError(
+            f"owned PTY process group {self.pid} did not reap; output={bytes(self.output)[-4000:]!r}"
+        )
 
     def wait_for_render(self):
         deadline = time.monotonic() + 60
@@ -73,10 +75,14 @@ class PTYSession:
             result = self.child_status(os.WNOHANG)
             if result is not None:
                 code = exit_code(result)
-                raise AssertionError(f"dashboard failed to render in PTY, exit={code}: {bytes(self.output)[-4000:]!r}")
+                raise AssertionError(
+                    f"dashboard failed to render in PTY, exit={code}: {bytes(self.output)[-4000:]!r}"
+                )
         if RENDER_MARKER not in self.output:
             status = self.terminate()
-            raise AssertionError(f"dashboard failed to render in PTY, exit={exit_code(status)}: {bytes(self.output)[-4000:]!r}")
+            raise AssertionError(
+                f"dashboard failed to render in PTY, exit={exit_code(status)}: {bytes(self.output)[-4000:]!r}"
+            )
 
     def quit_and_wait(self):
         os.write(self.master, b"q")
@@ -104,10 +110,14 @@ def dashboard_pty(env):
         session.wait_for_render()
         code = session.quit_and_wait()
         if code != 0:
-            raise AssertionError(f"dashboard did not exit cleanly after q (exit={code}): {bytes(session.output)[-4000:]!r}")
+            raise AssertionError(
+                f"dashboard did not exit cleanly after q (exit={code}): {bytes(session.output)[-4000:]!r}"
+            )
         for marker in (b"Projects", b"Agents", b"Runs", b"Inbox", b"No projects"):
             if marker not in session.output:
-                raise AssertionError(f"dashboard PTY output missed {marker!r}: {bytes(session.output)[-4000:]!r}")
+                raise AssertionError(
+                    f"dashboard PTY output missed {marker!r}: {bytes(session.output)[-4000:]!r}"
+                )
         return bytes(session.output)
     finally:
         session.close()

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+
 	"whirlwind/internal/model"
 )
 
