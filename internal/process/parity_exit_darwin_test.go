@@ -1,8 +1,9 @@
 package process
 
 import (
-	"golang.org/x/sys/unix"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestParityDarwinExitingProcessDoesNotBlockUnrelatedCleanup(t *testing.T) {

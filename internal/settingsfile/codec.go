@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go.yaml.in/yaml/v3"
 	"io"
+
+	"go.yaml.in/yaml/v3"
+
 	"whirlwind/internal/workflow"
 )
 

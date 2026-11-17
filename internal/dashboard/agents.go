@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/model"
-	"whirlwind/internal/workflow"
 )
 
 func (d *Dashboard) refreshAgents() {
@@ -16,7 +16,7 @@ func (d *Dashboard) refreshAgents() {
 		d.agents.SetText("Cannot read configured agents: " + tview.Escape(err.Error()))
 		return
 	}
-	statuses, err := decodeRecords[workflow.ProviderStatus](d.snapshot["provider_status"])
+	statuses, err := decodeRecords[model.ProviderStatus](d.snapshot["provider_status"])
 	if err != nil {
 		d.agents.SetText("Cannot read connection status: " + tview.Escape(err.Error()))
 		return

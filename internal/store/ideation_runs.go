@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+
 	"whirlwind/internal/model"
 )
 
@@ -36,7 +37,7 @@ func syncIdeationRunTx(ctx context.Context, tx *sql.Tx, id string, data []byte) 
 	if err := requireOneRow(result); err != nil {
 		return err
 	}
-	for _, direction := range []string{"expand", "optimize", "harden", "simplify"} {
+	for _, direction := range model.DirectionCategories() {
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO ideation_directions(run_id,direction,status) VALUES(?,?,'queued')`, id, direction); err != nil {
 			return err
 		}

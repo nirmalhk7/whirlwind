@@ -6,6 +6,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 )
 
@@ -108,7 +109,7 @@ func TestFooterShowsEveryShortcutAcrossTerminalSizes(t *testing.T) {
 				t.Errorf("width %d footer advertises removed instruction %q", width, unwanted)
 			}
 		}
-		for _, shortcut := range []string{"Shift-Tab", "Home/End", "PgUp/PgDn", "Enter", "Vim", "logs", "a choose direction / prepare plan", "d delete", "h rejected history", "o earlier directions", "t tasks", "r plan review (approve / request changes / reject)", "c questions", "p permissions", "f finalization", "x stop/resume", "Esc", "?", "q/Ctrl-C quit"} {
+		for _, shortcut := range []string{"Shift-Tab", "Home/End", "PgUp/PgDn", "Enter", "Vim", "logs", "a choose direction / prepare plan", "d delete", "h rejected history", "o earlier directions", "t tasks", "r retry failed or recheck completed setup (Runs) / plan review (Plans)", "c questions", "p permissions", "f finalization", "x stop/resume", "Esc", "?", "q/Ctrl-C quit"} {
 			if !strings.Contains(footer, shortcut) {
 				t.Errorf("width %d footer missing %q", width, shortcut)
 			}

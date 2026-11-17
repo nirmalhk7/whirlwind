@@ -1,0 +1,2 @@
+# Development-only Python source formatter; no runtime dependency.
+black==25.1.0

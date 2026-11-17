@@ -18,7 +18,7 @@ func TestCodexACPLiveRoundTrip(t *testing.T) {
 	if os.Getenv("WHIRLWIND_TEST_CODEX_LIVE") != "1" {
 		t.Skip("set WHIRLWIND_TEST_CODEX_LIVE=1 to verify real Codex ACP inference")
 	}
-	configured := Defaults("")[0]
+	configured := Defaults()[0]
 	if !Available(configured) {
 		t.Skip("configured Codex ACP adapter is not installed")
 	}
@@ -28,7 +28,7 @@ func TestCodexACPLiveRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker := "WHIRLWIND_" + hex.EncodeToString(nonce[:])
-	adapter := ProcessAdapter{Provider: Defaults("")[0]}
+	adapter := ProcessAdapter{Provider: Defaults()[0]}
 	input := Input{Role: "plan", CWD: t.TempDir(), ReadOnly: true}
 	prompts := []string{
 		fmt.Sprintf("Do not use tools or inspect files. Remember this marker for our next turn: %s. Reply with only that marker.", marker),

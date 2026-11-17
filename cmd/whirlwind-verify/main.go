@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
 	"whirlwind/internal/verification"
 )
 

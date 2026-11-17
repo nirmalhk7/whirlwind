@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+
 	"whirlwind/internal/model"
 )
 

@@ -15,11 +15,12 @@ async function fixture(t) {
   const data = await mkdtemp(join(tmpdir(), "whirlwind-logs-"));
   t.after(() => rm(data, { recursive: true, force: true }));
   const env = { ...process.env, WHIRLWIND_ROOT: root, WHIRLWIND_DATA_DIR: data };
-  const run = (...args) => exec(process.execPath, [entry, ...args], { env, cwd: tmpdir(), timeout: 5000 });
+  const run = (...args) =>
+    exec(process.execPath, [entry, ...args], { env, cwd: tmpdir(), timeout: 5000 });
   return { data, env, run };
 }
 
-test("logs prints full supervisor and launcher history without a running supervisor", async t => {
+test("logs prints full supervisor and launcher history without a running supervisor", async (t) => {
   const { data, run } = await fixture(t);
   await mkdir(join(data, "launcher"));
   const history = Array.from({ length: 250 }, (_, i) => `supervisor entry ${i}\n`).join("");
@@ -32,32 +33,46 @@ test("logs prints full supervisor and launcher history without a running supervi
   assert.match(stdout, /launcher\/whirlwind\.log/);
 });
 
-test("logs reports an empty log history and rejects unknown options", async t => {
+test("logs reports an empty log history and rejects unknown options", async (t) => {
   const { run } = await fixture(t);
   const result = await run("logs");
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /no .*logs/i);
-  await assert.rejects(run("logs", "--typo"), error => error.code === 1);
+  await assert.rejects(run("logs", "--typo"), (error) => error.code === 1);
 });
 
 function follow(t, env) {
-  const child = spawn(process.execPath, [entry, "logs", "--follow"], { env, cwd: tmpdir(), stdio: ["ignore", "pipe", "pipe"] });
-  let output = "", errors = "";
-  child.stdout.setEncoding("utf8").on("data", chunk => { output += chunk; });
-  child.stderr.setEncoding("utf8").on("data", chunk => { errors += chunk; });
-  const done = new Promise(resolve => child.once("close", (code, signal) => resolve({ code, signal })));
-  t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM"); await done; });
-  const waitFor = async text => {
+  const child = spawn(process.execPath, [entry, "logs", "--follow"], {
+    env,
+    cwd: tmpdir(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "",
+    errors = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk) => {
+    output += chunk;
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk) => {
+    errors += chunk;
+  });
+  const done = new Promise((resolve) =>
+    child.once("close", (code, signal) => resolve({ code, signal })),
+  );
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
+    await done;
+  });
+  const waitFor = async (text) => {
     const deadline = Date.now() + 5000;
     while (!output.includes(text) && Date.now() < deadline && child.exitCode === null) {
-      await new Promise(resolve => setTimeout(resolve, 20));
+      await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert.ok(output.includes(text), `missing ${text}; stdout=${output}; stderr=${errors}`);
   };
   return { child, done, waitFor, output: () => output };
 }
 
-test("logs --follow prints history and follows every log without duplicating entries", async t => {
+test("logs --follow prints history and follows every log without duplicating entries", async (t) => {
   const { data, env } = await fixture(t);
   await mkdir(join(data, "launcher"));
   const supervisor = join(data, "whirlwind-supervisor.log");
@@ -76,15 +91,20 @@ test("logs --follow prints history and follows every log without duplicating ent
   await stream.waitFor("short");
   stream.child.kill("SIGINT");
   assert.deepEqual(await stream.done, { code: 0, signal: null });
-  for (const entry of ["historical entry", "new supervisor entry", "new launcher entry", "after rotation"]) {
+  for (const entry of [
+    "historical entry",
+    "new supervisor entry",
+    "new launcher entry",
+    "after rotation",
+  ]) {
     assert.equal(stream.output().split(entry).length - 1, 1, `${entry} was duplicated`);
   }
 });
 
-test("logs --follow waits for the first log file to be created", async t => {
+test("logs --follow waits for the first log file to be created", async (t) => {
   const { data, env } = await fixture(t);
   const stream = follow(t, env);
-  await new Promise(resolve => setTimeout(resolve, 100));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   await writeFile(join(data, "whirlwind-supervisor.log"), "first available log\n");
   await stream.waitFor("first available log");
 });

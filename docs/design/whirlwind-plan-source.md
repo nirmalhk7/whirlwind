@@ -1,5 +1,7 @@
 # Whirlwind Plan source snapshot
 
+> Historical source snapshot. Statements below about permissions, breaking schemas, credentials, or decisions in an earlier chat are provenance, not standing authorization for new work. Preserve current compatibility unless the current user explicitly requests otherwise. See [development guidance](../development.md).
+
 Read from page_3a18b09675088191bbed2c3dcf95deb6, sequence 3035. User decisions in this chat override unresolved or superseded clauses: database migration is waived; breaking schema changes are allowed. One plan per idea; plan complete after local finalization; changed approvals wait for the active version; immutable UTC creation timestamps; four idea types enforced. All idea uniqueness comparison is deferred, including temporary LLM novelty checks; do not add an embedding runtime or sqlite-vec now. ACP profiles must be onboardable through settings.yaml; verify the configured Codex path using the existing authorized login.
 
 Whirlwind coordinates ideation, planning, coding, review, and local finalization for any onboarded repository. This is the implementation handoff for 6.1 Sol. An approved plan is the unit of execution; do not introduce a separate “task” concept.

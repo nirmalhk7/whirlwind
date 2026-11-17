@@ -7,6 +7,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+
 	"whirlwind/internal/model"
 )
 
@@ -142,7 +143,7 @@ func (s *Store) SaveDirections(ctx context.Context, project, day string, directi
 			present[direction.Category] = true
 		}
 		missing := make([]string, 0, 4)
-		for _, category := range []string{"expand", "optimize", "harden", "simplify"} {
+		for _, category := range model.DirectionCategories() {
 			if !present[category] {
 				missing = append(missing, category)
 			}

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -136,7 +137,7 @@ func TestIdeationRepairsOnlyMissingCategoriesAndPreservesAcceptedCandidates(t *t
 			seen[direction.Category]++
 		}
 	}
-	for _, category := range directionCategories {
+	for _, category := range model.DirectionCategories() {
 		if seen[category] != 1 {
 			t.Fatalf("category %s count=%d, want one: %v", category, seen[category], seen)
 		}

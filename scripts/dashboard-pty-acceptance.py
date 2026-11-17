@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+
 from dashboard_pty_support import RENDER_MARKER, dashboard_pty
 
 
@@ -16,11 +17,18 @@ ENTRY = REPO / "bin" / "whirlwind"
 
 def run_cli(env, command, timeout=300, expected_code=0):
     result = subprocess.run(
-        [str(ENTRY), command], cwd=REPO, env=env, capture_output=True, text=True,
-        timeout=timeout, check=False,
+        [str(ENTRY), command],
+        cwd=REPO,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
     )
     if result.returncode != expected_code:
-        raise AssertionError(f"./bin/whirlwind {command} returned {result.returncode}, expected {expected_code}: {result.stdout}{result.stderr}")
+        raise AssertionError(
+            f"./bin/whirlwind {command} returned {result.returncode}, expected {expected_code}: {result.stdout}{result.stderr}"
+        )
     return result.stdout + result.stderr
 
 
@@ -64,7 +72,9 @@ def main():
             raise AssertionError("supervisor did not survive the first dashboard exit")
         after_first = json.loads(state_path.read_text(encoding="utf-8"))
         if before != after_first:
-            raise AssertionError("first dashboard exit changed supervisor identity or durable state")
+            raise AssertionError(
+                "first dashboard exit changed supervisor identity or durable state"
+            )
         second_output = dashboard_pty(env)
         if run_cli(env, "status").find("supervisor: running") < 0:
             raise AssertionError("supervisor did not survive reopening the dashboard")
@@ -76,9 +86,13 @@ def main():
         run_cli(env, "stop")
         started = False
         start_attempted = False
-        if state_path.exists() or "supervisor: stopped" not in run_cli(env, "status", expected_code=1):
+        if state_path.exists() or "supervisor: stopped" not in run_cli(
+            env, "status", expected_code=1
+        ):
             raise AssertionError("owned scratch supervisor did not stop cleanly")
-        print("PASS: exact dashboard command rendered, exited, reopened, and preserved the same scratch supervisor until owned stop.")
+        print(
+            "PASS: exact dashboard command rendered, exited, reopened, and preserved the same scratch supervisor until owned stop."
+        )
     finally:
         if started or start_attempted:
             try:
@@ -88,10 +102,18 @@ def main():
             except Exception as error:
                 preserve_scratch = True
                 print(f"scratch supervisor cleanup failed: {error}", file=os.sys.stderr)
-                print(f"Scratch state retained for manual owner-scoped cleanup: {scratch}", file=os.sys.stderr)
-                raise RuntimeError(f"scratch supervisor cleanup failed; state retained at {scratch}") from error
+                print(
+                    f"Scratch state retained for manual owner-scoped cleanup: {scratch}",
+                    file=os.sys.stderr,
+                )
+                raise RuntimeError(
+                    f"scratch supervisor cleanup failed; state retained at {scratch}"
+                ) from error
         if preserve_scratch:
-            print(f"Scratch state retained for manual owner-scoped cleanup: {scratch}", file=os.sys.stderr)
+            print(
+                f"Scratch state retained for manual owner-scoped cleanup: {scratch}",
+                file=os.sys.stderr,
+            )
         else:
             shutil.rmtree(scratch, ignore_errors=True)
 

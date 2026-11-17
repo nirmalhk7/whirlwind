@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -87,7 +88,7 @@ func TestProposalHistoryFindsRejectedMatchOutsideRecentWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range 20 {
-		direction := model.Direction{ID: fmt.Sprintf("recent-%02d", i), ProjectID: task.ProjectID, Category: directionCategories[i%len(directionCategories)], Title: fmt.Sprintf("Recent proposal %02d", i), Description: fmt.Sprintf("Current unrelated proposal %02d", i), Problem: fmt.Sprintf("Recent unrelated problem %02d", i), Mechanism: fmt.Sprintf("Recent unrelated mechanism %02d", i), Components: []string{fmt.Sprintf("internal/recent/%02d", i)}, RepositoryRevision: "rev-current", Status: "shown"}
+		direction := model.Direction{ID: fmt.Sprintf("recent-%02d", i), ProjectID: task.ProjectID, Category: model.DirectionCategories()[i%len(model.DirectionCategories())], Title: fmt.Sprintf("Recent proposal %02d", i), Description: fmt.Sprintf("Current unrelated proposal %02d", i), Problem: fmt.Sprintf("Recent unrelated problem %02d", i), Mechanism: fmt.Sprintf("Recent unrelated mechanism %02d", i), Components: []string{fmt.Sprintf("internal/recent/%02d", i)}, RepositoryRevision: "rev-current", Status: "shown"}
 		if err := e.Store.Put(ctx, "directions", direction.ID, direction, 0); err != nil {
 			t.Fatal(err)
 		}

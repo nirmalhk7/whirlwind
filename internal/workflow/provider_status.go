@@ -7,43 +7,28 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
 )
 
-type ProviderStatus struct {
-	QuotaPool     string               `json:"quota_pool,omitempty"`
-	QuotaSnapshot *model.QuotaSnapshot `json:"quota_snapshot,omitempty"`
-	QuotaFresh    *bool                `json:"quota_fresh"`
-	ID            string               `json:"id"`
-	Name          string               `json:"name"`
-	Kind          string               `json:"kind"`
-	Status        string               `json:"status"`
-	Detail        string               `json:"detail"`
-	CheckedAt     string               `json:"checked_at,omitempty"`
-}
-type ProviderStatuses struct {
-	Providers       []ProviderStatus `json:"providers"`
-	IntervalSeconds int              `json:"interval_seconds"`
-	Stopped         bool             `json:"stopped"`
-}
 type providerStatusCache struct {
 	mu      sync.Mutex
 	key     string
 	expires time.Time
-	value   ProviderStatuses
+	value   model.ProviderStatuses
 }
 
 // ProviderStatuses shares bounded connection checks across Settings tabs. Configuration
 // changes and the stop flag invalidate cached results immediately.
-func (e *Engine) ProviderStatuses(ctx context.Context) (ProviderStatuses, error) {
+func (e *Engine) ProviderStatuses(ctx context.Context) (model.ProviderStatuses, error) {
 	e.providerStatuses.mu.Lock()
 	defer e.providerStatuses.mu.Unlock()
 	settings := e.settings(ctx)
 	records, err := e.Store.List(ctx, "providers")
 	if err != nil {
-		return ProviderStatuses{}, err
+		return model.ProviderStatuses{}, err
 	}
 	if settings.ProviderStatusCheckSeconds < 1 {
 		settings.ProviderStatusCheckSeconds = 30
@@ -58,7 +43,7 @@ func (e *Engine) ProviderStatuses(ctx context.Context) (ProviderStatuses, error)
 	if cache.key == key && time.Now().Before(cache.expires) {
 		return cache.value, nil
 	}
-	result := ProviderStatuses{Providers: make([]ProviderStatus, len(records)), IntervalSeconds: settings.ProviderStatusCheckSeconds, Stopped: settings.Stopped}
+	result := model.ProviderStatuses{Providers: make([]model.ProviderStatus, len(records)), IntervalSeconds: settings.ProviderStatusCheckSeconds, Stopped: settings.Stopped}
 	providers, err := decodeStatusProviders(records)
 	if err != nil {
 		return result, err
@@ -86,7 +71,7 @@ func decodeStatusProviders(records []model.Record) ([]model.Provider, error) {
 	return providers, nil
 }
 
-func (e *Engine) publishProviderStatuses(ctx context.Context, stopped bool, key string, result ProviderStatuses) (ProviderStatuses, error) {
+func (e *Engine) publishProviderStatuses(ctx context.Context, stopped bool, key string, result model.ProviderStatuses) (model.ProviderStatuses, error) {
 	cache := &e.providerStatuses
 	if latestStopped := e.settings(ctx).Stopped; latestStopped != stopped {
 		cache.key = ""
@@ -106,8 +91,8 @@ func (e *Engine) publishProviderStatuses(ctx context.Context, stopped bool, key 
 	return result, nil
 }
 
-func (e *Engine) checkProviderStatus(parent context.Context, p model.Provider, stopped bool) ProviderStatus {
-	status := ProviderStatus{QuotaPool: providerPool(p), QuotaSnapshot: p.QuotaSnapshot, ID: p.ID, Name: p.Name, Kind: p.Kind, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+func (e *Engine) checkProviderStatus(parent context.Context, p model.Provider, stopped bool) model.ProviderStatus {
+	status := model.ProviderStatus{QuotaPool: providerPool(p), QuotaSnapshot: p.QuotaSnapshot, ID: p.ID, Name: p.Name, Kind: p.Kind, CheckedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	e.populateQuotaStatus(parent, &status)
 	if !provider.Available(p) {
 		status.Status, status.Detail = "unavailable", providerUnavailableDetail(p)
@@ -121,7 +106,7 @@ func (e *Engine) checkProviderStatus(parent context.Context, p model.Provider, s
 	return e.runProviderStatusCheck(parent, p, status)
 }
 
-func (e *Engine) populateQuotaStatus(ctx context.Context, status *ProviderStatus) {
+func (e *Engine) populateQuotaStatus(ctx context.Context, status *model.ProviderStatus) {
 	if record, err := e.Store.Get(ctx, "quota_snapshots", status.QuotaPool); err == nil {
 		snapshot, decodeErr := store.Decode[model.QuotaSnapshot](record)
 		if decodeErr == nil && (status.QuotaSnapshot == nil || snapshot.ObservedAt > status.QuotaSnapshot.ObservedAt) {
@@ -150,7 +135,7 @@ func providerUnavailableDetail(provider model.Provider) string {
 	return "Supported integration required."
 }
 
-func (e *Engine) runProviderStatusCheck(parent context.Context, p model.Provider, status ProviderStatus) ProviderStatus {
+func (e *Engine) runProviderStatusCheck(parent context.Context, p model.Provider, status model.ProviderStatus) model.ProviderStatus {
 	ctx, release := e.runnerContext(parent)
 	defer release()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)

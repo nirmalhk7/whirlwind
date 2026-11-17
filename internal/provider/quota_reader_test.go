@@ -80,7 +80,7 @@ func TestCodexQuotaReadLive(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	adapter := ProcessAdapter{Provider: Defaults("")[0]}
+	adapter := ProcessAdapter{Provider: Defaults()[0]}
 	state, reset, err := adapter.ReadQuota(ctx, t.TempDir())
 	if err != nil || (state != "available" && state != "exhausted") {
 		t.Fatalf("native quota read: %s %s %v", state, reset, err)

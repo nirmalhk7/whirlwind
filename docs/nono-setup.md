@@ -1,6 +1,6 @@
 # Native nono execution
 
-Whirlwind runs providers, ACP terminals and committed checks through **nono 0.81.0** on the local host. Docker, a Linux agent image and an OpenShell gateway are no longer prerequisites. Install the [official nono 0.81.0 release](https://github.com/nolabs-ai/nono/releases/tag/v0.81.0) for your platform, place `nono` on `PATH`, and confirm:
+Whirlwind runs providers, ACP terminals and committed checks through **nono 0.81.0** on macOS. Current code explicitly rejects native agent and verification execution on other platforms; inspection remains available. Docker, a Linux agent image and an OpenShell gateway are no longer prerequisites. Install the [official nono 0.81.0 release](https://github.com/nolabs-ai/nono/releases/tag/v0.81.0) for your platform, place `nono` on `PATH`, and confirm:
 
 ```sh
 nono --version
@@ -25,7 +25,7 @@ Direct outbound network access is blocked. An authenticated local egress broker 
 
 Codex ACP selects `agent-full-access` **inside the enforced nono boundary** to avoid applying a second nested Seatbelt sandbox. Whirlwind's read-only client permissions and nono's filesystem/network rules still apply. An adapter lacking that mode fails with an actionable setup error.
 
-On Linux, the launcher refuses whole-worktree write grants that Landlock cannot subtract protected metadata from, and unsupported glob grants. Use bounded existing literal directories for Linux coding; do not widen permissions to bypass a refusal. Native read-only work and declared check outputs remain supported.
+Linux execution is currently blocked by `bridges/nono/launch.mjs`, `internal/execution/profile_command.go`, and `internal/verification/job.go`. Landlock capabilities alone do not establish support in this implementation. Do not remove these guards or broaden permissions to make tests pass.
 
 ## Recovery and verification
 
@@ -36,8 +36,7 @@ Legacy OpenShell code remains for recovery of persisted OpenShell attempts and e
 Run the native boundary and repository checks with nono installed:
 
 ```sh
-node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs bridges/nono/*.test.mjs
-go test -race ./...
+make test
 ```
 
 The native tests execute actual sandboxed processes: they verify read-only source, protected metadata, scoped new files, credential bootstrap, TLS initialization, direct network denial and ACP terminal write denial. Legacy physical gateway tests remain separate compatibility checks in [OpenShell setup](openshell-setup.md).

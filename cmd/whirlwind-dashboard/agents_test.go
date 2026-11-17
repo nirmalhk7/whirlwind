@@ -48,7 +48,7 @@ func TestOnlineDashboardLoadsConfiguredAgentsAndConnectionResults(t *testing.T) 
 	if len(snapshot["provider_status"]) != 1 {
 		t.Fatal("online dashboard omitted connection results")
 	}
-	status, err := store.Decode[workflow.ProviderStatus](snapshot["provider_status"][0])
+	status, err := store.Decode[model.ProviderStatus](snapshot["provider_status"][0])
 	if err != nil || status.ID != "offline" || status.Status != "unavailable" {
 		t.Fatalf("connection result lost: %+v %v", status, err)
 	}

@@ -49,7 +49,7 @@ func (e *Engine) pauseUnchangedIdeation(ctx context.Context, project model.Proje
 	if err := e.Store.SaveDirections(ctx, project.ID, day, nil); err != nil {
 		return err
 	}
-	err := fmt.Errorf("ideation incomplete: no new evidence-backed directions; missing categories: %s", strings.Join(directionCategories, ", "))
+	err := fmt.Errorf("ideation incomplete: no new evidence-backed directions; missing categories: %s", strings.Join(model.DirectionCategories(), ", "))
 	notice := e.Store.Notify(ctx, "", "ideation_paused", fmt.Sprintf("%s: %v", project.Name, err))
 	return errors.Join(err, notice)
 }
@@ -86,7 +86,7 @@ func (e *Engine) notifyGeneratedDirections(ctx context.Context, project model.Pr
 		}
 		return e.Store.Notify(ctx, "", "ideas_ready", message)
 	}
-	message := fmt.Sprintf("%s: ideation incomplete; no worthwhile new direction for categories: %s", project.Name, strings.Join(directionCategories, ", "))
+	message := fmt.Sprintf("%s: ideation incomplete; no worthwhile new direction for categories: %s", project.Name, strings.Join(model.DirectionCategories(), ", "))
 	return e.Store.Notify(ctx, "", "ideation_paused", message)
 }
 
@@ -216,7 +216,7 @@ func (e *Engine) generateDirectionAttempt(ctx context.Context, request direction
 	input := request.prompt
 	if operationID(ctx) != "" {
 		var allowed []string
-		for _, category := range directionCategories {
+		for _, category := range model.DirectionCategories() {
 			if pending[category] != "" {
 				allowed = append(allowed, category)
 			}

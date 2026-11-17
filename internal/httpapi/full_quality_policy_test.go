@@ -2,12 +2,14 @@ package httpapi
 
 import (
 	"context"
-	"go.yaml.in/yaml/v3"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
+
 	"whirlwind/internal/model"
 )
 

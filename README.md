@@ -16,7 +16,7 @@ Whirlwind's identity rests on velocity, control, and correctness: maximize verif
 
 ## Run locally
 
-Requirements: Go version specified in `go.mod` or newer, Git, Node.js 20.9+, nono 0.81.0, and an installed, authenticated ACP agent. The terminal dashboard and supervisor can open without nono; agent execution fails closed until the native sandbox is ready.
+Requirements: Go version specified in `go.mod` or newer, Git, Node.js 20.9+, nono 0.81.0, and an installed, authenticated ACP agent. Native agent and verification execution currently require macOS; other platforms retain inspection but reject execution. The terminal dashboard and supervisor can open without nono; agent execution fails closed until the native sandbox is ready.
 
 ```sh
 go mod download
@@ -33,7 +33,7 @@ go mod download
 ./bin/whirlwind doctor
 ```
 
-The launcher resolves its checkout from the executable, so its absolute path or a symlink also works outside the checkout. Set `WHIRLWIND_ROOT` to select a checkout and `WHIRLWIND_DATA_DIR` to select a state directory; the default remains `~/.local/share/whirlwind/whirlwind.db`, preserving existing records and in-flight work. `WHIRLWIND_SETTINGS_FILE` selects the authoritative YAML configuration. Keep the checkout in place while the supervisor runs.
+The launcher resolves its checkout from the executable, so its absolute path or a symlink also works outside the checkout. Set `WHIRLWIND_ROOT` to select a checkout and `WHIRLWIND_DATA_DIR` to select a state directory; the default database is `~/.local/share/whirlwind/parity-v1/whirlwind.db`. `WHIRLWIND_SETTINGS_FILE` selects the authoritative YAML configuration. Keep the checkout in place while the supervisor runs.
 
 If a legacy browser/HTTP instance still owns the data directory, `start` stops with an ownership message. Run `./bin/whirlwind stop` to stop only its registered processes, then start the supervisor. Whirlwind never kills an unrelated process or silently replaces the running instance. `make run` runs the local supervisor in the foreground; `make dev` opens the TUI.
 
@@ -65,7 +65,7 @@ SQLite retains execution records, fenced ownership, pending decisions, mutation 
 ## Configuration and naming
 
 - CLI executable: `bin/whirlwind`; backend-only executable: `go run ./cmd/whirlwind`.
-- State directory: `~/.local/share/whirlwind`, overridden by `WHIRLWIND_DATA_DIR` or `--data`.
+- State directory: `~/.local/share/whirlwind/parity-v1`, overridden by `WHIRLWIND_DATA_DIR` or `--data`.
 - Database: `whirlwind.db` within the state directory.
 - Project policy: human-reviewed, committed `.whirlwind.yml` or `.whirlwind.yaml`. Local onboarding reads existing policy; the operator supplies verification commands before approving execution.
 - GitHub labels: `whirlwind:ready` and `whirlwind:work`.
@@ -88,13 +88,11 @@ Target repositories may use any language. The Go supervisor runs each project's 
 
 ## Verify
 
+See [contributor guidance](AGENTS.md) for source ownership, compatibility constraints, and the [development guide](docs/development.md) for repeatable checks.
+
 ```sh
-node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs bridges/nono/*.test.mjs
-go test -race ./...
-go vet ./...
-go build ./cmd/whirlwind ./cmd/whirlwind-dashboard
-qlty smells --all
-qlty check --all
+make check
+make quality
 ```
 
 The native tests run real nono filesystem, network and ACP terminal boundary checks. Controlled OpenShell fixtures remain for legacy recovery regressions; they do not establish physical isolation. See [nono setup](docs/nono-setup.md) for runtime and platform details.

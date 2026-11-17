@@ -2,8 +2,10 @@ package dashboard
 
 import (
 	"encoding/json"
-	"github.com/rivo/tview"
 	"strings"
+
+	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 )

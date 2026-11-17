@@ -1,5 +1,7 @@
 # NVIDIA OpenShell setup for Whirlwind
 
+> Legacy recovery/reference guide. Current agent execution requires nono; use [nono setup](nono-setup.md). The retained OpenShell bridge and fixtures support compatibility/recovery testing and do not authorize switching the current workflow to OpenShell.
+
 Whirlwind's bridge targets the NVIDIA OpenShell v0.1.7 local CLI and structured output. Agent execution fails closed when the CLI, gateway, image, or policy is unavailable. Opening the terminal dashboard does not require a running sandbox.
 
 ## Install and select a local gateway

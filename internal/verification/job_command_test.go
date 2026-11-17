@@ -72,3 +72,9 @@ func TestResolveJobCommand(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveJobCommandRejectsEmptyCommand(t *testing.T) {
+	if _, err := resolveJobCommand(t.TempDir(), JobCommand{}); err == nil {
+		t.Fatal("empty command accepted")
+	}
+}
