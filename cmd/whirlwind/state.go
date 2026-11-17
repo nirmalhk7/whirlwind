@@ -71,7 +71,7 @@ func (c config) initializeConfiguration(ctx context.Context, s *store.Store, bri
 	return settingsfile.Attach(ctx, s, c.settings)
 }
 func initializeProviders(ctx context.Context, s *store.Store, bridge string) error {
-	for _, p := range provider.Defaults(bridge) {
+	for _, p := range provider.Defaults() {
 		if err := initializeProvider(ctx, s, p, bridge); err != nil {
 			return err
 		}

@@ -15,7 +15,7 @@ func TestACPModelCatalogLive(t *testing.T) {
 	if os.Getenv("WHIRLWIND_TEST_ACP_MODELS_LIVE") != "1" {
 		t.Skip("set WHIRLWIND_TEST_ACP_MODELS_LIVE=1 to verify ACP model discovery")
 	}
-	for _, p := range Defaults("") {
+	for _, p := range Defaults() {
 		if p.Kind != "acp" {
 			continue
 		}
@@ -32,7 +32,7 @@ func TestACPInitializationLive(t *testing.T) {
 	if os.Getenv("WHIRLWIND_TEST_ACP_INITIALIZATION_LIVE") != "1" {
 		t.Skip("set WHIRLWIND_TEST_ACP_INITIALIZATION_LIVE=1 to verify sandboxed ACP initialization")
 	}
-	for _, p := range Defaults("") {
+	for _, p := range Defaults() {
 		if p.Kind == "acp" {
 			t.Run(p.ID, func(t *testing.T) { checkLiveACPInitialization(t, p) })
 		}

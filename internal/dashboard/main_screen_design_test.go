@@ -9,7 +9,6 @@ import (
 
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
-	"whirlwind/internal/workflow"
 )
 
 const indexingTitle = "Improve indexing"
@@ -154,7 +153,7 @@ func TestAgentStatusHasColoredIndicator(t *testing.T) {
 	screen.SetSize(140, 45)
 	d.Present(control.Snapshot{
 		"providers":       {record("agent", model.Provider{ID: "agent", Name: "Agent"})},
-		"provider_status": {record("agent", workflow.ProviderStatus{ID: "agent", Status: "working"})},
+		"provider_status": {record("agent", model.ProviderStatus{ID: "agent", Status: "working"})},
 	})
 	d.ForceDraw()
 	cells, _, _ := screen.GetContents()

@@ -7,7 +7,6 @@ import (
 
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
-	"whirlwind/internal/workflow"
 )
 
 func loadProviderStatuses(ctx context.Context, client *control.Client, snapshot control.Snapshot) {
@@ -21,7 +20,7 @@ func loadProviderStatuses(ctx context.Context, client *control.Client, snapshot 
 	if err != nil {
 		return
 	}
-	var statuses workflow.ProviderStatuses
+	var statuses model.ProviderStatuses
 	if json.Unmarshal(data, &statuses) != nil {
 		return
 	}

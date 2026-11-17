@@ -26,7 +26,7 @@ func TestLocalProviderStatusReportsUnavailableConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var status workflow.ProviderStatuses
+	var status model.ProviderStatuses
 	if err := json.Unmarshal(data, &status); err != nil {
 		t.Fatal(err)
 	}

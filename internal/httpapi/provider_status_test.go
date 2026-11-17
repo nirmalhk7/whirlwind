@@ -68,7 +68,7 @@ func TestProviderStatusCachesChecksAndInvalidatesOnConfigurationAndStop(t *testi
 		if w.Code != 200 || !strings.Contains(w.Body.String(), `"status":"`+want+`"`) {
 			t.Fatalf("status response: %d %s", w.Code, w.Body)
 		}
-		var response workflow.ProviderStatuses
+		var response model.ProviderStatuses
 		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || len(response.Providers) != 1 {
 			t.Fatalf("provider evidence: %s %v", w.Body, err)
 		}

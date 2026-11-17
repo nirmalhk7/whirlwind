@@ -77,11 +77,11 @@ func isExplicitEmptyIdeationNotice(message string) bool {
 	} else {
 		return false
 	}
-	present := make(map[string]bool, len(ideationDirectionCategories))
+	present := make(map[string]bool, len(model.DirectionCategories()))
 	for _, category := range strings.FieldsFunc(categories, func(char rune) bool { return !unicode.IsLetter(char) }) {
 		present[category] = true
 	}
-	for _, category := range ideationDirectionCategories {
+	for _, category := range model.DirectionCategories() {
 		if !present[category] {
 			return false
 		}
