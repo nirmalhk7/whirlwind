@@ -125,7 +125,7 @@ func TestFooterKeepsKeyboardHelpAfterStatusUpdates(t *testing.T) {
 	rows := strings.Split(strings.TrimSuffix(screenText(screen), "\n"), "\n")
 	_, statusRow, _, _ := d.status.GetRect()
 	footer := strings.Join(rows[statusRow:], "\n")
-	for _, want := range []string{"connected", "Tab", "quit", "v/click rationale", "logs", "approve"} {
+	for _, want := range []string{"connected", "Tab", "quit", "v/click rationale", "logs", "retry failed", "plan review"} {
 		if !strings.Contains(footer, want) {
 			t.Errorf("footer missing %s: %s", want, footer)
 		}
