@@ -41,3 +41,5 @@ go test -race ./...
 ```
 
 The native tests execute actual sandboxed processes: they verify read-only source, protected metadata, scoped new files, credential bootstrap, TLS initialization, direct network denial and ACP terminal write denial. Legacy physical gateway tests remain separate compatibility checks in [OpenShell setup](openshell-setup.md).
+
+Recorded linked-worktree, UDP/DNS and SSH/22 acceptance, positive controls, tested platform and runtime versions are in [native isolation acceptance](nono-native-acceptance.md).
