@@ -99,6 +99,8 @@ qlty check --all
 
 The native tests run real nono filesystem, network and ACP terminal boundary checks. Controlled OpenShell fixtures remain for legacy recovery regressions; they do not establish physical isolation. See [nono setup](docs/nono-setup.md) for runtime and platform details.
 
+Settings-driven live provider outcomes and reproduction are recorded in [configured ACP acceptance](docs/acp-configured-acceptance.md). Skipped or incomplete checks do not certify authenticated inference.
+
 ## Repository
 
 - `cmd/whirlwind/`: durable local supervisor and command entry point.
