@@ -10,6 +10,7 @@ import (
 	"whirlwind/internal/control"
 	"whirlwind/internal/github"
 	"whirlwind/internal/httpapi"
+	"whirlwind/internal/rolequeue"
 	"whirlwind/internal/workflow"
 )
 
@@ -37,6 +38,14 @@ func run() error {
 		return err
 	}
 	engine := workflow.New(s, github.CLI{}, config.data)
+	if redisURL := os.Getenv("WHIRLWIND_REDIS_URL"); redisURL != "" {
+		queues, err := rolequeue.Open(redisURL, os.Getenv("WHIRLWIND_REDIS_NAMESPACE"))
+		if err != nil {
+			return err
+		}
+		defer func() { _ = queues.Close() }()
+		engine.UseRoleQueues(queues)
+	}
 	api := httpapi.New(s, engine, os.Getenv("WHIRLWIND_WEBHOOK_SECRET"))
 	api.Context = ctx
 	return serveSupervisor(ctx, engine, control.SupervisorDispatcher{DB: s.DB, Commands: localCommandExecutor{api: api, shutdown: cancel}}, control.SocketPath(config.data))

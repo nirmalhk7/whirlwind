@@ -46,7 +46,7 @@ func (e *Engine) generateAndSaveIdeation(ctx context.Context, p model.Project, d
 }
 
 func (e *Engine) pauseUnchangedIdeation(ctx context.Context, project model.Project, day string) error {
-	if err := e.Store.SaveDirections(ctx, project.ID, day, nil); err != nil {
+	if err := e.saveDirectionsForSchedule(ctx, project.ID, day, nil); err != nil {
 		return err
 	}
 	err := fmt.Errorf("ideation incomplete: no new evidence-backed directions; missing categories: %s", strings.Join(directionCategories, ", "))
@@ -55,7 +55,7 @@ func (e *Engine) pauseUnchangedIdeation(ctx context.Context, project model.Proje
 }
 
 func (e *Engine) pauseFailedIdeation(ctx context.Context, project model.Project, day string, failure error) error {
-	if err := e.Store.SaveDirections(ctx, project.ID, day, nil); err != nil {
+	if err := e.saveDirectionsForSchedule(ctx, project.ID, day, nil); err != nil {
 		return errors.Join(failure, err)
 	}
 	message := fmt.Sprintf("%s: ideation paused before a complete result; retry or update the Ideation ACP queue: %v", project.Name, failure)
@@ -63,7 +63,7 @@ func (e *Engine) pauseFailedIdeation(ctx context.Context, project model.Project,
 }
 
 func (e *Engine) saveGeneratedDirections(ctx context.Context, p model.Project, day string, directions []model.Direction, snapshot discoverySnapshot) error {
-	if err := e.Store.SaveDirections(ctx, p.ID, day, directions); err != nil {
+	if err := e.saveDirectionsForSchedule(ctx, p.ID, day, directions); err != nil {
 		return err
 	}
 	if err := e.notifyGeneratedDirections(ctx, p, directions); err != nil {
@@ -76,6 +76,14 @@ func (e *Engine) saveGeneratedDirections(ctx context.Context, p model.Project, d
 		return fmt.Errorf("ideation incomplete: no worthwhile new direction for categories: %s", strings.Join(missing, ", "))
 	}
 	return validateCompleteDirections(directions)
+}
+
+func (e *Engine) saveDirectionsForSchedule(ctx context.Context, project, day string, directions []model.Direction) error {
+	slot, _ := ctx.Value(ideationSlotKey{}).(string)
+	if slot == "" {
+		slot = day
+	}
+	return e.Store.SaveDirectionsForSlot(ctx, project, day, slot, directions)
 }
 
 func (e *Engine) notifyGeneratedDirections(ctx context.Context, project model.Project, directions []model.Direction) error {
