@@ -158,3 +158,34 @@ Generated directions include `rank`, `expected_benefit`, `effort_estimate`, `unc
 `GET /provider-status` reports optional `quota_pool` and `quota_snapshot` separately from protocol connectivity. Quota snapshots retain the complete native response in `raw_metadata`; `applicability` remains `unknown`, including historical snapshots, because provider model/account applicability is not inferred. Routing remains conservative across reported windows. Its `quota_fresh` is boolean or null; null means native quota freshness is unknown. No token-to-subscription-percentage conversion is performed.
 
 Usage reports preserve missing historical runtime in `unknown_runtime_attempts`; admission blocks instead of treating it as zero. Entry `kind` distinguishes model attempts from synthetic `legacy` unknowns, deterministic `verification` checks, and `preflight` with no model turn. Reconciliation of legacy session IDs also requires confirmed termination; supplying usage requires attempt scope and observed `active_runtime_ms`.
+
+
+## Role queue HTTP endpoints
+
+These endpoints run only on the supervisor's second private Unix socket (see
+[local supervisor](docs/local-supervisor.md#native-task-queues)). Unix socket
+permissions authorize the owning account; this is not a remote worker API.
+Use `Host: localhost`, `Content-Type: application/json`, and no browser
+`Origin`. Each path is `/api/v1/queues/{role}/{action}`; `role` must be
+`planner_tasks`, `coding_tasks`, `reviewer_tasks`, or `finalizer_tasks`.
+
+| POST action | JSON request | Result |
+| --- | --- | --- |
+| `push` | `{}`, or `{"plan_id":"plan_…","version":3}` | 204 publishes already-durable eligible work. A targeted retry is idempotent; invalid phase or revision is 409. |
+| `pop` | `{}` | 200 returns `id`, `token`, `plan_id`, `version`, `stage`, and `expires_at_ms` for a two-minute lease; 204 means no claimable head. |
+| `renew` | `{"id":42,"token":"…"}` | 204 extends a current lease; stale receipts return 409. |
+| `release` | Same receipt | 204 returns current work to the head; an expired receipt cannot release a newer lease. |
+| `ack` | Same receipt | 204 if the authoritative transition already retired this revision; 409 rather than discarding unchanged work. |
+
+A manual pop leases metadata only; it neither executes an agent nor approves
+or advances a plan. The supervisor is the normal consumer. Do not store the
+receipt in public logs. An interrupted request after a successful pop may leave
+the claim active until its lease expires. There is no arbitrary task-payload or
+role-transition API.
+
+Example (set `queue_socket` to the private queue socket path):
+
+```sh
+curl --unix-socket "$queue_socket" -H 'Content-Type: application/json' \
+  -d '{}' http://localhost/api/v1/queues/planner_tasks/push
+```

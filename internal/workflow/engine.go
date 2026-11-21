@@ -10,6 +10,7 @@ import (
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
+	"whirlwind/internal/taskqueue"
 )
 
 type Engine struct {
@@ -30,6 +31,9 @@ type Engine struct {
 	closing                  bool
 	wake                     chan struct{}
 	providerStatuses         providerStatusCache
+	taskQueues               *taskqueue.Client
+	taskQueueError           string
+	taskQueueCursor          int
 	retryWait                func(context.Context, time.Duration) error
 	attemptTimeout           time.Duration
 	integrationBrokerFactory func(context.Context, model.Project, []model.IntegrationSource) (*integrationMCPBroker, error)
@@ -40,6 +44,9 @@ type Engine struct {
 func New(s *store.Store, g github.Client, root string) *Engine {
 	return &Engine{Store: s, GitHub: g, Root: root, Adapter: func(p model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: p} }, owner: store.ID(), running: map[string]context.CancelFunc{}, active: map[string]int{}, wake: make(chan struct{}, 1)}
 }
+
+// UseTaskQueues enables named HTTP role dispatch; call before starting the engine.
+func (e *Engine) UseTaskQueues(queues *taskqueue.Client) { e.taskQueues = queues }
 
 // Wake is a coalesced hint. Durable state remains the source of dispatch eligibility.
 func (e *Engine) Wake() {

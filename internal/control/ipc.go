@@ -82,41 +82,49 @@ func Listen(path string, dispatcher Dispatcher) (*LocalServer, error) {
 	if dispatcher == nil {
 		return nil, errors.New("local supervisor dispatcher is required")
 	}
-	absolute, err := filepath.Abs(path)
+	listener, absolute, info, err := listenPrivateSocket(path)
 	if err != nil {
-		return nil, err
-	}
-	if err = os.MkdirAll(filepath.Dir(absolute), 0700); err != nil {
-		return nil, fmt.Errorf("create private control directory: %w", err)
-	}
-	dir, err := os.Lstat(filepath.Dir(absolute))
-	if err != nil {
-		return nil, err
-	}
-	if dir.Mode()&os.ModeSymlink != 0 || !dir.IsDir() || dir.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(dir) {
-		return nil, fmt.Errorf("control directory %s must be an owned private directory (mode 0700)", filepath.Dir(absolute))
-	}
-	if err = removeStaleSocket(absolute); err != nil {
-		return nil, err
-	}
-	listener, err := net.Listen("unix", absolute)
-	if err != nil {
-		return nil, fmt.Errorf("listen on local control socket: %w", err)
-	}
-	if err = os.Chmod(absolute, 0600); err != nil {
-		_ = listener.Close()
-		_ = os.Remove(absolute)
-		return nil, fmt.Errorf("secure local control socket: %w", err)
-	}
-	info, err := os.Lstat(absolute)
-	if err != nil {
-		_ = listener.Close()
-		_ = os.Remove(absolute)
 		return nil, err
 	}
 	server := &LocalServer{listener: listener, path: absolute, info: info, conns: make(map[net.Conn]struct{})}
 	go server.serve(dispatcher)
 	return server, nil
+}
+
+func listenPrivateSocket(path string) (net.Listener, string, os.FileInfo, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if err = os.MkdirAll(filepath.Dir(absolute), 0700); err != nil {
+		return nil, "", nil, fmt.Errorf("create private control directory: %w", err)
+	}
+	dir, err := os.Lstat(filepath.Dir(absolute))
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if dir.Mode()&os.ModeSymlink != 0 || !dir.IsDir() || dir.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(dir) {
+		return nil, "", nil, fmt.Errorf("control directory %s must be an owned private directory (mode 0700)", filepath.Dir(absolute))
+	}
+	if err = removeStaleSocket(absolute); err != nil {
+		return nil, "", nil, err
+	}
+	listener, err := net.Listen("unix", absolute)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("listen on local control socket: %w", err)
+	}
+	if err = os.Chmod(absolute, 0600); err != nil {
+		_ = listener.Close()
+		_ = os.Remove(absolute)
+		return nil, "", nil, fmt.Errorf("secure local control socket: %w", err)
+	}
+	info, err := os.Lstat(absolute)
+	if err != nil {
+		_ = listener.Close()
+		_ = os.Remove(absolute)
+		return nil, "", nil, err
+	}
+	return listener, absolute, info, nil
 }
 
 func ownedByCurrentUser(info os.FileInfo) bool {

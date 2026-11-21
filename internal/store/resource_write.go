@@ -78,6 +78,9 @@ func notifyResourceChange(ctx context.Context, tx *sql.Tx, kind, id string, valu
 		if err := syncPlannerPublicationTx(ctx, tx, before, data); err != nil {
 			return err
 		}
+		if err := stageRoleTaskTx(ctx, tx, id, data); err != nil {
+			return err
+		}
 		return notifyTaskTransition(ctx, tx, before, data)
 	}
 	if kind == "plan_versions" {
