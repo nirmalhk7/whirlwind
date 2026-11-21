@@ -115,6 +115,15 @@ Settings-driven live provider outcomes and reproduction are recorded in [configu
 
 `settings.yaml` remains the authoritative YAML file; `--settings` or `WHIRLWIND_SETTINGS_FILE` selects another path. The configuration contains workers, ACP providers, and independent ordered role queues. Explicitly configure each required role; an absent queue cannot borrow a different role's choices. Invalid settings block new dispatch while running attempts retain their recorded configuration.
 
+The default supervisor also owns four durable task queues in its existing
+SQLite state. Planners receive approved ideas, coding receives separately
+approved plans and repair feedback, reviewers receive implementation
+candidates, and finalizers receive accepted candidates that passed required
+checks and any critical approval. Agents do not start other roles. The
+supervisor pushes and claims role handoffs over a private local HTTP Unix
+socket; no Redis service or related configuration is required.
+See [Native task queues](docs/local-supervisor.md#native-task-queues).
+
 A role choice selects its ACP provider, model, and supported thinking configuration. Effective settings and configuration version are recorded for each attempt. Missing installation, authentication, or compatible capabilities produce actionable errors. Metadata-only account/quota checks do not authorize native model inference.
 
 Worker stop/resume settings, pending questions, approvals, deadlines, and restart counters persist outside the terminal session. Closing the dashboard leaves the supervisor running. Normal restart preserves an active attempt's original deadline. Replacements must reconcile old processes, sandboxes, and interrupted tool actions before obtaining write ownership; stale results are rejected.

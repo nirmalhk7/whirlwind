@@ -16,6 +16,7 @@ type IdeationSchedule struct {
 	// NoveltyRepairAttempts preserves the persisted settings key; it bounds
 	// content-validation repair attempts and does not run uniqueness checks.
 	NoveltyRepairAttempts int    `json:"novelty_repair_attempts,omitempty"`
+	IntervalMinutes       int    `json:"interval_minutes,omitempty"`
 	Enabled               bool   `json:"enabled"`
 	Time                  string `json:"time"`
 	Timezone              string `json:"timezone"`
@@ -45,6 +46,9 @@ func (s IdeationSchedule) Validate() error {
 	if s.HistoryRunTokenBudget > perRetrieval*attempts {
 		return fmt.Errorf("ideation total history budget cannot exceed %d tokens for %d bounded generation attempts", perRetrieval*attempts, attempts)
 	}
+	if s.IntervalMinutes < 0 || s.IntervalMinutes > 10080 {
+		return fmt.Errorf("ideation interval_minutes must be between 1 and 10080 when configured")
+	}
 	if _, err := time.Parse("15:04", s.Time); err != nil {
 		return fmt.Errorf("ideation time must be HH:MM")
 	}
@@ -73,6 +77,23 @@ func (s IdeationSchedule) DueDay(now time.Time) (string, error) {
 	return local.Format("2006-01-02"), nil
 }
 
+// dueSlot returns the display day and a distinct durable schedule key. The
+// interval uses UTC elapsed minutes; daylight-saving repeats do not repeat work.
+func (s IdeationSchedule) dueSlot(now time.Time) (day, slot string, err error) {
+	if s.IntervalMinutes == 0 {
+		day, err = s.DueDay(now)
+		return day, day, err
+	}
+	if err = s.Validate(); err != nil {
+		return "", "", err
+	}
+	loc, _ := time.LoadLocation(s.Timezone)
+	seconds := int64(s.IntervalMinutes) * 60
+	start := time.Unix(now.Unix()/seconds*seconds, 0)
+	return start.In(loc).Format(time.DateOnly), fmt.Sprintf("interval-%d-%d", s.IntervalMinutes, start.Unix()), nil
+}
+
 func (e *Engine) IdeationDay(ctx context.Context, now time.Time) (string, error) {
-	return e.settings(ctx).Ideation.DueDay(now)
+	day, _, err := e.settings(ctx).Ideation.dueSlot(now)
+	return day, err
 }

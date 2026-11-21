@@ -36,7 +36,16 @@ func run() error {
 	if err = config.initialize(ctx, s); err != nil {
 		return err
 	}
+	if err = s.BackfillRoleTasks(ctx); err != nil {
+		return err
+	}
+	queues, closeQueues, err := control.ListenQueues(ctx, control.QueueSocketPath(config.data), s)
+	if err != nil {
+		return err
+	}
+	defer closeQueues()
 	engine := workflow.New(s, github.CLI{}, config.data)
+	engine.UseTaskQueues(queues)
 	api := httpapi.New(s, engine, os.Getenv("WHIRLWIND_WEBHOOK_SECRET"))
 	api.Context = ctx
 	return serveSupervisor(ctx, engine, control.SupervisorDispatcher{DB: s.DB, Commands: localCommandExecutor{api: api, shutdown: cancel}}, control.SocketPath(config.data))

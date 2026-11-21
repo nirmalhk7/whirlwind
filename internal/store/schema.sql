@@ -221,3 +221,20 @@ BEGIN SELECT RAISE(ABORT,'approved plan versions are immutable'); END;
 DROP TABLE IF EXISTS proposal_components;
 -- Current layouts are installed directly; old migration history is unused.
 DROP TABLE IF EXISTS migrations;
+
+-- Lightweight delivery/outbox data only; business state remains in resources.
+CREATE TABLE IF NOT EXISTS role_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL CHECK (role IN ('planner_tasks','coding_tasks','reviewer_tasks','finalizer_tasks')),
+    plan_id TEXT NOT NULL,
+    project_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK (version > 0),
+    stage TEXT NOT NULL,
+    ready INTEGER NOT NULL DEFAULT 0 CHECK (ready IN (0,1)),
+    token TEXT NOT NULL DEFAULT '',
+    expires_at INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (plan_id, version)
+);
+CREATE INDEX IF NOT EXISTS role_tasks_fifo ON role_tasks(role, id);
+CREATE TRIGGER IF NOT EXISTS role_tasks_delete_plan AFTER DELETE ON resources WHEN OLD.kind='execution_plans'
+BEGIN DELETE FROM role_tasks WHERE plan_id=OLD.id; END;

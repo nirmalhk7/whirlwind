@@ -20,7 +20,7 @@ func (e *Engine) Daily(ctx context.Context) {
 	if !schedule.Enabled {
 		return
 	}
-	day, err := schedule.DueDay(time.Now())
+	day, slot, err := schedule.dueSlot(time.Now())
 	if err != nil {
 		return
 	}
@@ -33,13 +33,19 @@ func (e *Engine) Daily(ctx context.Context) {
 		if err != nil || p.Paused {
 			continue
 		}
-		if err := e.runDailyProject(ctx, p, day); err != nil {
+		if err := e.runDailySlot(ctx, p, day, slot); err != nil {
 			continue
 		}
 	}
 }
 
+type ideationSlotKey struct{}
+
 func (e *Engine) runDailyProject(ctx context.Context, p model.Project, day string) error {
+	return e.runDailySlot(ctx, p, day, day)
+}
+
+func (e *Engine) runDailySlot(ctx context.Context, p model.Project, day, slot string) error {
 	ctx, release, err := e.projectRunnerContext(ctx, p.ID)
 	if errors.Is(err, ErrProjectPaused) {
 		return nil
@@ -51,14 +57,14 @@ func (e *Engine) runDailyProject(ctx context.Context, p model.Project, day strin
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	key := p.ID + ":" + day
+	key := p.ID + ":" + slot
 	leaseKey := "daily:" + p.ID
 	lease, err := e.Store.Claim(ctx, leaseKey, e.owner, time.Hour)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = e.Store.Release(context.Background(), leaseKey, e.owner, lease.Fence) }()
-	return e.runScheduledIdeation(ctx, p, day, key)
+	return e.runScheduledIdeation(context.WithValue(ctx, ideationSlotKey{}, slot), p, day, key)
 }
 
 func (e *Engine) runScheduledIdeation(ctx context.Context, p model.Project, day, key string) error {
