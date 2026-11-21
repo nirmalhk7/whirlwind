@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sort"
 	"whirlwind/internal/model"
+	"whirlwind/internal/rolequeue"
 	"whirlwind/internal/store"
 )
 
@@ -20,6 +21,10 @@ func (e *Engine) dispatch(ctx context.Context) {
 		return
 	}
 	counts := e.runningCounts(records)
+	if e.roleQueues != nil {
+		e.dispatchRoleQueues(ctx, records, counts)
+		return
+	}
 	sort.SliceStable(records, func(i, j int) bool { return records[i].CreatedOrder < records[j].CreatedOrder })
 	queues := map[string][]model.ExecutionPlan{}
 	var projects []string
@@ -87,6 +92,10 @@ func (e *Engine) runningCounts(records []model.Record) map[string]int {
 	return counts
 }
 func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, counts map[string]int) {
+	e.dispatchDelivery(ctx, task, counts, nil)
+}
+
+func (e *Engine) dispatchDelivery(ctx context.Context, task model.ExecutionPlan, counts map[string]int, delivery *rolequeue.Delivery) {
 	record, err := e.Store.Get(ctx, "projects", task.ProjectID)
 	if err != nil {
 		return
@@ -125,7 +134,7 @@ func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, cou
 	counts[project.ID]++
 	e.background.Go(func() {
 		defer func() { e.mu.Lock(); delete(e.running, task.ID); e.mu.Unlock() }()
-		if err := e.runStep(run, task.ID, e.failOwnedStep); stepFailed(err) {
+		if err := e.runDeliveredStep(run, task.ID, e.failOwnedStep, delivery); stepFailed(err) {
 			e.fail(ctx, task.ID, err)
 		}
 	})

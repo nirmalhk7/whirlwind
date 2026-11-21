@@ -115,6 +115,53 @@ Settings-driven live provider outcomes and reproduction are recorded in [configu
 
 `settings.yaml` remains the authoritative YAML file; `--settings` or `WHIRLWIND_SETTINGS_FILE` selects another path. The configuration contains workers, ACP providers, and independent ordered role queues. Explicitly configure each required role; an absent queue cannot borrow a different role's choices. Invalid settings block new dispatch while running attempts retain their recorded configuration.
 
+### Redis-backed workflow handoffs
+
+The supervisor can dispatch through four independent FIFO role queues. Start
+the supervisor with `WHIRLWIND_REDIS_URL` (a `redis://` or `rediss://` URL)
+and `WHIRLWIND_REDIS_NAMESPACE` (a unique namespace for this SQLite state
+directory). For example, with a local Redis server running:
+
+```sh
+WHIRLWIND_REDIS_URL=redis://127.0.0.1:6379/0 \
+WHIRLWIND_REDIS_NAMESPACE=whirlwind-local \
+go run ./cmd/whirlwind --supervisor
+```
+
+| Queue suffix | Eligible committed work |
+| --- | --- |
+| `planner_tasks` | A human-approved direction or idea ready for a plan. |
+| `coding_tasks` | A confirmed plan or a repair from review/verification, within the same frozen plan. |
+| `reviewer_tasks` | A coded or repaired candidate. Reviewer preparation runs here, before inspecting the implementation. |
+| `finalizer_tasks` | Accepted review above 80%, passing required checks, and separate candidate approval when critical. |
+
+The supervisor is the only writer and reader of these namespaced Redis sorted
+sets; agents do not need Redis credentials or message one another. The
+supervisor invokes only the role for the committed stage. SQLite still owns
+plans, approvals, evidence, leases, outcomes, and local-only delivery. Redis
+holds only versioned task references. A completed state transition replaces the
+old delivery on the next dispatch; if a process dies first, the still-current
+revision can resume under the existing lease and recovery rules. Replay does
+not grant exactly-once provider side effects. The finalizer rechecks immutable
+evidence and does not push or open PRs.
+
+FIFO is per role; a busy or capacity-limited head is not overtaken. Redis
+unavailability pauses new role dispatch instead of bypassing the queues.
+After reconnect or Redis data loss, the supervisor rebuilds pending deliveries
+from committed state in readiness order. Use one namespace per state directory
+and a private, access-controlled Redis instance (TLS for remote connections).
+Unset the two variables to continue using the original local dispatch path.
+
+Ideation keeps its normal daily `workers.ideation.time` and `timezone` when
+`interval_minutes` is absent. Set `workers.ideation.interval_minutes` to 1–10080
+for an elapsed-minute cadence instead, or `enabled: false` to disable scheduled
+ideation. The schedule catches up only the latest slot after restart and still
+requires idea approval before planning.
+
+To exercise the transport and planner handoff against an isolated local Redis
+in tests, set `WHIRLWIND_TEST_REDIS_URL` and run
+`go test ./internal/rolequeue ./internal/workflow -run 'Redis|QueuedApproval|RoleRouting|IdeationInterval'`.
+
 A role choice selects its ACP provider, model, and supported thinking configuration. Effective settings and configuration version are recorded for each attempt. Missing installation, authentication, or compatible capabilities produce actionable errors. Metadata-only account/quota checks do not authorize native model inference.
 
 Worker stop/resume settings, pending questions, approvals, deadlines, and restart counters persist outside the terminal session. Closing the dashboard leaves the supervisor running. Normal restart preserves an active attempt's original deadline. Replacements must reconcile old processes, sandboxes, and interrupted tool actions before obtaining write ownership; stale results are rejected.

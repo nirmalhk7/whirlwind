@@ -9,6 +9,7 @@ import (
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
+	"whirlwind/internal/rolequeue"
 	"whirlwind/internal/store"
 )
 
@@ -30,6 +31,8 @@ type Engine struct {
 	closing                  bool
 	wake                     chan struct{}
 	providerStatuses         providerStatusCache
+	roleQueues               rolequeue.Transport
+	roleQueueError           string
 	retryWait                func(context.Context, time.Duration) error
 	attemptTimeout           time.Duration
 	integrationBrokerFactory func(context.Context, model.Project, []model.IntegrationSource) (*integrationMCPBroker, error)
@@ -40,6 +43,9 @@ type Engine struct {
 func New(s *store.Store, g github.Client, root string) *Engine {
 	return &Engine{Store: s, GitHub: g, Root: root, Adapter: func(p model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: p} }, owner: store.ID(), running: map[string]context.CancelFunc{}, active: map[string]int{}, wake: make(chan struct{}, 1)}
 }
+
+// UseRoleQueues selects the Redis dispatch path; call before starting the engine.
+func (e *Engine) UseRoleQueues(queues rolequeue.Transport) { e.roleQueues = queues }
 
 // Wake is a coalesced hint. Durable state remains the source of dispatch eligibility.
 func (e *Engine) Wake() {

@@ -18,6 +18,11 @@ func (step *taskStep) review() (bool, error) {
 	if err := step.verifyReviewReadiness(); err != nil {
 		return step.failedReviewVerification(err)
 	}
+	if step.roleQueues != nil && step.task.IdeaID != "" {
+		if err := step.prepareQueuedReview(); err != nil {
+			return true, err
+		}
+	}
 	review, commit, err := step.performReview()
 	if err != nil {
 		return true, err

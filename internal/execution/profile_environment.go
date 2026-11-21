@@ -21,7 +21,8 @@ func openShellBootstrapEnvironment(name string) bool {
 }
 
 func environmentAllowed(name string, profile Profile) bool {
-	if name == "WHIRLWIND_MCP_BROKER_TOKEN" {
+	switch name {
+	case "WHIRLWIND_MCP_BROKER_TOKEN", "WHIRLWIND_REDIS_URL", "WHIRLWIND_REDIS_NAMESPACE":
 		return false
 	}
 	if strings.HasPrefix(name, "WHIRLWIND_PROCESS_") {

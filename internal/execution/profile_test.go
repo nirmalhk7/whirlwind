@@ -168,6 +168,15 @@ func TestOpenShellBridgeReceivesOnlyHostBootstrapEnvironment(t *testing.T) {
 	}
 }
 
+func TestSupervisorRedisConfigNeverReachesAgents(t *testing.T) {
+	env := []string{"PATH=/bin", "WHIRLWIND_REDIS_URL=redis://fixture.invalid", "WHIRLWIND_REDIS_NAMESPACE=fixture"}
+	profile := Profile{Environment: []string{"WHIRLWIND_REDIS_URL", "WHIRLWIND_REDIS_NAMESPACE"}}
+	got := filteredEnvironment(env, profile)
+	if len(got) != 1 || got[0] != "PATH=/bin" {
+		t.Fatalf("supervisor-only Redis configuration reached an agent: %v", got)
+	}
+}
+
 func TestGeneratedGuestEnvironmentCannotBeOverriddenByPolicy(t *testing.T) {
 	reserved := []string{"HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "TMPDIR", "TMP", "TEMP", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"}
 	policy := &model.SandboxPolicy{Environment: reserved}
