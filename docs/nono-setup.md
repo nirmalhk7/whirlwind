@@ -21,7 +21,7 @@ Use `kind: acp`, `acp_profile: codex` and `command: [codex-acp]` in the existing
 
 Read-only roles can read their worktree and declared read roots. Coding grants follow `allowed_paths`; declared check output directories and private runtime state remain writable. On macOS, native rules support literal paths and `*`, `?`, and `**` patterns, including creation of new files. Git metadata, project policy and launcher code remain protected from writes. Symlink destinations are checked by the kernel.
 
-Direct outbound network access is blocked. An authenticated local egress broker permits public HTTP/HTTPS on ports 80 and 443, plus explicitly authorized private hosts. Selected MCP calls retain their scoped host broker; its capability and Unix socket stay outside the agent's filesystem grants. TLS clients use the public system CA bundle.
+Direct outbound network access is blocked. Provider and project `sandbox.allowed_domains` entries give the local nono proxy explicit HTTP/HTTPS host or path grants. Without grants or credential routes, provider egress is blocked. Multiple path grants on a host share one proxy route. Selected MCP calls retain their scoped host broker and its private Unix socket. TLS interception for path rules uses the sandbox-scoped proxy CA. [Verified Codex configuration](acp-configured-acceptance.md#codex-follow-up-2026-11-19)
 
 Codex ACP selects `agent-full-access` **inside the enforced nono boundary** to avoid applying a second nested Seatbelt sandbox. Whirlwind's read-only client permissions and nono's filesystem/network rules still apply. An adapter lacking that mode fails with an actionable setup error.
 

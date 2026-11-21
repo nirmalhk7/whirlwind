@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -118,6 +119,13 @@ func qualifyLiveACP(t *testing.T, settings liveACPSettings, id string) {
 	p = resolved
 	logLiveCodexBackend(t, p)
 	choice, choiceErr := liveConfiguredChoice(settings, id)
+	if liveRole() == "code" {
+		if choiceErr != nil {
+			t.Fatalf("incomplete Coding selection: %v", choiceErr)
+		}
+		t.Run("writable-candidate", func(t *testing.T) { qualifyLiveCodingCandidate(t, p, choice) })
+		return
+	}
 	cwd := t.TempDir()
 	t.Run("metadata", func(t *testing.T) { qualifyLiveCatalog(t, p, cwd) })
 	t.Run("missing-authentication", func(t *testing.T) { qualifyMissingLiveAuth(t, p) })
@@ -139,6 +147,14 @@ func qualifyLiveACP(t *testing.T, settings liveACPSettings, id string) {
 		bad.Thinking = &model.ThinkingChoice{ConfigID: "whirlwind-unsupported", Value: "whirlwind-unsupported"}
 		assertUnsupportedLiveSetting(t, adapter, bad, "thinking")
 	})
+	// The supervisor reuses private runtime state across compatible turns. A
+	// fresh standalone sandbox cannot load the first turn's saved session.
+	profile, err := execution.ForProvider(input.CWD, input.ReadOnly, "", p.Sandbox, p.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.RuntimeDir = t.TempDir()
+	input.Execution = &profile
 	marker := "WHIRLWIND_" + liveNonce(t)
 	input.Prompt = "Do not use tools or inspect files. Remember this marker for our next turn and reply with only it: " + marker
 	var first provider.Output
@@ -445,8 +461,33 @@ func qualifyLiveFallback(t *testing.T, settings liveACPSettings) {
 	engine, project := liveFallbackEngine(t, ctx, settings, chain)
 	recorder := &liveFallbackRecorder{primary: chain[0], cwd: project.Path}
 	engine.Adapter = recorder.adapter
-	out, err := engine.agent(ctx, project, model.ExecutionPlan{ID: "live-fallback-plan", ProjectID: project.ID}, provider.Input{Role: liveRole(), CWD: project.Path, ReadOnly: true, Prompt: "Reply with only FALLBACK_OK. Do not use tools or inspect or modify files."})
-	if err != nil || len(recorder.calls) < 2 || strings.TrimSpace(out.Text) != "FALLBACK_OK" {
+	task := model.ExecutionPlan{ID: "live-fallback-plan", ProjectID: project.ID}
+	role, marker := liveRole(), "FALLBACK_"+liveNonce(t)
+	prompt := "Reply with only " + marker + ". Do not use tools or inspect or modify files."
+	if role == "plan" {
+		task.Stage, task.PlanVersion = "planning", 1
+		if err := engine.Store.Put(ctx, "execution_plans", task.ID, task, 0); err != nil {
+			t.Fatal(err)
+		}
+		fixture := model.PlanSpecification{
+			Objective: marker, What: "Run a fixture check.", Why: "Verify fallback.", Benefit: "Confirm live inference.",
+			Where: []string{"fixture.txt"}, Scope: []string{"Read-only qualification."},
+			Exclusions: []string{"No project changes."}, Steps: []string{"Run the fixture check."},
+			RepositoryTestInventory:  "None configured: empty fixture repository.",
+			RepositoryBuildInventory: "None configured: empty fixture repository.",
+			AcceptanceCriteria:       []string{"The fixture check exits zero."},
+			Requirements:             []model.Requirement{{ID: "FALLBACK-1", Outcome: "The fixture check exits zero.", EvidenceMethod: "Run the fixture check."}},
+			Checks:                   []model.Check{{Name: "fixture", Command: []string{"/usr/bin/true"}}},
+		}
+		prompt = "Return only this JSON plan exactly. Do not use tools or inspect or modify files.\n" + jsonText(fixture)
+	}
+	out, err := engine.agent(ctx, project, task, provider.Input{Role: role, CWD: project.Path, ReadOnly: true, Prompt: prompt})
+	matched := strings.TrimSpace(out.Text) == marker
+	if role == "plan" {
+		spec, decodeErr := decodePlan(out.Text)
+		matched = decodeErr == nil && spec.Objective == marker
+	}
+	if err != nil || len(recorder.calls) < 2 || !matched {
 		t.Fatalf("configured fallback incomplete: calls=%v err=%v", recorder.calls, err)
 	}
 	for _, choice := range chain[1:] {
@@ -494,7 +535,21 @@ func liveFallbackEngine(t *testing.T, ctx context.Context, settings liveACPSetti
 		}
 	})
 	engine := New(state, nil, t.TempDir())
-	project := model.Project{ID: "live-fallback", Path: t.TempDir()}
+	repo, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"-c", "user.name=Whirlwind Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "--quiet", "-m", "ACP fallback fixture"},
+	} {
+		command := exec.CommandContext(ctx, "git", args...)
+		command.Dir = repo
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("prepare fallback repository: %v: %s", err, output)
+		}
+	}
+	project := model.Project{ID: "live-fallback", Name: "ACP fallback fixture", Path: repo}
 	for _, p := range settings.Providers {
 		p.Available = provider.Available(p)
 		p.Quota = "unknown"
@@ -502,6 +557,9 @@ func liveFallbackEngine(t *testing.T, ctx context.Context, settings liveACPSetti
 			t.Fatal(err)
 		}
 		project.Policy.Providers = append(project.Policy.Providers, p.ID)
+	}
+	if err := state.Put(ctx, "projects", project.ID, project, 0); err != nil {
+		t.Fatal(err)
 	}
 	if err := state.Put(ctx, "agents", liveRole(), model.AgentConfig{Role: liveRole(), Chain: chain}, 0); err != nil {
 		t.Fatal(err)

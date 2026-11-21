@@ -42,7 +42,7 @@ func (e *Engine) worktree(ctx context.Context, repo, path, branch, base string) 
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	_, err := github.Run(ctx, repo, "git", "worktree", "add", "-b", branch, path, base)
+	_, err := codingGit(ctx, repo, "worktree", "add", "-b", branch, path, base)
 	return err
 }
 
@@ -118,32 +118,55 @@ func registeredWorktree(ctx context.Context, repo, target, branch string) (bool,
 
 // commit rejects changed paths outside approved scope, stages changes, and commits nonempty diffs with Whirlwind identity.
 func (e *Engine) commit(ctx context.Context, p model.Project, path, message string) error {
-	files, err := github.Run(ctx, path, "git", "status", "--porcelain", "-uall")
+	files, err := codingChangedPaths(ctx, path)
 	if err != nil {
 		return err
 	}
-	for _, line := range strings.Split(files, "\n") {
-		if len(line) < 4 {
-			continue
-		}
-		f := strings.TrimSpace(line[3:])
-		if strings.Contains(f, " -> ") {
-			f = strings.Split(f, " -> ")[1]
-		}
-		f = strings.Trim(f, "\"")
-		if !policy.AllowedPath(p.Policy, f) {
-			return fmt.Errorf("out-of-scope file: %s", f)
-		}
+	if err := validateCodingPaths(p.Policy, files); err != nil {
+		return err
 	}
-	if _, err = github.Run(ctx, path, "git", "add", "--all"); err != nil {
+	if len(files) == 0 {
+		return nil
+	}
+	if _, err = codingGit(ctx, path, append([]string{"add", "--all", "--"}, files...)...); err != nil {
 		return err
 	}
 	diff, err := github.Run(ctx, path, "git", "diff", "--cached", "--name-only")
 	if err != nil || diff == "" {
 		return err
 	}
-	_, err = github.Run(ctx, path, "git", "-c", "user.name=Whirlwind", "-c", "user.email=whirlwind@localhost", "commit", "-m", message)
+	_, err = codingGit(ctx, path, "commit", "-m", message)
 	return err
+}
+
+func codingGit(ctx context.Context, cwd string, args ...string) (string, error) {
+	return submissionGitRun(ctx, cwd, append([]string{
+		"-c", brokerNoHooksArgument, "-c", "commit.gpgsign=false", "-c", "core.editor=true",
+		"-c", "user.name=Whirlwind", "-c", "user.email=whirlwind@localhost",
+	}, args...)...)
+}
+
+func codingChangedPaths(ctx context.Context, cwd string) ([]string, error) {
+	status, err := codingGit(ctx, cwd, "status", "--porcelain=v1", "-z", "--no-renames", "--untracked-files=all")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for entry := range strings.SplitSeq(strings.TrimSuffix(status, "\x00"), "\x00") {
+		if len(entry) >= 4 {
+			paths = append(paths, entry[3:])
+		}
+	}
+	return paths, nil
+}
+
+func validateCodingPaths(scope model.Policy, paths []string) error {
+	for _, path := range paths {
+		if !policy.AllowedPath(scope, path) {
+			return fmt.Errorf("out-of-scope file: %s", path)
+		}
+	}
+	return nil
 }
 
 // base fetches and resolves the configured remote default branch, or uses local HEAD when no default branch is recorded.

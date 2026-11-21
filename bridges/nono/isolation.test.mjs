@@ -62,7 +62,7 @@ const dnsProbe=`const resolver=new (require('dns').Resolver)({timeout:300,tries:
 const sshProbe=`const socket=require('net').connect({host:process.argv[1],port:22});socket.on('connect',()=>{throw new Error('direct SSH/22 escaped')});socket.on('error',error=>{if(!['EPERM','EACCES'].includes(error.code))throw error;console.log('denied')});`;
 
 // Direct sockets must remain blocked even when HTTP egress is enabled, not merely in deny-all mode.
-test('native nono blocks UDP DNS and outbound SSH/22 bypasses with egress enabled',async t=>{
+test('native nono blocks Coding UDP DNS and outbound SSH/22 bypasses with egress enabled',async t=>{
  versions(t);
  const cwd=await realpath(await mkdtemp(join(tmpdir(),'ww-network-native-'))),socket=createSocket('udp4');
  let packets=0;
@@ -81,7 +81,7 @@ test('native nono blocks UDP DNS and outbound SSH/22 bypasses with egress enable
   const dnsControl=await run(process.execPath,['-e',dnsProbe,port],cwd);
   assert.equal(dnsControl.status,0,dnsControl.stderr);assert.equal(dnsControl.stdout.trim(),'192.0.2.7');
   assert.equal(packets,2,'unconfined UDP and DNS controls must reach fixture');
-  const profile={cwd,read_only:true,read_roots:[],domains:['allowed.whirlwind.invalid'],environment:[]};
+  const profile={cwd,read_only:false,allowed_paths:['fixture-output.txt'],read_roots:[],domains:['allowed.whirlwind.invalid'],environment:[]};
   for(const [name,probe,args] of [['UDP',udpProbe,[port]],['DNS',dnsProbe,[port]],['DNS/53',udpProbe,['53']],['loopback SSH/22',sshProbe,['127.0.0.1']],['outbound SSH/22',sshProbe,['192.0.2.7']]]){
    const result=await native(profile,probe,args);
    assert.equal(result.status,0,`${name}: ${result.stderr||result.stdout}`);assert.equal(result.stdout.trim(),'denied',name);

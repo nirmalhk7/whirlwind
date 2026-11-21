@@ -134,3 +134,33 @@ func TestLDoesNotOpenPanelLogs(t *testing.T) {
 		})
 	}
 }
+
+func TestShortTerminalKeepsRunsAndHelpVisible(t *testing.T) {
+	d := New()
+	screen := dashboardScreen(t, d)
+	screen.SetSize(60, 20)
+	d.ForceDraw()
+	view := screenText(screen)
+	for _, want := range []string{"No runs", "? all keys"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("60x20 dashboard missing %q\n%s", want, view)
+		}
+	}
+}
+
+func TestRunnerStatusEmphasisSettlesOnNextRefresh(t *testing.T) {
+	d := New()
+	screen := dashboardScreen(t, d)
+	for _, step := range []struct{ online, emphasized bool }{
+		{true, false}, {false, true}, {false, false}, {true, true}, {true, false},
+	} {
+		d.Present(control.Snapshot{"supervisor": {record("local", map[string]bool{"online": step.online})}})
+		d.ForceDraw()
+		x, y, _, _ := d.runnerStatus.GetRect()
+		_, _, style, _ := screen.GetContent(x+3, y)
+		_, _, attrs := style.Decompose()
+		if (attrs&tcell.AttrBold != 0) != step.emphasized {
+			t.Errorf("online=%v: want emphasis=%v, attributes=%v", step.online, step.emphasized, attrs)
+		}
+	}
+}

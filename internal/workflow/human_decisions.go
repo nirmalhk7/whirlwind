@@ -205,21 +205,36 @@ func latestPendingDecisionAttempt(ctx context.Context, database *store.Store, ta
 	if err != nil {
 		return "", err
 	}
-	var latest model.Attempt
-	var latestOrder int64
+	type attemptScope struct{ role, purpose, unit string }
+	type scopedAttempt struct {
+		attempt model.Attempt
+		order   int64
+	}
+	latestByScope := map[attemptScope]scopedAttempt{}
 	for _, record := range records {
 		attempt, err := store.Decode[model.Attempt](record)
 		if err != nil {
 			return "", err
 		}
-		if attempt.Task == taskID && attempt.PlanVersion == planVersion && record.CreatedOrder > latestOrder {
-			latest, latestOrder = attempt, record.CreatedOrder
+		if attempt.Task == taskID && attempt.PlanVersion == planVersion {
+			scope := attemptScope{attempt.Role, attempt.Purpose, attempt.UnitID}
+			if record.CreatedOrder > latestByScope[scope].order {
+				latestByScope[scope] = scopedAttempt{attempt, record.CreatedOrder}
+			}
 		}
 	}
-	if latest.AttemptID == "" || !latest.Finished || latest.Status != "paused" || !pending[latest.AttemptID] {
+	// A newer Reviewer preparation or parallel unit cannot supersede a Coding question.
+	var latest scopedAttempt
+	for _, candidate := range latestByScope {
+		attempt := candidate.attempt
+		if candidate.order > latest.order && attempt.Finished && attempt.Status == "paused" && pending[attempt.AttemptID] {
+			latest = candidate
+		}
+	}
+	if latest.attempt.AttemptID == "" {
 		return "", store.ErrConflict
 	}
-	return latest.AttemptID, nil
+	return latest.attempt.AttemptID, nil
 }
 
 func roleMayResumeStage(role, stage string) bool {

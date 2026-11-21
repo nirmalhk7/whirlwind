@@ -176,6 +176,53 @@ test('nono filters HTTPS paths using child scoped certificate trust',async()=>{
  }finally{await rm(cwd,{recursive:true,force:true})}
 });
 
+test('nono preserves multiple HTTPS path grants on one host', async () => {
+ const cwd = await mkdtemp(join(tmpdir(), 'ww-nono-paths-'));
+ try {
+  const profile = {cwd, read_only: true, domains: ['https://example.com/index.html', 'https://example.com/robots.txt']};
+  const code = `(${async function probe() {
+   const http = require('node:http');
+   const tls = require('node:tls');
+   const fs = require('node:fs');
+   const proxy = new URL(process.env.HTTPS_PROXY);
+   const auth = Buffer.from(decodeURIComponent(proxy.username) + ':' + decodeURIComponent(proxy.password)).toString('base64');
+   const ca = fs.readFileSync(process.env.SSL_CERT_FILE);
+   function statusFor(path) {
+    return new Promise((resolve, reject) => {
+     const request = http.request({
+      hostname: proxy.hostname, port: proxy.port, method: 'CONNECT', path: 'example.com:443',
+      headers: {host: 'example.com:443', 'proxy-authorization': 'Basic ' + auth},
+     });
+     request.once('connect', (response, socket) => {
+      if (response.statusCode !== 200) {
+       socket.destroy();
+       reject(new Error('CONNECT status ' + response.statusCode));
+       return;
+      }
+      const secure = tls.connect({socket, servername: 'example.com', ca});
+      secure.once('secureConnect', () => secure.write('GET ' + path + ' HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n'));
+      let responseText = '';
+      secure.on('data', chunk => { responseText += chunk; });
+      secure.once('end', () => resolve(Number(responseText.split(' ')[1])));
+      secure.once('error', reject);
+     });
+     request.once('error', reject);
+     request.end();
+    });
+   }
+   console.log(JSON.stringify(await Promise.all(['/index.html', '/robots.txt', '/blocked'].map(statusFor))));
+  }.toString()})().catch(error => { console.error(error.message); process.exitCode = 1; });`;
+  const result = spawnSync(process.execPath, [resolve('bridges/nono/launch.mjs'), JSON.stringify(profile), '--', process.execPath, '-e', code], {encoding: 'utf8', timeout: 20000});
+  assert.equal(result.status, 0, result.stderr);
+  const [index, robots, blocked] = JSON.parse(result.stdout);
+  assert.ok([200, 404].includes(index), `first granted path returned ${index}`);
+  assert.ok([200, 404].includes(robots), `second granted path returned ${robots}`);
+  assert.equal(blocked, 403, 'ungranted path reached the upstream');
+ } finally {
+  await rm(cwd, {recursive: true, force: true});
+ }
+});
+
 // Real upstream credentials remain on the host; the child receives only the
 // native proxy's scoped phantom token and cannot bypass method/path grants.
 test('nono injects scoped credentials outside child and enforces endpoint methods',async()=>{

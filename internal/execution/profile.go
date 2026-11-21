@@ -52,6 +52,7 @@ type Profile struct {
 	CommandHash         string                             `json:"command_hash,omitempty"`
 	AllowedPaths        []string                           `json:"allowed_paths,omitempty"`
 	CWD                 string                             `json:"cwd"`
+	CommandCWD          string                             `json:"command_cwd,omitempty"`
 	ReadOnly            bool                               `json:"read_only"`
 	PolicyHash          string                             `json:"policy_hash"`
 	ReadRoots           []string                           `json:"read_roots"`

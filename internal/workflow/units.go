@@ -161,7 +161,18 @@ func (r *unitRun) validateCheckpointCommit(previous model.Unit) error {
 		return errors.New("durable unit checkpoint commit does not match its worktree HEAD")
 	}
 	if previous.Stage == "integrated" {
-		if _, err = github.Run(r.ctx, r.task.Worktree, "git", "merge-base", "--is-ancestor", previous.Commit, "HEAD"); err != nil {
+		integrated := previous.Commit
+		record, err := r.Store.Get(r.ctx, "checkpoints", integrationCheckpointID(r.task, previous.ID, previous.Commit))
+		if err == nil {
+			checkpoint, decodeErr := store.Decode[integrationCheckpoint](record)
+			if decodeErr != nil || checkpoint.Commit == "" || checkpoint.Source != previous.Commit || checkpoint.Plan != r.task.ID || checkpoint.Version != r.task.PlanVersion || checkpoint.Unit != previous.ID {
+				return errors.Join(decodeErr, errors.New("invalid unit integration checkpoint"))
+			}
+			integrated = checkpoint.Commit
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if _, err = github.Run(r.ctx, r.task.Worktree, "git", "merge-base", "--is-ancestor", integrated, "HEAD"); err != nil {
 			return fmt.Errorf("integrated unit checkpoint is not in the task candidate history: %w", err)
 		}
 	}

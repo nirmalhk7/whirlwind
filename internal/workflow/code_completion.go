@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
+	"whirlwind/internal/verification"
 )
 
 func (e *Engine) finishCode(ctx context.Context, p model.Project, t *model.ExecutionPlan) error {
@@ -16,7 +18,7 @@ func (e *Engine) finishCode(ctx context.Context, p model.Project, t *model.Execu
 		return err
 	}
 	if err := e.verify(ctx, p, t); err != nil {
-		if errors.Is(err, store.ErrPersistence) {
+		if errors.Is(err, store.ErrPersistence) || errors.Is(err, verification.ErrJobSetup) || errors.Is(err, execution.ErrSandbox) {
 			return err
 		}
 		t.Stage = "repair"

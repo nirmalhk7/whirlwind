@@ -10,6 +10,30 @@ import {codingRules} from './scope.mjs';
 
 const bridge=dirname(fileURLToPath(import.meta.url));
 const inside=(root,path)=>{const rel=relative(root,path);return rel!== '..'&&!rel.startsWith(`..${process.platform==='win32'?'\\':'/'}`)&&!isAbsolute(rel);};
+
+function networkDomainGrants(domains) {
+ const plainDomains = [];
+ const endpointDomains = new Map();
+ for (const domain of domains) {
+  const url = URL.canParse(domain) ? new URL(domain) : null;
+  if (!url || !['https:', 'http:'].includes(url.protocol) || url.pathname === '/') {
+   plainDomains.push(domain);
+   continue;
+  }
+  const paths = endpointDomains.get(url.hostname) ?? new Set();
+  paths.add(url.pathname);
+  endpointDomains.set(url.hostname, paths);
+ }
+ return {
+  plainDomains,
+  // nono 0.81.0 uses one credential-less route per hostname. Pass its
+  // endpoint rules together so subsequent path grants cannot replace it.
+  endpointDomains: Array.from(endpointDomains, ([domain, paths]) => ({
+   domain, endpoints: Array.from(paths, path => ({method: '*', path})),
+  })),
+ };
+}
+
 let scratch,temporary=false,control,proxy,cursorAlias;
 try{
  const profile=JSON.parse(process.argv[2]);
@@ -17,6 +41,8 @@ try{
  if(process.argv[3]!=='--'||!command.length||!profile?.cwd||typeof profile.read_only!=='boolean')throw new Error('Execution profile and argv required');
  if(process.platform!=='darwin')throw new Error('Execution requires macOS; inspection remains available');
  const cwd=await realpath(profile.cwd);
+ const commandCwd=profile.command_cwd?await realpath(profile.command_cwd):cwd;
+ if(!inside(cwd,commandCwd))throw new Error('Command directory escapes workspace');
  const nono=process.env.WHIRLWIND_NONO_CLI||'nono';
  const version=spawnSync(nono,['--version'],{encoding:'utf8',timeout:5000});
  if(version.status!==0||version.stdout.trim()!=='nono 0.81.0')throw new Error('Install required nono 0.81.0');
@@ -65,6 +91,7 @@ try{
  }
  const domains=profile.domains??[];
  if(!Array.isArray(domains)||domains.some(domain=>typeof domain!=='string'||!domain||domain==='*'||domain==='**'||/[\s\x00]/.test(domain)))throw new Error('Configure explicit bounded network domains');
+ const {plainDomains,endpointDomains}=networkDomainGrants(domains);
  const system=['/bin','/sbin','/usr','/lib','/lib64','/System','/Library/Developer/CommandLineTools','/opt/homebrew/Cellar','/opt/homebrew/opt','/usr/local/Cellar','/usr/local/opt','/private/etc/ssl','/etc/ssl/certs','/etc/ld.so.cache','/etc/resolv.conf','/etc/hosts','/etc/nsswitch.conf','/etc/passwd','/etc/group','/etc/protocols','/etc/services','/etc/localtime','/private/var/db/dyld','/private/var/select','/dev'].filter(existsSync);
  const reads=[...system,cwd,bridge,resolve(bridge,'../sandbox/initialize-state.mjs'),resolve(bridge,'../openshell/mcp-stdio.mjs'),await realpath(process.execPath),...(cursorAlias?[cursorAlias]:[]),...(profile.read_roots??[])];
  const writes=[scratch,...(profile.write_roots??[])];
@@ -83,7 +110,7 @@ try{
   const stat=await lstat(path);filesystem[stat.isDirectory()?access:`${access}_file`].push(path);
  }
  const protectedPaths=[join(cwd,'.git'),join(cwd,'.whirlwind.yml'),join(cwd,'.whirlwind.yaml'),bridge,resolve(bridge,'../sandbox')];
- const policy={meta:{name:'whirlwind',version:'1.0.0'},groups:{include:[],exclude:['system_read_macos','system_read_linux_core','system_write_macos','system_write_linux','user_tools','homebrew_macos','homebrew_linux']},workdir:{access:'read'},filesystem,network:{block:domains.length===0&&services.length===0,open_port:port?[port]:[],custom_credentials:nativeCredentials,credentials:services},security:{capability_elevation:false}};
+ const policy={meta:{name:'whirlwind',version:'1.0.0'},groups:{include:[],exclude:['system_read_macos','system_read_linux_core','system_write_macos','system_write_linux','user_tools','homebrew_macos','homebrew_linux']},workdir:{access:'read'},filesystem,network:{block:domains.length===0&&services.length===0,allow_domain:endpointDomains,open_port:port?[port]:[],custom_credentials:nativeCredentials,credentials:services},security:{capability_elevation:false}};
  if(process.platform==='darwin'){
   const escapedControl=control.replace(/[.+^${}()|[\]\\]/g,'\\$&');
   const publicCA=`(allow file-read* (regex ${JSON.stringify(`^${escapedControl}/state/nono/sessions/intercept-[^/]+/intercept-ca\\.pem$`)}))`;
@@ -91,15 +118,15 @@ try{
  }
  const policyFile=join(control,'profile.json');await writeFile(policyFile,JSON.stringify(policy),{mode:0o600,flag:'wx'});
  const proxyURL=port?`http://whirlwind:${token}@127.0.0.1:${port}`:undefined;
- const env={...process.env,XDG_CONFIG_HOME:join(control,'config'),XDG_STATE_HOME:join(control,'state'),XDG_DATA_HOME:join(control,'data'),PATH:dirname(await realpath(process.execPath))+delimiter+(process.env.PATH??''),PWD:cwd,OPENSSL_CONF:'/dev/null',SSL_CERT_FILE:process.platform==='darwin'?'/private/etc/ssl/cert.pem':'/etc/ssl/certs/ca-certificates.crt',NO_PROXY:'',no_proxy:''};
+ const env={...process.env,XDG_CONFIG_HOME:join(control,'config'),XDG_STATE_HOME:join(control,'state'),XDG_DATA_HOME:join(control,'data'),PATH:dirname(await realpath(process.execPath))+delimiter+(process.env.PATH??''),PWD:commandCwd,OPENSSL_CONF:'/dev/null',SSL_CERT_FILE:process.platform==='darwin'?'/private/etc/ssl/cert.pem':'/etc/ssl/certs/ca-certificates.crt',NO_PROXY:'',no_proxy:''};
  for(const name of ['HTTP_PROXY','HTTPS_PROXY','http_proxy','https_proxy','ALL_PROXY','all_proxy','WHIRLWIND_TOOL_PROXY'])delete env[name];
  for(const name of sourceNames)delete env[name];
  for(const [name,value] of credentialBindings)env[name]=value;
  if(proxyURL)env.WHIRLWIND_TOOL_PROXY=proxyURL;
  delete env.WHIRLWIND_MCP_BROKER_TOKEN;delete env.WHIRLWIND_NONO_PROXY_TOKEN;delete env.WHIRLWIND_NONO_CLI;
  for(const name of Object.keys(env))if(name.startsWith('NONO_'))delete env[name];
- const args=['run','--silent','--no-diagnostics','--no-rollback','--no-rollback-prompt','--profile',policyFile,'--allow-cwd',...domains.flatMap(domain=>['--allow-domain',domain]),'--',process.execPath,resolve(bridge,'../sandbox/initialize-state.mjs'),JSON.stringify({homes,readRoots:profile.read_roots??[],nativeFiles:profile.native_files??[]}),'--',...command];
- const child=spawn(nono,args,{cwd,stdio:'inherit',env});
+ const args=['run','--silent','--no-diagnostics','--no-rollback','--no-rollback-prompt','--profile',policyFile,'--allow-cwd',...plainDomains.flatMap(domain=>['--allow-domain',domain]),'--',process.execPath,resolve(bridge,'../sandbox/initialize-state.mjs'),JSON.stringify({homes,readRoots:profile.read_roots??[],nativeFiles:profile.native_files??[]}),'--',...command];
+ const child=spawn(nono,args,{cwd:commandCwd,stdio:'inherit',env});
  for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>child.kill(signal));
  process.exitCode=await new Promise((ok,bad)=>{child.once('error',bad);child.once('exit',(code,signal)=>ok(code??(signal?128:1)));});
 }catch(error){console.error(`nono execution failed: ${error.message}`);process.exitCode=1;}
