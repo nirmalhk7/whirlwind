@@ -20,7 +20,7 @@ func (s *Source) ensureFile(ctx context.Context) error {
 
 func (s *Source) seed(ctx context.Context) error {
 	doc := Document{Version: 1, Workers: workflow.DefaultSettings(), Providers: []Provider{}, Agents: map[string][]model.AgentChoice{}}
-	for _, load := range []func(context.Context, *Document) error{s.seedWorkers, s.seedProviders, s.seedAgents} {
+	for _, load := range []func(context.Context, *Document) error{s.seedWorkers, s.seedProviders, s.seedAgents, s.seedAgentHooks} {
 		if err := load(ctx, &doc); err != nil {
 			return err
 		}
@@ -74,6 +74,21 @@ func (s *Source) seedAgents(ctx context.Context, doc *Document) error {
 		doc.Agents[config.Role] = config.Chain
 	}
 	return nil
+}
+
+func (s *Source) seedAgentHooks(ctx context.Context, doc *Document) error {
+	record, err := s.store.Get(ctx, "workflow_config", "global")
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	config, err := store.Decode[model.WorkflowConfig](record)
+	if err == nil {
+		doc.AgentHooks = config.AgentHooks
+	}
+	return err
 }
 
 func (s *Source) createFile(encoded []byte) error {

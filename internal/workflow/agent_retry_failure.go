@@ -71,7 +71,7 @@ func terminalExecutionError(ctx context.Context, err error) error {
 }
 
 func terminalFailure(err error) error {
-	if terminalSetupFailure(err) || terminalPersistenceFailure(err) {
+	if terminalSetupFailure(err) || terminalPersistenceFailure(err) || errors.Is(err, execution.ErrAgentHookBlocked) {
 		return err
 	}
 	if isAdmissionWait(err) {

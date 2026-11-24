@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url';
 import {createMCPGateway} from './mcp-gateway.mjs';
 import {randomBytes} from 'node:crypto';
 import {codingRules} from './scope.mjs';
+import {lifecycleHookExit,prepareLifecycleHook} from './lifecycle-hooks.mjs';
 
 const bridge=dirname(fileURLToPath(import.meta.url));
 const inside=(root,path)=>{const rel=relative(root,path);return rel!== '..'&&!rel.startsWith(`..${process.platform==='win32'?'\\':'/'}`)&&!isAbsolute(rel);};
@@ -114,8 +115,19 @@ try{
  if(process.platform==='darwin'){
   const escapedControl=control.replace(/[.+^${}()|[\]\\]/g,'\\$&');
   const publicCA=`(allow file-read* (regex ${JSON.stringify(`^${escapedControl}/state/nono/sessions/intercept-[^/]+/intercept-ca\\.pem$`)}))`;
-  policy.unsafe_macos_seatbelt_rules=['(allow file-write-data (literal "/dev/null"))',...codingRules(profile,cwd),...(domains.length||services.length?[publicCA]:[]),...protectedPaths.map(path=>`(deny file-write* (subpath ${JSON.stringify(path)}))`)];
+  const protectedSettings=new Set();
+  for(const file of profile.protected_files??[]){
+   const location=join(await realpath(dirname(file)),basename(file));
+   if(!inside(cwd,location)||location===cwd)throw new Error('Protected settings must be within workspace');
+   for(const candidate of [location,await realpath(file)].filter(path=>inside(cwd,path)&&path!==cwd)){
+    // Protect the file and prevent replacing it by moving an ancestor.
+    for(let path=candidate;path!==cwd;path=dirname(path))protectedSettings.add(path);
+   }
+  }
+  policy.unsafe_macos_seatbelt_rules=['(allow file-write-data (literal "/dev/null"))',...codingRules(profile,cwd),...(domains.length||services.length?[publicCA]:[]),...protectedPaths.map(path=>`(deny file-write* (subpath ${JSON.stringify(path)}))`),...Array.from(protectedSettings,path=>`(deny file-write* (literal ${JSON.stringify(path)}))`)];
  }
+ const hook=await prepareLifecycleHook(profile.lifecycle_hook,control,{...profile,cwd},nono);
+ if(hook)policy.session_hooks=hook.hooks;
  const policyFile=join(control,'profile.json');await writeFile(policyFile,JSON.stringify(policy),{mode:0o600,flag:'wx'});
  const proxyURL=port?`http://whirlwind:${token}@127.0.0.1:${port}`:undefined;
  const env={...process.env,XDG_CONFIG_HOME:join(control,'config'),XDG_STATE_HOME:join(control,'state'),XDG_DATA_HOME:join(control,'data'),PATH:dirname(await realpath(process.execPath))+delimiter+(process.env.PATH??''),PWD:commandCwd,OPENSSL_CONF:'/dev/null',SSL_CERT_FILE:process.platform==='darwin'?'/private/etc/ssl/cert.pem':'/etc/ssl/certs/ca-certificates.crt',NO_PROXY:'',no_proxy:''};
@@ -128,7 +140,8 @@ try{
  const args=['run','--silent','--no-diagnostics','--no-rollback','--no-rollback-prompt','--profile',policyFile,'--allow-cwd',...plainDomains.flatMap(domain=>['--allow-domain',domain]),'--',process.execPath,resolve(bridge,'../sandbox/initialize-state.mjs'),JSON.stringify({homes,readRoots:profile.read_roots??[],nativeFiles:profile.native_files??[]}),'--',...command];
  const child=spawn(nono,args,{cwd:commandCwd,stdio:'inherit',env});
  for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>child.kill(signal));
- process.exitCode=await new Promise((ok,bad)=>{child.once('error',bad);child.once('exit',(code,signal)=>ok(code??(signal?128:1)));});
+ const status=await new Promise((ok,bad)=>{child.once('error',bad);child.once('exit',(code,signal)=>ok(code??(signal?128:1)));});
+ process.exitCode=await lifecycleHookExit(hook,status);
 }catch(error){console.error(`nono execution failed: ${error.message}`);process.exitCode=1;}
 finally{
  if(proxy)await new Promise(ok=>{proxy.close(()=>ok());proxy.closeAllConnections();});

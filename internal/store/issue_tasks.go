@@ -124,6 +124,12 @@ func (s *Store) BindIssue(ctx context.Context, repo string, t model.ExecutionPla
 // SaveDirections stores a direction run and records whether all four categories
 // were produced in one transaction. Incomplete runs remain visible for recovery.
 func (s *Store) SaveDirections(ctx context.Context, project, day string, directions []model.Direction) error {
+	return s.SaveDirectionsForSlot(ctx, project, day, day, directions)
+}
+
+// SaveDirectionsForSlot saves directions with their display date and deduplicates
+// automatic scheduling by its occurrence rather than by the whole date.
+func (s *Store) SaveDirectionsForSlot(ctx context.Context, project, day, slot string, directions []model.Direction) error {
 	groupID := ID()
 	return s.Transaction(ctx, func(tx *sql.Tx) error {
 		for _, d := range directions {
@@ -131,7 +137,7 @@ func (s *Store) SaveDirections(ctx context.Context, project, day string, directi
 				return err
 			}
 		}
-		key := project + ":" + day
+		key := project + ":" + slot
 		var version int
 		err := tx.QueryRowContext(ctx, "SELECT version FROM resources WHERE kind='schedules' AND id=?", key).Scan(&version)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

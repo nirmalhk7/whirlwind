@@ -98,6 +98,15 @@ func (c *Client) writablePath(filePath string) (string, string, string, error) {
 	if err != nil {
 		return "", "", "", err
 	}
+	if c.input.Execution != nil {
+		info, _ := os.Stat(path)
+		for _, protected := range c.input.Execution.ProtectedFiles {
+			protectedInfo, _ := os.Stat(protected)
+			if path == protected || (info != nil && protectedInfo != nil && os.SameFile(info, protectedInfo)) {
+				return "", "", "", errors.New("ACP write to supervisor settings denied")
+			}
+		}
+	}
 	relative, err := filepath.Rel(root, path)
 	if err != nil || (!c.plannerOutputPath(path) && !policy.AllowedPath(c.input.Policy, relative)) {
 		return "", "", "", errors.New("ACP write outside committed scope")

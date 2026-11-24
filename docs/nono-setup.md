@@ -27,6 +27,26 @@ Codex ACP selects `agent-full-access` **inside the enforced nono boundary** to a
 
 On Linux, the launcher refuses whole-worktree write grants that Landlock cannot subtract protected metadata from, and unsupported glob grants. Use bounded existing literal directories for Linux coding; do not widen permissions to bypass a refusal. Native read-only work and declared check outputs remain supported.
 
+## Role-specific lifecycle hooks
+
+Configure agent hook commands in the supervisor's `settings.yaml`. The same role configuration applies to each registered project.
+
+```yaml
+agent_hooks:
+  code:
+    before:
+      - name: environment-ready
+        command: [go, version]
+    after:
+      - name: unit-tests
+        command: [go, test, ./...]
+        timeout_seconds: 120
+```
+
+Supported roles are `ideate`, `plan`, `code`, `review`, and `finalizer`. Hooks run in list order, with dependencies named by `depends_on` within the same event run first. To migrate an older `agent_hooks` list from project policy, copy each selected check definition into its role and event in `settings.yaml` and remove the policy's `agent_hooks` section. Use verification commands whose checker code is outside the agent's edit scope. Put scratch files under `TMPDIR`. Commands see a read-only Git snapshot containing tracked and nonignored worktree files, plus approved read roots. The check sandbox blocks network access. Commands can use its isolated runtime directories for caches and reports.
+
+A failed `before` check blocks startup. After provider and terminal cleanup, the sandbox runs `after` checks before returning a successful result. A failed command sends diagnostics back to the same ACP session for up to three repair rounds within the active run budget. If the provider cannot resume, or a check times out or lacks a valid verdict, completion stays blocked. A Finalizer's pending delivery request is released only after its passing round. Together with the independent workflow verification, these hooks complement the existing mid-session red and green TDD checks.
+
 ## Recovery and verification
 
 Each managed execution persists its deadline, generation and private `nono.json` lifecycle record before launch. Process-group cleanup must succeed before lifecycle state becomes `Stopped`. Interrupted native runs require clean process-registry evidence before replacement. Check results retain their runtime identity and cleanup proof for review.

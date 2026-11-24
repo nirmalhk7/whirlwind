@@ -12,8 +12,12 @@ func (s *providerSession) hasFinalizationTool() bool {
 	return s.input.Role == "finalizer" && s.input.Purpose == "local_finalization" && s.input.ReadOnly && s.hooks.FinalizeDelivery != nil
 }
 func (s *providerSession) hasScopedTool() bool { return s.hasCheckTool() || s.hasFinalizationTool() }
-func finalizationTool() map[string]any {
-	return map[string]any{"type": "function", "name": "finalize_delivery", "description": "Finalize this attempt's exact accepted code version locally. Accepts no identities, paths, commands or Git arguments.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}
+func (s *providerSession) finalizationTool() map[string]any {
+	description := "Finalize this attempt's exact accepted code version locally."
+	if len(s.input.AgentHooks.After) > 0 {
+		description = "Request local delivery of this attempt's exact accepted code version. A pending receipt means publication waits for sandbox checks."
+	}
+	return map[string]any{"type": "function", "name": "finalize_delivery", "description": description + " Accepts no identities, paths, commands or Git arguments.", "inputSchema": map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}
 }
 func (s *providerSession) callScopedTool(ctx context.Context, name string, raw json.RawMessage) (any, error) {
 	switch name {

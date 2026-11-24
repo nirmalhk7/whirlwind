@@ -188,6 +188,7 @@ type RecoveryEpisode struct {
 	UpdatedAt     string `json:"updated_at"`
 }
 type AttemptInput struct {
+	AgentHooks          AgentHookChecks `json:"agent_hooks,omitzero"`
 	ExecutionProfile    string          `json:"execution_profile,omitempty"`
 	Handoff             Handoff         `json:"handoff"`
 	Policy              Policy          `json:"policy"`

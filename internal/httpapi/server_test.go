@@ -211,9 +211,11 @@ func TestSettingsIdeationScheduleValidationAndPersistence(t *testing.T) {
 		schedule string
 		status   int
 	}{
-		{`{"enabled":true,"time":"25:00","timezone":"America/Denver"}`, 422},
-		{`{"enabled":true,"time":"09:30","timezone":"Invalid/Zone"}`, 422},
-		{`{"enabled":false,"time":"09:30","timezone":"America/Denver"}`, 200},
+		{`{"cron":"0 25 * * *"}`, 422},
+		{`{"cron":"CRON_TZ=Invalid/Zone 30 9 * * MON-FRI"}`, 422},
+		{`{"cron":"0 0 10 * * *"}`, 422},
+		{`{"cron":"@daily"}`, 422},
+		{`{"cron":""}`, 200},
 	} {
 		body := `{"global_slots":4,"project_slots":2,"reconciliation_seconds":300,"ideation":` + tc.schedule + `}`
 		r := httptest.NewRequest("PATCH", "http://localhost/api/v1/settings", bytes.NewBufferString(body))
@@ -229,7 +231,7 @@ func TestSettingsIdeationScheduleValidationAndPersistence(t *testing.T) {
 			_ = json.Unmarshal(w.Body.Bytes(), &record)
 			var data map[string]any
 			_ = json.Unmarshal(record.Data, &data)
-			if data["ideation"] == nil || data["ideation"].(map[string]any)["enabled"] != false {
+			if data["ideation"] == nil || data["ideation"].(map[string]any)["cron"] != "" {
 				t.Fatalf("schedule lost: %s", record.Data)
 			}
 		}

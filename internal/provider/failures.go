@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+
+	"whirlwind/internal/execution"
 )
 
 // FailureKind distinguishes retryable transport failures from blocked configurations.
@@ -59,6 +61,9 @@ func (e *TransportError) Unwrap() error { return e.Cause }
 func ClassifyFailure(err error) FailureKind {
 	if err == nil || callerCancellation(err) {
 		return FailureUnknown
+	}
+	if errors.Is(err, execution.ErrAgentHookBlocked) {
+		return FailurePolicy
 	}
 	var startup *StartupError
 	if errors.Is(err, exec.ErrNotFound) || errors.As(err, &startup) {

@@ -18,6 +18,8 @@ import (
 )
 
 type Input struct {
+	AgentHooks             model.AgentHookChecks `json:"agent_hooks,omitzero"`
+	hookRuntimeDir         string
 	PlannerOutputDirectory string
 	PlannerPublicationPath string
 	ReadinessOnly          bool
@@ -149,6 +151,15 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (result Outp
 	if in.NativeIntegrations {
 		p.NativeIntegrations = true
 	}
+	if !in.ReadinessOnly && !in.CatalogOnly && in.Purpose != "provider_test" {
+		if len(in.AgentHooks.Before)+len(in.AgentHooks.After) > 0 {
+			return a.runWithAgentHooks(ctx, p, in, h)
+		}
+	}
+	return a.runResolved(ctx, p, in, h)
+}
+
+func (a ProcessAdapter) runResolved(ctx context.Context, p model.Provider, in Input, h Hooks) (result Output, err error) {
 	in.ProviderID = a.Provider.ID
 	in.ACPProfile = p.ACPProfile
 	s := &providerSession{ctx: ctx, input: in, hooks: h, client: NewClient(in, h), output: Output{SessionID: in.SessionID}}
@@ -203,6 +214,9 @@ func (s *providerSession) sessionExecutionProfile(ctx context.Context, execution
 		if err != nil {
 			return execution.Profile{}, err
 		}
+	}
+	if input.hookRuntimeDir != "" {
+		profile.RuntimeDir = input.hookRuntimeDir
 	}
 	profile.MCPBroker = input.MCPBroker
 	profile.MCPBrokerToken = input.MCPBrokerToken

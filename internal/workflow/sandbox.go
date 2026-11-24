@@ -2,9 +2,11 @@ package workflow
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
@@ -56,6 +58,9 @@ func (a *agentRun) prepareExecutionProfile(chosen model.Provider) error {
 		profile.NativeConfigDigest = evidenceDigest(digests)
 	}
 	profile.AllowedPaths = append([]string{}, a.project.Policy.AllowedPaths...)
+	if err := a.protectHookSettings(&profile); err != nil {
+		return err
+	}
 	a.input.ExecutionProfile = profile.Digest()
 	scope := sha256.Sum256([]byte(a.task.ID + ":" + fmt.Sprint(a.task.PlanVersion) + ":" + a.input.Role + ":" + chosen.ID + ":" + a.input.Model + ":" + a.input.Purpose + ":" + a.input.UnitID + ":" + a.input.ExecutionProfile))
 	profile.RuntimeDir = filepath.Join(a.Root, "sandbox", fmt.Sprintf("%x", scope[:]))
@@ -63,5 +68,33 @@ func (a *agentRun) prepareExecutionProfile(chosen model.Provider) error {
 		return err
 	}
 	a.input.Execution = &profile
+	return nil
+}
+
+// The live settings file can overlap a provider's checkout when Whirlwind
+// itself is registered as a project or uses a custom settings location.
+func (a *agentRun) protectHookSettings(profile *execution.Profile) error {
+	source, ok := a.Store.Source.(interface{ SettingsPath() string })
+	if !ok {
+		return nil
+	}
+	path := source.SettingsPath()
+	directory, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	canonical, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range []string{filepath.Join(directory, filepath.Base(path)), canonical} {
+		rel, err := filepath.Rel(profile.CWD, candidate)
+		if err == nil && filepath.IsLocal(rel) && rel != "." && !slices.Contains(profile.ProtectedFiles, candidate) {
+			if !execution.IsNonoLauncher(profile.Launcher) {
+				return errors.New("authoritative settings inside the agent worktree require native nono protection")
+			}
+			profile.ProtectedFiles = append(profile.ProtectedFiles, candidate)
+		}
+	}
 	return nil
 }

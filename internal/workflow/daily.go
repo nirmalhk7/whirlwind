@@ -9,21 +9,23 @@ import (
 	"whirlwind/internal/store"
 )
 
-// Daily runs ideation for the latest due project/day, skipping completed schedules and delaying failed schedules until retry time.
+// Daily runs ideation for the latest due crontab minute per project, skipping completed schedules and delaying failed schedules until retry time.
 func (e *Engine) Daily(ctx context.Context) {
 	settings := e.settings(ctx)
 	if settings.Stopped {
 		return
 	}
 	e.dispatchQueuedIdeation(ctx)
-	schedule := settings.Ideation
-	if !schedule.Enabled {
+	e.runIdeationSchedule(ctx, settings.Ideation, time.Now())
+}
+
+func (e *Engine) runIdeationSchedule(ctx context.Context, schedule IdeationSchedule, now time.Time) {
+	slot, err := schedule.latestOccurrence(now)
+	if err != nil || slot.IsZero() {
 		return
 	}
-	day, err := schedule.DueDay(time.Now())
-	if err != nil {
-		return
-	}
+	ctx = context.WithValue(ctx, ideationScheduleSlotKey{}, slot)
+	day := slot.Format("2006-01-02")
 	projects, err := e.Store.List(ctx, "projects")
 	if err != nil {
 		return
@@ -51,7 +53,7 @@ func (e *Engine) runDailyProject(ctx context.Context, p model.Project, day strin
 	if err = ctx.Err(); err != nil {
 		return err
 	}
-	key := p.ID + ":" + day
+	key := p.ID + ":" + ideationScheduleSlot(ctx, day)
 	leaseKey := "daily:" + p.ID
 	lease, err := e.Store.Claim(ctx, leaseKey, e.owner, time.Hour)
 	if err != nil {
@@ -66,14 +68,41 @@ func (e *Engine) runScheduledIdeation(ctx context.Context, p model.Project, day,
 	if err != nil || blocked {
 		return err
 	}
-	schedule, load := e.Store.Get(ctx, "schedules", key)
+	prior, load := e.scheduledIdeationRecord(ctx, p.ID, day, key)
 	if load != nil && !errors.Is(load, store.ErrNotFound) {
 		return load
 	}
-	if load == nil && !scheduledRetryAllowed(schedule.Data, recovered) {
+	if load == nil && !scheduledRetryAllowed(prior.Data, recovered) {
 		return nil
 	}
 	return e.runDailyAttempt(ctx, p, day, key)
+}
+
+type ideationScheduleSlotKey struct{}
+
+func ideationScheduleSlot(ctx context.Context, day string) string {
+	if slot, ok := ctx.Value(ideationScheduleSlotKey{}).(time.Time); ok {
+		return slot.UTC().Format(time.RFC3339)
+	}
+	return day
+}
+
+func (e *Engine) scheduledIdeationRecord(ctx context.Context, project, day, key string) (model.Record, error) {
+	record, err := e.Store.Get(ctx, "schedules", key)
+	slot, scheduled := ctx.Value(ideationScheduleSlotKey{}).(time.Time)
+	if !scheduled || !errors.Is(err, store.ErrNotFound) {
+		return record, err
+	}
+	// A legacy day record can account for an already processed occurrence.
+	legacy, err := e.Store.Get(ctx, "schedules", project+":"+day)
+	if err != nil {
+		return legacy, err
+	}
+	updated, _ := time.Parse(time.RFC3339Nano, legacy.UpdatedAt)
+	if updated.Before(slot) {
+		return model.Record{}, store.ErrNotFound
+	}
+	return legacy, nil
 }
 
 func scheduledRetryAllowed(data []byte, recovered bool) bool {

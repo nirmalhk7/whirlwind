@@ -170,7 +170,7 @@ func (a *agentAttempt) captureInput() error {
 	if err != nil {
 		return err
 	}
-	snapshot, err := store.SafeJSON(model.AttemptInput{ExecutionProfile: a.input.ExecutionProfile, Handoff: a.task.Handoff, Policy: a.project.Policy, Provider: provider.ExecutionProvider(a.chosen, a.input.Thinking), ReadOnly: a.input.ReadOnly, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, Model: a.input.Model, Thinking: a.input.Thinking})
+	snapshot, err := store.SafeJSON(model.AttemptInput{AgentHooks: a.input.AgentHooks, ExecutionProfile: a.input.ExecutionProfile, Handoff: a.task.Handoff, Policy: a.project.Policy, Provider: provider.ExecutionProvider(a.chosen, a.input.Thinking), ReadOnly: a.input.ReadOnly, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, Model: a.input.Model, Thinking: a.input.Thinking})
 	if err != nil {
 		return err
 	}
