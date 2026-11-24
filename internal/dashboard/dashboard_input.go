@@ -104,6 +104,8 @@ func (d *Dashboard) handleGlobalPanelAction(event *tcell.EventKey) bool {
 		d.showKeyboardHelp()
 	case 'x':
 		d.toggleRunners()
+	case '!':
+		return d.showDispatchBlock()
 	default:
 		return false
 	}

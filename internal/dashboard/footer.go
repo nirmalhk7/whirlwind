@@ -46,7 +46,8 @@ func shortcutLines(width int) []string {
 }
 
 func (d *Dashboard) updateRunnerStatus(snapshot control.Snapshot) {
-	ready := supervisorOnline(snapshot)
+	online := supervisorOnline(snapshot)
+	ready := online
 	for _, record := range snapshot["settings"] {
 		if record.ID != "global" {
 			continue
@@ -59,7 +60,11 @@ func (d *Dashboard) updateRunnerStatus(snapshot control.Snapshot) {
 		}
 	}
 	label, foreground, background := "[ DOWN ]", tcell.ColorWhite, tcell.ColorRed
-	if ready {
+	if state, present := snapshotDispatchHealth(snapshot); online && state.BlockReason != "" {
+		label = "[BLOCK ]"
+	} else if ready && present && !state.Checked {
+		label, foreground, background = "[ WAIT ]", tcell.ColorBlack, tcell.ColorYellow
+	} else if ready {
 		label, foreground, background = "[  OK  ]", tcell.ColorBlack, tcell.ColorGreen
 	}
 	changed := d.snapshot != nil && d.runnerStatus.GetText(false) != label
