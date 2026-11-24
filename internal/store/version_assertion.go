@@ -14,6 +14,11 @@ func VersionPrecondition(kind, id string, expected int) Change {
 	return Change{Kind: kind, ID: id, Value: resourceVersionAssertion{}, Expected: expected}
 }
 
+func (c Change) isVersionPrecondition() bool {
+	_, ok := c.Value.(resourceVersionAssertion)
+	return ok
+}
+
 // AssertVersion adds a read precondition to the request's commit. It does not
 // rewrite the inspected resource or manufacture a new version/event.
 func (s *Store) AssertVersion(ctx context.Context, kind, id string, expected int) error {
