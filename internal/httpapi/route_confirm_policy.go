@@ -12,6 +12,9 @@ func (q apiRequest) confirmPolicy() error {
 	if e != nil {
 		return e
 	}
+	if p.ManagedPolicy {
+		return &apiError{409, "managed_policy", "Use the local policy approval command for this project"}
+	}
 	old, e := generatedLegacyStarter(p.Path)
 	if e != nil {
 		return e

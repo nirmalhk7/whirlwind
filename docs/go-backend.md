@@ -20,12 +20,31 @@ Set absolute local Git checkout paths under `projects` in the authoritative
 `settings.yaml`. A GitHub remote and authenticated GitHub CLI are not
 part of canonical local delivery. A known [local-only ideation issue](https://github.com/nirmalhk7/whirlwind/issues/21)
 affects upstream revisions that still try to call GitHub during brainstorming.
-Review and commit a `.whirlwind.yml` or
-`.whirlwind.yaml` execution policy. Keep exactly one of those filenames.
 Read [workflow modes](workflow-modes.md) for approvals, the execution lifecycle,
 and local delivery. Use [nono setup](nono-setup.md) for provider installation,
 then configure independent Ideation, Planner, Coding, Reviewer, and Finalizer
 queues in YAML. One role cannot inherit another's queue.
+
+## Project policy approval
+
+Register the checkout in `settings.yaml` and start the supervisor. Prepare a
+YAML policy outside the checkout using the [policy format](#project-policy).
+
+```sh
+./bin/whirlwind policy preview /path/to/checkout /path/to/policy.yaml
+./bin/whirlwind policy approve /path/to/checkout /path/to/policy.yaml VERSION HASH
+```
+
+Review the printed policy and use the version and SHA256 from that preview.
+The command accepts a registered project ID in place of the checkout path.
+Approval stores the exact reviewed policy in Whirlwind's SQLite state and
+queues setup for that project. The checkout stays untouched. Preview again
+after editing the YAML or if the supervisor reports a version conflict.
+Editing the input file takes effect after a fresh approval. A new policy hash
+requires fresh setup and a new approval for plans bound to an older hash.
+
+Existing projects can continue using a committed `.whirlwind.yml` or
+`.whirlwind.yaml`. Keep one of those filenames when using repository policy.
 
 ## Project quality setup
 

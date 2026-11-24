@@ -2,9 +2,11 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"whirlwind/internal/model"
+	"whirlwind/internal/policy"
 	"whirlwind/internal/store"
 )
 
@@ -25,8 +27,42 @@ func (e *Engine) ConfirmProjectPolicy(ctx context.Context, project model.Project
 	if err := e.Store.Write(ctx, changes, nil); err != nil {
 		return err
 	}
-	store.AfterCommit(ctx, e.Wake)
+	store.AfterCommit(ctx, func() {
+		if project.ManagedPolicy {
+			e.StopProject(project.ID)
+		}
+		e.Wake()
+	})
 	return nil
+}
+
+func (e *Engine) projectPolicy(ctx context.Context, project model.Project) (model.Policy, error) {
+	if !project.ManagedPolicy {
+		if project.PolicyHash == "" {
+			return model.Policy{}, errors.New("project policy approval required; use whirlwind policy preview and approve")
+		}
+		rules, hash, err := policy.Load(project.Path)
+		if err == nil && hash != project.PolicyHash {
+			err = errors.New("committed policy changed; confirm updated project policy before continuing")
+		}
+		return rules, err
+	}
+	if err := policy.CheckManagedPolicyLocation(e.Root, project.Path); err != nil {
+		return model.Policy{}, err
+	}
+	record, err := e.Store.Get(ctx, policy.ManagedPolicyResource, project.ID)
+	if err != nil {
+		return model.Policy{}, err
+	}
+	document, err := store.Decode[model.ProjectPolicyDocument](record)
+	if err != nil || document.ProjectID != project.ID {
+		return model.Policy{}, errors.New("approved policy document is invalid for this project")
+	}
+	rules, hash, err := policy.ParseManagedPolicy(document.ProjectID, document.Content)
+	if err != nil || hash != project.PolicyHash {
+		return model.Policy{}, errors.New("approved policy document does not match the current project approval")
+	}
+	return rules, nil
 }
 
 func (e *Engine) restartProjectQualification(ctx context.Context, projectID string) ([]store.Change, error) {
