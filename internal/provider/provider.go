@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os/exec"
 	"slices"
 	"sort"
@@ -142,7 +141,7 @@ func Route(ps []model.Provider, role string, preferred []string, outcomes map[st
 	return c[0], nil
 }
 
-// Run drives a Codex, ACP, or Claude-bridge session over stdio, handling streamed output, tool permissions, user questions, and cancellation.
+// Run drives an ACP session over stdio, including streamed output, tool permissions, user questions, and cancellation.
 func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (result Output, err error) {
 	p, err := ResolveExecutionProvider(a.Provider)
 	if err != nil {
@@ -189,7 +188,7 @@ func (a ProcessAdapter) runResolved(ctx context.Context, p model.Provider, in In
 	transferred = true
 	s.rpc = rpc
 	defer func() { err = errors.Join(err, rpc.Close()) }()
-	err = authenticationACPError(p, s.runProviderKind(p.Kind))
+	err = authenticationACPError(p, s.runACP())
 	s.mu.Lock()
 	result = s.output
 	s.mu.Unlock()
@@ -260,19 +259,6 @@ func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider
 		return nil, nil
 	}
 	return s.prepareCheckMCP(s.ctx, profile)
-}
-
-func (s *providerSession) runProviderKind(kind string) error {
-	switch kind {
-	case "acp":
-		return s.runACP()
-	case "codex":
-		return fmt.Errorf("native Codex execution is unsupported; configure its ACP agent and set kind: acp")
-	case "claude":
-		return fmt.Errorf("Claude bridge execution is unsupported; configure its ACP agent and set kind: acp")
-	default:
-		return errors.New("unsupported provider kind")
-	}
 }
 
 type providerSession struct {
