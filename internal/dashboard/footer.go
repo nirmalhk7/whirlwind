@@ -9,6 +9,8 @@ import (
 	"whirlwind/internal/control"
 )
 
+const compactShortcuts = "? all keys | Tab/Shift-Tab panels | Enter open | q quit"
+
 const keyboardShortcuts = "Tab/Shift-Tab panels | Home/End first/last | PgUp/PgDn page | Enter open (Runs: logs) | i Run ideation (Projects) | v/click rationale (Inbox) | a choose direction / prepare plan (Inbox) | d delete (Inbox) | h rejected history (Inbox) | o earlier directions (Inbox) | t tasks (Inbox) | r retry failed or recheck completed setup (Runs) | r plan review (approve / request changes / reject) (Plans) | v Vim editor (plan review, plan view) | c questions | p permissions | f finalization | x stop/resume runners | j/k/g/G/h/l scroll (text) | Ctrl-B/Ctrl-F page (text) | Esc close | ? all keys | q/Ctrl-C quit"
 
 // Resize the footer before laying out panels, keeping shortcuts visible on resize.
@@ -20,9 +22,11 @@ type dashboardLayout struct {
 func (layout *dashboardLayout) Draw(screen tcell.Screen) {
 	_, _, width, height := layout.GetRect()
 	lines := shortcutLines(width)
-	// Preserve four rows per left-hand panel and one for runner status.
-	if height-len(lines) < 13 {
-		lines = tview.WordWrap("? all keys | Tab panels | Enter open | q quit", width)
+	// Each of the three equal-height navigation panes needs two border rows
+	// and four content rows (two complete Runs entries). Status takes one more.
+	const minimumNavigationRows = 3 * (2 + 4)
+	if height-1-len(lines) < minimumNavigationRows {
+		lines = tview.WordWrap(compactShortcuts, width)
 	}
 	layout.help.SetText(strings.Join(lines, "\n"))
 	layout.ResizeItem(layout.help, max(1, len(lines)), 0)
