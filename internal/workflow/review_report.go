@@ -105,6 +105,9 @@ func (e *Engine) loadReviewTask(ctx context.Context, taskID string) (model.Execu
 		return model.ExecutionPlan{}, err
 	}
 	if !taskHasApprovedReview(task) {
+		if task.PlanDocument != nil && task.PlanDocument.ApprovedHash != "" && task.VerificationID == "" {
+			return model.ExecutionPlan{}, errors.New("approved candidate has no saved verification ID; run approved verification before finalization")
+		}
 		return model.ExecutionPlan{}, errors.New("task lacks an approved plan and completed review evidence")
 	}
 	return task, nil
@@ -184,19 +187,26 @@ func reviewCandidateMatches(provenance *model.Provenance, task model.ExecutionPl
 
 func (e *Engine) loadVerificationEvidence(ctx context.Context, task model.ExecutionPlan, project model.Project) (verification.Report, model.Provenance, error) {
 	record, err := e.Store.Get(ctx, "verification", task.VerificationID)
+	if errors.Is(err, store.ErrNotFound) {
+		return verification.Report{}, model.Provenance{}, fmt.Errorf("saved verification %q is missing; run approved verification before finalization: %w", task.VerificationID, err)
+	}
 	if err != nil {
 		return verification.Report{}, model.Provenance{}, err
 	}
 	var evidence struct {
 		Stage      string              `json:"stage"`
+		Error      string              `json:"error"`
 		Report     verification.Report `json:"report"`
 		Provenance model.Provenance    `json:"provenance"`
 	}
 	if err := json.Unmarshal(record.Data, &evidence); err != nil {
 		return verification.Report{}, model.Provenance{}, err
 	}
-	if !verificationMatchesTask(evidence.Stage, evidence.Provenance, task, project.PolicyHash) {
+	if !verificationMatchesTask(evidence.Provenance, task, project.PolicyHash) {
 		return verification.Report{}, model.Provenance{}, errors.New("verification evidence does not match the reviewed candidate")
+	}
+	if evidence.Stage != "complete" {
+		return verification.Report{}, model.Provenance{}, verificationPrerequisiteError(evidence.Stage, evidence.Error, evidence.Report)
 	}
 	if err := e.validateQltyEvidence(ctx, task, evidence.Report); err != nil {
 		return verification.Report{}, model.Provenance{}, err
@@ -204,8 +214,20 @@ func (e *Engine) loadVerificationEvidence(ctx context.Context, task model.Execut
 	return evidence.Report, evidence.Provenance, nil
 }
 
-func verificationMatchesTask(stage string, provenance model.Provenance, task model.ExecutionPlan, policyHash string) bool {
-	return stage == "complete" && verificationIdentityMatches(provenance, task) && verificationCandidateMatches(provenance, task, policyHash)
+func verificationPrerequisiteError(stage, savedError string, report verification.Report) error {
+	if savedError != "" {
+		return fmt.Errorf("verification for the reviewed candidate did not finish successfully: %s", savedError)
+	}
+	for _, result := range report.Results {
+		if !result.Passed && result.Error != "" {
+			return fmt.Errorf("verification check %q did not finish successfully: %s", result.Name, result.Error)
+		}
+	}
+	return fmt.Errorf("verification for the reviewed candidate is not complete (stage %q); inspect or rerun the approved checks", stage)
+}
+
+func verificationMatchesTask(provenance model.Provenance, task model.ExecutionPlan, policyHash string) bool {
+	return verificationIdentityMatches(provenance, task) && verificationCandidateMatches(provenance, task, policyHash)
 }
 
 func verificationIdentityMatches(provenance model.Provenance, task model.ExecutionPlan) bool {

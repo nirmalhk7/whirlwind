@@ -81,10 +81,11 @@ func (run *verificationRun) checkDiff(p model.Policy, files, patch string) error
 	run.value["risk"] = risk
 	checks = structuredChecks(checks)
 	baseline, err := run.engine.qualityBaseline(run.ctx, model.Project{ID: run.task.ProjectID, Path: run.task.Worktree, Policy: p, PolicyHash: evidenceDigest(p)}, *run.task, checks)
-	if err != nil {
-		return err
-	}
 	run.value["baseline"] = baseline
+	if err != nil {
+		blocked := verification.Report{Results: []verification.Result{}}
+		return run.finish(blocked, blocked, fmt.Errorf("prepare verification baseline: %w", err))
+	}
 	if run.task.IdeaID == "" {
 		checks = append(checks, model.Check{Name: "diff", Command: []string{"git", "diff", "--check", run.task.Base + "...HEAD"}}, model.Check{Name: "tracked-files-clean", Command: []string{"git", "diff", "--exit-code"}}, model.Check{Name: "index-clean", Command: []string{"git", "diff", "--cached", "--exit-code"}})
 	}
@@ -120,7 +121,7 @@ func (run *verificationRun) captureResult(stored *verification.Report, result ve
 }
 
 func (run *verificationRun) finish(stored, report verification.Report, observeErr error) error {
-	stored.Passed = report.Passed
+	stored.Passed = report.Passed && observeErr == nil
 	run.value["report"] = stored
 	run.value["stage"] = "complete"
 	if !report.Passed || observeErr != nil {

@@ -19,7 +19,7 @@ import (
 func (run *verificationRun) runLocalChecks(policy model.Policy, checks []model.Check, observe func(verification.Result) error) (reportValue verification.Report, resultErr error) {
 	defer func() {
 		if resultErr != nil && !errors.Is(resultErr, store.ErrPersistence) {
-			resultErr = errors.Join(verification.ErrJobSetup, resultErr)
+			resultErr = fmt.Errorf("%w: %w", verification.ErrJobSetup, resultErr)
 		}
 	}()
 
@@ -45,13 +45,16 @@ func (run *verificationRun) runLocalChecks(policy model.Policy, checks []model.C
 }
 
 func localVerifierBinary() (string, error) {
-	binary := os.Getenv("WHIRLWIND_VERIFY_BIN")
-	if binary == "" {
-		var err error
-		binary, err = exec.LookPath("whirlwind-verify")
+	if configured := os.Getenv("WHIRLWIND_VERIFY_BIN"); configured != "" {
+		binary, err := exec.LookPath(configured)
 		if err != nil {
-			return "", fmt.Errorf("local verifier missing; install whirlwind-verify or configure WHIRLWIND_VERIFY_BIN: %w", err)
+			return "", fmt.Errorf("configured local verifier %q is unavailable (WHIRLWIND_VERIFY_BIN): %w", configured, err)
 		}
+		return binary, nil
+	}
+	binary, err := exec.LookPath("whirlwind-verify")
+	if err != nil {
+		return "", fmt.Errorf("local verifier missing; install whirlwind-verify or configure WHIRLWIND_VERIFY_BIN: %w", err)
 	}
 	return binary, nil
 }
