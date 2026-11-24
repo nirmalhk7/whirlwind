@@ -133,6 +133,9 @@ func (d *Dashboard) refreshRuns() {
 }
 
 func runStatus(attempt model.Attempt) string {
+	if attempt.Status == model.AttemptAwaitingPlanPublication {
+		return "awaiting plan publication"
+	}
 	if attempt.Status == "complete" {
 		return "completed"
 	}

@@ -74,7 +74,7 @@ func (step *taskStep) generateIdeaPlan() error {
 	}
 	plan, err := step.parseIdeaPlannerDocument(content)
 	if err != nil {
-		return err
+		return fmt.Errorf("the assigned plan.md is not publishable; correct the reported problem and retry planning: %w", err)
 	}
 	step.task.Plan, step.task.LastAttemptID = &plan, attemptID
 	if err := step.Store.PlannerRunLocation(step.ctx, attemptID, workspace.publication); err != nil {
@@ -82,7 +82,7 @@ func (step *taskStep) generateIdeaPlan() error {
 	}
 	published, err := step.writeLocalPlanFile(step.task, content)
 	if err != nil {
-		return err
+		return fmt.Errorf("could not publish plan.md; check the local plans directory and retry planning: %w", err)
 	}
 	step.task.PlanDocument.Path, step.task.PlanDocument.Hash = published, localPlanHash(content)
 	step.task.Stage, step.task.Error = "plan_approval", ""
@@ -92,7 +92,18 @@ func (step *taskStep) generateIdeaPlan() error {
 
 func (step *taskStep) completedIdeaPlannerAttempt() (string, error) {
 	var id string
-	err := step.Store.DB.QueryRowContext(step.ctx, `SELECT p.planner_run_id FROM planner_runs p JOIN resources s ON s.kind='sessions' AND s.id=p.planner_run_id WHERE p.idea_id=? AND p.status='in_process' AND json_extract(s.data,'$.plan_id')=? AND json_extract(s.data,'$.finished')=1 AND json_extract(s.data,'$.status')='complete' ORDER BY p.timestamp DESC LIMIT 1`, step.task.IdeaID, step.task.ID).Scan(&id)
+	// Legacy supervisors stored "complete" when the provider exited. Recognize
+	// both shapes so an upgrade can reconcile an already-written document.
+	err := step.Store.DB.QueryRowContext(step.ctx, `
+		SELECT p.planner_run_id FROM planner_runs p
+		JOIN resources s ON s.kind='sessions' AND s.id=p.planner_run_id
+		WHERE p.idea_id=? AND p.status='in_process'
+		AND json_extract(s.data,'$.plan_id')=?
+		AND json_extract(s.data,'$.plan_version')=?
+		AND json_extract(s.data,'$.finished')=1
+		AND ((json_extract(s.data,'$.status')=? AND json_extract(s.data,'$.success') IS NULL)
+		  OR (json_extract(s.data,'$.status')='complete' AND json_extract(s.data,'$.success')=1))
+		ORDER BY p.timestamp DESC LIMIT 1`, step.task.IdeaID, step.task.ID, step.task.PlanVersion, model.AttemptAwaitingPlanPublication).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
@@ -114,7 +125,14 @@ func (step *taskStep) recoverIdeaPlannerMarkdown(publication, output string) (st
 		return "", err
 	}
 	defer func() { _ = root.Close() }()
-	return readBoundedLocalPlan(root, "plan.md")
+	content, err := readBoundedLocalPlan(root, "plan.md")
+	if errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("Planner did not write the assigned plan.md; check the attempt log for output write errors and retry planning: %w", err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("could not read the assigned plan.md; check the output file and retry planning: %w", err)
+	}
+	return content, nil
 }
 
 func (e *Engine) intakeApprovedIdea(ctx context.Context, record model.Record, idea model.Idea, project model.Project) error {
