@@ -52,6 +52,19 @@ func TestReadyPlanUsesLocalApprovalAndRetainsFullSpecification(t *testing.T) {
 	}
 }
 
+func TestReadyPlanRejectsInvalidUnitScope(t *testing.T) {
+	ctx := context.Background()
+	e, task, _ := testEngine(t)
+	_, version := localStoredTask(t, e, task.ID)
+	task.Stage = "plan_ready"
+	task.Plan = &model.PlanSpecification{Units: []model.Unit{{ID: "implementation", AllowedPaths: []string{"src/["}}}}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, task, version))
+	err := e.Step(ctx, task.ID)
+	if err == nil || !strings.Contains(err.Error(), "invalid glob") {
+		t.Fatalf("ready plan did not reject an invalid unit scope: %v", err)
+	}
+}
+
 func TestPersonalPlanMustBeLocallyApprovedBeforeCoding(t *testing.T) {
 	e, original, _ := testEngine(t)
 	e.PlansRoot = t.TempDir()

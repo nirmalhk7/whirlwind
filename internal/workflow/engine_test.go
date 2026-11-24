@@ -46,17 +46,6 @@ func (fakeGitHub) RegisterWebhook(context.Context, string, string, string) error
 // PRState keeps fixture PRs open so reconciliation does not complete them.
 func (fakeGitHub) PRState(context.Context, string, string) (string, error) { return "OPEN", nil }
 
-type recordingGitHub struct {
-	fakeGitHub
-	prBody string
-}
-
-// CreatePR captures the PR body for assertions and returns the fixture publication result.
-func (g *recordingGitHub) CreatePR(_ context.Context, _, _, _, _, _, body string) (string, error) {
-	g.prBody = body
-	return "https://github.com/o/r/pull/1", nil
-}
-
 type fakeAgent struct{ score float64 }
 
 // Run returns a fixture plan or review, or writes the expected coding result inside the supplied worktree.

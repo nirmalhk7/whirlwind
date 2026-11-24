@@ -150,13 +150,14 @@ func TestSubmittingRequiresAcceptedReportBeforeCreatingDelivery(t *testing.T) {
 }
 
 func TestPublishingRoutesToLocalDeliveryWithoutRemotePublication(t *testing.T) {
-	step := &taskStep{task: model.ExecutionPlan{Stage: "publishing"}}
-	finished, err := step.publishing()
-	if finished || err != nil || step.task.Stage != "submitting" {
-		t.Fatalf("publishing did not route to local delivery: finished=%v stage=%q err=%v", finished, step.task.Stage, err)
-	}
-	if err := step.publishPullRequest("publication", model.Publication{}, 0); err == nil {
-		t.Fatal("direct remote publication path was not denied")
+	ctx := context.Background()
+	e, task, _, record := acceptedDeliveryFixture(t)
+	task.Stage = "publishing"
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, task, record.Version))
+	requireWorkflowSuccess(t, e.Step(ctx, task.ID))
+	updated, _ := localStoredTask(t, e, task.ID)
+	if updated.Stage != "submitting" || updated.PR != "" {
+		t.Fatalf("saved publishing task did not resume as local delivery: stage=%q pr=%q", updated.Stage, updated.PR)
 	}
 }
 
