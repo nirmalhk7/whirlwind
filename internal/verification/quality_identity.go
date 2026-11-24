@@ -23,6 +23,7 @@ import (
 const qualityRuntimeByteLimit = int64(512 << 20)
 const qualityRuntimeFileLimit = 100000
 
+var qualityToolDirectory = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 var qualityPackageDirectory = regexp.MustCompile(`^(.+)-([a-f0-9]{8,64})$`)
 var qualityCatalogHashPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
@@ -99,8 +100,15 @@ func captureQualityIdentityWithCatalogPath(output, runtimeDir, executable string
 }
 
 func captureQualityIdentityWithCatalogAt(output, runtimeDir, executable string, snapshot *model.QualitySnapshot, expectedBinarySHA256, observedCatalogHash, pathValue, cwd string) (*model.QualityIdentity, error) {
-	if snapshot == nil || len(output) == 0 || len(output) > 1<<20 || runtimeDir == "" {
-		return nil, errors.New("missing frozen configuration, SARIF, or isolated runtime directory")
+	switch {
+	case snapshot == nil:
+		return nil, errors.New("frozen quality configuration is missing")
+	case runtimeDir == "":
+		return nil, errors.New("isolated Qlty runtime directory is missing")
+	case len(output) == 0:
+		return nil, errors.New("Qlty command produced no SARIF on stdout; inspect its saved stderr")
+	case len(output) > 1<<20:
+		return nil, errors.New("Qlty SARIF exceeds the runtime identity evidence limit")
 	}
 	if err := validateFrozenRuleSources(snapshot.Files); err != nil {
 		return nil, err
@@ -274,7 +282,7 @@ func installedQualityTools(root string) ([]model.QualityToolIdentity, error) {
 			continue
 		}
 		toolName := toolEntry.Name()
-		if !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`).MatchString(toolName) {
+		if !qualityToolDirectory.MatchString(toolName) {
 			return nil, fmt.Errorf("invalid installed Qlty tool name %q", toolName)
 		}
 		packages, err := os.ReadDir(filepath.Join(root, toolName))
@@ -520,7 +528,11 @@ func copyApprovedQualityTree(ctx context.Context, source, destination, expectedH
 			if err != nil {
 				return err
 			}
-			output, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm()&^0222)
+			mode := info.Mode().Perm() &^ 0222
+			if isQualifiedQltyInstallLock(sourceRoot, relative, info) {
+				mode |= 0200
+			}
+			output, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 			if err != nil {
 				_ = input.Close()
 				return err

@@ -227,7 +227,11 @@ func (r *jobRunner) executeCommand(ctx context.Context, stage string, index int,
 			// Preserve the integrity error recorded above.
 		} else if identityErr != nil {
 			result.Passed, result.Status = false, "error"
-			result.Error = "quality runtime identity unavailable: " + identityErr.Error()
+			reason := "quality runtime identity unavailable: " + identityErr.Error()
+			if result.Error != "" {
+				reason += " (command: " + result.Error + ")"
+			}
+			result.Error = reason
 		} else if expected := r.manifest.Quality.Identity; expected != nil && !model.SameQualityIdentity(expected, identity) {
 			result.Passed, result.Status = false, "error"
 			result.Error = "quality runtime identity changed; rerun project setup and approval"
