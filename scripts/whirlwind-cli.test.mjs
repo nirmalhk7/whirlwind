@@ -32,9 +32,21 @@ async function fixture(t, timeout = 90000) {
 async function waitGone(pid) {
   for (let i = 0; i < 100; i++) {
     try { process.kill(pid, 0); } catch (error) { if (error.code === "ESRCH") return; throw error; }
+    // A container's PID 1 can leave exited orphans in the process table.
+    if (process.platform === "linux") {
+      try {
+        const [state] = await linuxProcessStat(pid);
+        if (state === "Z" || state === "X") return;
+      } catch (error) { if (error.code === "ENOENT") return; throw error; }
+    }
     await new Promise(resolve => setTimeout(resolve, 50));
   }
   assert.fail(`process ${pid} survived shutdown`);
+}
+
+async function linuxProcessStat(pid) {
+  const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+  return stat.slice(stat.lastIndexOf(")") + 1).trim().split(/\s+/);
 }
 
 function processAlive(pid) {
@@ -75,6 +87,31 @@ test("start, status, restart and stop manage the durable local supervisor", asyn
   await waitGone(second.pid);
   assert.equal((await run("status")).code, 1);
   await assert.rejects(access(join(data, "control/supervisor.json")), { code: "ENOENT" });
+});
+
+test("Linux launcher restart reaps a registered worker and preserves unrelated processes", { skip: process.platform !== "linux" }, async t => {
+  const { run, data } = await fixture(t);
+  const start = await run("start");
+  assert.equal(start.code, 0, start.output);
+
+  const worker = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+  const unrelated = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { detached: true, stdio: "ignore" });
+  t.after(() => { worker.kill(); unrelated.kill(); });
+  const started = (await linuxProcessStat(worker.pid))[19];
+  assert.match(started, /^\d+$/);
+
+  const directory = join(data, "processes");
+  await mkdir(directory, { mode: 0o700, recursive: true });
+  const token = "e".repeat(32);
+  const registration = join(directory, `${token}.json`);
+  await writeFile(registration, JSON.stringify({ pid: worker.pid, token, started }), { mode: 0o600 });
+
+  const restarted = await run("restart");
+  assert.equal(restarted.code, 0, restarted.output);
+  await waitGone(worker.pid);
+  await assert.rejects(access(registration), { code: "ENOENT" });
+  assert.equal(processAlive(unrelated.pid), true);
+  assert.equal((await run("status")).code, 0);
 });
 
 test("supervisor starts and stops from a checkout without web or npm files", async t => {

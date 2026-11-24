@@ -214,7 +214,11 @@ func TestReapDoesNotTreatCommandArgumentsAsOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = stdout.Close()
-	if err := writeRegistration(root, registration{Token: token(owned)}); err != nil {
+	parent, err := kernelIdentity(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRegistration(root, registration{Token: token(owned), ParentStarted: parent.Started}); err != nil {
 		t.Fatal(err)
 	}
 	if err := Reap(root); err != nil {

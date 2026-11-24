@@ -26,6 +26,8 @@ func Reap(root string) error {
 	for _, process := range processes {
 		if process.Registry == root && validToken(process.Token) {
 			if _, exists := records[process.Token]; !exists {
+				// A tag proves ownership but gives no lower bound on when the
+				// original launcher or its other descendants were created.
 				records[process.Token] = registration{Token: process.Token}
 			}
 		}
@@ -98,6 +100,9 @@ func Inspect(root string) (Report, error) {
 	for _, record := range records {
 		for _, identity := range liveProcesses(record, processes) {
 			owned[identity.PID] = identity
+		}
+		if err := ambiguousProcess(record, processes); err != nil {
+			return report, fmt.Errorf("%w: %w", ErrCleanup, err)
 		}
 	}
 	for _, process := range processes {

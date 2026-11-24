@@ -63,3 +63,28 @@ func TestReusedPIDDoesNotAuthorizeAnotherProcessGroup(t *testing.T) {
 		t.Fatalf("PID reuse selected unrelated processes: %+v", found)
 	}
 }
+
+func TestOpaqueProcessRemainsAmbiguousUnlessItPredatesLaunch(t *testing.T) {
+	denied := errors.New("environment unavailable")
+	opaque := inspectedProcess{Identity: Identity{PID: 2000001, Started: "81"}, OwnershipErr: denied}
+	for _, tc := range []struct {
+		name   string
+		record registration
+		want   error
+	}{
+		{"predates registered child", registration{Started: "82", ParentStarted: "80"}, nil},
+		{"predates parent before PID recorded", registration{ParentStarted: "82"}, nil},
+		{"same tick", registration{Started: "81"}, denied},
+		{"later detached process", registration{Started: "80"}, denied},
+		{"legacy token only", registration{}, denied},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ambiguousProcess(tc.record, []inspectedProcess{opaque}); !errors.Is(got, tc.want) {
+				t.Fatalf("ambiguity = %v, want %v", got, tc.want)
+			}
+			if live := liveProcesses(tc.record, []inspectedProcess{opaque}); len(live) != 0 {
+				t.Fatalf("unreadable environment alone was treated as ownership: %+v", live)
+			}
+		})
+	}
+}
