@@ -39,6 +39,8 @@ type JobManifest struct {
 	Root               string                 `json:"root"`
 	Launcher           string                 `json:"launcher"`
 	OfflineDockerImage string                 `json:"offline_docker_image,omitempty"`
+	OfflineImageID     string                 `json:"offline_image_id,omitempty"`
+	PolicyHash         string                 `json:"policy_hash,omitempty"`
 	Sandbox            *model.SandboxPolicy   `json:"sandbox,omitempty"`
 	Commands           []JobCommand           `json:"commands"`
 }
@@ -118,6 +120,9 @@ func (m JobManifest) Validate() error {
 func (m JobManifest) validateDefinition() error {
 	if m.Version != 1 || !jobIdentifier.MatchString(m.JobID) {
 		return errors.New("verification manifest requires supported version and job identity")
+	}
+	if m.OfflineDockerImage == "" && (m.OfflineImageID != "" || m.PolicyHash != "") {
+		return errors.New("offline authority requires the offline Docker backend")
 	}
 	if err := m.validateAuthority(); err != nil {
 		return err

@@ -45,6 +45,33 @@ func TestOfflineDockerManifestRequiresExplicitNarrowAuthority(t *testing.T) {
 	}
 }
 
+func TestOfflineDockerManagedManifestPinsPolicyAndImage(t *testing.T) {
+	policyHash := strings.Repeat("a", 64)
+	base := strings.Repeat("1", 40)
+	m := JobManifest{Version: 1, JobID: "job", PlanID: "plan", PlanVersion: 1, PlanHash: "document",
+		ConfigurationHash: "selected-configuration", Root: "/evidence", Repository: "/repository", ProjectID: "project",
+		CandidateCommit: strings.Repeat("2", 40), CandidateTree: strings.Repeat("3", 40), BaseCommit: base,
+		OfflineDockerImage: offlineFixtureImage, PolicyHash: policyHash, Commands: []JobCommand{{Name: "test", Command: []string{"go", "test"}, TimeoutSeconds: 30}}}
+	if m.validateDefinition() == nil {
+		t.Fatal("managed checks accepted an unqualified image")
+	}
+	m.OfflineImageID = "sha256:" + strings.Repeat("b", 64)
+	requireVerificationSuccess(t, m.validateDefinition())
+	changes := m
+	changes.PolicyHash = strings.Repeat("c", 64)
+	if m.Digest() == changes.Digest() {
+		t.Fatal("policy change did not invalidate the execution identity")
+	}
+	m.Purpose, m.OperationID = ProjectSetupPurpose, m.JobID
+	m.PlanID, m.PlanVersion, m.PlanHash, m.OfflineImageID = "", 0, "", ""
+	m.ConfigurationHash, m.CandidateCommit = policyHash, base
+	requireVerificationSuccess(t, m.validateDefinition())
+	m.ConfigurationHash = "different policy"
+	if m.validateDefinition() == nil {
+		t.Fatal("offline setup accepted different policy and configuration identities")
+	}
+}
+
 func TestOfflineDockerShippedVerifier(t *testing.T) {
 	image := os.Getenv("WHIRLWIND_TEST_OFFLINE_DOCKER_IMAGE")
 	if image == "" {

@@ -98,6 +98,14 @@ func (e *Engine) approveLocalPlan(ctx context.Context, task *model.ExecutionPlan
 	if project.ManagedPolicy && project.Status != "approved" {
 		return nil, errors.New("finish project setup before approving its execution plan")
 	}
+	if project.Policy.OfflineDockerImage != "" {
+		if task.IdeaID == "" {
+			return nil, errors.New("managed offline verification requires a canonical idea plan")
+		}
+		if _, err := e.qualifiedOfflineProject(ctx, project); err != nil {
+			return nil, err
+		}
+	}
 	if task.IdeaID != "" {
 		if err := validatePairCapacity(e.settings(ctx), project); err != nil {
 			return nil, err

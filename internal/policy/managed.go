@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 )
 
@@ -38,8 +39,32 @@ func ParseManagedPolicy(projectID, content string) (model.Policy, string, error)
 	if err := Validate(rules); err != nil {
 		return rules, "", err
 	}
+	if rules.OfflineDockerImage != "" {
+		if err := validateManagedOfflinePolicy(rules); err != nil {
+			return rules, "", err
+		}
+	}
 	hash := sha256.Sum256([]byte("whirlwind:project-policy:v1\x00" + projectID + "\x00" + content))
 	return rules, hex.EncodeToString(hash[:]), nil
+}
+
+func validateManagedOfflinePolicy(rules model.Policy) error {
+	if !execution.IsOfflineDockerImage(rules.OfflineDockerImage) || rules.Quality != nil || rules.Sandbox != nil {
+		return errors.New("offline Docker requires a digest-pinned image and an external check policy without native scanner or sandbox settings")
+	}
+	checks := append([]model.Check(nil), rules.Checks...)
+	for _, risk := range rules.RiskRules {
+		checks = append(checks, risk.Checks...)
+	}
+	for _, check := range checks {
+		if check.Reusable {
+			return errors.New("managed offline checks require fresh execution evidence")
+		}
+		if err := execution.ValidateOfflineDockerCheck(check); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func CheckManagedPolicyLocation(state, checkout string) error {

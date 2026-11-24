@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"whirlwind/internal/model"
 	"whirlwind/internal/process"
 )
 
@@ -30,6 +31,15 @@ var dockerID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var dockerImageID = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
 func IsOfflineDockerImage(reference string) bool { return offlineImageRef.MatchString(reference) }
+
+func IsOfflineDockerImageID(id string) bool { return dockerImageID.MatchString(id) }
+
+func ValidateOfflineDockerCheck(check model.Check) error {
+	if len(check.Command) == 0 || check.Mode == "autofix" || len(check.OutputPaths) != 0 || len(check.Environment) != 0 || check.ReportFormat == "sarif" || filepath.Base(check.Command[0]) == "qlty" || (check.Required != nil && !*check.Required) {
+		return fmt.Errorf("offline Docker check %s requires a mandatory read-only command without host environment, scanner, or output grants", check.Name)
+	}
+	return nil
+}
 
 func IsOfflineDockerIdentity(id, imageID string) bool {
 	return dockerID.MatchString(id) && dockerImageID.MatchString(imageID)
