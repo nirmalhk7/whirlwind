@@ -16,6 +16,7 @@ func (c *configurationChanges) projectValues(doc Document) error {
 	if err != nil {
 		return err
 	}
+	c.checkoutIDs = make(map[string]string, len(doc.Projects))
 	statuses := make([]model.ProjectStatus, 0, len(doc.Projects))
 	seen := map[string]bool{}
 	for _, path := range doc.Projects {
@@ -69,53 +70,41 @@ func (c *configurationChanges) onboardProject(path string, previous model.Projec
 	// A resolved alias may now point at a different repository.
 	status.ProjectID = ""
 	status.CanonicalPath = canonical
-	if previous.ProjectID != "" && previous.CanonicalPath == canonical {
-		record, err := c.source.store.Get(c.ctx, "projects", previous.ProjectID)
-		if err == nil {
-			project, decodeErr := store.Decode[model.Project](record)
-			if decodeErr != nil {
-				return status, decodeErr
-			}
-			if project.ManagedPolicy && project.Path == canonical {
-				status.Status, status.ProjectID = "OK", record.ID
-				return status, nil
-			}
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return status, err
-		}
+	if id := c.checkoutIDs[canonical]; id != "" {
+		status.Status, status.ProjectID = "OK", id
+		return status, nil
 	}
-	project, err := projectregistry.Load(ctx, filepath.Base(canonical), canonical)
+	registrations, err := c.checkoutRegistrations(canonical, previous)
+	if err != nil {
+		return status, err
+	}
+	var loaded model.Project
+	if len(registrations) > 0 && registrations[0].project.ManagedPolicy {
+		// A managed policy lives in Whirlwind state, so refresh only Git metadata.
+		loaded.Repo, loaded.RemoteURL, err = projectregistry.Origin(ctx, canonical)
+	} else {
+		loaded, err = projectregistry.Load(ctx, filepath.Base(canonical), canonical)
+	}
+	if len(registrations) > 0 {
+		status.ProjectID = registrations[0].record.ID
+	}
 	if err != nil {
 		status.Detail = "Onboarding failed: " + err.Error()
 		return status, c.ctx.Err()
 	}
-	project, err = c.preserveCheckoutIdentity(project, previous)
-	if err != nil {
-		return status, err
+	if len(registrations) == 0 {
+		c.registerProject(loaded, ideate)
+		status.ProjectID = loaded.ID
+	} else {
+		c.preserveCheckoutIdentity(registrations, loaded.Repo, loaded.RemoteURL)
 	}
+	c.checkoutIDs[canonical] = status.ProjectID
 	status.Status = "OK"
-	status.ProjectID = project.ID
-	return status, c.registerProject(project, ideate)
+	return status, nil
 }
 
-func (c *configurationChanges) registerProject(project model.Project, ideate bool) error {
-	_, err := c.source.store.Get(c.ctx, "projects", project.ID)
-	if err == nil {
-		// Preserve previously onboarded project choices and runtime state.
-		return nil
-	}
-	if !errors.Is(err, store.ErrNotFound) {
-		return err
-	}
-	for _, change := range c.values {
-		if change.Kind == "projects" && change.ID == project.ID {
-			return nil
-		}
-	}
+func (c *configurationChanges) registerProject(project model.Project, ideate bool) {
 	project.Status = "draft"
-	if err := c.appendValue("projects", project.ID, project); err != nil {
-		return err
-	}
+	c.values = append(c.values, store.UnregisteredCheckoutPrecondition(project), store.Change{Kind: "projects", ID: project.ID, Value: project})
 	c.values = append(c.values, store.ProjectRegistrationWork(project.ID, time.Now(), ideate)...)
-	return nil
 }

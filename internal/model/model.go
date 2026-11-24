@@ -56,6 +56,7 @@ type Project struct {
 	Paused               bool                        `json:"paused"`
 	DefaultBranch        string                      `json:"default_branch"`
 	ID                   string                      `json:"id"`
+	CheckoutAliases      []string                    `json:"checkout_aliases,omitempty"`
 	Name                 string                      `json:"name"`
 	Repo                 string                      `json:"repo"`
 	Path                 string                      `json:"path"`

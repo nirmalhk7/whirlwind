@@ -1,78 +1,87 @@
 package settingsfile
 
 import (
-	"errors"
+	"cmp"
+	"slices"
 	"strings"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
 
-// The origin is mutable metadata, while the original checkout record owns
-// history, setup qualification, and selection. Never rename or re-onboard
-// that record solely because Git now reports a different remote.
-func (c *configurationChanges) preserveCheckoutIdentity(loaded model.Project, previous model.ProjectStatus) (model.Project, error) {
-	record, saved, err := c.findRegisteredCheckout(loaded.Path, previous)
-	if err != nil {
-		return model.Project{}, err
-	}
-	for _, change := range c.values {
-		if change.Kind != "projects" {
-			continue
-		}
-		if pending, ok := change.Value.(model.Project); ok && pending.Path == loaded.Path &&
-			(record.Version == 0 || change.ID == record.ID) {
-			return pending, nil // Another configured alias already staged this checkout.
-		}
-	}
-	if record.Version == 0 {
-		return loaded, nil
-	}
-	repoKey := loaded.Repo
-	if short, ok := strings.CutPrefix(loaded.RemoteURL, "https://github.com/"); ok && strings.EqualFold(saved.Repo, short) {
-		// Legacy HTTP registration used owner/repo as the issue binding key.
-		// Learning its URL doesn't change which repository owns those issues.
-		repoKey = saved.Repo
-	}
-	if saved.Repo != repoKey || saved.RemoteURL != loaded.RemoteURL {
-		saved.Repo, saved.RemoteURL = repoKey, loaded.RemoteURL
-		// Fence against a human or runner changing the project after this read.
-		c.values = append(c.values, store.Change{Kind: "projects", ID: record.ID, Value: saved, Expected: record.Version})
-	}
-	return saved, nil
+type checkoutRegistration struct {
+	record  model.Record
+	project model.Project
 }
 
-func (c *configurationChanges) findRegisteredCheckout(path string, previous model.ProjectStatus) (model.Record, model.Project, error) {
-	if previous.CanonicalPath == path && previous.ProjectID != "" {
-		record, err := c.source.store.Get(c.ctx, "projects", previous.ProjectID)
-		if err == nil {
-			project, err := store.Decode[model.Project](record)
-			if err != nil {
-				return model.Record{}, model.Project{}, err
-			}
-			if project.Path == path && project.ID == record.ID {
-				return record, project, nil
-			}
-		} else if !errors.Is(err, store.ErrNotFound) {
-			return model.Record{}, model.Project{}, err
+// checkoutRegistrations finds only registrations of the same local checkout.
+// The saved configuration binding is preferred, or the oldest registration
+// when this path has never had a saved binding.
+func (c *configurationChanges) checkoutRegistrations(path string, previous model.ProjectStatus) ([]checkoutRegistration, error) {
+	if c.registeredByCheckout == nil {
+		if err := c.loadCheckoutRegistrations(); err != nil {
+			return nil, err
 		}
 	}
-	// A checkout can have been registered by the local control command or be
-	// newly listed through an alias with no previous settings binding.
+	matches := c.registeredByCheckout[path]
+	slices.SortFunc(matches, func(a, b checkoutRegistration) int {
+		return cmp.Compare(a.record.CreatedOrder, b.record.CreatedOrder)
+	})
+	if previous.CanonicalPath == path {
+		for index, entry := range matches {
+			if entry.record.ID == previous.ProjectID {
+				matches[0], matches[index] = entry, matches[0]
+				break
+			}
+		}
+	}
+	return matches, nil
+}
+
+func (c *configurationChanges) loadCheckoutRegistrations() error {
 	rows, err := c.source.store.List(c.ctx, "projects")
 	if err != nil {
-		return model.Record{}, model.Project{}, err
+		return err
 	}
-	var oldest model.Record
-	var bound model.Project
+	c.registeredByCheckout = make(map[string][]checkoutRegistration)
 	for _, record := range rows {
 		project, err := store.Decode[model.Project](record)
 		if err != nil {
-			return model.Record{}, model.Project{}, err
+			return err
 		}
-		if project.Path == path && project.ID == record.ID && (oldest.Version == 0 || record.CreatedOrder < oldest.CreatedOrder) {
-			oldest, bound = record, project
+		if project.ID == record.ID {
+			c.registeredByCheckout[project.Path] = append(c.registeredByCheckout[project.Path], checkoutRegistration{record: record, project: project})
 		}
 	}
-	return oldest, bound, nil
+	return nil
+}
+
+func (c *configurationChanges) preserveCheckoutIdentity(registrations []checkoutRegistration, repo, remote string) {
+	canonical := registrations[0]
+	project := canonical.project
+	if short, ok := strings.CutPrefix(remote, "https://github.com/"); ok &&
+		(strings.EqualFold(project.Repo, short) || strings.EqualFold(project.Repo, repo)) {
+		// Legacy HTTP registrations used owner/repo as the issue binding key.
+		repo = project.Repo
+	}
+	for _, duplicate := range registrations[1:] {
+		project.CheckoutAliases = appendProjectAlias(project.CheckoutAliases, duplicate.record.ID)
+		for _, alias := range duplicate.project.CheckoutAliases {
+			if alias != project.ID {
+				project.CheckoutAliases = appendProjectAlias(project.CheckoutAliases, alias)
+			}
+		}
+		c.values = append(c.values, store.ArchiveDuplicateProject(duplicate.record))
+	}
+	if project.Repo != repo || project.RemoteURL != remote || len(registrations) > 1 {
+		project.Repo, project.RemoteURL = repo, remote
+		c.values = append(c.values, store.Change{Kind: "projects", ID: project.ID, Value: project, Expected: canonical.record.Version})
+	}
+}
+
+func appendProjectAlias(aliases []string, id string) []string {
+	if !slices.Contains(aliases, id) {
+		aliases = append(aliases, id)
+	}
+	return aliases
 }

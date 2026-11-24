@@ -54,3 +54,11 @@ func (d *Dashboard) showProjectHealth() {
 		d.detail.SetText(text + "\n\nNo runs for this project.")
 	}
 }
+
+// checkoutProjectID resolves historical project IDs for dashboard inspection.
+func (d *Dashboard) checkoutProjectID(id string) string {
+	if canonical := d.projectAliases[id]; canonical != "" {
+		return canonical
+	}
+	return id
+}

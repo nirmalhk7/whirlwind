@@ -44,7 +44,7 @@ projects:
   - /absolute/path/to/repository
 ```
 
-Projects shows `Git OK` for a valid repository path and `Git ERR` for an invalid path. A failed setup shows `Setup ERR`. Open its Inbox notice to see the reason and retry instructions. Refresh preserves existing project choices and runtime state. Adding, changing, or removing a remote updates metadata for the same checkout. Agents lists every configured role's ordered model choices, reasoning effort, and provider connection status: green `up`, red `down`, or a truthful `paused`/`unverified` state when no current check is available. Connection checks follow `workers.provider_status_check_seconds` and pause while runners are stopped.
+Projects shows `Git OK` for a valid repository path and `Git ERR` for an invalid path. A failed setup shows `Setup ERR`. Open its Inbox notice to see the reason and retry instructions. Refresh preserves existing project choices and runtime state. Adding, changing, or removing a remote updates metadata for the same checkout. Existing duplicate registrations for a configured checkout appear as one project, with setup and run history from both registrations available in Runs. Agents lists every configured role's ordered model choices, reasoning effort, and provider connection status: green `up`, red `down`, or a truthful `paused`/`unverified` state when no current check is available. Connection checks follow `workers.provider_status_check_seconds` and pause while runners are stopped.
 
 If sandbox recovery blocks new dispatch, the dashboard shows `BLOCK` and the reason instead of `OK`. Press `!` for the full diagnostic. The block clears only after a successful recovery check.
 
