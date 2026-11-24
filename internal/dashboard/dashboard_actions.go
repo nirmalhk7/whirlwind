@@ -94,6 +94,14 @@ func currentPausedAttempt(plan model.ExecutionPlan) (string, bool) {
 
 func (d *Dashboard) supervisorStatus(snapshot control.Snapshot) string {
 	if supervisorOnline(snapshot) {
+		if state, present := snapshotDispatchHealth(snapshot); present {
+			if state.BlockReason != "" {
+				return "Dispatch blocked (! details): " + dispatchBlockSummary(state.BlockReason)
+			}
+			if !state.Checked {
+				return "Whirlwind | sandbox recovery status unverified"
+			}
+		}
 		return "Whirlwind | local supervisor connected"
 	}
 	return "Whirlwind | supervisor offline · read-only database inspection"

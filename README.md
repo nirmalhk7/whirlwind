@@ -46,6 +46,8 @@ projects:
 
 Valid repositories appear in Projects with green `OK`; invalid paths remain visible with red `ERR` and details in Inbox. Refresh preserves existing project choices and runtime state. Agents lists every configured role's ordered model choices, reasoning effort, and provider connection status: green `up`, red `down`, or a truthful `paused`/`unverified` state when no current check is available. Connection checks follow `workers.provider_status_check_seconds` and pause while runners are stopped.
 
+If sandbox recovery blocks new dispatch, the dashboard shows `BLOCK` and the reason instead of `OK`. Press `!` for the full diagnostic. The block clears only after a successful recovery check.
+
 The Go/tview TUI displays saved plans, questions, permission requests, attempts, review and verification evidence, and local completion data. Inbox occupies the right pane; focus it and press `a` to choose a direction for approval or `h` for direction history. Direction approval and plan approval are separate. Decisions carry expected record versions and idempotency keys over a user-private Unix socket; the supervisor rechecks them before saving. Whirlwind has no browser frontend or UI server.
 
 See [local supervisor and terminal setup](docs/local-supervisor.md), [nono setup](docs/nono-setup.md), [project policy](docs/go-backend.md), and the [HTTP API contract](API.md) for integration and webhook interfaces.
