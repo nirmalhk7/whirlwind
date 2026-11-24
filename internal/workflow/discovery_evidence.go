@@ -46,6 +46,7 @@ type approvedPlanContext struct {
 type discoveryBase struct {
 	index          ctxengine.Index
 	sources        any
+	githubSources  bool
 	externalRefs   []model.EvidenceRef
 	previous       discoverySnapshot
 	brief          model.IdeationBrief
@@ -114,7 +115,7 @@ func (e *Engine) prepareDiscovery(ctx context.Context, p model.Project) (string,
 		return "", nil, snapshot, false, err
 	}
 	snapshot.ExplorationAreas = rotatingDiscoveryAreas(paths, componentCounts, 12)
-	if previous.Sources != snapshot.Sources && !e.Agentic(ctx) {
+	if base.githubSources && previous.Sources != snapshot.Sources {
 		snapshot.Evidence = append(snapshot.Evidence, model.EvidenceRef{Kind: "github", Ref: p.Repo, Revision: model.Fingerprint([]byte(snapshot.Sources)), Summary: "Issue and discussion snapshot"})
 	}
 	fresh, _ := ctx.Value(freshDiscoveryKey{}).(bool)
@@ -171,9 +172,17 @@ func (e *Engine) loadDiscoverySources(ctx context.Context, project model.Project
 	var err error
 	if e.Agentic(ctx) {
 		base.sources, base.externalRefs, err = e.integrationContext(ctx, project, base.index.Commit)
-	} else {
-		base.sources, err = e.GitHub.Sources(ctx, project.Repo)
+		return err
 	}
+	if localOnlyProject(project) {
+		base.sources = map[string]string{
+			"mode":  "local_repository_only",
+			"scope": "No hosted repository is registered. Use the local Git snapshot as evidence.",
+		}
+		return nil
+	}
+	base.sources, err = e.GitHub.Sources(ctx, project.Repo)
+	base.githubSources = err == nil
 	return err
 }
 
