@@ -169,9 +169,24 @@ func baselineFindings(r Result, quality bool) ([]baselineFinding, error) {
 
 // IsStructuredTestFailure accepts only completed named assertion failures.
 func IsStructuredTestFailure(result Result) bool {
-	if result.Passed || baselineProcessEvidence(result) != nil || baselineQlty(result) {
-		return false
+	return StructuredTestFailureError(result) == nil
+}
+
+// StructuredTestFailureError separates a genuine failed assertion from an
+// infrastructure or evidence error, without changing the red requirements.
+func StructuredTestFailureError(result Result) error {
+	if err := baselineProcessEvidence(result); err != nil {
+		return err
+	}
+	if result.Passed || baselineQlty(result) {
+		return errors.New("a red check must be a failed test, not a successful process or scanner result")
 	}
 	findings, err := baselineFindings(result, false)
-	return err == nil && len(findings) > 0
+	if err != nil {
+		return err
+	}
+	if len(findings) == 0 {
+		return errors.New("check failed without a completed named assertion failure")
+	}
+	return nil
 }
