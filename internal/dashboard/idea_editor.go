@@ -148,7 +148,7 @@ func (d *Dashboard) addIdeaDecisionButtons(form *tview.Form, idea model.Idea, ve
 			send("idea.approve", struct{}{})
 		})
 	}
-	if idea.DecisionStatus == "in_process" {
+	if idea.DecisionStatus == "approved" || idea.DecisionStatus == "in_process" {
 		form.AddButton("Cancel planning", func() { send("planner.cancel", struct{}{}) })
 	}
 	if idea.DecisionStatus == "error" {

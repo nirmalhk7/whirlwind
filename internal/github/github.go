@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
+	"time"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/process"
@@ -146,6 +148,23 @@ func (c CLI) Issue(ctx context.Context, repo string, n int) (model.Issue, error)
 		return model.Issue{}, e
 	}
 	return parseIssue([]byte(b))
+}
+
+// CheckSources confirms the configured repository's issues can be read before
+// a source-dependent ideation run is accepted.
+func (CLI) CheckSources(ctx context.Context, repo string) error {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return errors.New("GitHub ideation sources require the gh executable; install GitHub CLI and sign in")
+	}
+	check, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := gh(check, "issue", "list", repoFlag, repo, limitFlag, "1", jsonFlag, "number"); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("GitHub ideation sources require read access to %s; check GitHub CLI login and repository access", repo)
+	}
+	return nil
 }
 
 // Sources collects issues and attempts to fetch discussions, reporting discussion availability without failing the issue collection.

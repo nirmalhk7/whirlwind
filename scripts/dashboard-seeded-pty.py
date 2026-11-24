@@ -1,4 +1,4 @@
-"""Drive the seeded Go dashboard helper through two actual terminals."""
+"""Drive the shipped dashboard through two PTYs with seeded supervisor state."""
 
 import json
 import os
@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 
-from dashboard_pty_support import PTYSession, REPO
+from dashboard_pty_support import PTYSession
 
 ENTER = b"\r"
 ESCAPE = b"\x1b"
@@ -154,7 +154,7 @@ def initial_session(session, data):
     see(session, b"Background update preserved")
     decision(session, data, "idea.update", 2, b"APPROVED" + b"\t" * 4 + ENTER)
     see(session, b"decision saved by supervisor")
-    see(session, b"local supervisor connected")
+    see(session, b"sandbox recovery status unverified")
     idea(session)
     decision(session, data, "idea.approve", 1, b"\t" * 5 + ENTER)
     see(session, b"approved")
@@ -167,7 +167,7 @@ def initial_session(session, data):
     see(session, b"whirlwind-plan-", send(session, F6 + b"v"), raw=True)
     decision(session, data, "plan.document.save", 1, b":%s/Verify fixture output/Verify revised fixture output/g\r:wq\r")
     see(session, b"decision saved by supervisor")
-    see(session, b"local supervisor connected")
+    see(session, b"sandbox recovery status unverified")
     step(session, b"r", b"Verify revised fixture output")
     decision(session, data, "plan.review", 1, b"\t" + ENTER)
 
@@ -199,7 +199,10 @@ def fixture_environment(data):
     home.mkdir(mode=0o700)
     env = {"PATH": os.environ["PATH"], "HOME": str(home), "TMPDIR": str(data),
            "TERM": "xterm-256color", "LANG": "C", "VIMINIT": "set nocompatible",
-           "WHIRLWIND_SEEDED_PTY_DATA": str(data)}
+           "WHIRLWIND_DATA_DIR": str(data)}
+    for name in ("GOCACHE", "GOMODCACHE", "GOFLAGS"):
+        if name in os.environ:
+            env[name] = os.environ[name]
     if shutil.which("vim") is None:
         vi = shutil.which("vi")
         if vi is None or b"Vi IMproved" not in subprocess.check_output([vi, "--version"]):
@@ -216,15 +219,14 @@ def fixture_environment(data):
 
 def main():
     data = Path(sys.argv[1])
-    argv = (sys.argv[2], "-test.run=^TestSeededHumanWorkflowTerminalHelper$")
     env = fixture_environment(data)
     for drive in (initial_session, reopened_session):
-        session = PTYSession(env, argv, REPO)
+        session = PTYSession(env)
         try:
             drive(session, data)
         finally:
             session.close()
-    print("PASS: seeded PTYs drove versioned mutations, rejected a stale decision, reopened pending clarification, and inspected local delivery.")
+    print("PASS: the shipped dashboard sent versioned mutations over the private Unix socket, rejected a stale decision, reopened pending clarification, and inspected local delivery.")
 
 
 if __name__ == "__main__":

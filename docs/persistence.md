@@ -44,8 +44,9 @@ Component history uses the existing `proposals.components` JSON array.
 `proposal_components` and its lookup index are removed, including on reopen of a
 database that still contains that derived copy. Component filters and counts
 preserve whitespace normalization, per-proposal deduplication and project scope.
-The remaining proposal ledger, fingerprint history and FTS index still support
-novelty checks and history search.
+The remaining proposal ledger, fingerprints and FTS index support durable history
+and evidence retrieval. They do not reject repeated ideas; all uniqueness
+comparison is deferred.
 
 ## Attempts and inspection
 
@@ -112,7 +113,8 @@ Old leases
 expire while retaining fencing counters. Task dispatch resumes under fresh leases;
 connectivity/model-discovery operations require a new explicit request.
 
-Issue/PR publication journals exact request content, repository, plan version,
+Retained compatibility records for historical issue/PR publication journal exact
+request content, repository, plan version,
 branch/base/head, policy, request fingerprint, owner, and result/error before
 GitHub writes. Uncertain outcomes reconcile against existing issue markers/PR
 branches, with strict content/head/base matching. Mismatches pause work rather
@@ -124,7 +126,8 @@ Checks persist incrementally with command, effective timeout, timing, exit resul
 output reference, and truncation. Verification and reviews bind to base/head,
 policy, plan version, and producing attempts. Human publication approval binds to
 accepted review/verification evidence. Missing or stale evidence requires fresh
-verification/review and, where applicable, approval.
+verification/review and, where applicable, approval. Current agent delivery is
+local and does not push or open a PR; see [workflow modes](workflow-modes.md#finalize-locally).
 
 ## Read API
 

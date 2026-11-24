@@ -14,15 +14,20 @@ import (
 )
 
 type IdeationSchedule struct {
-	MaxAttemptsPerDirection int `json:"max_attempts_per_direction"`
-	MaxCandidates           int `json:"max_candidates,omitempty"`
-	HistoryTokenBudget      int `json:"history_token_budget,omitempty"`
-	HistoryRunTokenBudget   int `json:"history_run_token_budget,omitempty"`
-	HistoryRecordLimit      int `json:"history_record_limit,omitempty"`
+	OnRegistration          *bool `json:"on_registration,omitempty"`
+	MaxAttemptsPerDirection int   `json:"max_attempts_per_direction"`
+	MaxCandidates           int   `json:"max_candidates,omitempty"`
+	HistoryTokenBudget      int   `json:"history_token_budget,omitempty"`
+	HistoryRunTokenBudget   int   `json:"history_run_token_budget,omitempty"`
+	HistoryRecordLimit      int   `json:"history_record_limit,omitempty"`
 	// NoveltyRepairAttempts preserves the persisted settings key; it bounds
 	// content-validation repair attempts and does not run uniqueness checks.
 	NoveltyRepairAttempts int    `json:"novelty_repair_attempts,omitempty"`
 	Cron                  string `json:"cron"`
+}
+
+func (s IdeationSchedule) OnRegistrationEnabled() bool {
+	return s.OnRegistration == nil || *s.OnRegistration
 }
 
 func DefaultSettings() Settings {

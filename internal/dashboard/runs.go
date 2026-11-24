@@ -87,11 +87,19 @@ func (d *Dashboard) refreshRuns() {
 			selected = i
 		}
 		if row.operation != nil {
-			label := "Ideation"
-			if row.operation.Kind == "project_setup" {
-				label = "Project setup: " + projectSetupPhaseLabel(row.operation.Input)
+			label := "Ideation · " + row.operation.Stage
+			if row.operation.RegistrationIdeation() {
+				label = "Auto ideation · " + row.operation.Stage
 			}
-			d.runs.AddItem(tview.Escape(label+" · "+row.operation.Stage), tview.Escape(row.id+" · "+recordedRuntimeValue(row.operation.StartedAt)), 0, nil)
+			if row.operation.Kind == "project_setup" {
+				phase := projectSetupPhaseLabel(row.operation.Input)
+				if row.operation.Stage == "failed" {
+					label = "Setup failed: " + phase
+				} else {
+					label = "Project setup: " + phase + " · " + row.operation.Stage
+				}
+			}
+			d.runs.AddItem(tview.Escape(label), tview.Escape(row.id+" · "+recordedRuntimeValue(row.operation.StartedAt)), 0, nil)
 			continue
 		}
 		attempt := row.attempt
@@ -133,6 +141,9 @@ func (d *Dashboard) refreshRuns() {
 }
 
 func runStatus(attempt model.Attempt) string {
+	if attempt.Status == model.AttemptAwaitingPlanPublication {
+		return "awaiting plan publication"
+	}
 	if attempt.Status == "complete" {
 		return "completed"
 	}

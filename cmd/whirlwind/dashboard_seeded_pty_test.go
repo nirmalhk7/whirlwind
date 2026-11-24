@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"whirlwind/internal/control"
-	"whirlwind/internal/dashboard"
 	"whirlwind/internal/httpapi"
 	"whirlwind/internal/model"
 	"whirlwind/internal/policy"
@@ -35,24 +34,21 @@ const (
 	fixtureEditedTitle   = "Verify revised fixture output"
 )
 
-// This intentionally uses the production dashboard and dispatcher/command
-// adapter, but without a Unix listener or provider. The separate launcher PTY
-// acceptance checks the real process/socket boundary.
+// Drive the shipped dashboard through the production socket and command adapter
+// while the test owns the workflow fixtures and prevents worker dispatch.
 func TestSeededHumanWorkflowThroughPTY(t *testing.T) {
 	if os.Getenv("WHIRLWIND_TEST_SEEDED_PTY") != "1" {
 		t.Skip("set WHIRLWIND_TEST_SEEDED_PTY=1 for seeded PTY acceptance (requires Python 3 and Vim)")
 	}
-	t.Setenv("WHIRLWIND_SEEDED_PTY_DATA", "")
 	data := t.TempDir()
 	s := openSeededTerminalStore(t, data)
 	w := workflow.New(s, nil, data)
 	w.PlansRoot = filepath.Join(data, "plans")
 	hash := seedTerminalWorkflow(t, s, w, data)
-	executable, err := os.Executable()
-	mustSeedTerminal(t, err)
+	startSeededTerminalControl(t, s, w, data)
 	python, err := exec.LookPath("python3")
 	mustSeedTerminal(t, err)
-	cmd := exec.Command(python, "../../scripts/dashboard-seeded-pty.py", data, executable)
+	cmd := exec.Command(python, "../../scripts/dashboard-seeded-pty.py", data)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		requests, _ := os.ReadFile(filepath.Join(data, "requests.jsonl"))
@@ -62,61 +58,59 @@ func TestSeededHumanWorkflowThroughPTY(t *testing.T) {
 	assertSeededTerminalDecisions(t, s, data, hash)
 }
 
-// TestSeededHumanWorkflowTerminalHelper runs only inside the harness PTYs.
-func TestSeededHumanWorkflowTerminalHelper(t *testing.T) {
-	data := os.Getenv("WHIRLWIND_SEEDED_PTY_DATA")
-	if data == "" {
-		return
-	}
-	s := openSeededTerminalStore(t, data)
-	w := workflow.New(s, nil, data)
-	w.PlansRoot = filepath.Join(data, "plans")
-	dispatcher := control.SupervisorDispatcher{DB: s.DB, Commands: localCommandExecutor{api: httpapi.New(s, w, "")}}
+func startSeededTerminalControl(t *testing.T, s *store.Store, w *workflow.Engine, data string) {
+	t.Helper()
 	logFile, err := os.OpenFile(filepath.Join(data, "requests.jsonl"), os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0600)
 	mustSeedTerminal(t, err)
-	defer logFile.Close()
-	log := json.NewEncoder(logFile)
-	var serial sync.Mutex
-	app := dashboard.New(data)
-	app.SetCommandHandler(func(ctx context.Context, request control.Request) (json.RawMessage, error) {
-		serial.Lock()
-		defer serial.Unlock()
-		// Simulate a concurrent writer winning after the form's last refresh.
-		// The actual dispatcher, not the UI test fake, rejects the stale write.
-		if request.Operation == "idea.update" && request.ExpectedVersion == 1 {
-			if err := bumpSeededIdea(ctx, s); err != nil {
-				return nil, err
-			}
-		}
-		response, err := dispatcher.Handle(ctx, request)
-		entry := terminalJournalEntry{Request: request}
-		if err != nil {
-			entry.Error = err.Error()
-		}
-		if logErr := log.Encode(entry); logErr != nil {
-			return nil, logErr
-		}
-		if err != nil {
-			return nil, err
-		}
-		return json.Marshal(response.Result)
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := app.Watch(ctx, func(ctx context.Context) (control.Snapshot, error) {
-		if err := holdSeededSnapshot(ctx, data); err != nil {
-			return nil, err
-		}
-		result, err := dispatcher.Snapshot(ctx, 100)
-		if err == nil {
-			result["supervisor"] = []model.Record{{Data: json.RawMessage("{\"online\":true}")}}
-		}
-		return result, err
-	})
-	err = app.Run()
-	cancel()
-	<-done
+	t.Cleanup(func() { _ = logFile.Close() })
+	dispatcher := &seededTerminalDispatcher{
+		SupervisorDispatcher: control.SupervisorDispatcher{
+			DB:             s.DB,
+			Commands:       localCommandExecutor{api: httpapi.New(s, w, "")},
+			DispatchHealth: func() model.DispatchHealth { return model.DispatchHealth{} },
+		},
+		store: s, data: data, journal: json.NewEncoder(logFile),
+	}
+	server, err := control.Listen(control.SocketPath(data), dispatcher)
 	mustSeedTerminal(t, err)
+	t.Cleanup(func() { _ = server.Close() })
+}
+
+type seededTerminalDispatcher struct {
+	control.SupervisorDispatcher
+	store   *store.Store
+	data    string
+	journal *json.Encoder
+	mu      sync.Mutex
+}
+
+func (d *seededTerminalDispatcher) Handle(ctx context.Context, request control.Request) (control.Response, error) {
+	if request.Operation == "inspect.records" && request.ResourceID == "projects" {
+		if err := holdSeededSnapshot(ctx, d.data); err != nil {
+			return control.Response{}, err
+		}
+	}
+	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" {
+		return d.SupervisorDispatcher.Handle(ctx, request)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// Let a concurrent write win after the form loads so the dispatcher
+	// has to reject the stale version through its normal command path.
+	if request.Operation == "idea.update" && request.ExpectedVersion == 1 {
+		if err := bumpSeededIdea(ctx, d.store); err != nil {
+			return control.Response{}, err
+		}
+	}
+	response, err := d.SupervisorDispatcher.Handle(ctx, request)
+	entry := terminalJournalEntry{Request: request}
+	if err != nil {
+		entry.Error = err.Error()
+	}
+	if logErr := d.journal.Encode(entry); logErr != nil {
+		return control.Response{}, logErr
+	}
+	return response, err
 }
 
 // Only the test can write these files. Wait for a deliberately blocked load so
@@ -185,7 +179,7 @@ func seedTerminalWorkflow(t *testing.T, s *store.Store, w *workflow.Engine, data
 	save("ideas", idea.ID, idea)
 	idea.DecisionStatus = "approved"
 	mustSeedTerminal(t, s.Put(ctx, "ideas", idea.ID, idea, 1))
-	cancelling := model.ExecutionPlan{ID: "cancel-plan", ProjectID: project.ID, IdeaID: idea.ID, IdeationRunID: idea.RunID,
+	cancelling := model.ExecutionPlan{ID: model.PlanID("idea:" + idea.ID), ProjectID: project.ID, IdeaID: idea.ID, IdeationRunID: idea.RunID,
 		Issue: model.Issue{Title: "Cancel fixture planning"}, Stage: "planning", PlanVersion: 1}
 	save("execution_plans", cancelling.ID, cancelling)
 	save("sessions", "cancel-attempt", model.Attempt{AttemptID: "cancel-attempt", Task: cancelling.ID,
@@ -278,9 +272,6 @@ func assertSeededTerminalDecisions(t *testing.T, s *store.Store, data, initialHa
 	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
 		var entry terminalJournalEntry
 		mustSeedTerminal(t, json.Unmarshal([]byte(line), &entry))
-		if entry.Request.Operation == "inspect.plan" {
-			continue
-		}
 		if entry.Request.RequestID == "" || entry.Request.IdempotencyKey == "" || seen[entry.Request.IdempotencyKey] {
 			t.Fatalf("missing or replayed decision identity: %+v", entry)
 		}
@@ -319,6 +310,11 @@ func assertSeededTerminalDecisions(t *testing.T, s *store.Store, data, initialHa
 	cancelled := terminalFixtureRecord[model.Idea](t, s, "ideas", fixtureCancelIdea, 4)
 	if cancelled.DecisionStatus != "error" || cancelled.ErrorReason != "user_cancelled" {
 		t.Fatalf("planner cancellation did not persist: %+v", cancelled)
+	}
+	cancelledPlan := terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", model.PlanID("idea:"+fixtureCancelIdea), 2)
+	cancelledAttempt := terminalFixtureRecord[model.Attempt](t, s, "sessions", "cancel-attempt", 2)
+	if cancelledPlan.Stage != "cancelled" || cancelledAttempt.Status != "cancelled" || !cancelledAttempt.Finished {
+		t.Fatalf("planner cancellation left plan or attempt active: stage=%s attempt=%s", cancelledPlan.Stage, cancelledAttempt.Status)
 	}
 	plan := terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", fixtureDraftPlan, 3)
 	if writes[4].Request.ContentHash != initialHash || writes[5].Request.ContentHash == initialHash ||
