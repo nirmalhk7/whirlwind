@@ -16,11 +16,11 @@ RENDER_MARKER = b"Projects"
 
 
 class PTYSession:
-    def __init__(self, env):
+    def __init__(self, env, argv=(ENTRY, "dashboard"), cwd=REPO):
         self.pid, self.master = pty.fork()
         if self.pid == 0:
-            os.chdir(REPO)
-            os.execve(ENTRY, [ENTRY, "dashboard"], env)
+            os.chdir(cwd)
+            os.execve(argv[0], argv, env)
         fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 112, 0, 0))
         self.output = bytearray()
         self.reaped = False

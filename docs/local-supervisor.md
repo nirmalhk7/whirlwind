@@ -2,6 +2,8 @@
 
 Whirlwind's human interface is a Go terminal application using `rivo/tview`. The supervisor owns SQLite state and runs independently from the terminal session. The dashboard connects through a private Unix-domain socket; it reads the existing database read-only when the supervisor is offline.
 
+See [seeded terminal acceptance](seeded-terminal-acceptance.md) to verify human decisions through the real terminal.
+
 ## Start
 
 ```sh

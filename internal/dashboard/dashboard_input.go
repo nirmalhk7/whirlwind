@@ -170,6 +170,7 @@ func (d *Dashboard) handleInboxPanelAction(event *tcell.EventKey) bool {
 }
 
 func (d *Dashboard) closeModal() {
+	panel := d.focusedPanel()
 	if d.modal == d.directions {
 		d.directions.SetTitle(inboxTitle)
 	}
@@ -180,7 +181,7 @@ func (d *Dashboard) closeModal() {
 	d.planReviewVim = nil
 	d.directionChoiceFromRationale = false
 	d.SetRoot(d.root, true)
-	d.SetFocus(d.focusedPanel())
+	d.SetFocus(panel)
 }
 
 func (d *Dashboard) openRunDetails(event *tcell.EventKey) bool {
