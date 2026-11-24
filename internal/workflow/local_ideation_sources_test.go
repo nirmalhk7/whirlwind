@@ -35,7 +35,7 @@ func TestLocalGitIdeationUsesRepositoryEvidenceWithoutGitHub(t *testing.T) {
 			fixture := prepareNoveltyTest(t, nil)
 			e, p := fixture.engine, fixture.project
 			ctx := t.Context()
-			p.Name, p.Repo, p.RemoteURL = "Local fixture", p.Path, ""
+			p.Name, p.Repo, p.RemoteURL, p.Status = "Local fixture", p.Path, "", "draft"
 			record, err := e.Store.Get(ctx, "projects", p.ID)
 			requireWorkflowSuccess(t, err)
 			requireWorkflowSuccess(t, e.Store.Put(ctx, "projects", p.ID, p, record.Version))
@@ -67,6 +67,15 @@ func TestLocalGitIdeationUsesRepositoryEvidenceWithoutGitHub(t *testing.T) {
 			}
 			e.dispatchQueuedIdeation(ctx)
 			e.background.Wait()
+			if trigger == "initial" {
+				waiting, _ := inspectOnboardingIdeation(t, e, runID)
+				if waiting.Stage != "queued" || !strings.Contains(waiting.Error, "waiting for project setup") || len(fixture.fixture.generationPrompts) != 0 {
+					t.Fatalf("local automatic ideation did not wait for setup: %+v", waiting)
+				}
+				setOnboardingProjectStatus(t, e, p, "approved")
+				e.dispatchQueuedIdeation(ctx)
+				e.background.Wait()
+			}
 			run, err := e.Store.Get(ctx, "operations", runID)
 			requireWorkflowSuccess(t, err)
 			op, err := store.Decode[model.Operation](run)
