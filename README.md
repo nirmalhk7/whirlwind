@@ -16,7 +16,7 @@ Whirlwind's identity rests on velocity, control, and correctness: maximize verif
 
 ## Run locally
 
-Requirements: Go version specified in `go.mod` or newer, Git, Node.js 20.9+, nono 0.81.0, and an installed, authenticated ACP agent. The terminal dashboard and supervisor can open without nono; agent execution fails closed until the native sandbox is ready.
+The dashboard and supervisor use the Go version specified in `go.mod` or newer, Git, and Node.js 20.9+. Native agent and check execution additionally require macOS and nono 0.81.0. To run an agent, install and authenticate its ACP adapter. Linux supports inspection only. See the [support and verification matrix](docs/support.md).
 
 ```sh
 go mod download
@@ -73,7 +73,7 @@ SQLite retains execution records, fenced ownership, pending decisions, mutation 
 
 Whirlwind creates one current SQLite schema directly, without schema versions or data migrations. Reopening a current database preserves its records. Opening an obsolete development layout deletes its database state and recreates the current schema, including `projects`, `ideas`, and `plans`. See [local supervisor setup](docs/local-supervisor.md) and [SQL persistence details](docs/persistence.md).
 
-Target repositories may use any language. The Go supervisor runs each project's approved verification commands through the separate local runner; it does not add Go tests or Go analyzer settings. The approved Qlty command is `qlty check --upstream HEAD --fix --no-progress --sarif`, run in isolated staging with the approved base exposed as `HEAD`. Qlty findings in that diff block acceptance at every severity. Scanner configuration and generated state belong under the external per-project quality directory. Project setup selects Gitleaks from the Qlty catalog and verifies the installed scanner before recording qualification.
+Target repositories may use any language. The Go supervisor runs each project's approved verification commands through the separate local runner; it does not add Go tests or Go analyzer settings. The approved Qlty command is `qlty check --upstream HEAD --fix --no-progress --sarif`, run in isolated staging with the approved base exposed as `HEAD`. Qlty findings in that diff block acceptance at every severity. Scanner configuration and generated state belong under the external per-project quality directory. Managed project setup selects only Gitleaks from the Qlty catalog and qualifies the actual installed scanner before recording readiness. The onboarding code is present; current native compatibility and finding coverage require separate evidence.
 
 ## Visual identity
 
@@ -97,7 +97,7 @@ qlty smells --all
 qlty check --all
 ```
 
-The native tests run real nono filesystem, network and ACP terminal boundary checks. Controlled OpenShell fixtures remain for legacy recovery regressions; they do not establish physical isolation. See [nono setup](docs/nono-setup.md) for runtime and platform details.
+On macOS with the pinned runtime, the native suites can exercise real nono filesystem, network and ACP terminal boundaries. Linux launcher tests cover the execution refusal, not native isolation. Controlled OpenShell fixtures remain for legacy recovery regressions; they do not establish physical isolation. See [nono setup](docs/nono-setup.md) for runtime and platform details.
 
 Settings-driven live provider outcomes and reproduction are recorded in [configured ACP acceptance](docs/acp-configured-acceptance.md). Skipped or incomplete checks do not certify authenticated inference.
 
