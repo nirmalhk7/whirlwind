@@ -53,6 +53,13 @@ func issueTaskID(ctx context.Context, tx *sql.Tx, project model.Project, issue m
 	return id, err
 }
 
+// IssueBoundToPlan reports whether the exact repository issue owns the plan.
+func (s *Store) IssueBoundToPlan(ctx context.Context, repo string, number int, planID string) (bool, error) {
+	var matches bool
+	err := s.DB.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM issue_plans WHERE repo=? AND issue=? AND plan_id=?)", repo, number, planID).Scan(&matches)
+	return matches, err
+}
+
 func loadIssueTask(ctx context.Context, tx *sql.Tx, id string) (model.ExecutionPlan, error) {
 	var data []byte
 	if err := tx.QueryRowContext(ctx, "SELECT data FROM resources WHERE kind='execution_plans' AND id=?", id).Scan(&data); err != nil {

@@ -44,7 +44,7 @@ projects:
   - /absolute/path/to/repository
 ```
 
-Valid repositories appear in Projects with green `OK`; invalid paths remain visible with red `ERR` and details in Inbox. Refresh preserves existing project choices and runtime state. Agents lists every configured role's ordered model choices, reasoning effort, and provider connection status: green `up`, red `down`, or a truthful `paused`/`unverified` state when no current check is available. Connection checks follow `workers.provider_status_check_seconds` and pause while runners are stopped.
+Valid repositories appear in Projects with green `OK`; invalid paths remain visible with red `ERR` and details in Inbox. Refresh preserves existing project choices and runtime state. Adding, changing, or removing a remote updates metadata without registering the same checkout again. Agents lists every configured role's ordered model choices, reasoning effort, and provider connection status: green `up`, red `down`, or a truthful `paused`/`unverified` state when no current check is available. Connection checks follow `workers.provider_status_check_seconds` and pause while runners are stopped.
 
 The Go/tview TUI displays saved plans, questions, permission requests, attempts, review and verification evidence, and local completion data. Inbox occupies the right pane; focus it and press `a` to choose a direction for approval or `h` for direction history. Direction approval and plan approval are separate. Decisions carry expected record versions and idempotency keys over a user-private Unix socket; the supervisor rechecks them before saving. Whirlwind has no browser frontend or UI server.
 

@@ -74,6 +74,10 @@ func (c *configurationChanges) onboardProject(path string, previous model.Projec
 		status.Detail = "Onboarding failed: " + err.Error()
 		return status, c.ctx.Err()
 	}
+	project, err = c.preserveCheckoutIdentity(project, previous)
+	if err != nil {
+		return status, err
+	}
 	status.Status = "OK"
 	status.ProjectID = project.ID
 	return status, c.registerProject(project)
