@@ -232,6 +232,18 @@ test("legacy browser ownership requires explicit stop before supervisor startup"
   assert.equal(result.code, 0, result.output);
 });
 
+test("stop rejects a malformed legacy process registration", async t => {
+  const { data, run } = await fixture(t);
+  const statePath = join(data, "launcher/state.json");
+  await mkdir(dirname(statePath), { recursive: true });
+  const registration = JSON.stringify({ version: 1, token: "e".repeat(32), pid: -1 });
+  await writeFile(statePath, registration);
+  const stopped = await run("stop");
+  assert.equal(stopped.code, 1, stopped.output);
+  assert.match(stopped.output, /invalid process registration/);
+  assert.equal(await readFile(statePath, "utf8"), registration);
+});
+
 test("stop waits for the owned process to finish after its control socket closes", async t => {
   const {run,data,env}=await fixture(t);
   const token="d".repeat(32);

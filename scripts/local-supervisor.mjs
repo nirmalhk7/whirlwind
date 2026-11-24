@@ -1,5 +1,4 @@
-import { spawn } from "node:child_process";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createConnection } from "node:net";
 import { createHash, randomBytes } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -7,8 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { readState } from "./launcher-config.mjs";
-import { ownedProcesses, signal } from "./launcher-processes.mjs";
+import { ownedProcesses, readLegacyState, signal, stopLegacyLauncher } from "./launcher-processes.mjs";
 import { withLock } from "./launcher-lock.mjs";
 
 const exec = promisify(execFile);
@@ -76,7 +74,7 @@ async function request(config, operation) {
 }
 
 async function legacyInstance(config) {
-  const state = await readState({ stateFile: join(config.data, "launcher", "state.json") });
+  const state = await readLegacyState(join(config.commandDirectory, "state.json"));
   return Boolean(state && (await ownedProcesses(state)).length);
 }
 
@@ -203,10 +201,10 @@ async function stopLocked(config) {
     console.log("Whirlwind supervisor stopped.");
     return 0;
   }
-  const legacyState = await readState({ stateFile: join(config.data, "launcher", "state.json") });
+  const legacyStateFile = join(config.commandDirectory, "state.json");
+  const legacyState = await readLegacyState(legacyStateFile);
   if (legacyState && (await ownedProcesses(legacyState)).length) {
-    const { stop } = await import("./launcher-processes.mjs");
-    return stop({ ...config, stateFile: join(config.data, "launcher", "state.json"), log: join(config.data, "launcher", "whirlwind.log") });
+    return stopLegacyLauncher(legacyStateFile, join(config.commandDirectory, "whirlwind.log"));
   }
   const state = await readSupervisorState(config);
   let processes = await ownedProcesses(state, supervisorToken);

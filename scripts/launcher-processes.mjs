@@ -1,8 +1,7 @@
 import { execFile } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
-import { readState } from "./launcher-config.mjs";
 
 const exec = promisify(execFile);
 const tokenKey = "WHIRLWIND_LAUNCHER_TOKEN";
@@ -28,8 +27,21 @@ export function signal(pid, name) {
   catch (error) { if (error.code !== "ESRCH") throw error; }
 }
 
-export async function stop(config) {
-  const state = await readState(config);
+export async function readLegacyState(stateFile) {
+  try {
+    const state = JSON.parse(await readFile(stateFile, "utf8"));
+    if (state.version !== 1 || !/^[a-f0-9]{32}$/.test(state.token) || !Number.isInteger(state.pid) || state.pid < 0) {
+      throw new Error("invalid process registration");
+    }
+    return state;
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw new Error(`Cannot read ${stateFile}: ${error.message}`);
+  }
+}
+
+export async function stopLegacyLauncher(stateFile, log) {
+  const state = await readLegacyState(stateFile);
   let processes = await ownedProcesses(state);
   if (processes.some(({ pid }) => pid === state.pid)) signal(state.pid, "SIGTERM");
   else for (const group of new Set(processes.map(({ group }) => group))) signal(-group, "SIGTERM");
@@ -44,8 +56,8 @@ export async function stop(config) {
     await delay(100);
     processes = await ownedProcesses(state);
   }
-  if (processes.length) throw new Error(`Managed processes still running. Inspect ${config.log}`);
-  await rm(config.stateFile, { force: true });
+  if (processes.length) throw new Error(`Managed processes still running. Inspect ${log}`);
+  await rm(stateFile, { force: true });
   console.log("Legacy Whirlwind processes stopped.");
   return 0;
 }
