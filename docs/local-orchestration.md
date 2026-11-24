@@ -1,5 +1,10 @@
 # Local orchestration, accounting and execution boundaries
 
+> Historical orchestration and accounting reference for the earlier task and
+> Anthropic Sandbox Runtime paths. Do not use it to configure current local
+> plan execution, publication or quotas. See [current workflows](workflow-modes.md),
+> [nono setup](nono-setup.md), and the [support matrix](support.md).
+
 Whirlwind turns a selected objective into a reviewed change on one local machine. Selection authorizes planning; a ready-labeled external issue becomes a candidate and an `awaiting_selection` task. Selecting the current candidate revision records objective, scope, policy hash and source fingerprint atomically with its task binding. Legacy tasks need explicit adoption. Ordinary technical decisions remain with agents inside that scope.
 
 ## Setup before unattended inference

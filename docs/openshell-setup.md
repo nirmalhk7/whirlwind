@@ -1,5 +1,9 @@
 # NVIDIA OpenShell setup for Whirlwind
 
+> Historical compatibility and recovery reference. OpenShell is not a current
+> installation path or evidence for native isolation. For supported execution use
+> [nono setup](nono-setup.md); see the [support matrix](support.md) for Linux.
+
 Whirlwind's bridge targets the NVIDIA OpenShell v0.1.7 local CLI and structured output. Agent execution fails closed when the CLI, gateway, image, or policy is unavailable. Opening the terminal dashboard does not require a running sandbox.
 
 ## Install and select a local gateway

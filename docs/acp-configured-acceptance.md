@@ -1,5 +1,10 @@
 # Configured ACP qualification (#6)
 
+> The dated sections record specific installations, settings and reruns; they
+> do not qualify current HEAD, every model/account, or all three providers.
+> Follow [nono setup](nono-setup.md) for current configuration and use the
+> [configured harness](#harness-and-reproduction) with locally authorized settings.
+
 ## Writable Coding, 2026-11-19
 
 The configured Codex Coding smoke test uses a disposable Git repository and a
