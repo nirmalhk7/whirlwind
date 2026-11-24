@@ -48,6 +48,17 @@ Valid repositories appear in Projects with green `OK`; invalid paths remain visi
 
 If sandbox recovery blocks new dispatch, the dashboard shows `BLOCK` and the reason instead of `OK`. Press `!` for the full diagnostic. The block clears only after a successful recovery check.
 
+By default, registration queues one automatic ideation run. It waits for successful project setup. Runs identifies the registration trigger and shows why setup is blocking it. Turn off registration and scheduled ideation to register and inspect projects without automatic model calls.
+
+```yaml
+workers:
+  ideation:
+    on_registration: false
+    cron: ""
+```
+
+Project setup still runs. Operators can explicitly start ideation with `i` in Projects. Coding still requires plan approval.
+
 The Go/tview TUI displays saved plans, questions, permission requests, attempts, review and verification evidence, and local completion data. Inbox occupies the right pane; focus it and press `a` to choose a direction for approval or `h` for direction history. Direction approval and plan approval are separate. Decisions carry expected record versions and idempotency keys over a user-private Unix socket; the supervisor rechecks them before saving. Whirlwind has no browser frontend or UI server.
 
 See [local supervisor and terminal setup](docs/local-supervisor.md), [nono setup](docs/nono-setup.md), [project policy](docs/go-backend.md), and the [HTTP API contract](API.md) for integration and webhook interfaces.
