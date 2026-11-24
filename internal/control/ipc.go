@@ -62,7 +62,8 @@ type LocalServer struct {
 type Client struct{ path string }
 
 var allowedOperations = map[string]bool{
-	"idea.reconsider": true, "idea.update": true, "idea.approve": true, "idea.archive": true, "idea.retry_planning": true, "planner.cancel": true,
+	DispatchHealthOperation: true,
+	"idea.reconsider":       true, "idea.update": true, "idea.approve": true, "idea.archive": true, "idea.retry_planning": true, "planner.cancel": true,
 	"plan.document.read": true, "plan.document.save": true, "plan.approve": true, "plan.request_changes": true, "plan.reject": true,
 	"inspect.snapshot": true, "inspect.records": true, "inspect.events": true, "inspect.plan": true, "inspect.artifact": true, "supervisor.stop": true,
 	"project.register": true, "project.setup.retry": true, "ideation.start": true,

@@ -1,5 +1,8 @@
 # Native nono isolation acceptance (#7)
 
+> Dated macOS evidence for the exact fixtures and runtime below. It does not
+> qualify current HEAD or any Linux execution. See [current support](support.md).
+
 ## Coding workflow, 2026-11-19
 
 The deterministic ACP peer ran through Coding, Reviewer, and Finalizer in

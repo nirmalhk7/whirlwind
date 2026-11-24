@@ -77,7 +77,7 @@ Separate optional listener exposes only `POST /webhooks/github`. Requires `X-Hub
 
 Generated directions include `category`: `expand`, `optimize`, `harden`, or `simplify`, with exactly one per batch. Older directions may omit it. Ideation validates each batch against all stored suggestions for that project and requires a separate semantic novelty verdict before saving. Descriptions are capped at 35 whitespace-separated words. Rejected batches retry up to three times; failed validation or unavailable history/review leaves no new directions.
 
-Empty project policies permit registration and ideation with an empty `policy_hash`. Task execution still requires a configured, committed policy confirmed through `/projects/{id}/policy`. Native providers accept optional `model_command:["executable", "argument", ...]` for ACP discovery; otherwise pinned official npm adapters are used.
+Empty project policies permit registration and ideation with an empty `policy_hash`. Task execution still requires a configured, committed policy confirmed through `/projects/{id}/policy`. Confirming a changed policy clears the prior scanner qualification, sets the project to draft, and queues fresh setup without starting another ideation run. Confirming the same committed policy preserves its qualification. Native providers accept optional `model_command:["executable", "argument", ...]` for ACP discovery; otherwise pinned official npm adapters are used.
 
 ## Thinking, Run history, and ideation schedules
 

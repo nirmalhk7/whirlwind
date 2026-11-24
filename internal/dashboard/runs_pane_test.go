@@ -158,3 +158,28 @@ func TestUnreadableRunsClearStaleHistory(t *testing.T) {
 		t.Fatal("unreadable history retained stale selection")
 	}
 }
+
+func TestPlannerRunStatusReportsPublicationRatherThanProviderExit(t *testing.T) {
+	d := New(t.TempDir())
+	attempt := model.Attempt{AttemptID: "plan-run", Provider: "fixture", Role: "plan", Finished: true, Status: model.AttemptAwaitingPlanPublication}
+	present := func() (row string, details string) {
+		d.Present(control.Snapshot{"sessions": {record(attempt.AttemptID, attempt)}})
+		row, _ = runList(d).GetItemText(0)
+		return row, d.detail.GetText(false)
+	}
+	row, details := present()
+	if !strings.Contains(row, "awaiting plan publication") || !strings.Contains(details, "Status: awaiting plan publication") {
+		t.Fatalf("pending publication not visible: %q\n%s", row, details)
+	}
+	attempt.Status = "failed"
+	attempt.Error = "Planner did not write the assigned plan.md; retry planning"
+	row, details = present()
+	if !strings.Contains(row, "failed") || !strings.Contains(details, attempt.Error) {
+		t.Fatalf("publication failure not visible: %q\n%s", row, details)
+	}
+	attempt.Status, attempt.Error = "complete", ""
+	row, _ = present()
+	if !strings.Contains(row, "completed") {
+		t.Fatalf("verified publication not shown as complete: %q", row)
+	}
+}

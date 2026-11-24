@@ -30,8 +30,9 @@ type CommandExecutor interface {
 }
 
 type SupervisorDispatcher struct {
-	DB       *sql.DB
-	Commands CommandExecutor
+	DB             *sql.DB
+	Commands       CommandExecutor
+	DispatchHealth func() model.DispatchHealth
 }
 
 type RecordPage struct {
@@ -53,6 +54,12 @@ func (d SupervisorDispatcher) Handle(ctx context.Context, request Request) (Resp
 		result, err = d.records(ctx, request)
 	case "inspect.events":
 		result, err = d.events(ctx, request)
+	case DispatchHealthOperation:
+		if d.DispatchHealth == nil {
+			err = ErrDispatchHealthUnavailable
+		} else {
+			result = d.DispatchHealth()
+		}
 	default:
 		if !allowedOperations[request.Operation] || (strings.HasPrefix(request.Operation, inspectOperationPrefix) && request.Operation != "inspect.plan" && request.Operation != "inspect.artifact") {
 			return Response{}, fmt.Errorf("unsupported local operation %q", request.Operation)

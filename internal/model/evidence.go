@@ -96,6 +96,10 @@ type Publication struct {
 	Error       string      `json:"error,omitempty"`
 }
 
+// AttemptAwaitingPlanPublication separates a successful provider exit from a
+// successfully published Planner document.
+const AttemptAwaitingPlanPublication = "awaiting_plan_publication"
+
 // Attempt preserves additive session fields while distinguishing reported runtime metadata from configured input.
 type Attempt struct {
 	IdeaID                string          `json:"idea_id,omitempty"`

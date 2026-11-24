@@ -34,6 +34,7 @@ type Dashboard struct {
 	status                       *tview.TextView
 	runnerStatus                 *tview.TextView
 	agents                       *tview.TextView
+	agentInspection              *tview.TextView
 	focus                        int
 	snapshot                     control.Snapshot
 	root                         tview.Primitive
@@ -111,7 +112,7 @@ func New(dataDirectories ...string) *Dashboard {
 	d.directions.SetBorder(true).SetTitle(inboxTitle)
 	d.plans.SetBorder(true).SetTitle(" Plans ")
 	d.agents = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
-	d.agents.SetBorder(true).SetTitle(" Agents ")
+	d.agents.SetBorder(true).SetTitle(" Agents · Enter ")
 	d.agents.SetText("No configured agents")
 	d.projects.AddItem("No projects", "", 0, nil)
 	d.directions.AddItem("No inbox items", "", 0, nil)
