@@ -114,6 +114,55 @@ test("Linux launcher restart reaps a registered worker and preserves unrelated p
   assert.equal((await run("status")).code, 0);
 });
 
+test("managed policy approval binds the file and project without touching either checkout", async t => {
+  const { run, data, env } = await fixture(t);
+  const first = join(data, "first-checkout");
+  const second = join(data, "second-checkout");
+  const createCheckout = async directory => {
+    await mkdir(directory);
+    await exec("git", ["-C", directory, "init", "--quiet"]);
+    await writeFile(join(directory, "result.txt"), "fixture\n");
+    await exec("git", ["-C", directory, "add", "result.txt"]);
+    await exec("git", ["-C", directory, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "core.hooksPath=/dev/null", "commit", "--no-gpg-sign", "-qm", "Fixture"]);
+  };
+  const gitState = async directory => ({
+    head: (await exec("git", ["-C", directory, "rev-parse", "HEAD"])).stdout,
+    status: (await exec("git", ["-C", directory, "status", "--porcelain", "--untracked-files=all"])).stdout,
+    index: await readFile(join(directory, ".git", "index")),
+    config: await readFile(join(directory, ".git", "config")),
+  });
+  await createCheckout(first);
+  await createCheckout(second);
+  const before = await Promise.all([gitState(first), gitState(second)]);
+  await writeFile(env.WHIRLWIND_SETTINGS_FILE, JSON.stringify({ version: 1, workers: { stopped: true }, providers: [], agents: {}, projects: [first, second] }));
+  const file = join(data, "reviewed.yaml");
+  const policy = "allowed_paths: [result.txt]\nrisk_rules: [{level: low, paths: [result.txt]}]\nchecks: [{name: result, command: [test, -f, result.txt]}]\n";
+  await writeFile(file, policy);
+  const start = await run("start");
+  assert.equal(start.code, 0, start.output);
+
+  const preview = await run("policy", "preview", first, file);
+  assert.equal(preview.code, 0, preview.output);
+  assert.ok(preview.output.includes(policy));
+  const [, version, hash] = /Version (\d+)\nSHA256 ([0-9a-f]{64})/.exec(preview.output);
+  const approve = project => run("policy", "approve", project, file, version, hash);
+  assert.equal((await approve(second)).code, 1);
+  await writeFile(file, policy + "# Changed after preview\n");
+  assert.equal((await approve(first)).code, 1);
+  await writeFile(file, policy);
+  const approved = await approve(first);
+  assert.equal(approved.code, 0, approved.output);
+  assert.match(approved.output, new RegExp(hash));
+  assert.equal((await approve(first)).code, 1);
+
+  const restart = await run("restart");
+  assert.equal(restart.code, 0, restart.output);
+  const reopened = await run("policy", "preview", first, file);
+  assert.equal(reopened.code, 0, reopened.output);
+  assert.ok(reopened.output.includes(`Version ${Number(version) + 1}\nSHA256 ${hash}`));
+  assert.deepEqual(await Promise.all([gitState(first), gitState(second)]), before);
+});
+
 test("supervisor starts and stops from a checkout without web or npm files", async t => {
   const checkout = await mkdtemp(join("/tmp", "ww-no-web-checkout-"));
   const data = await mkdtemp(join("/tmp", "ww-no-web-data-"));

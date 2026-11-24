@@ -80,7 +80,7 @@ SQLite retains execution records, fenced ownership, pending decisions, mutation 
 - CLI executable: `bin/whirlwind`; backend-only executable: `go run ./cmd/whirlwind`.
 - State directory: `~/.local/share/whirlwind`, overridden by `WHIRLWIND_DATA_DIR` or `--data`.
 - Database: `whirlwind.db` within the state directory.
-- Project policy: human-reviewed, committed `.whirlwind.yml` or `.whirlwind.yaml`. Local onboarding reads existing policy; the operator supplies verification commands before approving execution.
+- Project policy is explicitly approved through `whirlwind policy preview` and `whirlwind policy approve`, then kept in Whirlwind state outside the checkout. Existing committed policies are also supported. See [project policy approval](docs/go-backend.md#project-policy-approval).
 - GitHub labels: `whirlwind:ready` and `whirlwind:work`.
 - Optional webhook secret: `WHIRLWIND_WEBHOOK_SECRET`.
 

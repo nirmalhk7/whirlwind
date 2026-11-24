@@ -67,6 +67,7 @@ var allowedOperations = map[string]bool{
 	"plan.document.read": true, "plan.document.save": true, "plan.approve": true, "plan.request_changes": true, "plan.reject": true,
 	"inspect.snapshot": true, "inspect.records": true, "inspect.events": true, "inspect.plan": true, "inspect.artifact": true, "supervisor.stop": true,
 	"project.register": true, "project.setup.retry": true, "ideation.start": true,
+	"project.policy.preview": true, "project.policy.approve": true,
 	"provider.status":  true,
 	"runners.toggle":   true,
 	"direction.select": true, "direction.approve": true,
@@ -229,7 +230,7 @@ func validateRequest(request Request) error {
 	if request.Operation == "finalization.inspect" && (request.DiffOffset < 0 || request.DiffOffset > maxDiffCursor) {
 		return errors.New("finalization diff cursor is outside the supported range")
 	}
-	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" || request.Operation == "finalization.inspect" || request.Operation == "provider.status" {
+	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" || request.Operation == "finalization.inspect" || request.Operation == "provider.status" || request.Operation == "project.policy.preview" {
 		return nil
 	}
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {

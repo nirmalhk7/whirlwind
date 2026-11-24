@@ -69,6 +69,21 @@ func (c *configurationChanges) onboardProject(path string, previous model.Projec
 	// A resolved alias may now point at a different repository.
 	status.ProjectID = ""
 	status.CanonicalPath = canonical
+	if previous.ProjectID != "" && previous.CanonicalPath == canonical {
+		record, err := c.source.store.Get(c.ctx, "projects", previous.ProjectID)
+		if err == nil {
+			project, decodeErr := store.Decode[model.Project](record)
+			if decodeErr != nil {
+				return status, decodeErr
+			}
+			if project.ManagedPolicy && project.Path == canonical {
+				status.Status, status.ProjectID = "OK", record.ID
+				return status, nil
+			}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return status, err
+		}
+	}
 	project, err := projectregistry.Load(ctx, filepath.Base(canonical), canonical)
 	if err != nil {
 		status.Detail = "Onboarding failed: " + err.Error()

@@ -164,5 +164,9 @@ func (e *Engine) Project(ctx context.Context, id string) (model.Project, error) 
 	if err != nil {
 		return model.Project{}, err
 	}
-	return store.Decode[model.Project](r)
+	project, err := store.Decode[model.Project](r)
+	if err == nil && project.ManagedPolicy {
+		project.Policy, err = e.projectPolicy(ctx, project)
+	}
+	return project, err
 }

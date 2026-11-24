@@ -12,7 +12,6 @@ import (
 	"whirlwind/internal/execution"
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
 	"whirlwind/internal/store"
 	"whirlwind/internal/verification"
 )
@@ -211,13 +210,14 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 	if evidence.Onboarding && evidence.Phase != "" && evidence.Phase != "catalog" && evidence.Phase != "qualify" {
 		return verification.JobManifest{}, errors.New("unknown durable project setup phase; explicitly retry setup")
 	}
-	rules, hash, err := policy.Load(project.Path)
+	rules, err := e.projectPolicy(ctx, project)
 	if err != nil {
 		return verification.JobManifest{}, err
 	}
-	if hash != project.PolicyHash {
-		return verification.JobManifest{}, errors.New("project policy changed; confirm current configuration before setup")
+	if project.ManagedPolicy {
+		project.Policy = rules
 	}
+	hash := project.PolicyHash
 	head, err := github.Run(ctx, project.Path, "git", "rev-parse", "HEAD")
 	if err != nil {
 		return verification.JobManifest{}, err
@@ -404,8 +404,7 @@ func (e *Engine) finishProjectSetup(ctx context.Context, record model.Record, op
 		}
 	}
 	if failure == nil {
-		_, hash, err := policy.Load(project.Path)
-		if err != nil || hash != project.PolicyHash {
+		if _, err := e.projectPolicy(ctx, project); err != nil {
 			failure = errors.New("project policy changed during verification; setup result rejected")
 		}
 	}
