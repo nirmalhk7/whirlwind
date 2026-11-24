@@ -1,0 +1,545 @@
+{
+  "schema_version": 1,
+  "source_sequence": 3035,
+  "baseline_revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+  "platform": "Linux portable checks; native supervision and scanning require supported macOS and nono 0.81.0",
+  "release_status": "not_accepted",
+  "evidence": {
+    "baseline_schema": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Core SQLite column sets, UTC creation timestamps, five-state domain and obsolete-layout rebuild",
+      "tests": [
+        "TestWhirlwindPlanExactCoreColumns",
+        "TestWhirlwindPlanCreationTimestampsSurviveUpdatesAndReopen",
+        "TestWhirlwindPlanDatabaseRejectsLegacyStatuses",
+        "TestWhirlwindPlanReopenReplacesLayoutWithExtraCoreColumns"
+      ],
+      "limit": "Does not imply lossless legacy migration; it is waived."
+    },
+    "baseline_idea_history": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Repeated content may persist; reasoned reconsideration preserves the predecessor and is consumed once",
+      "tests": [
+        "TestWhirlwindPlanAllowsRepeatedIdeaContentWithDifferentTitle",
+        "TestHumanReconsiderationAllowsOneSameEvidenceRevisit",
+        "TestParityArchivedIdeaHistoryOffersReasonedReconsideration",
+        "TestHumanReconsiderationFlowsThroughIdeationOnce",
+        "TestParityGeneratedIdeasPublishDurableContentWithDeferredUniqueness"
+      ],
+      "limit": "Does not qualify all production prompts, bounded histories or creation schedules."
+    },
+    "baseline_approval": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Active approved plans reject changed saves until finish/pause and preserve frozen bytes and version conflicts",
+      "tests": [
+        "TestParityActiveApprovedPlanWaitsBeforeSavingChanges",
+        "TestParityPausedAndFinishedApprovedPlansCanBeEdited",
+        "TestParityApprovalFreezesExactDocumentBytes",
+        "TestLocalPlanEditApprovalRaceRejectsStaleCommit"
+      ],
+      "limit": "Does not establish complete separate-process human terminal acceptance."
+    },
+    "baseline_planner": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "A missing Planner document requires explicit retry",
+      "tests": [
+        "TestParityPlannerMissingOutputRequiresExplicitRetry"
+      ],
+      "limit": "Publication-versus-exit and queue cancellation improvements are independent PRs."
+    },
+    "baseline_overlap": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Two coding/reviewer pairs overlap, and approved plans for one repository use independent worktrees",
+      "tests": [
+        "TestParityTwoCodingReviewerPairsOverlap",
+        "TestApprovedPlansForSameRepositoryExecuteConcurrentlyInIndependentWorktrees"
+      ],
+      "limit": "Does not follow both plans through native correction and finalization."
+    },
+    "baseline_review": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Strict unrounded adherence threshold, mandatory checks and exact approval/candidate provenance",
+      "tests": [
+        "TestLoadAcceptedReviewReportRequiresCompleteEvidence",
+        "TestAdherenceUsesStrictUnroundedEightyPercent",
+        "TestAdherenceFailedGateOverridesPerfectScore",
+        "TestAdherenceRejectsChangedSnapshotOrApprovedVersion"
+      ],
+      "limit": "Synthetic evidence does not establish complete native scanner coverage."
+    },
+    "baseline_delivery": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Accepted report promotes the exact local commit without remote publication",
+      "tests": [
+        "TestAcceptedCandidateCompletesAsExactLocalDelivery"
+      ],
+      "limit": "The Finalizer and its verifier evidence use deterministic fixtures."
+    },
+    "baseline_recovery": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Pending human decisions and deadline survive durable recovery; transport restart matrix covers all roles",
+      "tests": [
+        "TestRecoveryPreservesPendingHumanDecisionsAndInvalidatesAttempt",
+        "TestSupervisorRecoveryPreservesOriginalAttemptDeadline",
+        "TestProcessTransportDisconnectRecoveryMatrixAcrossCanonicalRoles"
+      ],
+      "limit": "Not an authenticated provider transport or macOS kernel acceptance result."
+    },
+    "baseline_qlty": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "External default preparation, frozen configuration, stable report contracts, and no grandfathering of findings in the approved diff",
+      "tests": [
+        "TestProjectSetupDefaultsPreserveExistingHumanConfiguration",
+        "TestProjectSetupPreparesFrozenExternalDefaultsWithoutSourceWrites",
+        "TestDefaultQualityApprovalFreezesQltyAndSecretConfiguration",
+        "TestSARIFMalformedNotificationsCannotCertifyCleanEvidence",
+        "TestCleanQltyHeadDiffDoesNotRequireScanBaseline",
+        "TestQltyHeadDiffCannotGrandfatherReportedFindings"
+      ],
+      "limit": "Does not certify installed Qlty, findings outside the observed scope, or native onboarding."
+    },
+    "baseline_acp": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Bundled ACP profile contracts and refusal/remediation for native inference transport",
+      "tests": [
+        "TestBundledACPProfilesDefineLaunchAuthAndDynamicSelection",
+        "TestRunRejectsLegacyNativeTransportBeforeStartingProcess",
+        "TestNativeInferenceTransportFailsWithACPRemediation"
+      ],
+      "limit": "Does not qualify configured, authenticated inference, model/thinking, tools, resume or fallback."
+    },
+    "baseline_terminal": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "Go dashboard navigation, current-review inspection and shipped CLI invocation without the retired browser target",
+      "tests": [
+        "TestDashboardOpensProjectAndPlanNavigation",
+        "TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery"
+      ],
+      "commands": [
+        "node --test scripts/dashboard-cli.test.mjs"
+      ],
+      "limit": "Unit and launcher tests, not native separate-process PTY acceptance."
+    },
+    "baseline_linux": {
+      "kind": "main_fixture_pass",
+      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "summary": "The launcher rejects native execution on Linux before invoking nono",
+      "tests": [],
+      "commands": [
+        "node --test --test-name-pattern='Linux inspection' bridges/nono/launch.test.mjs"
+      ],
+      "limit": "Linux is inspection-only; no Linux-execution acceptance requirement."
+    },
+    "pr_34": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/34",
+      "revision": "a4ae71ed7a3c70eea16165d54233ebd511b20d47",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/31",
+      "summary": "Reapproval invalidates stale scanner qualification and enqueues one fresh setup check.",
+      "limit": "No native scanner requalification result."
+    },
+    "pr_35": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/35",
+      "revision": "bc35fff2bd1e6522ab4eabef2ad81ec271a0f216",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/27",
+      "summary": "A real seeded 80×24 dashboard renders two full Runs rows and usable shortcuts.",
+      "limit": "Only terminal rendering/inspection covered."
+    },
+    "pr_36": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/36",
+      "revision": "593371806bbcc0397f1d02649ebc7491679a287d",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/19",
+      "summary": "Project setup failure is durably visible in Projects, Runs and Inbox; tested through a temporary Basera fixture.",
+      "limit": "No real live onboarding or authenticated provider run."
+    },
+    "pr_37": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/37",
+      "revision": "4e963ac2059fddf28aa5cdc14ab3487f82d452af",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/26",
+      "summary": "Real PTY verifies Escape and Ctrl-C exit run log mode without quitting the dashboard.",
+      "limit": "No broader process/transport acceptance."
+    },
+    "pr_38": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/38",
+      "revision": "c9b24e62d69ea115cc7592ae98ce7f82a21d2500",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/23",
+      "summary": "Agent inspection distinguishes ordered model/thinking choices, connection freshness and project outcomes.",
+      "limit": "Does not establish authenticated inference or model selection."
+    },
+    "pr_39": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/39",
+      "revision": "2b6aa61e8e6c744665a64dd99124b08497830bfb",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/21",
+      "summary": "Initial and manual ideation on a local-only pinned Basera checkout use local evidence without GitHub.",
+      "limit": "No native provider or real reconciliation tooling."
+    },
+    "pr_40": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/40",
+      "revision": "b2cdba9914ccfe785b732a781ecd83bb63bbe0ea",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/22",
+      "summary": "Initial ideation waits for successful setup, opt-out works, and manual ideation remains available.",
+      "limit": "Does not certify full automatic onboarding."
+    },
+    "pr_41": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/41",
+      "revision": "694e2276824054011c52693b1854fea4e71d4666",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/20",
+      "summary": "Origin metadata changes keep the canonical checkout identity, history and binding scope.",
+      "limit": "No live remote write or GitHub deployment."
+    },
+    "pr_42": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/42",
+      "revision": "1361da816ee9b0ceb11676dd8fc4f662fd48f9be",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/28",
+      "summary": "Dashboard keeps the exact dispatch blocker visible until recovery verifies it can clear.",
+      "limit": "Does not establish Mac process/sandbox or authenticated-provider recovery."
+    },
+    "pr_43": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/43",
+      "revision": "4fa4b24ffc87107ca738444b1629ccee889a9bfc",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/24",
+      "summary": "Planner status reflects actual Markdown publication and retained failure/restart state, not provider exit.",
+      "limit": "Does not qualify the native planner/provider suite."
+    },
+    "pr_44": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/44",
+      "revision": "1909fd9aee617424762be99158d622fa50c6aba4",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/5",
+      "summary": "Only completed verifier-owned scratch staging is released; saved reports, runtime and interrupted recovery are retained.",
+      "limit": "Darwin binary was cross-built, not run natively."
+    },
+    "pr_45": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/45",
+      "revision": "cb5d47bd4a890741e5b0364e82d34763b96f7e41",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/11",
+      "summary": "Cancellation fences queued/capacity-blocked work and both commit orders against Planner completion.",
+      "limit": "Native coding/reviewer workflow is separate."
+    },
+    "pr_46": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/46",
+      "revision": "5785129f585c43aca672aed55c5d45363c4b5ad1",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/33",
+      "summary": "Invalid Go regression evidence never claims pass and retains the concrete reason and raw result.",
+      "limit": "Original native whole-workflow fixture is still unverified."
+    },
+    "pr_47": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/47",
+      "revision": "df54361bbb4f28e73f2edfb161b902d71bbf4630",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/32",
+      "summary": "Finalizer stops and names missing scanner/verifier prerequisites while keeping stale or wrong proof blocked.",
+      "limit": "Does not qualify installed native scanner identity or the native exact delivery."
+    },
+    "pr_48": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/48",
+      "revision": "2dee2f2c4364ecfce159ccaf887ae031e15349e9",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/13",
+      "summary": "Operator documentation distinguishes support, scope, and historical evidence.",
+      "limit": "Documentation and portable cross-checks; no native acceptance claim."
+    },
+    "pr_49": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/49",
+      "revision": "ca306767cc05d26b8ce7fdae388641c0f9a8a7c0",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/12",
+      "summary": "Two seeded PTYs exercise versions, separate approvals, stale edits, actual Vim save, cancellation, reopened clarification, blocked refresh, and stored delivery.",
+      "limit": "Production dispatcher is in-process; the separate Unix-socket launcher cannot run on this host."
+    },
+    "pr_50": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/50",
+      "revision": "f50512f51668913aaa92f216c66fb527a1edc737",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/10",
+      "summary": "Two independently accepted local candidates stay isolated through pause, Git-ref checkpoint recovery, restart and replay.",
+      "limit": "Uses deterministic verifier and Finalizer inputs, not a full native two-plan session."
+    },
+    "pr_51": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/51",
+      "revision": "245f8bba27fd6b2d6305d6e1c583603760e91633",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/29",
+      "summary": "Candidate copy retains exact scanner identity around real OS installer-lock operations while preserving immutable approved runtime.",
+      "limit": "Pinned Qlty/nono on actual macOS is not verified."
+    },
+    "pr_52": {
+      "kind": "review_pr_fixture_pass",
+      "pr": "https://github.com/nirmalhk7/whirlwind/pull/52",
+      "revision": "6d23911b180162e4ecf4459850138417ef45097b",
+      "issue": "https://github.com/nirmalhk7/whirlwind/issues/30",
+      "summary": "Onboarding HEAD and candidate delta are distinct in real Git staging; evidence validation rejects incomplete SARIF.",
+      "limit": "Opt-in native Gitleaks controls were not passed on this host."
+    },
+    "historical_nono": {
+      "kind": "historical_only",
+      "source": "docs/nono-native-acceptance.md",
+      "summary": "Dated macOS native policy and coding acceptance on older revisions.",
+      "limit": "Not rerun on the integration candidate; do not use to certify current runtime isolation."
+    },
+    "historical_acp": {
+      "kind": "historical_only",
+      "source": "docs/acp-configured-acceptance.md",
+      "summary": "Earlier configured Codex acceptance and recorded incomplete Claude/Cursor qualification.",
+      "limit": "Different runtime/model/settings; no current account or transport certification."
+    },
+    "historical_basera": {
+      "kind": "historical_only",
+      "source": "docs/basera-e2e-findings.md",
+      "summary": "Pinned earlier Basera test and its concrete dashboard/native workflow observations.",
+      "limit": "A historic bug or passing step is not current release status."
+    }
+  },
+  "blockers": {
+    "release": {
+      "issue_numbers": [
+        15
+      ],
+      "remaining": "Freeze one integrated candidate after repairs, then run full regression, terminal, native scanner, and configured ACP acceptance on that exact head."
+    },
+    "terminal_socket": {
+      "issue_numbers": [
+        12
+      ],
+      "remaining": "Run the seeded human decisions with a separate real supervisor over its private Unix socket; this runner rejects the socket with EPERM."
+    },
+    "native_policy": {
+      "issue_numbers": [
+        7
+      ],
+      "remaining": "Revalidate the supported native isolation and shared-worktree policy on the exact Darwin/nono release candidate; dated checks are not current."
+    },
+    "authenticated_acp": {
+      "issue_numbers": [
+        6,
+        25
+      ],
+      "remaining": "Use authorized configured accounts on macOS; qualify model/thinking, tools, resume and fallback and diagnose the reported live Codex transport stalls."
+    },
+    "concurrent_native": {
+      "issue_numbers": [
+        10,
+        32,
+        33
+      ],
+      "remaining": "Run two independently approved native plans through real verification, review/correction, restart and exact local delivery in the same session."
+    },
+    "planner_integration": {
+      "issue_numbers": [
+        11,
+        24
+      ],
+      "remaining": "Integrate cancellation and publication branches and run both committed race orders, persisted recovery and terminal intake together on the same candidate."
+    },
+    "project_lifecycle": {
+      "issue_numbers": [
+        19,
+        20,
+        21,
+        22,
+        31
+      ],
+      "remaining": "Integrate local-only registration, checkout identity, setup-first dispatch and requalification; rerun the isolated Basera and dashboard onboarding flows on one revision."
+    },
+    "ideation_contract": {
+      "issue_numbers": [
+        14,
+        15
+      ],
+      "remaining": "Recheck per-direction statuses, human-facing provenance, bounded retrieval/recovery and reconsideration together on current integrated code; uniqueness is outside scope."
+    },
+    "native_scanner": {
+      "issue_numbers": [
+        8,
+        29,
+        30
+      ],
+      "remaining": "On macOS with pinned nono/Qlty, qualify installed scanner, prove candidate reuse of the same identity, and run separate unchanged/project and changed-file controls."
+    },
+    "scanner_coverage": {
+      "issue_numbers": [
+        9
+      ],
+      "remaining": "Validate severity-inclusive finding coverage, existing-debt comparison, and relevant cross-file scope with real scanner reports without changing the approved argv."
+    },
+    "recovery_boundary": {
+      "issue_numbers": [
+        25,
+        28
+      ],
+      "remaining": "Run current ownership, visible fail-closed dispatch, restart-budget and actual provider/native recovery together; separate transport failure from deadline expiry."
+    },
+    "finalization_evidence": {
+      "issue_numbers": [
+        32,
+        33
+      ],
+      "remaining": "Pass native regression, scanner prerequisites and full review/local-finalization fixture with exact report, plan, tree and delivery evidence."
+    }
+  },
+  "requirements": {
+    "7876719c-0b96-442b-a66e-1e3fb8321cb9": {"source_hash": "6fce87edd29a2f8a8b061e3d995c0a0c7b923abdb70285f0b151a4b51c604a6d", "scope": "applicable", "evidence": ["baseline_terminal", "baseline_delivery", "pr_50"], "blockers": ["release"]},
+    "4cac3b5a-56c9-4ec6-8d43-0773c6f950ad": {"source_hash": "eaf13a497983ea354380de6f13ffdb749ae4c7ea53d32a714c9b71d7eadf9f8a", "scope": "applicable", "evidence": ["baseline_terminal", "pr_35"], "blockers": ["release"]},
+    "f14e9651-23b5-47fe-9dfb-5352c555c277": {"source_hash": "838be53c4cefedf2b130a4a4e1ba95f8256c3bf9ac5ec9e04c03b687d466d092", "scope": "applicable", "evidence": ["baseline_terminal", "pr_35"], "blockers": ["release"]},
+    "f1ad12f0-2423-42e3-8175-8f44d06a4bb9": {"source_hash": "50dfe2db8837f85a1c3a4a98a3b9b3b0535b5746aa431aa4a5625ae299b5543a", "scope": "applicable", "evidence": ["pr_49", "baseline_terminal"], "blockers": ["terminal_socket"]},
+    "d33f4a44-063d-4e7d-a971-336905299b25": {"source_hash": "61590a38387727b6dc103ae2b18097c4db021bdc65307514507c562c0ef665c3", "scope": "applicable", "evidence": ["pr_49", "baseline_terminal"], "blockers": ["terminal_socket"]},
+    "eb34275c-8279-496e-9cf8-d0a6d3e191e0": {"source_hash": "0f99db9886c0924c81ffdc1d893a10abaaa29175b0b355b9cbea499bbab8658e", "scope": "applicable", "evidence": ["pr_38", "pr_37", "pr_42"], "blockers": ["terminal_socket", "authenticated_acp", "recovery_boundary"]},
+    "f2cada33-fd1b-4330-b221-02a5f89f340c": {"source_hash": "149509e1097ebad3727702b7aa66420c221f69b424d57948540d544ed0a70b3c", "scope": "applicable", "evidence": ["pr_49", "baseline_terminal"], "blockers": ["terminal_socket"]},
+    "c77e6b41-c8ee-42c3-930b-678ed36271b1": {"source_hash": "14ae18eeaeb1820789e6e4e3e42d0d7bd2d055c4ee27fdd3089f0904e91cc8f8", "scope": "applicable", "evidence": ["baseline_recovery", "pr_49"], "blockers": ["terminal_socket"]},
+    "6ae0b043-1811-482e-80c2-f72efca3f139": {"source_hash": "44a95b7316e5fe2df255915e49ba5ddc5caf502061795e089ac44a8c4874fa51", "scope": "applicable", "evidence": ["baseline_acp"], "blockers": ["authenticated_acp"]},
+    "14789cbc-7a2c-4389-b68b-82fa61a6c2b5": {"source_hash": "d76ef31a65cbe38ba73988c8155ac1a0cd0689d87e08df20795e9eeb9df84d50", "scope": "applicable", "evidence": ["baseline_acp"], "blockers": ["authenticated_acp"]},
+    "9e19a5cd-35c5-47d3-8355-d3e7000ba951": {"source_hash": "6af7851460fa35150f288bc299c98cc7b3a71ff00cdca47bd53195cce7b07c2b", "scope": "applicable", "evidence": ["baseline_acp"], "blockers": ["authenticated_acp"]},
+    "2641d6d7-62a7-4b1e-ad51-85eb7e2cbd63": {"source_hash": "0eea7fc7b3e19bfee6aaf8d7766089630440c07d81b81138b326677ee3e34f12", "scope": "applicable", "evidence": ["baseline_acp", "pr_38", "historical_acp"], "blockers": ["authenticated_acp"]},
+    "57938cbb-388d-43eb-b6aa-05b44908cb87": {"source_hash": "fae4141157ca4bae8bad93570de35d3e73df90c99e8d5da6d87049eb009704a4", "scope": "applicable", "evidence": ["baseline_acp", "pr_38", "historical_acp"], "blockers": ["authenticated_acp"]},
+    "13d43ef1-e93e-49d9-addc-3bdda4d3020a": {"source_hash": "937da9ff879d09166f7e0f7f00d3eab18abec2fdd94fad088ada567f649b01c7", "scope": "applicable", "evidence": ["baseline_linux", "historical_nono", "pr_48"], "blockers": ["native_policy"]},
+    "ad4f250e-cb03-44c0-8795-b8c42f4b2454": {"source_hash": "05cfb34a6e9eff698d1d0ee31f989f06260a90a9a04d0da07b477c6666f3f3d4", "scope": "applicable", "evidence": ["baseline_linux", "historical_nono", "pr_48"], "blockers": ["native_policy"]},
+    "a5ef389a-c336-4a8f-9482-dc96c0ad1a2b": {"source_hash": "488701b09b640a7b7db225503a9e85a5a56dde657f1ab44c5faebd62fa7bbba2", "scope": "applicable", "evidence": ["baseline_acp", "historical_acp"], "blockers": ["authenticated_acp", "native_policy"]},
+    "646195e4-cd6f-4c6c-bcb3-d80a6b96f9e7": {"source_hash": "fecb2844e68d576ae018bc52aeacd917ff54a358fe765e54308c9097002bb258", "scope": "applicable", "evidence": ["baseline_overlap", "pr_50"], "blockers": ["concurrent_native", "native_policy"]},
+    "c97a1f6f-c626-4f8b-aa21-a5ecf13a6269": {"source_hash": "fb486fa7269ff23aa6b158adcd4e10707f7156d98bc62f2fe3504af3dcfeb158", "scope": "applicable", "evidence": ["baseline_overlap", "pr_50"], "blockers": ["concurrent_native", "native_policy"]},
+    "ad21cb5f-b4a7-40ae-8afb-e37d6acb1eca": {"source_hash": "a0c82b3f8e144d58cb62dd4748322267cb31564293a3f59258eadefbc474adf7", "scope": "applicable", "evidence": ["baseline_overlap", "baseline_review", "pr_50"], "blockers": ["concurrent_native", "finalization_evidence"]},
+    "18faf89d-b2af-43d9-8d97-b8dea07902db": {"source_hash": "908964369ca2fe05b786a03a28e49e8cefe8899a292ba99eca59f6ecdc0c43a6", "scope": "applicable", "evidence": ["baseline_overlap", "baseline_review", "pr_50"], "blockers": ["concurrent_native", "finalization_evidence"]},
+    "ce2ff41b-3326-4a3c-8e1d-2407a215bfde": {"source_hash": "d8cbc88a5b85e559c8eb7ecbf75bcc6020e341defd89952b869f5f5ff651dc76", "scope": "applicable", "evidence": ["baseline_approval", "pr_49"], "blockers": ["terminal_socket"]},
+    "69992b36-b752-4314-bfc1-38edc028de07": {"source_hash": "1f05ab6fccfdfd603f7630b282bb0ac386963d240442c9b4a53753d5136ced79", "scope": "applicable", "evidence": ["baseline_delivery", "pr_50"], "blockers": ["finalization_evidence"]},
+    "63fc18a3-37c9-4f5f-9d71-776108e2dca1": {"source_hash": "0925c3b6ff85a9883d2a47705f73cee5f0fca89bfa080d3d5566445c85989a2b", "scope": "applicable", "evidence": ["baseline_review"], "blockers": ["scanner_coverage", "finalization_evidence"]},
+    "fe740d88-93e6-48be-9c17-0869a09bfd05": {"source_hash": "b31fcaaf00819723653f063abfa201da523e7bf0de204a4ff2e11b962bcc1a0e", "scope": "applicable", "evidence": ["baseline_recovery", "pr_49", "pr_42"], "blockers": ["authenticated_acp", "recovery_boundary"]},
+    "e3ac91e4-043c-4da8-95ae-5965b9bc379f": {"source_hash": "cb17481d8338a73dfe1dbd0b3cd65ba75d6f3318eba806fd07dc6ee2209c7036", "scope": "applicable", "evidence": ["baseline_terminal", "pr_49"], "blockers": ["terminal_socket"]},
+    "53a274f3-8512-4ad0-b53f-8ec80a8b22a1": {"source_hash": "999a910b1086aef1c5967a78bf5631eefc6cec7498ef7050d929c4a95a786ca5", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_45"], "blockers": ["planner_integration"]},
+    "874717bb-4477-4feb-a916-652a5f2f8e89": {"source_hash": "59c0caa33593f3dc7738acc8b9eebb0fc1c39a7f41776d34d1c65db48ba40da1", "scope": "applicable", "evidence": ["baseline_recovery", "pr_43", "pr_45"], "blockers": ["planner_integration"]},
+    "48d1b559-1ccc-4e38-a812-8aa8be987bc3": {"source_hash": "a9e6e733fbdd22870ff0049a05f960f09fbb45867a01af87eb2c9e4253a1ddc0", "scope": "applicable", "evidence": ["pr_39", "pr_40"], "blockers": ["project_lifecycle", "ideation_contract"]},
+    "bea06222-9a29-41e7-825a-4e1532bd6622": {"source_hash": "c5f80a30de2ac83714709d3390a50ee450f670fff209068cbef60b1988259c01", "scope": "applicable", "evidence": ["baseline_acp", "pr_39", "historical_nono"], "blockers": ["native_policy", "authenticated_acp"]},
+    "34caf2d0-c129-4cd0-85a5-18430c088368": {"source_hash": "eeea1c4145a47b119de1ad4b3cfed6ac4fd946e8dcdacdfe86b80a33fe64e3f1", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39", "pr_40"], "blockers": ["ideation_contract"]},
+    "424bfac0-62e2-40b3-a75a-78cbbf73c8d3": {"source_hash": "a7ab9bb309cd2a329d41265136c58b3c7b48c11b36500ad562130d847f960393", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39", "pr_40"], "blockers": ["ideation_contract"]},
+    "9a60a5c0-521b-4bfa-8c42-c0b4b64bd6b5": {"source_hash": "23536f66875e109292168f1cc02cbc57095015be15c3cdeb10101a50d0e6c74b", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39", "pr_40"], "blockers": ["ideation_contract"]},
+    "5b803245-94ee-49b9-bc50-065991aed209": {"source_hash": "a77c84d1e9a502043485f9a27250178ccb2b6f981c736a0a72dee493b3e892a5", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39", "pr_40"], "blockers": ["ideation_contract"]},
+    "f085d7b1-3a37-4c8b-bac1-2a75deef2831": {"source_hash": "f1398f17e96152c3f7db148bcdcf7b356e48a4c091ca510b48fb3987491519c0", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39", "pr_40"], "blockers": ["ideation_contract"]},
+    "c0e53a03-6f88-4b5e-b9dc-6447b153fdcb": {"source_hash": "3e3aa2948c9c8b541555cffee01b15e35f96bee643868aef070415a56e03b83a", "scope": "applicable", "evidence": ["baseline_idea_history", "baseline_schema", "pr_49"], "blockers": ["ideation_contract", "terminal_socket"]},
+    "f2b2204b-9741-4b14-bb6c-8cb73737c78c": {"source_hash": "d6cac565f844c8cf13b065cb4f05775e523441f0f2f6b379a131b6afa5ccbe38", "scope": "applicable", "evidence": ["baseline_schema", "baseline_idea_history", "pr_41", "pr_43"], "blockers": ["release"]},
+    "cb7a9780-1df2-4c00-96f7-c209666a3562": {"source_hash": "895dfb09df5fc85a6f0f6a252343a73cfbc4accd3207deaa11c4e3ffbceedea8", "scope": "applicable", "evidence": ["baseline_schema", "baseline_idea_history", "pr_41", "pr_43"], "blockers": ["release"]},
+    "21edbd6c-b8d9-4ec8-a5a6-5c0945a9ac3d": {"source_hash": "a9a29c05508b05a8d56d5b079df00d5e73717424b2e85b3ee881041f94dd5fac", "scope": "applicable", "evidence": ["baseline_schema", "baseline_idea_history", "pr_41", "pr_43"], "blockers": ["release"]},
+    "978d97b7-22a5-45b2-b8e0-5718f677c16c": {"source_hash": "70b4c8d694746326450077fed71e0dc0dbba4187d15d3b897097ff1f691ea2dc", "scope": "applicable", "evidence": ["baseline_schema", "baseline_idea_history", "pr_41", "pr_43"], "blockers": ["release"]},
+    "9fbd23b2-136d-45f8-a91f-d01756307be2": {"source_hash": "17ac1771abf14e52ebcaafc0c66148166cbf47010b53f6adab87a154f0a5ae50", "scope": "applicable", "evidence": ["baseline_schema", "baseline_idea_history", "pr_41", "pr_43"], "blockers": ["release"]},
+    "acee251f-65d4-4f97-bdbc-cca518ec55d0": {"source_hash": "4fab0e3b452933ba6c9e23eab1ed3006ea7ea0dc180f46d99a13a1d5c3664299", "scope": "applicable", "evidence": ["baseline_schema", "baseline_idea_history", "pr_41", "pr_43"], "blockers": ["release"]},
+    "93fbafd2-7a8b-4063-b282-b68f0d2ae066": {"source_hash": "4c4094209187c9db32713b8f84da1afb9309dca7651744a934bf6e7ecc10599c", "scope": "applicable", "evidence": ["baseline_schema", "baseline_idea_history", "pr_41", "pr_43"], "blockers": ["release"]},
+    "6d421c3a-fc38-46d4-a9eb-fada3257bff5": {"source_hash": "98cf35756ee70003a857707eeea395f9727abb673281e0ffa3574bd315ff473b", "scope": "partly_deferred", "evidence": ["baseline_idea_history", "baseline_schema"], "blockers": ["ideation_contract"], "scope_note": "All uniqueness comparisons, vector installation/search and uniqueness-based rejection/retry are deferred. Keep content validation, durable publication, bounded history and independent directions."},
+    "ea59eda0-3af5-4e2f-8b49-4624027f1ee5": {"source_hash": "9e92e7cc04670584f296bb0fdb1c38c5122ea545b8bb230383dc2ad49317c685", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_40", "pr_49"], "blockers": ["ideation_contract", "terminal_socket"]},
+    "c0599c96-e80a-4858-a310-c04d77b5d2e5": {"source_hash": "1834c111e565adab2b4028b8f6991324217b133548d156d7cedf8370fef65b05", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_40", "pr_49"], "blockers": ["ideation_contract", "terminal_socket"]},
+    "0dbf4bbe-3988-4770-bd42-e50cc08887e0": {"source_hash": "3d175697b8d981bea0fc93898a4f1e948d707a993e1c013939b29c77a5971426", "scope": "applicable", "evidence": ["baseline_schema", "baseline_approval"], "blockers": ["release"]},
+    "ad196a3a-1717-465d-99a5-5d3c758e0a36": {"source_hash": "f14f9580adf3490429634a4d07f6983cffd869590166e80d6eff6aad3e213d81", "scope": "applicable", "evidence": ["baseline_schema", "baseline_approval"], "blockers": ["release"]},
+    "b6c965f1-9c20-47de-8193-f7e512a7b247": {"source_hash": "8a89f064b6210140f8bd60eca5896ecbdb6c0f21592ac282155021675944191e", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_45"], "blockers": ["planner_integration"]},
+    "6745edf9-1048-462c-94b0-701c2eb4b3ae": {"source_hash": "3edac9ddb1c4433e7872760c502620643e593f882cd207029fdb7df4ff078f0c", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_45"], "blockers": ["planner_integration"]},
+    "22316edd-1681-49b5-97db-a5349ce4ef0a": {"source_hash": "fdc2cc86a25695c792bbe777cb6a86a6eaf7013309caec949c3589bf5e391b9a", "scope": "applicable", "evidence": ["historical_nono", "pr_43"], "blockers": ["native_policy", "authenticated_acp"]},
+    "530a0eb9-c97d-44f5-93bb-89a1ba98dba8": {"source_hash": "7873945c91c63d2fafb259924eede0a1d74bd1a58564334d10bc07843afbc41f", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_49"], "blockers": ["planner_integration", "terminal_socket"]},
+    "2a79df27-681c-4bf1-ac03-63ba706c6df4": {"source_hash": "95d34f4e2a652a64930a35a5683640f93152f30fbc80f0867900e71d137c1292", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_49"], "blockers": ["planner_integration", "terminal_socket"]},
+    "3bd13913-ea69-40c9-85a7-e06e1f1bfd06": {"source_hash": "1781fa4cfb557ca355f0e4483054adea432abedca4ef00568fad0bfda49a9f13", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_49"], "blockers": ["planner_integration", "terminal_socket"]},
+    "a027c7c4-bbec-4845-8dd5-76041452dc18": {"source_hash": "c4f0f74cd16ab86a467e2e84444c9d1e42a13b8f7d01a0944305853babc79e6a", "scope": "applicable", "evidence": ["pr_39", "pr_40"], "blockers": ["project_lifecycle", "ideation_contract"]},
+    "bb873ce2-915b-4a6e-a733-3e6022b2b979": {"source_hash": "d8908ed7ebfae6e6670267eb6a65619180e6c529fbb5ee44c8a539f37a1f2e08", "scope": "applicable", "evidence": ["baseline_acp", "pr_39", "historical_nono"], "blockers": ["native_policy", "authenticated_acp"]},
+    "9326c283-15a8-4e7f-9be0-cd723d78979e": {"source_hash": "c93c1bb527d1cd74ddc3c42badd107de975f7a27837d0014a2ce291889db22d0", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39"], "blockers": ["ideation_contract"]},
+    "581f9e5b-24ad-4d83-8d10-ccab16b32f6f": {"source_hash": "7715a131eb631d2926f615d5679cb3a4dff58c7c2aa1ea22ffbdbfee5ff4dd0f", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39"], "blockers": ["ideation_contract"]},
+    "dd8903c9-8934-41ce-bfe6-9027153e34f8": {"source_hash": "d6c0d0c5e94f7ecddc6099967a68630c86330e007b911126c0cf1a811a213bb5", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39"], "blockers": ["ideation_contract"]},
+    "d2c029a8-de45-4391-b410-e57e68800b98": {"source_hash": "d7c3f8745c2c5638a55665510e4242217f53413798351b997de44fe66f4374e1", "scope": "applicable", "evidence": ["baseline_idea_history", "pr_39"], "blockers": ["ideation_contract"]},
+    "928d920e-1e2c-4f33-a1da-b11ed9f82ad3": {"source_hash": "9e5ba838e2cf5bd7bba5748b394bb73815d6634e2d0f240af4de53412d1919e4", "scope": "deferred", "evidence": [], "blockers": [], "scope_note": "Fingerprints are retained as history only. Exact, vector, and temporary ACP/LLM uniqueness checks are all deferred."},
+    "b71cc1c0-bc11-4caa-a3fe-431cca5f870c": {"source_hash": "269e4799d95cb43a1e3a1421aff8639b67b5b35be68470fb2a939f94286ea974", "scope": "partly_deferred", "evidence": ["baseline_idea_history"], "blockers": ["ideation_contract"], "scope_note": "Do not repair/reject for duplicates. Preserve independent per-direction recovery and previously successful drafts."},
+    "2b307468-0285-44de-a29e-7aaf6762a40b": {"source_hash": "a618e3eb9e31b62c924d47b0863aafd7054ab7fef47401431e2e467bf812d602", "scope": "partly_deferred", "evidence": ["baseline_idea_history"], "blockers": ["ideation_contract"], "scope_note": "Reasoned human reconsideration authorizes one linked new draft. Retain the predecessor. Novelty rejection is deferred."},
+    "e9e9bb0b-1ef1-4778-9dba-64a2831046dc": {"source_hash": "fec143b5ef111fe8c1464dd512e4d13e54868735d73bab65b8fde84c786632b1", "scope": "partly_deferred", "evidence": ["baseline_idea_history", "pr_40"], "blockers": ["ideation_contract"], "scope_note": "Keep bounded prompts, content validation and explicit partial success; uniqueness exhaustion and embedding thresholds are not current gates."},
+    "1566d4b7-ce34-40a6-b9d9-346b7c2db959": {"source_hash": "b5d2eab71eab88b2aa108503b78c257c364c4e23423a92cf4638f16920b7511e", "scope": "partly_deferred", "evidence": ["baseline_idea_history", "pr_40"], "blockers": ["ideation_contract"], "scope_note": "Keep bounded prompts, content validation and explicit partial success; uniqueness exhaustion and embedding thresholds are not current gates."},
+    "bb2aee64-b412-41a5-aa7b-ecedeafef0d7": {"source_hash": "3f1e15bf300a5eade01479062b2b427cf74adc3a646a05deefeb264b0e9f1d04", "scope": "partly_deferred", "evidence": ["baseline_idea_history", "pr_40"], "blockers": ["ideation_contract"], "scope_note": "Keep bounded prompts, content validation and explicit partial success; uniqueness exhaustion and embedding thresholds are not current gates."},
+    "ce9e7e9f-9c7f-430d-b414-00c6b9bc690a": {"source_hash": "a0f3d80f8ad6d941dc980d1589a734e5398a1a4090f0f0d90c1d0dd4d698cc23", "scope": "applicable", "evidence": ["baseline_approval", "baseline_overlap", "pr_50"], "blockers": ["concurrent_native"]},
+    "c43bc4d3-2bdf-4220-91bc-3246cc61f7f1": {"source_hash": "5c855b43fd82cc85785d5e0527965e0dfa3e61f75182696321434cef0382fe03", "scope": "applicable", "evidence": ["baseline_approval", "baseline_overlap", "pr_50"], "blockers": ["concurrent_native"]},
+    "1317ad36-aae4-4d1c-b4d4-1ed40b110bd0": {"source_hash": "f66d3db074511b2d2e449846b9f7104fc26d9c497b01c22b814bdd39742ac1d1", "scope": "applicable", "evidence": ["historical_nono"], "blockers": ["native_policy"]},
+    "2599c659-8476-48c2-9ef1-ef07c73dcc65": {"source_hash": "fbd43e822fbeedd9bf7c264619a86fb9c66012dd5ae67731233deaa756373423", "scope": "applicable", "evidence": ["baseline_overlap", "baseline_review", "pr_46"], "blockers": ["finalization_evidence", "concurrent_native"]},
+    "3b2df2d3-30bd-4006-ae0d-8672b9d5c365": {"source_hash": "518d46f52f558cce47b9faba9034f45c72acdcb9a98847ea80ee201e359e021e", "scope": "applicable", "evidence": ["baseline_overlap", "baseline_review", "pr_46"], "blockers": ["finalization_evidence", "concurrent_native"]},
+    "745801ce-07ef-41fe-8e60-195f81c67368": {"source_hash": "e2c9fb114d9f37605212625c6815a3a052466fc928398553ed21eb8b7efbe0f4", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "pr_46", "pr_49"], "blockers": ["terminal_socket", "finalization_evidence"]},
+    "17f638f7-a17e-4ebc-b023-6fd1a64edb65": {"source_hash": "d8648a6594be9e5936f1f8a3e0d1b1ab318220d24f50c3e0bed52ed0a18a53d4", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "pr_46", "pr_49"], "blockers": ["terminal_socket", "finalization_evidence"]},
+    "f4524305-3a9f-468f-a413-7ae2bf8bb173": {"source_hash": "c069c3f85caee4b9eeaa553d1c45e1d1f1f9c24c5362b97ba6bbe180e5410ac6", "scope": "applicable", "evidence": ["baseline_overlap", "baseline_review", "historical_nono", "pr_50"], "blockers": ["concurrent_native", "native_policy"]},
+    "16fab6a8-3fb5-400b-8391-9f021bcdcf07": {"source_hash": "88e992ca2a7c506587a09b16616611e2baf4e7abbc790e4412fb40f9e2b8eb69", "scope": "applicable", "evidence": ["baseline_overlap", "baseline_review", "historical_nono", "pr_50"], "blockers": ["concurrent_native", "native_policy"]},
+    "38cf4432-44e1-44b5-91d5-ea6560238061": {"source_hash": "094940498ca648926e4a6da962b2b81fae74c6d4138bb82f6ce035278c6e368f", "scope": "applicable", "evidence": ["baseline_overlap", "baseline_review", "historical_nono", "pr_50"], "blockers": ["concurrent_native", "native_policy"]},
+    "c4618f2b-ef72-4ffa-b9da-87d5fc23e061": {"source_hash": "c41f2db3b35d789723ab3989e32d528ee12d60ce0c1c0ce07cd3442f04b4e9fa", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal", "pr_50"], "blockers": ["scanner_coverage", "concurrent_native", "terminal_socket"]},
+    "506225bf-99fc-4b84-9157-eae9a53de277": {"source_hash": "c837e4b17824c2f97302c09a437e93d2fcaab16fb08b196a07dd00666065b059", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal", "pr_50"], "blockers": ["scanner_coverage", "concurrent_native", "terminal_socket"]},
+    "aaadce80-bef2-4d6b-94ea-6c2757bfbc84": {"source_hash": "cfb8b2c7e48b86099bc1e7e68d8798b8852ea6188695ad35155dbc2ffa686ace", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal", "pr_50"], "blockers": ["scanner_coverage", "concurrent_native", "terminal_socket"]},
+    "b8599939-8be9-4661-b5ec-aa797280d7b3": {"source_hash": "c67fd5feac4602723a914fd1d3054c35beba261d898afc10b9953e881bda61ee", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal"], "blockers": ["finalization_evidence"]},
+    "81a06527-209a-4d18-aeeb-a552cc0a6054": {"source_hash": "739e3069735a2545da55da7959009e2a91c4af39f5df1a5e33495ca4707829fb", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal"], "blockers": ["finalization_evidence"]},
+    "f67951d3-1183-4f30-bd2f-21afbf3737e8": {"source_hash": "26d4fbc3078d7e83d814e90bc0409107f13f4d1f0c844ee521db0b1ca7ff9437", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal"], "blockers": ["finalization_evidence"]},
+    "5be3ea96-e439-4f16-b65a-f280c36df7a1": {"source_hash": "4117cf682abca3448ec02e7e0804273d75d48eb232291a695dac67c24bf65b1c", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal"], "blockers": ["finalization_evidence"]},
+    "5e0a8ee9-6324-4afc-88db-4cde0165a2cf": {"source_hash": "4f0415facbd214cd6b9b7ca72d7cc7e82b5bc54ee715c927d8933b7c0a735419", "scope": "applicable", "evidence": ["baseline_review", "baseline_qlty", "pr_46", "pr_47"], "blockers": ["native_scanner", "scanner_coverage", "finalization_evidence"]},
+    "0ed35b6e-aba5-4e05-9fa5-3618e23a7ba6": {"source_hash": "3d7519391b7fb0c89a7db42702483c5713dc268f104062b2709b502e6fbaa0ef", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal"], "blockers": ["finalization_evidence"]},
+    "cea61f73-ca4e-4fd9-beb1-4d27a22a7ade": {"source_hash": "0899944e79ecd6d5a0259e862e1f4980fab7b9f70196163615eed3d5675346ed", "scope": "applicable", "evidence": ["baseline_review", "baseline_terminal"], "blockers": ["finalization_evidence"]},
+    "4d4b2fde-3cf4-446c-acb7-16bb08e0d91a": {"source_hash": "0614a54eaa8e4010259dc202a14093c2c07a5c8f9e12a5b7ac18a62b5c721ca6", "scope": "applicable", "evidence": ["baseline_delivery", "pr_47", "pr_49", "pr_50"], "blockers": ["finalization_evidence", "concurrent_native", "terminal_socket"]},
+    "b936e2d3-1fdd-4a29-b8f4-0e61b7a6f455": {"source_hash": "b9e2733c39bbcb5fc0f8b7a041f77dd8e426750b7fa3215eb7d21b29e9d436c6", "scope": "applicable", "evidence": ["baseline_delivery", "pr_47", "pr_49", "pr_50"], "blockers": ["finalization_evidence", "concurrent_native", "terminal_socket"]},
+    "ba5b7335-17b7-4b35-b213-cee5fc9cebbc": {"source_hash": "3e09a9f443365dfaed4048c6bd78692771d25f51f9099c38a37678d807ce21a9", "scope": "applicable", "evidence": ["baseline_delivery", "pr_47", "pr_49", "pr_50"], "blockers": ["finalization_evidence", "concurrent_native", "terminal_socket"]},
+    "be3891d5-fdc7-4200-bc3f-5574daa895f2": {"source_hash": "42547135de52f2c631c21ffc6afd48a20baa501d402f23f9f73aa18e9924c6f1", "scope": "applicable", "evidence": ["baseline_delivery", "pr_47", "pr_49", "pr_50"], "blockers": ["finalization_evidence", "concurrent_native", "terminal_socket"]},
+    "221c0c4a-8545-4a88-95cf-03f96d3a97c9": {"source_hash": "84fc0cc8a09ed5e5dc6dfaea603490f9f5cdfacf909d4a7b4df490434086aaff", "scope": "applicable", "evidence": ["baseline_delivery", "pr_47", "pr_49", "pr_50"], "blockers": ["finalization_evidence", "concurrent_native", "terminal_socket"]},
+    "9c150f23-7f14-4095-90be-6c16fa93a89c": {"source_hash": "b89ca2e2e0df43195feabc7f0bcfb5aace6a5ac09bd5a9520a287129e38fe86d", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_nono"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "bfd2aed3-5803-4bdb-8174-fc6fa0ed4411": {"source_hash": "4c43ea229b366d92bd1b4832707205b49f8659d294be26a3e8150c42f39a5836", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_nono"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "a322df3f-6239-43fc-b40a-d2d8553cd0df": {"source_hash": "7a384ccf5bb5ec3a33aec273cef09761329f60cb3a040c5abd99b4a2ed3ec618", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_nono"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "11776852-5550-4e5a-a20a-7ac684933c00": {"source_hash": "2b872fe0ad06eb8832eae2bcaaedb4ed4c87263193864d9cf556940e3c38cdf5", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_nono"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "f4cac959-07c9-4875-9847-888be171b720": {"source_hash": "e3dc479d307663b91ed428323cfce894a26b12dd12f346d8dac82114af9cd793", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_nono"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "f1425fcb-8ed9-424a-be7d-22d5a167cc34": {"source_hash": "87256e129e6242001b9748b160405da347ef28a2adc82bd4035d73a991fbf752", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "15705ccc-aa51-4597-aee8-169aad39a9df": {"source_hash": "6e105292806a5461b6af417795d49e1decfd6c860bbf085cc088da58b151303b", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "7465fb01-a4da-41a0-bcf1-3f0197d7e4da": {"source_hash": "2c3b00e89a0d769b135ccdfb935cea8260110a4f1a01428b695d32c15a886e9b", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "0f8f4258-48d1-4bc3-a421-ee771c900571": {"source_hash": "94bf6a6c140dda6ff26361fc4a122f90e6a9b9caf9c18ef8aa8ae981c2c2afb3", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "0975f82d-aa83-4ba8-bbfb-083db3d57dc4": {"source_hash": "849c66509d418ef7fd9b7732d02cb7ce6f5afbd4c65b6898fb6f976c394509c3", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "1a07286d-7ac6-4d3f-a98c-8ca03cc133e7": {"source_hash": "fed5f39d7b8ca6682329337ff7a83aa233a8655abd249dfb74529732504308fa", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "bbb19517-0d00-45f4-b832-f781f211fb17": {"source_hash": "33d2512fdb5d5f851941f8c6f72e0add574dd0bdf91f65309559af37a48153ee", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "4037aa6b-e6e3-4330-b426-64b407ec7719": {"source_hash": "5ec5209e1a2feba434ee5bf60fb05296e1ba6546389d170317174d94c2ec9f10", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "22730ba2-46ea-458a-ae1d-4b53c459ae0a": {"source_hash": "4989b4ea167cca2133a320304f98aa185ac7ba193215bd1424fa92d3f2720163", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "d7926a37-a2f5-4361-963d-f51f6cf3ed9f": {"source_hash": "968833559718203f27d16fe84be323a193685031aa5cb9790ed0f0da7efdf327", "scope": "applicable", "evidence": ["baseline_recovery", "pr_42", "historical_acp"], "blockers": ["recovery_boundary", "authenticated_acp"]},
+    "6a84ec68-2bdf-4287-bfc4-47fa62f40cfa": {"source_hash": "2cb811137e0a653b8636875905caaa5658fae680117bb07b1292636e4da789bf", "scope": "applicable", "evidence": ["baseline_qlty", "pr_34", "pr_36", "pr_40", "pr_52"], "blockers": ["project_lifecycle", "native_scanner"]},
+    "32366a8f-5715-488e-ac47-0bab7597f3fc": {"source_hash": "95a3c3f9a2f39e36a20989e09594f7a4d76ce46400be251df2589058ff41e266", "scope": "applicable", "evidence": ["baseline_review", "pr_44", "pr_47"], "blockers": ["finalization_evidence"]},
+    "23c28fa0-62a2-4e8a-8e0c-c6c78c78a496": {"source_hash": "20c15c46fd98808191a6326de554c89953a36e83e475a3e055431c21266f5c57", "scope": "applicable", "evidence": ["baseline_review", "pr_44", "pr_47"], "blockers": ["finalization_evidence"]},
+    "ae092cb4-4672-4eb4-872e-5cf44befb54e": {"source_hash": "a5e03813244f46665c780792f5a7bc001cf9272cf5926243352910a0989a1ea8", "scope": "applicable", "evidence": ["baseline_review", "pr_47", "pr_50"], "blockers": ["concurrent_native", "finalization_evidence"]},
+    "654fdc1f-837d-4834-9c6e-54216e1c808a": {"source_hash": "c48bec7ec534d7e87aa654b0c658168849b21dda6a252252a9c85647f94f09c4", "scope": "applicable", "evidence": ["baseline_qlty", "pr_34", "pr_51", "pr_52"], "blockers": ["native_scanner"]},
+    "c127680c-4d88-4167-a6c6-ee7dcfa3efd6": {"source_hash": "adb355aa17f9792066d5fd78e386e86ffb9e19ec534823bf2e9d73945959bf42", "scope": "applicable", "evidence": ["baseline_qlty", "pr_34", "pr_51", "pr_52"], "blockers": ["native_scanner"]},
+    "e940dede-889b-4b43-8db3-0dcb2ff9a424": {"source_hash": "7b6af0f91ec6efbb7496440ffa60ad7ecf7d3be0150848f9e8139a286040919c", "scope": "applicable", "evidence": ["baseline_qlty", "pr_52"], "blockers": ["scanner_coverage", "native_scanner"]},
+    "c8b3f256-4688-4998-b7d0-3e99c5f2c295": {"source_hash": "638104b73faff4eeca34e7779d4e3a36ced84c0264b6b70101a0330ce81889e4", "scope": "applicable", "evidence": ["baseline_qlty", "pr_52"], "blockers": ["scanner_coverage", "native_scanner"]},
+    "b99c7604-1d88-4cf8-856a-629c7c2d1e55": {"source_hash": "39ef1de06d300195cd311d0933cec47302f8114621bd3ad98adc9f27fc33cd7b", "scope": "applicable", "evidence": ["baseline_review", "baseline_qlty", "pr_46", "pr_47", "pr_52"], "blockers": ["scanner_coverage", "finalization_evidence"]},
+    "44d100cc-f68f-4fe0-8857-9adc8603d454": {"source_hash": "9bfb296ca33616421844d532b4487e71472b2c0e60cc45378093f165101f8933", "scope": "applicable", "evidence": ["baseline_schema", "baseline_approval", "pr_43", "pr_45", "pr_49"], "blockers": ["planner_integration", "terminal_socket"]},
+    "d6e0fc1c-731d-4a3e-8381-bffe48c48f26": {"source_hash": "8bb6a59667beec8b9e2bda46cd25a3e898936e3e18a5b0e52e960b9ec0c54797", "scope": "applicable", "evidence": ["baseline_schema", "baseline_approval", "pr_43", "pr_45", "pr_49"], "blockers": ["planner_integration", "terminal_socket"]},
+    "15de577e-85fd-4545-ae41-c4b1cffa44ec": {"source_hash": "c08328d4c2b5e1bc4f355dea6f75be127acd993dddab6243062c3273eaf75932", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_45"], "blockers": ["planner_integration"]},
+    "d13cc433-b655-49ea-ad97-56c8f79cc105": {"source_hash": "301889b69bbe4460572c30cd2a1a96babd6c69e1dd86227ffd47a6dcb93586e0", "scope": "applicable", "evidence": ["pr_48", "historical_basera"], "blockers": ["release"]},
+    "dd382104-7f3c-4663-b1be-353988969be0": {"source_hash": "e7f84c49e5a767c3b80be0d9bcaf96a9d7706a31c14c7bc24df26d66b5c179c7", "scope": "applicable", "evidence": ["baseline_approval", "pr_49"], "blockers": ["terminal_socket"]},
+    "bb1946b5-118b-49d0-976f-899ce2ac26d7": {"source_hash": "aebf1bfe8f90d66f1ee04d7e931439b9086e62e70cb51abd5b4619e0dbd5b723", "scope": "applicable", "evidence": ["pr_45", "pr_43"], "blockers": ["planner_integration"]},
+    "1d729ed0-4412-4494-9459-58c6c7253331": {"source_hash": "81402685ee2aff4c0d9746aa904f1c4da6251a795339634360785f4fa03bc2c8", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_45"], "blockers": ["planner_integration"]},
+    "46ff7efa-ef5e-420e-b894-c011821502ea": {"source_hash": "18449036f604f5ddd233d8750fb919b77dd553066fbc1bfeeeace00f039dd981", "scope": "partly_deferred", "evidence": ["baseline_idea_history"], "blockers": ["ideation_contract"], "scope_note": "Vector/LLM/fingerprint comparison and duplicate-based retries are deferred. Durable content generation and contextual history remain in scope."},
+    "8e5bdf61-043d-43df-a2f5-ed5e9f95ed56": {"source_hash": "a3c8882e3ae5bcf86b73632f7037e9fdf57d75a90d70eb517a5b34abdf073671", "scope": "applicable", "evidence": ["baseline_review", "baseline_qlty", "pr_44", "pr_46", "pr_47"], "blockers": ["native_scanner", "finalization_evidence"]},
+    "a39e328c-ca1e-429c-8fd3-0b57fd3ba739": {"source_hash": "01ddc5562c609c5944c54728c4b1e9fd3178ad2c3153c7aae5a0338e75a73184", "scope": "applicable", "evidence": ["baseline_overlap", "pr_50"], "blockers": ["concurrent_native"]},
+    "cf933885-457d-451a-89da-aa82aaf93d08": {"source_hash": "03a98103d935eaf2edf17216d080216f7b1c26633bd7ebb91fa4aa4d1ba363d2", "scope": "applicable", "evidence": ["historical_nono", "baseline_linux"], "blockers": ["native_policy"]},
+    "279601c6-5c8c-4672-b34a-fa4d6b4c9ab2": {"source_hash": "43a03fc2e757338dbc7873cc6e21f8c153ecf1d71112fa82fdb067278ceaacb0", "scope": "partly_waived", "evidence": ["baseline_schema", "pr_48"], "blockers": ["release"], "scope_note": "Lossless migration is waived. An obsolete layout is discarded, not converted; exact current schema, constraints, and current-layout reopen remain required."},
+    "182ed7d4-9ff8-4f0f-84e8-4c96ce2a30d3": {"source_hash": "10e9b767ec0be16d3f8a75f8b7ccef4821475ec0f7e33366e3720874503e4589", "scope": "applicable", "evidence": ["baseline_schema", "baseline_approval", "pr_43", "pr_45", "pr_48"], "blockers": ["release"]},
+    "90d09bff-33bf-4506-9fe3-1f387b1afeda": {"source_hash": "650933ba8f1df50322eefcbbb810173820501ebe543a9e0a3d1e8dcb3de62bc2", "scope": "applicable", "evidence": ["baseline_schema", "baseline_approval", "pr_43", "pr_45", "pr_48"], "blockers": ["release"]},
+    "85d710d1-51d6-44ef-bd3e-eb6394f5da91": {"source_hash": "8a15f89e7a94d5bd1e6a3124c66b24e50111477e1b41901873cf544cd531164b", "scope": "deferred", "evidence": [], "blockers": [], "scope_note": "Embedding runtime, sqlite-vec, thresholds, vector migration, and temporary novelty judges are deferred."},
+    "9915293b-459c-4f1f-bcb6-7f076eaceeee": {"source_hash": "1b9a9cd4e1f698e2a7c01a71677c0533b4f98dced5b726b81b7d8fc38cad73ad", "scope": "applicable", "evidence": ["baseline_linux", "baseline_acp", "historical_nono", "historical_acp", "pr_48"], "blockers": ["native_policy", "authenticated_acp"]},
+    "4681a617-cc59-4f0a-a297-5d8570b21ee2": {"source_hash": "f82043432ccbe7241223f9d97b61f4277f61f42395f0ad41acf4c43d82ae5331", "scope": "applicable", "evidence": ["baseline_qlty", "baseline_review", "pr_51", "pr_52"], "blockers": ["scanner_coverage", "native_scanner"]},
+    "37956871-4182-4a02-b9e3-f12ef43c3239": {"source_hash": "62736d5801bb4bf4c77a2a8647cb85631b996f16eb8351b4d42bbc4bc1ae2237", "scope": "partly_deferred", "evidence": ["baseline_idea_history"], "blockers": ["ideation_contract"], "scope_note": "Reasoned human reconsideration authorizes one linked new draft. Retain the predecessor. Novelty rejection is deferred."},
+    "ad2577e4-a5b6-48e0-a8e5-00d357fe89f8": {"source_hash": "c04c568cc34ec7b35750e837ab91e39effa09a9f843b36f70c0d54b8cfa94880", "scope": "partly_waived", "evidence": ["baseline_schema", "pr_48"], "blockers": ["release"], "scope_note": "Lossless migration is waived. An obsolete layout is discarded, not converted; exact current schema, constraints, and current-layout reopen remain required."},
+    "11443562-c29a-492d-ae14-87854bcf12bf": {"source_hash": "171fbc1f081302dc3ce34d2515648bf312abb612e9006d5d22a0eac4fa2a6a1f", "scope": "applicable", "evidence": ["baseline_approval", "pr_49"], "blockers": ["terminal_socket"]},
+    "9f0fd8c4-68f8-49d4-b56d-4ba4a5f12892": {"source_hash": "f7eaad601639218929b54546892d2462b145e19837ff44b52e19a685e81e53f3", "scope": "applicable", "evidence": ["baseline_planner", "pr_43", "pr_45", "pr_49"], "blockers": ["planner_integration", "terminal_socket"]},
+    "298b53ac-e137-4b5b-83ef-217aa82a6a23": {"source_hash": "04ebb0a63bf4a677a206a8e9c74f22e6b8d23c53b3637a064cda3317dbaa8d52", "scope": "partly_deferred", "evidence": ["baseline_idea_history"], "blockers": ["ideation_contract"], "scope_note": "Novelty-specific thresholds, duplicate rejection, cross-scope similarity, vector faults and duplicate repair are deferred; keep draft edits, bounded history and partial results."},
+    "4734292f-8596-4af7-a668-5942eedc0189": {"source_hash": "edbfcf30578a64cfdd21235f7d70a74a0df6b434d74a7d23a6c75cc60f9f67b5", "scope": "applicable", "evidence": ["baseline_review", "baseline_qlty", "pr_46", "pr_47", "pr_51", "pr_52"], "blockers": ["scanner_coverage", "native_scanner", "finalization_evidence"]},
+    "33027fc4-7bdd-4c87-bdf0-e184a9140e43": {"source_hash": "bcab9837266bf34092a0792ec2da21739aae5aac125d624ea4bb20e68779693b", "scope": "applicable", "evidence": ["baseline_recovery", "baseline_delivery", "pr_42", "pr_44", "pr_50"], "blockers": ["concurrent_native", "recovery_boundary", "finalization_evidence"]},
+    "9bc94a2b-76f8-49d9-af88-e30ffde89c26": {"source_hash": "4187ac68c57608de9370ddecd0184bf4708cbc3348a7257f0fda11bbb77998a3", "scope": "applicable", "evidence": ["baseline_acp", "historical_nono", "historical_acp", "pr_49"], "blockers": ["terminal_socket", "native_policy", "authenticated_acp"]},
+    "a6bbfe91-737a-4934-9b8c-655a0b061d36": {"source_hash": "a476ce54cbb66af96aa352120f25fd858ce83bab0fcf6839d349cc1f7f069cd4", "scope": "deferred", "evidence": [], "blockers": [], "scope_note": "External feature detection is explicitly future work."},
+    "6051b6f7-ffff-43f9-8d70-d536040d96bc": {"source_hash": "20637320af65df3ccbe47d17f30f712dc475a7e0b195a5121db633cdd1c36596", "scope": "deferred", "evidence": [], "blockers": [], "scope_note": "Three-band semantic novelty and any LLM judging are future, outside current scope."}
+  }
+}

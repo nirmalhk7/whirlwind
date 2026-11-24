@@ -5,6 +5,8 @@
   "title": "Whirlwind Plan",
   "goal": "Implement all requirements in Whirlwind Plan; no completion claim until current evidence proves every applicable requirement.",
   "audit_date": "2026-11-16",
+  "current_evidence_file": "whirlwind-plan-current-evidence.json",
+  "historical_evidence_notice": "Older requirement status, mapped commands, log paths, and implementation progress below are archival. Use the current evidence file for revision-bound observations, remaining blockers, and current scope. Neither file establishes release acceptance.",
   "decisions": [
     {
       "topic": "core_schema",
@@ -19,7 +21,7 @@
     {
       "topic": "domain_lifecycles",
       "status": "confirmed",
-      "decision": "Plan complete only after successful local finalization; terminal errors become error; ordinary human pauses retain draft/approved. Projects: draft pending setup, approved after valid confirmed setup, error on setup/health failure, complete only by explicit human action. One plan per idea; revisions retain ID and increment version; changed approval stops/fences earlier work before new dispatch."
+      "decision": "Plan complete only after successful local finalization; terminal errors become error; ordinary human pauses retain draft/approved. Projects: draft pending setup, approved after valid confirmed setup, error on setup/health failure, complete only by explicit human action. One plan per idea; revisions retain ID and increment version; changed saves wait until active approved work finishes or is explicitly paused; the changed draft then requires separate approval. Unchanged saves leave active execution running."
     },
     {
       "topic": "field_semantics",
@@ -29,7 +31,7 @@
     {
       "topic": "embedding_model_runtime",
       "status": "skipped_by_user",
-      "decision": "User asked to skip this embedding model decision. No model/runtime selected or installed; vector novelty remains unimplemented and blocks full source parity."
+      "decision": "All idea uniqueness comparisons are deferred, including embeddings, sqlite-vec, historical fingerprint rejection, and temporary ACP/LLM judging. Keep content validation and bounded history."
     },
     {
       "topic": "agent_code_quality_gate",
