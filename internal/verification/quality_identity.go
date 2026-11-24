@@ -196,30 +196,16 @@ func canonicalizeQltyCatalogNode(node *yaml.Node) {
 	}
 }
 
-var remoteRuleReference = regexp.MustCompile(`(?i)(https?://|git@|[[:space:]"']p/[a-z0-9_./-]+)`)
-var remoteSemgrepRuleConfig = regexp.MustCompile(`(?im)^\s*(?:config|configs|include)\s*:\s*["']?(?:https?://|git@|p/[a-z0-9_./-]+)`)
-var localRulePath = regexp.MustCompile(`\.semgrep/[a-zA-Z0-9_./-]+\.(yaml|yml)`)
+var remoteRuleReference = regexp.MustCompile(`(?i)(https?://|git@)`)
+var astGrepRemoteRuleReference = regexp.MustCompile(`(?im)^\s*(?:config|configs|include)\s*:\s*["']?(?:https?://|git@)`)
 
 func validateFrozenRuleSources(files map[string]string) error {
-	known := make(map[string]bool, len(files))
-	for path := range files {
-		known[path] = true
-	}
 	for path, content := range files {
-		if strings.HasPrefix(path, ".qlty/") {
-			if remoteRuleReference.MatchString(content) {
-				return errors.New("external Qlty sources and remote rule references cannot be frozen; use approved local rule files")
-			}
-			for _, reference := range localRulePath.FindAllString(content, -1) {
-				if strings.HasPrefix(reference, ".semgrep/") && !known[reference] {
-					return fmt.Errorf("Qlty references unfrozen local rule file %s", reference)
-				}
-			}
+		if strings.HasPrefix(path, ".qlty/") && remoteRuleReference.MatchString(content) {
+			return errors.New("external Qlty sources and remote rule references cannot be frozen; use approved local rule files")
 		}
-		if strings.HasPrefix(path, ".semgrep/") || strings.HasPrefix(path, "semgrep.") || path == "sgconfig.yml" {
-			if remoteSemgrepRuleConfig.MatchString(content) {
-				return fmt.Errorf("Semgrep rule file %s contains a remote reference; freeze rules locally", path)
-			}
+		if path == "sgconfig.yml" && astGrepRemoteRuleReference.MatchString(content) {
+			return errors.New("ast-grep configuration contains a remote rule reference; freeze rules locally")
 		}
 	}
 	return nil

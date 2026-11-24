@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"slices"
 	"time"
 
 	"whirlwind/internal/execution"
@@ -236,9 +235,6 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 	}
 	manifest := verification.JobManifest{Version: 1, Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: id, JobID: id, ConfigurationHash: hash, CandidateCommit: head, CandidateTree: tree, BaseCommit: head, Repository: project.Path, Root: filepath.Join(e.Root, "project_setup", id), Launcher: profile.Launcher, Sandbox: rules.Sandbox}
 	if evidence.Onboarding && evidence.Phase == "" {
-		if rules.Sandbox == nil || !slices.Contains(rules.Sandbox.AllowedDomains, "semgrep.dev") {
-			return verification.JobManifest{}, errors.New("project setup needs network access to semgrep.dev; add it to committed sandbox.allowed_domains, confirm the project policy, then retry setup")
-		}
 		qualityPolicy := project.Policy.Quality
 		if qualityPolicy == nil {
 			qualityPolicy = &model.QualityPolicy{}
@@ -251,7 +247,6 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 		manifest.Root = filepath.Join(qualityRoot, "jobs", id)
 		manifest.Commands = []verification.JobCommand{
 			{Name: "qlty-catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30},
-			{Name: "semgrep-default-rules", Command: []string{"curl", "-fsSL", "https://semgrep.dev/c/p/ci"}, TimeoutSeconds: 60},
 		}
 		manifest.ConfigurationHash = evidenceDigest(manifest.Quality)
 		return manifest, manifest.Validate()
@@ -351,11 +346,7 @@ func (e *Engine) finishProjectSetupPreparation(ctx context.Context, record model
 	if err != nil {
 		return e.finishProjectSetup(ctx, record, op, projectRecord, project, evidence, fmt.Errorf("read retained Qlty catalog: %w", err))
 	}
-	rules, _, err := verification.ReadJobStreams(evidence.Manifest.Root, 1)
-	if err != nil {
-		return e.finishProjectSetup(ctx, record, op, projectRecord, project, evidence, fmt.Errorf("read retained Semgrep rules: %w", err))
-	}
-	_, err = evidence.Manifest.PrepareQualityDefaults([]byte(catalog), []byte(rules))
+	_, err = evidence.Manifest.PrepareQualityDefaults([]byte(catalog))
 	if err != nil {
 		return e.finishProjectSetup(ctx, record, op, projectRecord, project, evidence, fmt.Errorf("prepare external Qlty defaults: %w", err))
 	}

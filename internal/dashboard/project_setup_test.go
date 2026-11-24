@@ -17,10 +17,10 @@ func TestProjectSetupFailureShowsDurableProgressAndOffersExplicitRetry(t *testin
 	d.Present(control.Snapshot{
 		"projects": {record("p", model.Project{ID: "p", Name: "Repository", Status: "error"})},
 		"operations": {record("setup-1", map[string]any{
-			"kind": "project_setup", "subject": "p", "stage": "failed", "error": "Qlty could not install Semgrep; check approved network access and retry",
+			"kind": "project_setup", "subject": "p", "stage": "failed", "error": "Qlty could not install Gitleaks; check approved network access and retry",
 			"started_at": time.Now().UTC().Format(time.RFC3339Nano),
 			"input": map[string]any{"progress": map[string]any{
-				"current": "semgrep", "completed": []map[string]string{{"name": "qlty catalog", "status": "pass"}},
+				"current": "gitleaks", "completed": []map[string]string{{"name": "qlty catalog", "status": "pass"}},
 			}},
 		})},
 	})
@@ -28,7 +28,7 @@ func TestProjectSetupFailureShowsDurableProgressAndOffersExplicitRetry(t *testin
 		t.Fatalf("project setup operation hidden from run history: %+v", d.runRows)
 	}
 	d.selectRun(0, "", "", 0)
-	for _, want := range []string{"Project setup", "failed", "qlty catalog", "pass", "semgrep", "retry"} {
+	for _, want := range []string{"Project setup", "failed", "qlty catalog", "pass", "gitleaks", "retry"} {
 		if !strings.Contains(strings.ToLower(d.detail.GetText(false)), strings.ToLower(want)) {
 			t.Fatalf("setup progress detail missing %q: %s", want, d.detail.GetText(false))
 		}

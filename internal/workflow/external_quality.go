@@ -72,17 +72,13 @@ func externalQualityConfigurationPaths(directory *os.Root, configured []string) 
 		return configured, nil
 	}
 	paths := []string{".qlty/qlty.toml"}
-	for _, path := range []string{".semgrep/ci.yaml", ".gitleaks.toml"} {
-		_, err := directory.Lstat(filepath.Join("config", path))
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		paths = append(paths, path)
+	const secretConfig = ".gitleaks.toml"
+	if _, err := directory.Lstat(filepath.Join("config", secretConfig)); os.IsNotExist(err) {
+		return paths, nil
+	} else if err != nil {
+		return nil, err
 	}
-	return paths, nil
+	return append(paths, secretConfig), nil
 }
 
 func approvedQualitySnapshot(plan model.ExecutionPlan) (*model.QualitySnapshot, error) {

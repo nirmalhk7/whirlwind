@@ -24,7 +24,7 @@ func TestConfirmChangedProjectPolicyQueuesOneFreshQualification(t *testing.T) {
 			t.Fatalf("git config: %v %s", err, output)
 		}
 	}
-	projectPolicy := model.Policy{Checks: []model.Check{{Name: "build", Command: []string{"/usr/bin/true"}}}, AllowedPaths: []string{"**"}, RiskRules: []model.RiskRule{{Level: "low", Paths: []string{"**"}}}, Sandbox: &model.SandboxPolicy{AllowedDomains: []string{"semgrep.dev"}}}
+	projectPolicy := model.Policy{Checks: []model.Check{{Name: "build", Command: []string{"/usr/bin/true"}}}, AllowedPaths: []string{"**"}, RiskRules: []model.RiskRule{{Level: "low", Paths: []string{"**"}}}}
 	encoded, err := yaml.Marshal(projectPolicy)
 	if err != nil {
 		t.Fatal(err)

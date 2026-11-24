@@ -113,7 +113,7 @@ func regressionQuality(output string, exit int) Result {
 }
 
 func regressionFixtureIdentity() *model.QualityIdentity {
-	return &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 fixture", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: "/tmp/approved-runtime/tools", Tools: []model.QualityToolIdentity{{Name: "semgrep", Version: "1.179.0", Fingerprint: "c5011bfd1d76"}}}
+	return &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 fixture", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: "/tmp/approved-runtime/tools", Tools: []model.QualityToolIdentity{{Name: "gitleaks", Version: "1.179.0", Fingerprint: "c5011bfd1d76"}}}
 }
 
 func TestCompareBaselineQltyRejectsDifferentRuntimeIdentity(t *testing.T) {

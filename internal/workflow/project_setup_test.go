@@ -3,7 +3,6 @@ package workflow
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -172,12 +171,12 @@ func TestProjectSetupPersistsLiveAndCompletedCheckProgress(t *testing.T) {
 	}
 }
 
-func TestAutomaticProjectSetupBuildsFetchAndQualificationPhases(t *testing.T) {
+func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t *testing.T) {
 	e, _, repository := testEngine(t)
 	installSetupRunner(t)
 	policyPath := filepath.Join(repository, ".whirlwind.yaml")
 	qualityRoot := filepath.Join(t.TempDir(), "external-qlty")
-	configuration := "checks:\n  - name: build\n    command: [/usr/bin/true]\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\nsandbox:\n  allowed_domains: [semgrep.dev]\nquality:\n  root: " + qualityRoot + "\n"
+	configuration := "checks:\n  - name: build\n    command: [/usr/bin/true]\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\nquality:\n  root: " + qualityRoot + "\n"
 	if err := os.WriteFile(policyPath, []byte(configuration), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -192,8 +191,8 @@ func TestAutomaticProjectSetupBuildsFetchAndQualificationPhases(t *testing.T) {
 	requireWorkflowSuccess(t, err)
 	prepare, err := e.projectSetupManifest(context.Background(), project, "prepare", projectSetupEvidence{Onboarding: true})
 	requireWorkflowSuccess(t, err)
-	if len(prepare.Commands) != 2 || prepare.Commands[0].Name != "qlty-catalog" || prepare.Commands[1].Command[0] != "curl" || prepare.Commands[1].Command[2] != "https://semgrep.dev/c/p/ci" {
-		t.Fatalf("setup does not fetch the real Qlty catalog and pinned Semgrep registry: %+v", prepare.Commands)
+	if len(prepare.Commands) != 1 || !slices.Equal(prepare.Commands[0].Command, []string{"qlty", "config", "show", "--no-upgrade-check"}) {
+		t.Fatalf("setup preparation should only inspect the Qlty catalog: %+v", prepare.Commands)
 	}
 	if prepare.Quality == nil || prepare.Quality.Root != qualityRoot {
 		t.Fatalf("preparation lacks external Qlty root: %+v", prepare.Quality)
@@ -201,7 +200,7 @@ func TestAutomaticProjectSetupBuildsFetchAndQualificationPhases(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(qualityRoot, "config", ".qlty"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	for path, content := range map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n", ".semgrep/ci.yaml": "rules:\n  - id: test-rule\n", ".gitleaks.toml": "[extend]\nuseDefault = true\n"} {
+	for path, content := range map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n", ".gitleaks.toml": "[extend]\nuseDefault = true\n"} {
 		full := filepath.Join(qualityRoot, "config", path)
 		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
 			t.Fatal(err)
@@ -212,18 +211,18 @@ func TestAutomaticProjectSetupBuildsFetchAndQualificationPhases(t *testing.T) {
 	}
 	snapshot, err := externalQualitySnapshot(project)
 	requireWorkflowSuccess(t, err)
-	semgrepConfig := filepath.Join(qualityRoot, "config", ".semgrep", "ci.yaml")
-	if err := os.WriteFile(semgrepConfig, []byte("rules:\n  - id: changed-after-prepare\n"), 0600); err != nil {
+	secretConfig := filepath.Join(qualityRoot, "config", ".gitleaks.toml")
+	if err := os.WriteFile(secretConfig, []byte("# changed after preparation\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	_, staleErr := e.projectSetupManifest(context.Background(), project, "stale-qualify", projectSetupEvidence{Onboarding: true, Phase: "qualify", QualityRoot: snapshot.Root, SnapshotHash: evidenceDigest(snapshot)})
 	if staleErr == nil {
 		t.Fatal("changed external rules were accepted after preparation")
 	}
-	if err := os.WriteFile(semgrepConfig, []byte(snapshot.Files[".semgrep/ci.yaml"]), 0600); err != nil {
+	if err := os.WriteFile(secretConfig, []byte(snapshot.Files[".gitleaks.toml"]), 0600); err != nil {
 		t.Fatal(err)
 	}
-	catalog := []byte("plugins:\n  definitions:\n    semgrep:\n      known_good_version: 1.2.3\n    gitleaks:\n      known_good_version: 4.5.6\n")
+	catalog := []byte("plugins:\n  definitions:\n    gitleaks:\n      known_good_version: 4.5.6\n")
 	catalogHash, err := verification.HashQltyPluginCatalog(catalog)
 	requireWorkflowSuccess(t, err)
 	priorRoot := t.TempDir()
@@ -250,7 +249,7 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	e, _, repository := testEngine(t)
 	installSetupRunner(t)
 	qualityRoot := filepath.Join(t.TempDir(), "external-qlty")
-	configuration := "checks:\n  - name: build\n    command: [/usr/bin/true]\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\nsandbox:\n  allowed_domains: [semgrep.dev]\nquality:\n  root: " + qualityRoot + "\n"
+	configuration := "checks:\n  - name: build\n    command: [/usr/bin/true]\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\nquality:\n  root: " + qualityRoot + "\n"
 	if err := os.WriteFile(filepath.Join(repository, ".whirlwind.yaml"), []byte(configuration), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -275,17 +274,10 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(manifest.Root, "streams"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	catalog := "plugins:\n  definitions:\n    semgrep:\n      known_good_version: 1.2.3\n      drivers:\n        lint: {}\n    gitleaks:\n      known_good_version: 4.5.6\n      drivers:\n        lint: {}\n"
-	ruleResponse := `{"rule_config":"rules:\n  - id: default-rule\n    message: test\n    languages: [python]\n    severity: WARNING\n    pattern: eval($X)\n"}`
-	for index, content := range []string{catalog, ruleResponse} {
-		for _, suffix := range []string{"stdout", "stderr"} {
-			value := content
-			if suffix == "stderr" {
-				value = ""
-			}
-			if err := os.WriteFile(filepath.Join(manifest.Root, "streams", fmt.Sprintf("%03d.%s", index, suffix)), []byte(value), 0600); err != nil {
-				t.Fatal(err)
-			}
+	catalog := "plugins:\n  definitions:\n    gitleaks:\n      known_good_version: 4.5.6\n      drivers:\n        lint: {}\n"
+	for name, content := range map[string]string{"000.stdout": catalog, "000.stderr": ""} {
+		if err := os.WriteFile(filepath.Join(manifest.Root, "streams", name), []byte(content), 0600); err != nil {
+			t.Fatal(err)
 		}
 	}
 	id := store.ID()
@@ -329,7 +321,7 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	if savedProject.Status != "draft" {
 		t.Fatalf("project became ready before scanner qualification: %s", savedProject.Status)
 	}
-	for _, path := range []string{".qlty/qlty.toml", ".semgrep/ci.yaml", ".gitleaks.toml"} {
+	for _, path := range []string{".qlty/qlty.toml", ".gitleaks.toml"} {
 		if _, err := os.Stat(filepath.Join(qualityRoot, "config", path)); err != nil {
 			t.Fatalf("default file not published outside source: %s: %v", path, err)
 		}
@@ -405,7 +397,7 @@ func TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings(t *testing.T) {
 		Quality:  &model.QualitySnapshot{Root: filepath.Join(root, "quality"), Files: map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n"}, PluginCatalog: []byte("plugins: {}\n")},
 		Commands: []verification.JobCommand{{Name: "build", Command: []string{"/usr/bin/true"}, TimeoutSeconds: 10}, {Name: "quality", Command: []string{"qlty", "check", "--sarif"}, TimeoutSeconds: 10, ReportFormat: "sarif"}},
 	}
-	identity := &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 macos-arm64 (fixture)", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: filepath.Join(root, "runtime"), Tools: []model.QualityToolIdentity{{Name: "gitleaks", Version: "1.0", Fingerprint: strings.Repeat("e", 8)}, {Name: "semgrep", Version: "1.0", Fingerprint: strings.Repeat("f", 8)}}}
+	identity := &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 macos-arm64 (fixture)", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: filepath.Join(root, "runtime"), Tools: []model.QualityToolIdentity{{Name: "gitleaks", Version: "1.0", Fingerprint: strings.Repeat("e", 8)}}}
 	zero, one := 0, 1
 	manifestHash := manifest.Digest()
 	report := verification.JobReport{Purpose: manifest.Purpose, ProjectID: manifest.ProjectID, OperationID: manifest.OperationID, ManifestHash: manifestHash, ConfigurationHash: manifest.ConfigurationHash, CandidateCommit: manifest.CandidateCommit, CandidateTree: manifest.CandidateTree, Passed: false, QualityIdentity: identity, Results: []verification.JobResult{
@@ -415,7 +407,7 @@ func TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(manifest.Root, "streams"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	sarif := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty"}},"results":[{"ruleId":"semgrep:fixture","level":"warning","message":{"text":"existing finding"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"app.py"},"region":{"startLine":1,"snippet":{"text":"eval(value)"}}}}]}],"invocations":[{"executionSuccessful":true,"toolExecutionNotifications":[],"toolConfigurationNotifications":[]}]}]}`
+	sarif := `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty"}},"results":[{"ruleId":"gitleaks:fixture","level":"warning","message":{"text":"existing finding"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"app.py"},"region":{"startLine":1,"snippet":{"text":"eval(value)"}}}}]}],"invocations":[{"executionSuccessful":true,"toolExecutionNotifications":[],"toolConfigurationNotifications":[]}]}]}`
 	stream := filepath.Join(manifest.Root, "streams", "001.stdout")
 	if err := os.WriteFile(stream, []byte(sarif), 0600); err != nil {
 		t.Fatal(err)

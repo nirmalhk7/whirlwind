@@ -1,7 +1,6 @@
 package verification
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,20 +11,13 @@ import (
 
 const defaultQualityCatalog = `plugins:
   definitions:
-    semgrep:
-      known_good_version: 1.179.0
-      drivers:
-        lint: {}
     gitleaks:
       known_good_version: 8.29.1
       drivers:
         lint: {}
 `
 
-const defaultQualityRules = `{"rules":[{"id":"qualification-print","languages":["python"],"severity":"WARNING","message":"Harmless scanner qualification marker","pattern":"print(\"whirlwind-scanner-probe\")"}]}`
-
 const defaultPreparedQltyPath = ".qlty/qlty.toml"
-const defaultPreparedSemgrepPath = ".semgrep/ci.yaml"
 
 func defaultQualityManifest(t *testing.T) JobManifest {
 	t.Helper()
@@ -33,36 +25,32 @@ func defaultQualityManifest(t *testing.T) JobManifest {
 	return JobManifest{Version: 1, Purpose: ProjectSetupPurpose, ProjectID: "project_fixture", JobID: "job", OperationID: "job", ConfigurationHash: "configuration", CandidateCommit: strings.Repeat("a", 40), CandidateTree: strings.Repeat("b", 40), BaseCommit: strings.Repeat("c", 40), Repository: t.TempDir(), Root: filepath.Join(root, "jobs", "job"), Launcher: filepath.Join(root, "bridges", "nono", "launch.mjs"), Quality: &model.QualitySnapshot{Root: root, Files: map[string]string{defaultPreparedQltyPath: "config_version = \"0\"\n"}}, Commands: []JobCommand{{Name: "metadata", Command: []string{"qlty", "--version"}, TimeoutSeconds: 15}}}
 }
 
-func prepareQualityDefaults(t *testing.T, manifest JobManifest, catalog, rules string) (model.QualitySnapshot, error) {
-	t.Helper()
-	return manifest.PrepareQualityDefaults([]byte(catalog), []byte(rules))
-}
-
 func TestProjectSetupPreparesFrozenExternalDefaultsWithoutSourceWrites(t *testing.T) {
 	manifest := defaultQualityManifest(t)
-	snapshot, err := prepareQualityDefaults(t, manifest, defaultQualityCatalog, defaultQualityRules)
+	snapshot, err := manifest.PrepareQualityDefaults([]byte(defaultQualityCatalog))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := snapshot.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.Root != manifest.Quality.Root || len(snapshot.Files) != 3 {
+	if snapshot.Root != manifest.Quality.Root || len(snapshot.Files) != 2 {
 		t.Fatalf("default quality files or external root missing: %+v", snapshot)
 	}
-	for _, path := range []string{defaultPreparedQltyPath, ".gitleaks.toml", defaultPreparedSemgrepPath} {
+	for _, path := range []string{defaultPreparedQltyPath, ".gitleaks.toml"} {
 		content, err := os.ReadFile(filepath.Join(snapshot.Root, "config", path))
 		if err != nil || len(content) == 0 || string(content) != snapshot.Files[path] {
 			t.Fatalf("default file %s not durably captured: %q %v", path, content, err)
 		}
 	}
-	if !strings.Contains(snapshot.Files[defaultPreparedSemgrepPath], "qualification-print") {
-		t.Fatal("captured rules were lost")
+	config := snapshot.Files[defaultPreparedQltyPath]
+	if strings.Count(config, "[[plugin]]") != 1 || !strings.Contains(config, "name = \"gitleaks\"\nversion = \"8.29.1\"") {
+		t.Fatalf("default setup did not pin only Gitleaks: %s", config)
 	}
 	if entries, err := os.ReadDir(manifest.Repository); err != nil || len(entries) != 0 {
 		t.Fatalf("default setup wrote to original source: %+v %v", entries, err)
 	}
-	again, err := prepareQualityDefaults(t, manifest, defaultQualityCatalog, defaultQualityRules)
+	again, err := manifest.PrepareQualityDefaults([]byte(defaultQualityCatalog))
 	if err != nil || again.Files[defaultPreparedQltyPath] != snapshot.Files[defaultPreparedQltyPath] {
 		t.Fatalf("retry changed prepared defaults: %+v %v", again, err)
 	}
@@ -78,7 +66,7 @@ func TestProjectSetupDefaultsPreserveExistingHumanConfiguration(t *testing.T) {
 	if err := os.WriteFile(path, []byte(want), 0600); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := prepareQualityDefaults(t, manifest, defaultQualityCatalog, defaultQualityRules)
+	snapshot, err := manifest.PrepareQualityDefaults([]byte(defaultQualityCatalog))
 	if err != nil || snapshot.Files[defaultPreparedQltyPath] != want {
 		t.Fatalf("default setup replaced human quality policy: %q %v", snapshot.Files[defaultPreparedQltyPath], err)
 	}
@@ -92,7 +80,7 @@ func TestProjectSetupDefaultsRejectSourceAndLinkedConfiguration(t *testing.T) {
 	for _, location := range []string{"source root", "inside source", "source inside quality root", "root link", "configuration link"} {
 		t.Run(location, func(t *testing.T) {
 			manifest := unsafeDefaultQualityManifest(t, location)
-			if _, err := prepareQualityDefaults(t, manifest, defaultQualityCatalog, defaultQualityRules); err == nil {
+			if _, err := manifest.PrepareQualityDefaults([]byte(defaultQualityCatalog)); err == nil {
 				t.Fatal("unsafe external quality destination accepted")
 			}
 			if entries, err := os.ReadDir(manifest.Repository); err != nil || len(entries) != 0 {
@@ -127,7 +115,7 @@ func TestApprovedPlanCannotPrepareDefaultProjectConfiguration(t *testing.T) {
 	manifest := defaultQualityManifest(t)
 	manifest.Purpose, manifest.ProjectID, manifest.OperationID = "", "", ""
 	manifest.PlanID, manifest.PlanVersion, manifest.PlanHash = "plan", 1, "approved"
-	if _, err := prepareQualityDefaults(t, manifest, defaultQualityCatalog, defaultQualityRules); err == nil {
+	if _, err := manifest.PrepareQualityDefaults([]byte(defaultQualityCatalog)); err == nil {
 		t.Fatal("approved-plan runner rewrote project configuration")
 	}
 	if _, err := os.Stat(filepath.Join(manifest.Quality.Root, "config")); !os.IsNotExist(err) {
@@ -136,45 +124,20 @@ func TestApprovedPlanCannotPrepareDefaultProjectConfiguration(t *testing.T) {
 }
 
 func TestProjectSetupDefaultsRejectIncompleteInputsBeforePublishing(t *testing.T) {
-	for _, input := range []struct{ name, catalog, rules string }{
-		{"missing catalog", "{}", defaultQualityRules},
-		{"missing version", strings.Replace(defaultQualityCatalog, "known_good_version: 1.179.0", "known_good_version: ''", 1), defaultQualityRules},
-		{"missing rules", defaultQualityCatalog, `{}`},
-		{"empty rules", defaultQualityCatalog, `{"rules":[]}`},
-		{"duplicate rules", defaultQualityCatalog, `{"rules":[{"id":"same"},{"id":"same"}]}`},
-		{"malformed response", defaultQualityCatalog, `not JSON`},
+	for _, input := range []struct{ name, catalog string }{
+		{"missing catalog", "{}"},
+		{"missing version", strings.Replace(defaultQualityCatalog, "known_good_version: 8.29.1", "known_good_version: ''", 1)},
+		{"missing lint driver", strings.Replace(defaultQualityCatalog, "lint: {}", "format: {}", 1)},
+		{"malformed catalog", "["},
 	} {
 		t.Run(input.name, func(t *testing.T) {
 			manifest := defaultQualityManifest(t)
-			if _, err := prepareQualityDefaults(t, manifest, input.catalog, input.rules); err == nil {
-				t.Fatal("incomplete scanner metadata/rules produced default configuration")
+			if _, err := manifest.PrepareQualityDefaults([]byte(input.catalog)); err == nil {
+				t.Fatal("incomplete scanner metadata produced default configuration")
 			}
 			if _, err := os.Stat(filepath.Join(manifest.Quality.Root, "config")); !os.IsNotExist(err) {
 				t.Fatalf("invalid setup input published configuration: %v", err)
 			}
 		})
-	}
-}
-
-func TestProjectSetupDefaultsRetainRegistryRuleContent(t *testing.T) {
-	for name, value := range map[string]any{"wrapped text": defaultQualityRules, "wrapped object": json.RawMessage(defaultQualityRules)} {
-		t.Run(name, func(t *testing.T) {
-			response, err := json.Marshal(map[string]any{"rule_config": value})
-			if err != nil {
-				t.Fatal(err)
-			}
-			snapshot, err := prepareQualityDefaults(t, defaultQualityManifest(t), defaultQualityCatalog, string(response))
-			if err != nil || snapshot.Files[defaultPreparedSemgrepPath] != defaultQualityRules {
-				t.Fatalf("registry response changed retained rule bytes: %q %v", snapshot.Files[defaultPreparedSemgrepPath], err)
-			}
-		})
-	}
-}
-
-func TestProjectSetupDefaultsRetainRawYAMLRegistryRules(t *testing.T) {
-	rules := "rules:\n  - id: ci-raw-yaml\n    languages: [python]\n    severity: WARNING\n    message: harmless test\n    pattern: eval($VALUE)\n"
-	snapshot, err := prepareQualityDefaults(t, defaultQualityManifest(t), defaultQualityCatalog, rules)
-	if err != nil || snapshot.Files[defaultPreparedSemgrepPath] != rules {
-		t.Fatalf("raw registry YAML was rejected or changed: %q %v", snapshot.Files[defaultPreparedSemgrepPath], err)
 	}
 }

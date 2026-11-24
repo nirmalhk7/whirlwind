@@ -17,7 +17,7 @@ import (
 )
 
 // This acceptance test exercises the registered-project path against installed
-// Qlty and the public Semgrep registry. Its network grants are test-local.
+// Qlty and Gitleaks. Its distribution network grants are test-local.
 func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if os.Getenv("WHIRLWIND_RUN_LIVE_QLTY_ONBOARDING") != "1" {
 		t.Skip("set WHIRLWIND_RUN_LIVE_QLTY_ONBOARDING=1 to run native Qlty onboarding acceptance")
@@ -43,7 +43,7 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 		Checks:       []model.Check{{Name: "python-syntax", Command: []string{python, "-c", "import ast,pathlib; ast.parse(pathlib.Path('app.py').read_text())"}, TimeoutSeconds: 60}},
 		AllowedPaths: []string{"**"},
 		RiskRules:    []model.RiskRule{{Level: "low", Paths: []string{"**"}}},
-		Sandbox:      &model.SandboxPolicy{AllowedDomains: []string{"semgrep.dev", "github.com", "api.github.com", "release-assets.githubusercontent.com", "pypi.org", "files.pythonhosted.org"}},
+		Sandbox:      &model.SandboxPolicy{AllowedDomains: []string{"github.com", "api.github.com", "release-assets.githubusercontent.com"}},
 	}
 	encodedPolicy, err := yaml.Marshal(projectPolicy)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if identity == nil || identity.Validate() != nil {
 		t.Fatalf("native setup did not bind verified Qlty identity: %+v", identity)
 	}
-	for _, name := range []string{"semgrep", "gitleaks"} {
+	for _, name := range []string{"gitleaks"} {
 		found := false
 		for _, tool := range identity.Tools {
 			if tool.Name == name {
