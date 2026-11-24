@@ -19,27 +19,28 @@ import (
 	"whirlwind/internal/process"
 )
 
-// JobManifest is supplied only by the local supervisor. It contains no store
-// handle, agent configuration, or authority to change workflow state.
+// JobManifest is trusted input from the local supervisor or an offline check
+// operator. It has no store handle or authority to change workflow state.
 type JobManifest struct {
-	Purpose           string                 `json:"purpose,omitempty"`
-	ProjectID         string                 `json:"project_id,omitempty"`
-	OperationID       string                 `json:"operation_id,omitempty"`
-	Quality           *model.QualitySnapshot `json:"quality,omitempty"`
-	Version           int                    `json:"version"`
-	JobID             string                 `json:"job_id"`
-	PlanID            string                 `json:"plan_id"`
-	PlanVersion       int                    `json:"plan_version"`
-	PlanHash          string                 `json:"plan_hash"`
-	ConfigurationHash string                 `json:"configuration_hash"`
-	CandidateCommit   string                 `json:"candidate_commit"`
-	CandidateTree     string                 `json:"candidate_tree"`
-	BaseCommit        string                 `json:"base_commit"`
-	Repository        string                 `json:"repository"`
-	Root              string                 `json:"root"`
-	Launcher          string                 `json:"launcher"`
-	Sandbox           *model.SandboxPolicy   `json:"sandbox,omitempty"`
-	Commands          []JobCommand           `json:"commands"`
+	Purpose            string                 `json:"purpose,omitempty"`
+	ProjectID          string                 `json:"project_id,omitempty"`
+	OperationID        string                 `json:"operation_id,omitempty"`
+	Quality            *model.QualitySnapshot `json:"quality,omitempty"`
+	Version            int                    `json:"version"`
+	JobID              string                 `json:"job_id"`
+	PlanID             string                 `json:"plan_id"`
+	PlanVersion        int                    `json:"plan_version"`
+	PlanHash           string                 `json:"plan_hash"`
+	ConfigurationHash  string                 `json:"configuration_hash"`
+	CandidateCommit    string                 `json:"candidate_commit"`
+	CandidateTree      string                 `json:"candidate_tree"`
+	BaseCommit         string                 `json:"base_commit"`
+	Repository         string                 `json:"repository"`
+	Root               string                 `json:"root"`
+	Launcher           string                 `json:"launcher"`
+	OfflineDockerImage string                 `json:"offline_docker_image,omitempty"`
+	Sandbox            *model.SandboxPolicy   `json:"sandbox,omitempty"`
+	Commands           []JobCommand           `json:"commands"`
 }
 
 type JobCommand struct {
@@ -59,6 +60,8 @@ type JobResult struct {
 	Status            string `json:"status"`
 	StdoutPath        string `json:"stdout_path"`
 	StderrPath        string `json:"stderr_path"`
+	StdoutSHA256      string `json:"stdout_sha256,omitempty"`
+	StderrSHA256      string `json:"stderr_sha256,omitempty"`
 	ManifestHash      string `json:"manifest_hash"`
 	CandidateCommit   string `json:"candidate_commit"`
 	CandidateTree     string `json:"candidate_tree"`
@@ -100,7 +103,11 @@ func (m JobManifest) Digest() string {
 }
 
 func (m JobManifest) Validate() error {
-	if runtime.GOOS != "darwin" {
+	if m.OfflineDockerImage != "" {
+		if runtime.GOOS != "linux" {
+			return errors.New("offline Docker verification requires Linux")
+		}
+	} else if runtime.GOOS != "darwin" {
 		return errors.New("local verification execution currently requires macOS; inspection remains available")
 	}
 	return m.validateDefinition()
@@ -118,7 +125,7 @@ func (m JobManifest) validateDefinition() error {
 	if !gitObject.MatchString(m.CandidateCommit) || !gitObject.MatchString(m.CandidateTree) || !gitObject.MatchString(m.BaseCommit) {
 		return errors.New("verification requires frozen Git object identities")
 	}
-	if !filepath.IsAbs(m.Repository) || !filepath.IsAbs(m.Root) || !filepath.IsAbs(m.Launcher) {
+	if !filepath.IsAbs(m.Repository) || !filepath.IsAbs(m.Root) || (m.OfflineDockerImage == "" && !filepath.IsAbs(m.Launcher)) {
 		return errors.New("verification requires absolute repository, staging, and launcher paths")
 	}
 	if m.Quality != nil {
@@ -140,6 +147,9 @@ func (m JobManifest) validateDefinition() error {
 	}
 	if err := validateJobCommands(m.Commands); err != nil {
 		return err
+	}
+	if m.OfflineDockerImage != "" {
+		return m.validateOfflineDocker()
 	}
 	if hasQltyCheck(m.Commands) && m.Quality == nil {
 		return errors.New("Qlty verification requires frozen external quality configuration")
