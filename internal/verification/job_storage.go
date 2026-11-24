@@ -151,34 +151,52 @@ func (r *jobRunner) prepareCheckout(ctx context.Context) (string, error) {
 	if err := r.root.MkdirAll("host-home", 0700); err != nil {
 		return "", err
 	}
-	if _, err := r.root.Lstat(verificationCheckoutDir); os.IsNotExist(err) {
-		if _, err := r.cloneDisposableCheckout(ctx, verificationCheckoutDir); err != nil {
-			return "", err
-		}
-		if _, err := r.git(ctx, stage, "checkout", "--detach", r.manifest.CandidateCommit); err != nil {
-			return "", err
-		}
-		if err := r.prepareQualityConfiguration(stage); err != nil {
-			return "", err
-		}
-	} else if err != nil {
+	current, err := r.checkoutOwnership(verificationCheckoutDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return r.cloneDisposableCheckout(ctx, verificationCheckoutDir, func(draft string) error {
+			if err := r.populateDisposableCheckout(ctx, draft); err != nil {
+				return err
+			}
+			return r.validateCheckout(ctx, draft)
+		})
+	}
+	if err != nil {
 		return "", err
 	}
-	head, err := r.git(ctx, stage, "rev-parse", "HEAD")
-	if err != nil || head != r.manifest.CandidateCommit {
-		return "", errors.New("verification checkout candidate mismatch")
-	}
-	tree, err := r.git(ctx, stage, "rev-parse", "HEAD^{tree}")
-	if err != nil || tree != r.manifest.CandidateTree {
-		return "", errors.New("verification checkout tree mismatch")
-	}
-	if _, err := r.git(ctx, stage, "cat-file", "-e", r.manifest.BaseCommit+"^{commit}"); err != nil {
+	saved, err := r.readCheckoutOwnership(verificationCheckoutDir)
+	if err == nil {
+		if err := saved.verifyDirectory(current); err != nil {
+			return "", err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	if err := r.validateFrozenCheckout(ctx, stage); err != nil {
+	if err := r.validateCheckout(ctx, stage); err != nil {
 		return "", err
 	}
 	return stage, nil
+}
+
+func (r *jobRunner) populateDisposableCheckout(ctx context.Context, stage string) error {
+	if _, err := r.git(ctx, stage, "checkout", "--detach", r.manifest.CandidateCommit); err != nil {
+		return err
+	}
+	return r.prepareQualityConfiguration(stage)
+}
+
+func (r *jobRunner) validateCheckout(ctx context.Context, stage string) error {
+	head, err := r.git(ctx, stage, "rev-parse", "HEAD")
+	if err != nil || head != r.manifest.CandidateCommit {
+		return errors.New("verification checkout candidate mismatch")
+	}
+	tree, err := r.git(ctx, stage, "rev-parse", "HEAD^{tree}")
+	if err != nil || tree != r.manifest.CandidateTree {
+		return errors.New("verification checkout tree mismatch")
+	}
+	if _, err := r.git(ctx, stage, "cat-file", "-e", r.manifest.BaseCommit+"^{commit}"); err != nil {
+		return err
+	}
+	return r.validateFrozenCheckout(ctx, stage)
 }
 
 func verificationRootPath(m JobManifest) (string, error) {

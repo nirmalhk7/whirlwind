@@ -11,13 +11,17 @@ import (
 	"syscall"
 )
 
-const verificationCheckoutDir = "checkout"
+const (
+	verificationCheckoutDir = "checkout"
+	checkoutDraftPrefix     = "checkout-preparing-"
+)
 
 type checkoutOwnership struct {
 	Manifest string
 	Path     string
 	Device   uint64
 	Inode    uint64
+	Draft    string `json:",omitempty"`
 }
 
 func autofixCheckoutDir(index int) string {
@@ -28,27 +32,57 @@ func checkoutOwnershipFile(relative string) string {
 	return "stage-" + strings.ReplaceAll(filepath.ToSlash(relative), "/", "-") + ".json"
 }
 
-// Mark only fresh Git clones created by this runner, never a preexisting
-// checkout. Keep the marker outside the checkout so partial deletion can be
-// retried, but bind it to the actual directory so a replacement isn't removed.
-func (r *jobRunner) cloneDisposableCheckout(ctx context.Context, relative string) (string, error) {
+// Record ownership before Git writes anything, then publish the complete
+// checkout by renaming the same directory. A retry can discard a verified
+// unpublished copy without touching an existing checkout.
+func (r *jobRunner) cloneDisposableCheckout(ctx context.Context, relative string, prepare func(string) error) (string, error) {
 	if _, err := r.root.Lstat(relative); err == nil {
 		return "", fmt.Errorf("disposable verification checkout already exists: %s", relative)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	stage := filepath.Join(r.root.Name(), relative)
-	if _, err := r.git(ctx, r.root.Name(), "clone", "--no-hardlinks", "--no-checkout", "--", r.manifest.Repository, stage); err != nil {
+	if err := r.discardUnpublishedCheckout(relative); err != nil {
 		return "", err
 	}
-	ownership, err := r.checkoutOwnership(relative)
+	draft, err := os.MkdirTemp(r.root.Name(), checkoutDraftPrefix)
 	if err != nil {
 		return "", err
 	}
-	if err := writeJobJSON(r.root, checkoutOwnershipFile(relative), ownership); err != nil {
-		return "", fmt.Errorf("record verification staging ownership: %w", err)
+	draftName := filepath.Base(draft)
+	ownership, err := r.checkoutOwnership(draftName)
+	if err != nil {
+		return "", errors.Join(err, r.root.Remove(draftName))
 	}
-	return stage, nil
+	ownership.Path, ownership.Draft = relative, draftName
+	if err := writeJobJSON(r.root, checkoutOwnershipFile(relative), ownership); err != nil {
+		return "", fmt.Errorf("record verification staging ownership: %w", errors.Join(err, r.root.Remove(draftName)))
+	}
+	if _, err := r.git(ctx, r.root.Name(), "clone", "--no-hardlinks", "--no-checkout", "--", r.manifest.Repository, draft); err != nil {
+		return "", err
+	}
+	if err := prepare(draft); err != nil {
+		return "", err
+	}
+	if err := r.root.Rename(draftName, relative); err != nil {
+		return "", err
+	}
+	return filepath.Join(r.root.Name(), relative), nil
+}
+
+func (r *jobRunner) discardUnpublishedCheckout(relative string) error {
+	saved, err := r.readCheckoutOwnership(relative)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if saved.Draft != "" {
+		if err := r.removeOwnedCheckout(saved.Draft, saved); err != nil {
+			return err
+		}
+	}
+	return r.root.Remove(checkoutOwnershipFile(relative))
 }
 
 // Only a published, validated report reaches this point, while the runner
@@ -76,34 +110,67 @@ func (r *jobRunner) releaseCheckout(relative string, report JobReport) error {
 	}
 	current, err := r.checkoutOwnership(relative)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil
+		return r.discardUnpublishedCheckout(relative)
 	}
 	if err != nil {
 		return err
 	}
-	marker := checkoutOwnershipFile(relative)
-	info, err := r.root.Lstat(marker)
+	saved, err := r.readCheckoutOwnership(relative)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil // Legacy/unmarked: never delete it.
 	}
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() || info.Size() > 512 {
-		return fmt.Errorf("invalid verification staging marker: %s", marker)
-	}
-	raw, err := r.root.ReadFile(marker)
-	if err != nil {
+	if err := saved.verifyDirectory(current); err != nil {
 		return err
-	}
-	var saved checkoutOwnership
-	if json.Unmarshal(raw, &saved) != nil || saved != current {
-		return fmt.Errorf("unrecognized verification staging owner: %s", relative)
 	}
 	if err := r.root.RemoveAll(relative); err != nil {
 		return err
 	}
-	return r.root.Remove(marker)
+	return r.root.Remove(checkoutOwnershipFile(relative))
+}
+
+func (r *jobRunner) removeOwnedCheckout(relative string, saved checkoutOwnership) error {
+	current, err := r.checkoutOwnership(relative)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := saved.verifyDirectory(current); err != nil {
+		return err
+	}
+	return r.root.RemoveAll(relative)
+}
+
+func (r *jobRunner) readCheckoutOwnership(relative string) (checkoutOwnership, error) {
+	marker := checkoutOwnershipFile(relative)
+	info, err := r.root.Lstat(marker)
+	if err != nil {
+		return checkoutOwnership{}, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > 512 {
+		return checkoutOwnership{}, fmt.Errorf("invalid verification staging marker: %s", marker)
+	}
+	raw, err := r.root.ReadFile(marker)
+	if err != nil {
+		return checkoutOwnership{}, err
+	}
+	var saved checkoutOwnership
+	if json.Unmarshal(raw, &saved) != nil || saved.Manifest != r.manifest.Digest() || saved.Path != relative || saved.Inode == 0 ||
+		saved.Draft != "" && (filepath.Base(saved.Draft) != saved.Draft || !strings.HasPrefix(saved.Draft, checkoutDraftPrefix)) {
+		return checkoutOwnership{}, fmt.Errorf("unrecognized verification staging owner: %s", relative)
+	}
+	return saved, nil
+}
+
+func (saved checkoutOwnership) verifyDirectory(current checkoutOwnership) error {
+	if saved.Device != current.Device || saved.Inode != current.Inode {
+		return fmt.Errorf("unrecognized verification staging owner: %s", current.Path)
+	}
+	return nil
 }
 
 func (r *jobRunner) checkoutOwnership(relative string) (checkoutOwnership, error) {

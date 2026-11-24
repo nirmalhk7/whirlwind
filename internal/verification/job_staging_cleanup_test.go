@@ -2,9 +2,12 @@ package verification
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"whirlwind/internal/model"
@@ -39,6 +42,116 @@ func stagingJobOpen(t *testing.T, manifest JobManifest) *jobRunner {
 	r, err := openJob(manifest)
 	requireVerificationSuccess(t, err)
 	return r
+}
+
+func runStagingJob(t *testing.T, manifest JobManifest, observe func(JobEvent) error) (JobReport, error) {
+	t.Helper()
+	if runtime.GOOS == "darwin" {
+		return RunJob(t.Context(), manifest, observe)
+	}
+	// The legacy public entry point only admits native execution on macOS.
+	r := stagingJobOpen(t, manifest)
+	defer r.close()
+	return r.run(t.Context(), observe)
+}
+
+func TestVerificationRetriesAfterStagingMarkerWriteFails(t *testing.T) {
+	m := stagingJobFixture(t, JobCommand{Name: "verify", Command: []string{"/must/not/run"}, TimeoutSeconds: 5})
+	markerTemp := filepath.Join(m.Root, checkoutOwnershipFile(verificationCheckoutDir)+".tmp")
+	requireVerificationSuccess(t, os.MkdirAll(markerTemp, 0700))
+	requireVerificationSuccess(t, os.WriteFile(filepath.Join(markerTemp, "blocker"), []byte("preserve"), 0600))
+	observe := func(JobEvent) error {
+		t.Fatal("command started before checkout ownership was published")
+		return nil
+	}
+	if _, err := runStagingJob(t, m, observe); err == nil || !strings.Contains(err.Error(), "record verification staging ownership") {
+		t.Fatalf("expected staging marker failure, got %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(m.Root, verificationCheckoutDir)); !os.IsNotExist(err) {
+		t.Fatalf("published a checkout without recorded ownership: %v", err)
+	}
+	requireVerificationSuccess(t, os.RemoveAll(markerTemp))
+	interrupted := errors.New("stop before executing the frozen command")
+	_, err := runStagingJob(t, m, func(event JobEvent) error {
+		if event.Type != "started" || event.Index != 0 {
+			t.Fatalf("unexpected event after retry: %+v", event)
+		}
+		content, err := os.ReadFile(filepath.Join(m.Root, verificationCheckoutDir, "source.txt"))
+		requireVerificationSuccess(t, err)
+		if string(content) != "frozen source\n" {
+			t.Fatalf("checkout did not restore frozen source: %q", content)
+		}
+		return interrupted
+	})
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("did not recover and reach the first command after the marker failure: %v", err)
+	}
+}
+
+func TestVerificationRecoversOnlyOwnedUnpublishedCheckouts(t *testing.T) {
+	for _, scenario := range []string{"frozen-checkout", "autofix-checkout", "replaced-checkout"} {
+		t.Run(scenario, func(t *testing.T) {
+			m := stagingJobFixture(t, JobCommand{Name: "verify", Command: []string{"/must/not/run"}, TimeoutSeconds: 5})
+			relative := verificationCheckoutDir
+			if scenario == "autofix-checkout" {
+				m.Commands[0].Mode = "autofix"
+				relative = autofixCheckoutDir(0)
+			}
+			interrupted := errors.New("stop after git clone --no-checkout")
+			var draft string
+			func() {
+				r := stagingJobOpen(t, m)
+				defer r.close()
+				_, err := r.cloneDisposableCheckout(t.Context(), relative, func(stage string) error {
+					draft = stage
+					if _, err := os.Stat(filepath.Join(stage, ".git", "HEAD")); err != nil {
+						t.Fatalf("fixture did not clone with real Git: %v", err)
+					}
+					if _, err := os.Lstat(filepath.Join(stage, "source.txt")); !os.IsNotExist(err) {
+						t.Fatalf("fixture already populated the checkout: %v", err)
+					}
+					return interrupted
+				})
+				if !errors.Is(err, interrupted) {
+					t.Fatalf("expected interrupted Git preparation, got %v", err)
+				}
+			}()
+			if scenario == "replaced-checkout" {
+				requireVerificationSuccess(t, os.Rename(draft, draft+".original"))
+				requireVerificationSuccess(t, os.Mkdir(draft, 0700))
+				requireVerificationSuccess(t, os.WriteFile(filepath.Join(draft, "untouched"), []byte("replacement"), 0600))
+			}
+			r := stagingJobOpen(t, m)
+			defer r.close()
+			var stage string
+			var err error
+			if scenario == "autofix-checkout" {
+				stage, err = r.prepareFixCheckout(t.Context(), 0)
+			} else {
+				stage, err = r.prepareCheckout(t.Context())
+			}
+			if scenario == "replaced-checkout" {
+				if err == nil || !strings.Contains(err.Error(), "unrecognized verification staging owner") {
+					t.Fatalf("retry accepted a replacement directory: %v", err)
+				}
+				content, err := os.ReadFile(filepath.Join(draft, "untouched"))
+				requireVerificationSuccess(t, err)
+				if string(content) != "replacement" {
+					t.Fatalf("changed replacement directory: %q", content)
+				}
+				return
+			}
+			requireVerificationSuccess(t, err)
+			content, err := os.ReadFile(filepath.Join(stage, "source.txt"))
+			requireVerificationSuccess(t, err)
+			if string(content) != "frozen source\n" {
+				t.Fatalf("retry did not restore frozen source: %q", content)
+			}
+			if _, err := os.Lstat(draft); !os.IsNotExist(err) {
+				t.Fatalf("retry kept the abandoned clone: %v", err)
+			}
+		})
+	}
 }
 
 func stagingResult(t *testing.T, runner *jobRunner, index int, cleanupVerified bool) JobResult {
@@ -128,9 +241,7 @@ func TestCompletedVerificationReleasesStagingAndRetainsEvidence(t *testing.T) {
 	}()
 	run := func() {
 		t.Helper()
-		r := stagingJobOpen(t, m)
-		defer r.close()
-		report, err := r.run(ctx, func(JobEvent) error { t.Error("completed commands must not replay"); return nil })
+		report, err := runStagingJob(t, m, func(JobEvent) error { t.Error("completed commands must not replay"); return nil })
 		requireVerificationSuccess(t, err)
 		if !report.Passed || !model.SameQualityIdentity(report.QualityIdentity, identity) {
 			t.Fatalf("evidence changed: %+v", report)
@@ -138,9 +249,11 @@ func TestCompletedVerificationReleasesStagingAndRetainsEvidence(t *testing.T) {
 	}
 	run()
 	for i := 0; i < 2; i++ {
-		for _, path := range []string{"checkout", "fixes/001/checkout"} {
-			if _, err := os.Lstat(filepath.Join(m.Root, path)); !os.IsNotExist(err) {
-				t.Errorf("completed disposable staging still exists: %s: %v", path, err)
+		for _, path := range []string{verificationCheckoutDir, autofixCheckoutDir(1)} {
+			for _, name := range []string{path, checkoutOwnershipFile(path)} {
+				if _, err := os.Lstat(filepath.Join(m.Root, name)); !os.IsNotExist(err) {
+					t.Errorf("completed disposable staging still exists: %s: %v", name, err)
+				}
 			}
 		}
 		saved, err := readJobReport(m)
@@ -248,6 +361,9 @@ func TestCompletedVerificationKeepsUnownedOrUnverifiedStaging(t *testing.T) {
 			case "replaced-owned-directory":
 				requireVerificationSuccess(t, os.Rename(stage, stage+".other"))
 				requireVerificationSuccess(t, os.Mkdir(stage, 0700))
+				if _, err := r.prepareCheckout(t.Context()); err == nil || !strings.Contains(err.Error(), "unrecognized verification staging owner") {
+					t.Fatalf("preparation accepted replacement staging: %v", err)
+				}
 			}
 			requireVerificationSuccess(t, os.WriteFile(filepath.Join(stage, "untouched"), []byte("preserve"), 0600))
 			result := stagingResult(t, r, 0, scenario != "runtime-cleanup-unverified")

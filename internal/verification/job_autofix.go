@@ -28,25 +28,18 @@ func (r *jobRunner) prepareFixCheckout(ctx context.Context, index int) (string, 
 	if err := r.root.MkdirAll(filepath.Dir(relative), 0700); err != nil {
 		return "", err
 	}
-	stage, err := r.cloneDisposableCheckout(ctx, relative)
-	if err != nil {
-		return "", err
-	}
-	if _, err := r.git(ctx, stage, "checkout", "--detach", r.manifest.CandidateCommit); err != nil {
-		return "", err
-	}
-	if err := r.prepareQualityConfiguration(stage); err != nil {
-		return "", err
-	}
-	if err := r.validateFrozenCheckout(ctx, stage); err != nil {
-		return "", err
-	}
-	// Keep candidate bytes, but expose approved base as HEAD for commands such
-	// as qlty check --upstream HEAD. Added candidate files remain untracked.
-	if _, err := r.git(ctx, stage, "reset", "--mixed", r.manifest.BaseCommit); err != nil {
-		return "", err
-	}
-	return stage, nil
+	return r.cloneDisposableCheckout(ctx, relative, func(stage string) error {
+		if err := r.populateDisposableCheckout(ctx, stage); err != nil {
+			return err
+		}
+		if err := r.validateFrozenCheckout(ctx, stage); err != nil {
+			return err
+		}
+		// Keep candidate bytes, but expose approved base as HEAD for commands such
+		// as qlty check --upstream HEAD. Added candidate files remain untracked.
+		_, err := r.git(ctx, stage, "reset", "--mixed", r.manifest.BaseCommit)
+		return err
+	})
 }
 
 func (r *jobRunner) captureAutofix(ctx context.Context, stage string, index int, command JobCommand) (*AutofixProposal, error) {
