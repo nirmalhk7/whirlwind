@@ -16,7 +16,8 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 	if err := json.Unmarshal(data, &attempt); err != nil {
 		return err
 	}
-	if err := validatePlannerAttemptRevision(before, attempt); err != nil {
+	previous, err := previousPlannerAttempt(before, attempt)
+	if err != nil {
 		return err
 	}
 	if attempt.IdeaID == "" {
@@ -36,7 +37,12 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 	} else if err := validateExistingPlannerRunTx(ctx, tx, id, idea.ID); err != nil {
 		return err
 	}
-	if attempt.Finished && attempt.Status != "complete" {
+	if attempt.Finished && attempt.Status != "complete" && attempt.Status != model.AttemptAwaitingPlanPublication {
+		if plannerPublicationCandidate(previous) {
+			if err := finalizePlannerMetricTx(ctx, tx, id, false); err != nil {
+				return err
+			}
+		}
 		result, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='error',error_reason=?,finished_at=? WHERE planner_run_id=? AND status='in_process'", attempt.Error, attempt.FinishedAt, id)
 		if err != nil {
 			return err
@@ -108,6 +114,9 @@ func failPlannerIdeaTx(ctx context.Context, tx *sql.Tx, plan model.ExecutionPlan
 		return nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := failUnpublishedPlannerSessionTx(ctx, tx, plan, now); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='error',error_reason=?,finished_at=? WHERE idea_id=? AND status='in_process'", plan.Error, now, idea.ID); err != nil {
 		return err
 	}
@@ -115,17 +124,17 @@ func failPlannerIdeaTx(ctx context.Context, tx *sql.Tx, plan model.ExecutionPlan
 	return put(ctx, tx, "ideas", idea.ID, idea, version)
 }
 
-func validatePlannerAttemptRevision(before []byte, attempt model.Attempt) error {
+func previousPlannerAttempt(before []byte, attempt model.Attempt) (model.Attempt, error) {
 	var old model.Attempt
 	if len(before) > 0 {
 		if err := json.Unmarshal(before, &old); err != nil {
-			return err
+			return old, err
 		}
 		if old.IdeaID != attempt.IdeaID {
-			return ErrConflict
+			return old, ErrConflict
 		}
 	}
-	return nil
+	return old, nil
 }
 
 func plannerAttemptIdeaTx(ctx context.Context, tx *sql.Tx, attempt model.Attempt) (model.Idea, int, error) {
@@ -203,12 +212,22 @@ func completePlannerPublicationTx(ctx context.Context, tx *sql.Tx, plan model.Ex
 	if idea.ID != plan.IdeaID || idea.ProjectID != plan.ProjectID || idea.RunID != plan.IdeationRunID || plan.PlanDocument == nil || plan.PlanDocument.Path == "" || plan.PlanDocument.Hash == "" || plan.Plan == nil || len(plan.Plan.Requirements) == 0 {
 		return ErrConflict
 	}
-	attempt, _, err := txResource[model.Attempt](ctx, tx, "sessions", plan.LastAttemptID)
+	attempt, attemptVersion, err := txResource[model.Attempt](ctx, tx, "sessions", plan.LastAttemptID)
 	if err != nil {
 		return err
 	}
-	if attempt.Task != plan.ID || !attempt.Finished || attempt.Status != "complete" || attempt.Success == nil || !*attempt.Success {
+	if attempt.Task != plan.ID || attempt.PlanVersion != plan.PlanVersion || !plannerPublicationCandidate(attempt) {
 		return ErrConflict
+	}
+	if attempt.Status == model.AttemptAwaitingPlanPublication {
+		success := true
+		attempt.Status, attempt.Success = "complete", &success
+		if err := put(ctx, tx, "sessions", attempt.AttemptID, attempt, attemptVersion); err != nil {
+			return err
+		}
+		if err := finalizePlannerMetricTx(ctx, tx, attempt.AttemptID, true); err != nil {
+			return err
+		}
 	}
 	result, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='completed',plan_id=?,finished_at=? WHERE planner_run_id=? AND status='in_process' AND markdown_path=?", plan.ID, attempt.FinishedAt, plan.LastAttemptID, plan.PlanDocument.Path)
 	if err != nil {
