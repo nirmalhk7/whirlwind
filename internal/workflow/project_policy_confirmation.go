@@ -18,7 +18,7 @@ func (e *Engine) ConfirmProjectPolicy(ctx context.Context, project model.Project
 	if !changed {
 		return e.Store.Put(ctx, "projects", project.ID, project, version)
 	}
-	project.Status, project.QualityIdentity = "draft", nil
+	project.Status, project.QualityIdentity, project.OfflineQualification = "draft", nil, nil
 	changes, err := e.restartProjectQualification(ctx, project.ID)
 	if err != nil {
 		return err

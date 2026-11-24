@@ -17,6 +17,9 @@ import (
 
 // verify reserves capacity, checks diff scope, runs baseline and risk-specific checks, and stores diagnostics in the task handoff.
 func (e *Engine) verify(ctx context.Context, p model.Project, t *model.ExecutionPlan) (resultErr error) {
+	if p.Policy.OfflineDockerImage != "" && (t.IdeaID == "" || t.PlanDocument == nil) {
+		return errors.Join(verification.ErrJobSetup, errors.New("offline verification requires an approved canonical idea plan"))
+	}
 	var plan model.PlanSpecification
 	if t.Plan != nil {
 		plan = *t.Plan
@@ -80,7 +83,11 @@ func (run *verificationRun) checkDiff(p model.Policy, files, patch string) error
 	run.task.Risk = risk
 	run.value["risk"] = risk
 	checks = structuredChecks(checks)
-	baseline, err := run.engine.qualityBaseline(run.ctx, model.Project{ID: run.task.ProjectID, Path: run.task.Worktree, Policy: p, PolicyHash: evidenceDigest(p)}, *run.task, checks)
+	policyHash := evidenceDigest(p)
+	if p.OfflineDockerImage != "" {
+		policyHash = run.task.PlanDocument.PolicyHash
+	}
+	baseline, err := run.engine.qualityBaseline(run.ctx, model.Project{ID: run.task.ProjectID, Path: run.task.Worktree, Policy: p, PolicyHash: policyHash}, *run.task, checks)
 	if err != nil {
 		return err
 	}

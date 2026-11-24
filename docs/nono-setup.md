@@ -25,7 +25,7 @@ Direct outbound network access is blocked. Provider and project `sandbox.allowed
 
 Codex ACP selects `agent-full-access` **inside the enforced nono boundary** to avoid applying a second nested Seatbelt sandbox. Whirlwind's read-only client permissions and nono's filesystem/network rules still apply. An adapter lacking that mode fails with an actionable setup error.
 
-The native execution builder and nono launcher reject Linux, including read-only agents and checks. Use the [dashboard](local-supervisor.md) to inspect state and a supported macOS host to run the native workflow. Linux also has an opt-in [standalone offline verifier](offline-docker-verifier.md) for pinned local images.
+The native execution builder and nono launcher reject Linux, including read-only agents and checks. Use the [dashboard](local-supervisor.md) to inspect state and a supported macOS host to run the native workflow. Managed and standalone verification on Linux can opt in to [offline Docker](offline-docker-verifier.md) for pinned local images.
 
 ## Role-specific lifecycle hooks
 

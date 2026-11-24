@@ -13,16 +13,40 @@ import (
 	"time"
 
 	"whirlwind/internal/execution"
+	"whirlwind/internal/model"
 )
 
 func (m JobManifest) validateOfflineDocker() error {
-	if !execution.IsOfflineDockerImage(m.OfflineDockerImage) || m.Launcher != "" || m.Purpose != "" || m.Quality != nil || m.Sandbox != nil {
-		return errors.New("offline Docker verification requires a digest-pinned image and a standalone approved check manifest without native setup or sandbox settings")
+	if !execution.IsOfflineDockerImage(m.OfflineDockerImage) || m.Launcher != "" || m.Quality != nil || m.Sandbox != nil {
+		return errors.New("offline Docker verification requires a digest-pinned image and an approved check manifest without native scanner or sandbox settings")
+	}
+	if err := m.validateOfflineAuthority(); err != nil {
+		return err
 	}
 	for _, check := range m.Commands {
-		if check.Mode == "autofix" || len(check.OutputPaths) != 0 || len(check.Environment) != 0 || check.ReportFormat == "sarif" || filepath.Base(check.Command[0]) == "qlty" || (check.Required != nil && !*check.Required) {
-			return fmt.Errorf("offline Docker check %s requires a mandatory read-only command without host environment, scanner, or output grants", check.Name)
+		if err := execution.ValidateOfflineDockerCheck(model.Check{Name: check.Name, Mode: check.Mode, Command: check.Command, OutputPaths: check.OutputPaths, Environment: check.Environment, ReportFormat: check.ReportFormat, Required: check.Required}); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func (m JobManifest) validateOfflineAuthority() error {
+	if m.ProjectID == "" {
+		if m.PolicyHash != "" || m.OfflineImageID != "" {
+			return errors.New("standalone offline checks have no managed project qualification")
+		}
+		return nil
+	}
+	if !jobIdentifier.MatchString(m.ProjectID) || len(m.PolicyHash) != 64 || !gitObject.MatchString(m.PolicyHash) {
+		return errors.New("managed offline checks require the approved project and policy identity")
+	}
+	if m.Purpose == ProjectSetupPurpose {
+		if m.OfflineImageID != "" || m.ConfigurationHash != m.PolicyHash || m.CandidateCommit != m.BaseCommit {
+			return errors.New("offline setup requires the approved policy and a single source revision")
+		}
+	} else if !execution.IsOfflineDockerImageID(m.OfflineImageID) {
+		return errors.New("managed offline checks require the qualified image configuration ID")
 	}
 	return nil
 }
@@ -39,6 +63,9 @@ func (r *jobRunner) prepareJobInput(ctx context.Context) (string, error) {
 	r.offline, err = execution.OpenOfflineDocker(ctx, config, r.manifest.OfflineDockerImage)
 	if err != nil {
 		return "", err
+	}
+	if r.manifest.OfflineImageID != "" && r.manifest.OfflineImageID != r.offline.ImageID() {
+		return "", errors.New("available offline image differs from qualified project image")
 	}
 	if err := r.pinOfflineDockerImage(); err != nil {
 		return "", err
@@ -140,7 +167,7 @@ func validateOfflineDockerResult(m JobManifest, index int, result JobResult) err
 	raw, err := root.ReadFile("offline-image.json")
 	closeErr := root.Close()
 	var imageID string
-	if err := errors.Join(err, closeErr, json.Unmarshal(raw, &imageID)); err != nil || imageID == "" || imageID != result.Runtime.ImageID {
+	if err := errors.Join(err, closeErr, json.Unmarshal(raw, &imageID)); err != nil || imageID == "" || imageID != result.Runtime.ImageID || m.OfflineImageID != "" && m.OfflineImageID != imageID {
 		return errors.New("offline Docker verification image evidence mismatch")
 	}
 	stdout, stderr, err := ReadJobStreams(m.Root, index)

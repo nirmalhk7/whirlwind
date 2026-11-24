@@ -1,9 +1,23 @@
 # Standalone offline verification on Linux
 
-An operator can set `offline_docker_image` in a private `whirlwind-verify`
-manifest to run mandatory commands against a frozen Git tree on Linux. The
-supervisor continues to use native nono for project setup and managed
-verification. Reviewer and Finalizer require their existing managed evidence.
+An operator can set `offline_docker_image` in an approved external project
+policy or a private standalone `whirlwind-verify` manifest to run mandatory
+commands against a frozen Git tree on Linux. Native nono remains the default.
+Reviewer and Finalizer require their existing managed evidence.
+
+## Managed setup and candidate checks
+
+Put `offline_docker_image` and the mandatory check commands in an external
+policy document. Use `whirlwind policy preview` and `whirlwind policy approve`
+to confirm its project-scoped hash. The supervisor runs the configured checks
+against the current project commit and records which local image configuration
+actually completed them. Setup must pass before approving an idea plan.
+
+Later checks use the qualified image configuration and bind every result to
+the approved policy, plan, command and exact Git tree. Changing the approved
+policy clears its qualification. The Linux option supports mandatory checks
+with preloaded or vendored dependencies. Managed Qlty setup and live agent
+execution continue to require native nono.
 
 Use the managed rootless Docker socket at `/var/run/docker.sock` with `runc`
 and built-in seccomp. Preload an approved Linux workload image and record one

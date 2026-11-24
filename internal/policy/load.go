@@ -30,6 +30,9 @@ func Load(path string) (model.Policy, string, error) {
 	if err = decoder.Decode(&p); err != nil {
 		return p, "", err
 	}
+	if p.OfflineDockerImage != "" {
+		return p, "", errors.New("offline Docker requires an approved external project policy")
+	}
 	if err = Validate(p); err != nil {
 		return p, "", err
 	}
