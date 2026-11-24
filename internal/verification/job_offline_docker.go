@@ -76,16 +76,14 @@ func offlineExecutionKey(m JobManifest, index int) string {
 
 func (r *jobRunner) runOfflineDockerCheck(ctx context.Context, stage string, index int, command JobCommand, result JobResult, stdout, stderr *os.File) (JobResult, error) {
 	started := time.Now()
-	run, cancel := context.WithTimeout(ctx, time.Duration(command.TimeoutSeconds)*time.Second)
-	defer cancel()
 	var output, diagnostics capped
 	executionID := offlineExecutionKey(r.manifest, index)
-	id, exit, cleaned, err := r.offline.Run(run, executionID, stage, command.Command, &output, &diagnostics)
+	id, exit, cleaned, err := r.offline.Run(ctx, executionID, stage, command.Command, time.Duration(command.TimeoutSeconds)*time.Second, &output, &diagnostics)
 	result.Runtime = RuntimeIdentity{Kind: execution.OfflineDockerKind, ExecutionID: executionID, Generation: 1, SandboxID: id, ImageID: r.offline.ImageID(), CleanupVerified: cleaned}
 	result.ExecutionProfile = r.manifest.Digest()
 	result.ExitCode = exit
 	switch {
-	case errors.Is(run.Err(), context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded):
 		result.Status, result.Error = "timeout", "approved offline Docker command timeout exceeded"
 	case err != nil:
 		result.Error = err.Error()

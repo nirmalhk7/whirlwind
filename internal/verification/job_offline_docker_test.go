@@ -76,7 +76,7 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 		git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "fixture")
 		return git("rev-parse", "HEAD"), git("rev-parse", "HEAD^{tree}")
 	}
-	git("init", "-q")
+	git("init", "-q", "-b", "offline-fixture")
 	write(".gitattributes", "go.mod filter=canary export-ignore\n")
 	write("go.mod", "module example.test/offline\ngo 1.23.0\n")
 	write("result.go", "package result\nfunc Result() bool { return false }\n")
@@ -156,11 +156,17 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 		t.Fatalf("missing image did not fail closed: %v", err)
 	}
 	expired := manifest("expired", green, greenTree)
-	expired.Commands = []JobCommand{{Name: "deadline", Command: []string{"sh", "-c", "printf started; sleep 30"}, TimeoutSeconds: 3}}
+	expired.Commands = []JobCommand{{Name: "deadline", Command: []string{"sh", "-c", "printf started; sleep 30"}, TimeoutSeconds: 5}}
 	lapsed, err := RunLocalJob(ctx, verifier, expired, nil)
 	requireVerificationSuccess(t, err)
-	if lapsed.Passed || lapsed.Results[0].Status != "timeout" || !lapsed.Results[0].Runtime.CleanupVerified {
+	if lapsed.Passed || lapsed.Results[0].Status != "timeout" || !lapsed.Results[0].Runtime.CleanupVerified || lapsed.Results[0].Output != "started" || lapsed.Results[0].Runtime.SandboxID == "" {
 		t.Fatalf("expired container remained eligible or was not reaped: %+v", lapsed.Results[0])
+	}
+	identity := lapsed.Results[0].Runtime.ExecutionID
+	look := exec.CommandContext(ctx, "docker", "--host=unix:///var/run/docker.sock", "container", "ls", "--all", "--quiet", "--filter", "name=^/"+identity+"$")
+	look.Env = []string{"HOME=" + root, "PATH=" + os.Getenv("PATH")}
+	if remaining, err := look.CombinedOutput(); err != nil || strings.TrimSpace(string(remaining)) != "" {
+		t.Fatalf("daemon still reports the timed-out container: %s (%v)", remaining, err)
 	}
 	if git("status", "--porcelain") != before || git("rev-parse", "HEAD") != green {
 		t.Fatal("offline verifier changed the input checkout")

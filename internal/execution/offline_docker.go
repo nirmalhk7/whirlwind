@@ -82,15 +82,19 @@ func (d *OfflineDocker) ImageID() string { return d.imageID }
 
 // Run uses one container per command. The only bind mount is the read-only
 // frozen export. The CLI operates outside the container with a private config.
-func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []string, stdout, stderr io.Writer) (id string, exit *int, cleaned bool, err error) {
+func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []string, timeout time.Duration, stdout, stderr io.Writer) (id string, exit *int, cleaned bool, err error) {
 	if strings.ContainsAny(source, ",\"\r\n") {
 		return "", nil, false, errors.New("offline verifier checkout has an unsupported mount path")
 	}
+	if err := ctx.Err(); err != nil {
+		return "", nil, false, err
+	}
+	createConfirmed := false
 	defer func() {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
 		defer cancel()
 		cleanupErr := d.Recover(cleanup, key)
-		cleaned = cleanupErr == nil
+		cleaned = createConfirmed && cleanupErr == nil
 		err = errors.Join(err, cleanupErr)
 	}()
 	args := []string{"create", "--name", key, "--label", offlineDockerLabel + "=" + key, "--pull=never",
@@ -103,7 +107,11 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 		"--tmpfs", "/tmp:" + offlineDockerScratch,
 		"--mount", "type=bind,src=" + source + ",dst=/checkout,readonly,bind-propagation=rprivate,bind-recursive=disabled",
 		"--workdir", "/checkout", "--entrypoint", argv[0], d.imageID}
-	created, err := d.read(ctx, append(args, argv[1:]...)...)
+	// Cancellation of the CLI does not cancel an in-flight daemon create.
+	// Wait for its response separately before starting the workload clock.
+	creation, cancelCreation := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	created, err := d.read(creation, append(args, argv[1:]...)...)
+	cancelCreation()
 	if err != nil {
 		return "", nil, false, fmt.Errorf("create confined check: %w", err)
 	}
@@ -111,14 +119,23 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 	if !dockerID.MatchString(id) {
 		return "", nil, false, errors.New("Docker create returned no full container identity")
 	}
-	if err := d.verifyContainer(ctx, id, key, source, argv); err != nil {
+	createConfirmed = true
+	inspection, cancelInspection := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelInspection()
+	if err := d.verifyContainer(inspection, id, key, source, argv); err != nil {
 		return id, nil, false, err
 	}
-	start := d.command(ctx, "start", "--attach", id)
+	if err := ctx.Err(); err != nil {
+		return id, nil, false, err
+	}
+	workload, cancelWorkload := context.WithTimeout(ctx, timeout)
+	start := d.command(workload, "start", "--attach", id)
 	start.Stdout, start.Stderr = stdout, stderr
 	startErr := process.Run(start)
-	if ctx.Err() != nil {
-		return id, nil, false, ctx.Err()
+	workloadErr := workload.Err()
+	cancelWorkload()
+	if workloadErr != nil {
+		return id, nil, false, workloadErr
 	}
 	var state struct {
 		Status    string
@@ -126,7 +143,9 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 		Error     string
 		OOMKilled bool
 	}
-	if err := d.inspect(ctx, &state, "container", "inspect", "--format", "{{json .State}}", id); err != nil {
+	outcome, cancelOutcome := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelOutcome()
+	if err := d.inspect(outcome, &state, "container", "inspect", "--format", "{{json .State}}", id); err != nil {
 		return id, nil, false, err
 	}
 	if state.Status != "exited" || state.Error != "" || state.OOMKilled || state.ExitCode < 0 || state.ExitCode > 255 {
