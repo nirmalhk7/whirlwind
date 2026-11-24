@@ -15,6 +15,8 @@ The supervisor socket lives under a per-user private directory in `/tmp`; the so
 
 Human mutations include an idempotency key and expected resource version. Plan review also binds to the hash of the exact plan content shown in the approval form. The dashboard never mutates SQLite directly. Closing, redrawing, or reopening the terminal does not reset the supervisor, attempt deadline, retry counters, approvals, or pending questions.
 
+From an approved or active idea, **Cancel planning** revokes that approval even if the Planner is still waiting for a slot. A later worker reply cannot write the cancelled plan into the plans directory. Use **Retry planning** to approve a fresh attempt. If Markdown already reached the plans directory, the supervisor resumes publication with the same file and attempt after interruption. Reopen the idea to inspect the completed plan.
+
 ## Existing state and legacy service cutover
 
 The supervisor initializes the current schema directly in `~/.local/share/whirlwind/whirlwind.db`. There are no schema versions or data migrations. Reopening a current database preserves pending records. Opening an obsolete development layout deletes its database state and recreates the current schema. See [SQL persistence details](persistence.md) for the `projects`, `ideas`, and `plans` tables. Dashboard reads do not initialize, recover, or create a database.

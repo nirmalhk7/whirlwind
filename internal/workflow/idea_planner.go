@@ -39,24 +39,42 @@ func (e *Engine) intakeApprovedIdeas(ctx context.Context) {
 }
 
 func (step *taskStep) generateIdeaPlan() error {
-	idea, err := step.planningIdea()
+	content, err := step.prepareIdeaPlanPublication()
 	if err != nil {
 		return err
 	}
+	return step.commitIdeaPlanPublication(content)
+}
+
+func (step *taskStep) commitIdeaPlanPublication(content string) error {
+	return step.Store.CommitPlannerPublication(step.ctx, step.task, step.record.Version, func() error {
+		_, err := step.writeLocalPlanFile(step.task, content)
+		if err != nil {
+			return fmt.Errorf("could not publish plan.md; check the local plans directory and retry planning: %w", err)
+		}
+		return nil
+	})
+}
+
+func (step *taskStep) prepareIdeaPlanPublication() (string, error) {
+	idea, err := step.planningIdea()
+	if err != nil {
+		return "", err
+	}
 	workspace, err := step.prepareIdeaPlannerWorkspace()
 	if err != nil {
-		return err
+		return "", err
 	}
 	// Successful ACP output survives a later file/database failure. Reconcile it
 	// before launching any replacement attempt.
 	attemptID, err := step.completedIdeaPlannerAttempt()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if attemptID == "" {
 		input, cleanup, err := step.ideaPlannerInput(idea, workspace)
 		if err != nil {
-			return err
+			return "", err
 		}
 		if cleanup != nil {
 			defer cleanup()
@@ -64,30 +82,26 @@ func (step *taskStep) generateIdeaPlan() error {
 
 		out, err := step.agent(step.ctx, step.project, step.task, input)
 		if err != nil {
-			return err
+			return "", err
 		}
 		attemptID = out.AttemptID
 	}
 	content, err := step.recoverIdeaPlannerMarkdown(workspace.publication, workspace.output)
 	if err != nil {
-		return err
+		return "", err
 	}
 	plan, err := step.parseIdeaPlannerDocument(content)
 	if err != nil {
-		return fmt.Errorf("the assigned plan.md is not publishable; correct the reported problem and retry planning: %w", err)
+		return "", fmt.Errorf("the assigned plan.md is not publishable; correct the reported problem and retry planning: %w", err)
 	}
 	step.task.Plan, step.task.LastAttemptID = &plan, attemptID
 	if err := step.Store.PlannerRunLocation(step.ctx, attemptID, workspace.publication); err != nil {
-		return err
+		return "", err
 	}
-	published, err := step.writeLocalPlanFile(step.task, content)
-	if err != nil {
-		return fmt.Errorf("could not publish plan.md; check the local plans directory and retry planning: %w", err)
-	}
-	step.task.PlanDocument.Path, step.task.PlanDocument.Hash = published, localPlanHash(content)
+	step.task.PlanDocument.Path, step.task.PlanDocument.Hash = workspace.publication, localPlanHash(content)
 	step.task.Stage, step.task.Error = "plan_approval", ""
 	step.task.Handoff.NextAction = "Planner completed. Review and separately approve the saved specification."
-	return nil
+	return content, nil
 }
 
 func (step *taskStep) completedIdeaPlannerAttempt() (string, error) {
@@ -148,7 +162,7 @@ func (e *Engine) intakeApprovedIdea(ctx context.Context, record model.Record, id
 		authorization := *existing.Selection
 		authorization.CandidateVersion, authorization.SelectedAt = record.Version, time.Now().UTC().Format(time.RFC3339Nano)
 		existing.Selection = &authorization
-		if err := e.Store.Put(ctx, "execution_plans", id, existing, current.Version); err != nil && !errors.Is(err, store.ErrConflict) {
+		if err := e.saveApprovedIdeaIntake(ctx, record, existing, current.Version); err != nil && !errors.Is(err, store.ErrConflict) {
 			return err
 		}
 		return nil
@@ -156,10 +170,17 @@ func (e *Engine) intakeApprovedIdea(ctx context.Context, record model.Record, id
 		return nil
 	}
 	plan := model.ExecutionPlan{ID: id, ProjectID: idea.ProjectID, IdeaID: idea.ID, IdeationRunID: idea.RunID, Mode: model.AgenticMode, Stage: "planning", PlanVersion: 1, Issue: model.Issue{Title: idea.What, Body: jsonText(idea)}, Selection: &model.SelectionAuthorization{CandidateID: idea.ID, CandidateVersion: record.Version, Objective: idea.What, Scope: []string{idea.Where}, PolicyHash: project.PolicyHash, SourceFingerprint: idea.Fingerprint, SelectedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
-	if err := e.Store.Put(ctx, "execution_plans", id, plan, 0); err != nil && !errors.Is(err, store.ErrConflict) {
+	if err := e.saveApprovedIdeaIntake(ctx, record, plan, 0); err != nil && !errors.Is(err, store.ErrConflict) {
 		return err
 	}
 	return nil
+}
+
+func (e *Engine) saveApprovedIdeaIntake(ctx context.Context, idea model.Record, plan model.ExecutionPlan, version int) error {
+	return e.Store.Write(ctx, []store.Change{
+		store.VersionPrecondition("ideas", idea.ID, idea.Version),
+		{Kind: "execution_plans", ID: plan.ID, Value: plan, Expected: version},
+	}, nil)
 }
 
 func (step *taskStep) planningIdea() (model.Idea, error) {
