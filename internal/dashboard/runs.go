@@ -88,6 +88,9 @@ func (d *Dashboard) refreshRuns() {
 		}
 		if row.operation != nil {
 			label := "Ideation"
+			if row.operation.RegistrationIdeation() {
+				label = "Auto ideation"
+			}
 			if row.operation.Kind == "project_setup" {
 				label = "Project setup: " + projectSetupPhaseLabel(row.operation.Input)
 			}

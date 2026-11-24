@@ -64,7 +64,7 @@ func (s *Server) saveLocalProject(ctx context.Context, command LocalCommand, fin
 	receipt := &store.Receipt{Key: command.IdempotencyKey, Fingerprint: fingerprint, Status: 201, Body: body}
 	audit := model.Audit{Source: "local_operator", Action: "project.register", Target: project.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
 	changes := []store.Change{{Kind: "projects", ID: project.ID, Value: project}, {Kind: "audit", ID: store.ID(), Value: audit}}
-	changes = append(changes, store.InitialProjectWork(project.ID, time.Now())...)
+	changes = append(changes, store.ProjectRegistrationWork(project.ID, time.Now(), s.Engine.InitialIdeationEnabled(ctx))...)
 	if err := s.Store.Write(ctx, changes, receipt); err != nil {
 		return nil, err
 	}

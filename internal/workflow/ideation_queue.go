@@ -54,11 +54,28 @@ func (e *Engine) runQueuedIdeation(ctx context.Context, project model.Project, r
 	if op.Stage != "queued" {
 		return store.ErrConflict
 	}
+	var guards []store.Change
+	if op.RegistrationIdeation() {
+		admission, err := e.onboardingIdeationAdmission(ctx, project.ID)
+		if err != nil {
+			return err
+		}
+		project, guards = admission.project, admission.guards
+		if admission.hold != "" {
+			if op.Error == admission.hold {
+				return nil
+			}
+			op.Error = admission.hold
+			changes := append(guards, store.Change{Kind: "operations", ID: record.ID, Value: op, Expected: record.Version})
+			return e.Store.Write(store.WithoutSettingsSource(ctx), changes, nil)
+		}
+	}
 	op.Stage, op.Owner, op.Error, op.FinishedAt = "running", e.owner, "", ""
 	if op.StartedAt == "" {
 		op.StartedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	if err := e.Store.Put(ctx, "operations", record.ID, op, record.Version); err != nil {
+	changes := append(guards, store.Change{Kind: "operations", ID: record.ID, Value: op, Expected: record.Version})
+	if err := e.Store.Write(store.WithoutSettingsSource(ctx), changes, nil); err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
