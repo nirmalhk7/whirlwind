@@ -28,16 +28,19 @@ func (d *Dashboard) refreshAgents() {
 	sort.SliceStable(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
 	var text strings.Builder
 	for _, agent := range agents {
-		name := agent.Name
-		if name == "" {
-			name = agent.ID
-		}
-		fmt.Fprintf(&text, "%s · %s\n", tview.Escape(name), connectionLabel(health[agent.ID]))
+		fmt.Fprintf(&text, "%s · %s\n", tview.Escape(providerDisplayName(agent)), connectionLabel(health[agent.ID]))
 	}
 	if text.Len() == 0 {
 		text.WriteString("No configured agents")
 	}
 	d.agents.SetText(text.String())
+}
+
+func providerDisplayName(provider model.Provider) string {
+	if provider.Name != "" {
+		return provider.Name
+	}
+	return provider.ID
 }
 
 func connectionLabel(status string) string {

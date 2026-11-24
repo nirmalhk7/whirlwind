@@ -93,6 +93,12 @@ func (d *Dashboard) handlePanelAction(event *tcell.EventKey) bool {
 			return d.retrySelectedProjectSetup()
 		}
 		return d.handlePlanPanelAction(event)
+	case 4:
+		if event.Key() == tcell.KeyEnter {
+			d.showAgentInspection()
+			return true
+		}
+		return false
 	default:
 		return false
 	}
@@ -170,6 +176,7 @@ func (d *Dashboard) handleInboxPanelAction(event *tcell.EventKey) bool {
 }
 
 func (d *Dashboard) closeModal() {
+	focused := d.focusedPanel()
 	if d.modal == d.directions {
 		d.directions.SetTitle(inboxTitle)
 	}
@@ -178,9 +185,10 @@ func (d *Dashboard) closeModal() {
 	d.planReviewView = nil
 	d.planReviewForm = nil
 	d.planReviewVim = nil
+	d.agentInspection = nil
 	d.directionChoiceFromRationale = false
 	d.SetRoot(d.root, true)
-	d.SetFocus(d.focusedPanel())
+	d.SetFocus(focused)
 }
 
 func (d *Dashboard) openRunDetails(event *tcell.EventKey) bool {
