@@ -166,6 +166,7 @@ func (d *Dashboard) selectRun(index int, _, _ string, _ rune) {
 	attempt := row.attempt
 	var text strings.Builder
 	fmt.Fprintf(&text, "Run: %s\nAgent: %s\nRole: %s\nModel: %s\nThinking: %s\nStatus: %s\nStarted: %s\nFinished: %s\n", row.id, attempt.Provider, attempt.Role, attemptModelDisplay(attempt), attemptThinkingDisplay(attempt), runStatus(attempt), recordedRuntimeValue(attempt.StartedAt), recordedRuntimeValue(attempt.FinishedAt))
+	fmt.Fprintf(&text, "ACP activity: %s\n", providerActivity(attempt, time.Now()))
 	if attempt.Error != "" {
 		fmt.Fprintf(&text, "Error: %s\n", attempt.Error)
 	}
