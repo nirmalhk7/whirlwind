@@ -171,16 +171,24 @@ func (run *verificationRun) handoff(report verification.Report) error {
 
 // progress measures check/blocker/criteria outcomes; patch churn alone never resets recovery.
 func (e *Engine) progress(ctx context.Context, t *model.ExecutionPlan) error {
-	diff, err := github.Run(ctx, t.Worktree, "git", "diff", t.Base)
+	change, err := e.collectProgress(ctx, t, nil)
 	if err != nil {
 		return err
+	}
+	return e.Store.Write(ctx, []store.Change{change}, nil)
+}
+
+func (e *Engine) collectProgress(ctx context.Context, t *model.ExecutionPlan, review *model.Review) (store.Change, error) {
+	diff, err := github.Run(ctx, t.Worktree, "git", "diff", t.Base)
+	if err != nil {
+		return store.Change{}, err
 	}
 	sum := sha256.Sum256([]byte(diff))
 	fingerprint := hex.EncodeToString(sum[:])
 	t.Fingerprint = fingerprint
-	improved, err := e.measuredProgress(ctx, t)
+	improved, change, err := e.measuredProgress(ctx, t, review)
 	if err != nil {
-		return err
+		return store.Change{}, err
 	}
 	if improved {
 		t.UnchangedFailures = 0
@@ -193,7 +201,7 @@ func (e *Engine) progress(ctx context.Context, t *model.ExecutionPlan) error {
 		t.Recoveries++
 		t.Handoff.NextAction = "recover with new context or another provider"
 	}
-	return nil
+	return change, nil
 }
 
 func checkedDiff(ctx context.Context, p model.Policy, t *model.ExecutionPlan) (string, string, error) {
