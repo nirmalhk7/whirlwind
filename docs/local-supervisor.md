@@ -25,4 +25,4 @@ The supervisor initializes the current schema directly in `~/.local/share/whirlw
 
 If an older browser/HTTP instance owns the same state directory, `start` fails with an actionable message. Stop that owned instance explicitly with `./bin/whirlwind stop`, then run `start`. Process ownership uses the saved launcher token; unrelated listeners and processes are left alone.
 
-Missing nono does not prevent opening the TUI or inspecting SQLite. Native agent and check execution require macOS and nono 0.81.0, plus the configured host ACP runtime for agents. Linux can inspect state but cannot execute. See [nono setup](nono-setup.md).
+The TUI can inspect saved SQLite state without nono. Native agents and nono-backed checks require macOS and nono 0.81.0. Agents also require the configured host ACP adapter. Linux supports [opt-in offline verification](support.md#verification-on-linux) alongside inspection. See [nono setup](nono-setup.md) for the native path.
