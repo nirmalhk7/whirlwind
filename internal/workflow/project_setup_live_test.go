@@ -2,10 +2,12 @@ package workflow
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 	"time"
 
@@ -17,7 +19,8 @@ import (
 )
 
 // This acceptance test exercises the registered-project path against installed
-// Qlty and Gitleaks. Its distribution network grants are test-local.
+// Qlty and Gitleaks. Its distribution network grants are test-local. This
+// qualifies onboarding for the unchanged HEAD, not changed-file detection.
 func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if os.Getenv("WHIRLWIND_RUN_LIVE_QLTY_ONBOARDING") != "1" {
 		t.Skip("set WHIRLWIND_RUN_LIVE_QLTY_ONBOARDING=1 to run native Qlty onboarding acceptance")
@@ -32,7 +35,7 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	e, _, repository := testEngine(t)
 	installSetupRunner(t)
 	qualityRoot := filepath.Join(t.TempDir(), "external-qlty")
-	if err := os.WriteFile(filepath.Join(repository, "app.py"), []byte("def inspect(value):\n    return eval(value)\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repository, "app.py"), []byte("def inspect(value):\n    return value\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repository, "credentials.txt"), []byte("token = \"ghp_aB3cD4eF5gH6aB3cD4eF5gH6aB3cD4eF5gH6\"\n"), 0600); err != nil {
@@ -151,11 +154,12 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("native scanner SARIF streams were not retained: %v", err)
 	}
-	if err := verification.ValidateJobSARIF([]byte(output)); err != nil {
-		t.Fatalf("native scanner SARIF lacks successful complete invocation evidence: %v", err)
-	}
-	if !strings.Contains(output, "gitleaks:") || !strings.Contains(output, "credentials.txt") {
-		t.Fatalf("native Gitleaks scanner did not report the harmless known canary: %s", output)
+	// At onboarding the registered commit is both base and candidate. The
+	// committed credentials.txt canary is intentionally unchanged. A separate
+	// verifier fixture, TestPreparedDefaultConfigurationRunsActualGitleaks,
+	// puts its canary inside a real candidate diff and requires a finding.
+	if err := verifyQltyOnboardingBaselineEvidence(finalEvidence.Manifest, qltyIndex, []byte(output)); err != nil {
+		t.Fatal(err)
 	}
 	savedProject, err := e.Project(ctx, project.ID)
 	requireWorkflowSuccess(t, err)
@@ -188,4 +192,49 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 		t.Fatalf("native onboarding duplicated or lost work: setup=%d ideation=%d", setupCount, ideationCount)
 	}
 	t.Logf("native Qlty build %s; tools %v; effective catalog hash %s", identity.QltyVersion, identity.Tools, identity.PluginCatalogHash)
+}
+
+// A valid empty SARIF result is legitimate for an unchanged baseline, but it
+// cannot be counted as changed-candidate detection evidence.
+func verifyQltyOnboardingBaselineEvidence(manifest verification.JobManifest, index int, output []byte) error {
+	if manifest.Purpose != verification.ProjectSetupPurpose || manifest.BaseCommit == "" || manifest.BaseCommit != manifest.CandidateCommit {
+		return errors.New("onboarding qualification must compare the registered commit against itself")
+	}
+	argv := []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}
+	if index < 0 || index >= len(manifest.Commands) || !slices.Equal(manifest.Commands[index].Command, argv) ||
+		manifest.Commands[index].Mode != "autofix" || manifest.Commands[index].ReportFormat != "sarif" {
+		return errors.New("onboarding qualification changed the approved HEAD-diff check")
+	}
+	if err := verification.ValidateJobSARIF(output); err != nil {
+		return fmt.Errorf("onboarding qualification lacks complete scanner evidence: %w", err)
+	}
+	return nil
+}
+
+func TestQltyOnboardingBaselineEvidenceIsNotCandidateFindingCoverage(t *testing.T) {
+	manifest := verification.JobManifest{Purpose: verification.ProjectSetupPurpose, BaseCommit: "onboarded-head",
+		CandidateCommit: "onboarded-head", Commands: []verification.JobCommand{{Name: "qlty-qualification",
+			Command: []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"},
+			Mode:    "autofix", ReportFormat: "sarif"}}}
+	clean := []byte(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty"}},"invocations":[{"executionSuccessful":true}],"results":[]}]}`)
+	if err := verifyQltyOnboardingBaselineEvidence(manifest, 0, clean); err != nil {
+		t.Fatalf("valid empty report may qualify the unchanged baseline: %v", err)
+	}
+	for _, bad := range [][]byte{
+		[]byte(`{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty"}},"invocations":[{"executionSuccessful":false}],"results":[]}]}`),
+		[]byte(`{}`),
+	} {
+		if err := verifyQltyOnboardingBaselineEvidence(manifest, 0, bad); err == nil {
+			t.Fatalf("failed or incomplete scanner report qualified the baseline: %s", bad)
+		}
+	}
+	manifest.CandidateCommit = "changed-candidate"
+	if err := verifyQltyOnboardingBaselineEvidence(manifest, 0, clean); err == nil {
+		t.Fatal("candidate report was accepted as unchanged onboarding evidence")
+	}
+	manifest.CandidateCommit = manifest.BaseCommit
+	manifest.Commands[0].Command[2] = "--all"
+	if err := verifyQltyOnboardingBaselineEvidence(manifest, 0, clean); err == nil {
+		t.Fatal("changed command was accepted as approved HEAD-diff evidence")
+	}
 }
