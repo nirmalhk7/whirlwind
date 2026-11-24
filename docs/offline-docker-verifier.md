@@ -1,9 +1,10 @@
-# Standalone offline verification on Linux
+# Offline verification on Linux
 
 An operator can set `offline_docker_image` in an approved external project
 policy or a private standalone `whirlwind-verify` manifest to run mandatory
 commands against a frozen Git tree on Linux. Native nono remains the default.
-Reviewer and Finalizer require their existing managed evidence.
+Managed Review can consume the offline evidence for this policy. Live Review
+and Finalizer still require the native read-only role runtime.
 
 ## Managed setup and candidate checks
 
@@ -18,6 +19,11 @@ the approved policy, plan, command and exact Git tree. Changing the approved
 policy clears its qualification. The Linux option supports mandatory checks
 with preloaded or vendored dependencies. Managed Qlty setup and live agent
 execution continue to require native nono.
+
+Review and the local delivery gate revalidate the completed job, its retained
+streams, the qualified image, and the current clean candidate. Local delivery
+also requires qualified Qlty evidence. The offline runner does not support
+that scanner, so an offline-only report cannot qualify for delivery.
 
 Use the managed rootless Docker socket at `/var/run/docker.sock` with `runc`
 and built-in seccomp. Preload an approved Linux workload image and record one
@@ -74,3 +80,10 @@ fixture image separately and run the test with its exact local digest.
 WHIRLWIND_TEST_OFFLINE_DOCKER_IMAGE=golang@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696 \
   go test -race ./internal/verification -run '^TestOfflineDocker' -count=1 -v
 ```
+
+Use the same image with `go test -race -p 1 ./cmd/whirlwind -run
+'^TestManagedOfflineVerificationThroughLauncher$' -count=1 -v` to qualify the
+shipped supervisor path. Setting `WHIRLWIND_TEST_SEEDED_NONO` to an installed
+nono binary also exercises deterministic Reviewer handoffs and delivery
+refusals. The Review fixture uses the native profile metadata and returns a
+seeded response in process.
