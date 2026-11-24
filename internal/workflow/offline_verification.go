@@ -101,6 +101,40 @@ func (run *verificationRun) bindOfflineManifest(m *verification.JobManifest, pol
 	return nil
 }
 
+func (step *taskStep) validateOfflineReviewAuthority(m verification.JobManifest, commit string) error {
+	image := step.project.Policy.OfflineDockerImage
+	if image == "" && m.OfflineDockerImage == "" {
+		return nil
+	}
+	if image == "" || image != m.OfflineDockerImage || m.ProjectID != step.project.ID || m.PolicyHash != step.project.PolicyHash ||
+		m.Root != filepath.Join(step.Root, "verification", m.JobID) || m.Repository != step.task.Worktree {
+		return errors.New("offline runner report does not match the managed project, policy and candidate workspace")
+	}
+	if err := step.validateApprovalConfiguration(step.ctx, step.task); err != nil {
+		return err
+	}
+	qualification, err := step.qualifiedOfflineProject(step.ctx, step.project)
+	if err != nil {
+		return err
+	}
+	if m.OfflineImageID != qualification.ImageID {
+		return errors.New("offline runner report differs from the qualified project image")
+	}
+	head, err := submissionCommit(step.ctx, step.task.Worktree, "HEAD")
+	if err != nil || head != commit {
+		return errors.New("offline runner report is stale for the current candidate commit")
+	}
+	return submissionClean(step.ctx, step.task.Worktree)
+}
+
+// Used only after JobReport.Validate confirms the command, stream digests,
+// container identity and cleanup for this already authorized manifest.
+func managedOfflineResult(manifest verification.JobManifest, result verification.JobResult) bool {
+	return manifest.ProjectID != "" && manifest.OfflineImageID != "" && manifest.PolicyHash != "" &&
+		result.ReusedFrom == "" && result.Runtime.Kind == execution.OfflineDockerKind && result.Runtime.ImageID == manifest.OfflineImageID &&
+		result.ExecutionProfile == manifest.Digest() && execution.IsOfflineDockerIdentity(result.Runtime.SandboxID, result.Runtime.ImageID)
+}
+
 func verificationJobCommands(checks []model.Check) []verification.JobCommand {
 	out := make([]verification.JobCommand, 0, len(checks))
 	for _, check := range checks {

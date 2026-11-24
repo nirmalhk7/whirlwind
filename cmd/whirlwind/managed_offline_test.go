@@ -41,7 +41,8 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	}
 	raw, err := json.Marshal(map[string]any{"version": 1, "mode": model.AgenticMode, "projects": []string{source}, "agents": queues,
 		"providers": []map[string]any{{"id": "seeded", "name": "Seeded test role", "kind": "acp", "command": []string{fixtureCommand}, "capabilities": model.AgentRoles()}},
-		"workers":   map[string]any{"global_slots": 4, "project_slots": 2, "ideation": map[string]any{"on_registration": false, "cron": ""}}})
+		"workers": map[string]any{"global_slots": 4, "project_slots": 2, "ideation": map[string]any{"on_registration": false, "cron": ""},
+			"admission": model.AdmissionSettings{Pools: map[string]model.QuotaReserve{"seeded": {MinRemainingPercent: 10, MaxAgeSeconds: 900}}}}})
 	mustSeedTerminal(t, err)
 	mustSeedTerminal(t, os.WriteFile(settings, raw, 0600))
 	launcher := func(args ...string) string {
@@ -176,13 +177,16 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	waitOfflineFixture(t, data, "managed Reviewer evidence boundary", func() bool {
 		record, _ := db.Get(ctx, "execution_plans", task.ID)
 		current, _ := store.Decode[model.ExecutionPlan](record)
-		return current.Stage == "paused" && strings.Contains(current.Error, "runner report contains incomplete execution")
+		return current.Stage == "paused" && strings.Contains(current.Error, "Reviewer preparation unavailable")
 	})
 	launcher("stop")
+	if nono := os.Getenv("WHIRLWIND_TEST_SEEDED_NONO"); nono != "" {
+		exerciseSeededOfflineHandoffs(t, db, data, project, task.ID, candidate, green, nono, git)
+	}
 	if signature() != initial || git(source, "rev-parse", "HEAD") != base {
 		t.Fatal("supervisor changed the original checkout")
 	}
-	t.Logf("seeded red=%s repair=%s qualified as green=%s; managed review remained fenced", red, green, green)
+	t.Logf("seeded red=%s repair=%s qualified as green=%s; shipped supervisor reached the Reviewer preparation gate", red, green, green)
 }
 
 func seedOfflineCandidatePlan(t *testing.T, e *workflow.Engine, db *store.Store, project model.Project, candidate, base string) model.ExecutionPlan {

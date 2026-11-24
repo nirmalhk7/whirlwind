@@ -198,6 +198,12 @@ func (e *Engine) loadVerificationEvidence(ctx context.Context, task model.Execut
 	if !verificationMatchesTask(evidence.Stage, evidence.Provenance, task, project.PolicyHash) {
 		return verification.Report{}, model.Provenance{}, errors.New("verification evidence does not match the reviewed candidate")
 	}
+	if project.Policy.OfflineDockerImage != "" {
+		step := taskStep{Engine: e, ctx: ctx, task: task, project: project}
+		if err := step.validateReviewRunnerReport(evidence.Provenance.Head); err != nil {
+			return verification.Report{}, model.Provenance{}, err
+		}
+	}
 	if err := e.validateQltyEvidence(ctx, task, evidence.Report); err != nil {
 		return verification.Report{}, model.Provenance{}, err
 	}
