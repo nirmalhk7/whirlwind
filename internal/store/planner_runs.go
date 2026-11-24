@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"time"
+
 	"whirlwind/internal/model"
 )
 
@@ -31,6 +34,13 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 		return err
 	}
 	if len(before) == 0 {
+		plan, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", attempt.Task)
+		if err != nil {
+			return err
+		}
+		if plan.Stage != "planning" || plan.PlanVersion != attempt.PlanVersion {
+			return ErrConflict
+		}
 		if err := createPlannerRunTx(ctx, tx, id, attempt, idea, version); err != nil {
 			return err
 		}
@@ -39,6 +49,11 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 	}
 	if attempt.Finished && attempt.Status != "complete" && attempt.Status != model.AttemptAwaitingPlanPublication {
 		if plannerPublicationCandidate(previous) {
+			if attempt.Status == "cancelled" {
+				if err := checkPlannerCancellationFileTx(ctx, tx, id); err != nil {
+					return err
+				}
+			}
 			if err := finalizePlannerMetricTx(ctx, tx, id, false); err != nil {
 				return err
 			}
@@ -50,6 +65,49 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 		return requireOneRow(result)
 	}
 	return nil
+}
+
+// CommitPlannerPublication holds the SQLite writer lock from the checked plan
+// transition through the atomic file publication. A stale lease or cancellation
+// therefore prevents the publisher from running. If the process stops after the
+// file is in place, restart can reuse it at the persisted PlannerRunLocation.
+func (s *Store) CommitPlannerPublication(ctx context.Context, plan model.ExecutionPlan, expected int, publish func() error) error {
+	if staged(ctx) != nil || expected < 1 || plan.IdeaID == "" || plan.Stage != "plan_approval" {
+		return ErrConflict
+	}
+	err := s.Transaction(ctx, func(tx *sql.Tx) error {
+		if err := put(ctx, tx, "execution_plans", plan.ID, plan, expected); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return publish()
+	})
+	if err != nil {
+		return err
+	}
+	return s.syncCommittedRunLogs(ctx, []Change{{Kind: "execution_plans", ID: plan.ID}})
+}
+
+// A file can survive a crash after publication but before SQL commit. Detect
+// it under the same writer lock and keep it available for the original plan.
+func checkPlannerCancellationFileTx(ctx context.Context, tx *sql.Tx, attemptID string) error {
+	var path sql.NullString
+	if err := tx.QueryRowContext(ctx, "SELECT markdown_path FROM planner_runs WHERE planner_run_id=?", attemptID).Scan(&path); err != nil {
+		return err
+	}
+	if !path.Valid || path.String == "" {
+		return nil
+	}
+	_, err := os.Lstat(path.String)
+	if err == nil {
+		return fmt.Errorf("%w: Planner Markdown is already published; allow recovery to finish the plan", ErrConflict)
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // PlannerRunLocation pins the publication destination before writing the file.
@@ -165,9 +223,12 @@ func createPlannerRunTx(ctx context.Context, tx *sql.Tx, id string, attempt mode
 	}
 	if idea.DecisionStatus == "approved" {
 		idea.DecisionStatus, idea.ErrorReason = "in_process", ""
-		if err := put(ctx, tx, "ideas", idea.ID, idea, version); err != nil {
-			return err
-		}
+	}
+	// Every new claim, including a fallback, advances the idea version.
+	// A cancellation that observed no active claim cannot miss one that
+	// commits before that cancellation's version check.
+	if err := put(ctx, tx, "ideas", idea.ID, idea, version); err != nil {
+		return err
 	}
 	_, err := tx.ExecContext(ctx, "INSERT INTO planner_runs(planner_run_id,idea_id,idea_run_id,timestamp,status) VALUES(?,?,?,?,'in_process')", id, idea.ID, idea.RunID, attempt.StartedAt)
 	if err != nil {

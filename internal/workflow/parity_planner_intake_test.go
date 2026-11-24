@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/google/uuid"
 	"os"
 	"path/filepath"
@@ -292,8 +293,17 @@ func TestParityPlannerReconcilesPublishedFileAfterInterruptedCommit(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := step.generateIdeaPlan(); err != nil {
-		t.Fatal(err)
+	content, err := step.prepareIdeaPlanPublication()
+	requireWorkflowSuccess(t, err)
+	interrupted := errors.New("publication interrupted after writing Markdown")
+	err = e.Store.CommitPlannerPublication(ctx, step.task, step.record.Version, func() error {
+		if _, err := step.writeLocalPlanFile(step.task, content); err != nil {
+			return err
+		}
+		return interrupted
+	})
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("expected interruption after writing Markdown: %v", err)
 	}
 	published := step.task.PlanDocument.Path
 	before, err := os.ReadFile(published)
@@ -305,6 +315,12 @@ func TestParityPlannerReconcilesPublishedFileAfterInterruptedCommit(t *testing.T
 		t.Fatalf("provider success was reported as Planner success before the publication commit: status=%q success=%v", pending.Status, pending.Success)
 	}
 	assertPlannerMetric(t, e, step.task.LastAttemptID, true, nil)
+
+	ideaRecord, err := e.Store.Get(ctx, "ideas", idea.ID)
+	requireWorkflowSuccess(t, err)
+	if err := e.CancelPlanner(ctx, idea.ID, ideaRecord.Version); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("cancellation discarded published recovery evidence: %v", err)
+	}
 
 	// Simulate process loss between filesystem publication and the final transaction.
 	// No authoring result is committed to the ExecutionPlan resource.
