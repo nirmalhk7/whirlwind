@@ -130,7 +130,7 @@ func (e *Engine) intakeApprovedIdea(ctx context.Context, record model.Record, id
 		authorization := *existing.Selection
 		authorization.CandidateVersion, authorization.SelectedAt = record.Version, time.Now().UTC().Format(time.RFC3339Nano)
 		existing.Selection = &authorization
-		if err := e.Store.Put(ctx, "execution_plans", id, existing, current.Version); err != nil && !errors.Is(err, store.ErrConflict) {
+		if err := e.saveApprovedIdeaIntake(ctx, record, existing, current.Version); err != nil && !errors.Is(err, store.ErrConflict) {
 			return err
 		}
 		return nil
@@ -138,10 +138,17 @@ func (e *Engine) intakeApprovedIdea(ctx context.Context, record model.Record, id
 		return nil
 	}
 	plan := model.ExecutionPlan{ID: id, ProjectID: idea.ProjectID, IdeaID: idea.ID, IdeationRunID: idea.RunID, Mode: model.AgenticMode, Stage: "planning", PlanVersion: 1, Issue: model.Issue{Title: idea.What, Body: jsonText(idea)}, Selection: &model.SelectionAuthorization{CandidateID: idea.ID, CandidateVersion: record.Version, Objective: idea.What, Scope: []string{idea.Where}, PolicyHash: project.PolicyHash, SourceFingerprint: idea.Fingerprint, SelectedAt: time.Now().UTC().Format(time.RFC3339Nano)}}
-	if err := e.Store.Put(ctx, "execution_plans", id, plan, 0); err != nil && !errors.Is(err, store.ErrConflict) {
+	if err := e.saveApprovedIdeaIntake(ctx, record, plan, 0); err != nil && !errors.Is(err, store.ErrConflict) {
 		return err
 	}
 	return nil
+}
+
+func (e *Engine) saveApprovedIdeaIntake(ctx context.Context, idea model.Record, plan model.ExecutionPlan, version int) error {
+	return e.Store.Write(ctx, []store.Change{
+		store.VersionPrecondition("ideas", idea.ID, idea.Version),
+		{Kind: "execution_plans", ID: plan.ID, Value: plan, Expected: version},
+	}, nil)
 }
 
 func (step *taskStep) planningIdea() (model.Idea, error) {

@@ -30,6 +30,13 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 		return err
 	}
 	if len(before) == 0 {
+		plan, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", attempt.Task)
+		if err != nil {
+			return err
+		}
+		if plan.Stage != "planning" || plan.PlanVersion != attempt.PlanVersion {
+			return ErrConflict
+		}
 		if err := createPlannerRunTx(ctx, tx, id, attempt, idea, version); err != nil {
 			return err
 		}
@@ -156,9 +163,12 @@ func createPlannerRunTx(ctx context.Context, tx *sql.Tx, id string, attempt mode
 	}
 	if idea.DecisionStatus == "approved" {
 		idea.DecisionStatus, idea.ErrorReason = "in_process", ""
-		if err := put(ctx, tx, "ideas", idea.ID, idea, version); err != nil {
-			return err
-		}
+	}
+	// Every new claim, including a fallback, advances the idea version.
+	// A cancellation that observed no active claim cannot miss one that
+	// commits before that cancellation's version check.
+	if err := put(ctx, tx, "ideas", idea.ID, idea, version); err != nil {
+		return err
 	}
 	_, err := tx.ExecContext(ctx, "INSERT INTO planner_runs(planner_run_id,idea_id,idea_run_id,timestamp,status) VALUES(?,?,?,?,'in_process')", id, idea.ID, idea.RunID, attempt.StartedAt)
 	if err != nil {
