@@ -12,7 +12,6 @@ import (
 	"whirlwind/internal/execution"
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
 	"whirlwind/internal/store"
 	"whirlwind/internal/verification"
 )
@@ -77,6 +76,9 @@ func (e *Engine) runProjectSetup(ctx context.Context, id string) error {
 	evidence := setupEvidenceFromInput(op.Input)
 	manifest, failure := e.projectSetupManifest(ctx, project, id, evidence)
 	if failure == nil {
+		if manifest.OfflineDockerImage != "" {
+			evidence.Onboarding = false
+		}
 		evidence.Manifest = manifest
 		op.Stage, op.Owner, op.ConfigurationHash, op.RepositoryRevision = "running", e.owner, manifest.ConfigurationHash, manifest.CandidateCommit
 		op.Input = evidence
@@ -211,13 +213,14 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 	if evidence.Onboarding && evidence.Phase != "" && evidence.Phase != "catalog" && evidence.Phase != "qualify" {
 		return verification.JobManifest{}, errors.New("unknown durable project setup phase; explicitly retry setup")
 	}
-	rules, hash, err := policy.Load(project.Path)
+	rules, err := e.projectPolicy(ctx, project)
 	if err != nil {
 		return verification.JobManifest{}, err
 	}
-	if hash != project.PolicyHash {
-		return verification.JobManifest{}, errors.New("project policy changed; confirm current configuration before setup")
+	if project.ManagedPolicy {
+		project.Policy = rules
 	}
+	hash := project.PolicyHash
 	head, err := github.Run(ctx, project.Path, "git", "rev-parse", "HEAD")
 	if err != nil {
 		return verification.JobManifest{}, err
@@ -226,6 +229,15 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 	if err != nil {
 		return verification.JobManifest{}, err
 	}
+	manifest := verification.JobManifest{Version: 1, Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: id, JobID: id, ConfigurationHash: hash, CandidateCommit: head, CandidateTree: tree, BaseCommit: head, Repository: project.Path, Root: filepath.Join(e.Root, "project_setup", id)}
+	if rules.OfflineDockerImage != "" {
+		if !project.ManagedPolicy {
+			return verification.JobManifest{}, errors.New("offline setup requires approved external policy")
+		}
+		manifest.OfflineDockerImage, manifest.PolicyHash = rules.OfflineDockerImage, hash
+		manifest.Commands = verificationJobCommands(rules.Checks)
+		return manifest, manifest.Validate()
+	}
 	profile, err := execution.ForPolicy(project.Path, true, hash, rules.Sandbox)
 	if err != nil {
 		return verification.JobManifest{}, err
@@ -233,7 +245,7 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 	if !execution.IsNonoLauncher(profile.Launcher) {
 		return verification.JobManifest{}, errors.New("project setup requires native nono")
 	}
-	manifest := verification.JobManifest{Version: 1, Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: id, JobID: id, ConfigurationHash: hash, CandidateCommit: head, CandidateTree: tree, BaseCommit: head, Repository: project.Path, Root: filepath.Join(e.Root, "project_setup", id), Launcher: profile.Launcher, Sandbox: rules.Sandbox}
+	manifest.Launcher, manifest.Sandbox = profile.Launcher, rules.Sandbox
 	if evidence.Onboarding && evidence.Phase == "" {
 		qualityPolicy := project.Policy.Quality
 		if qualityPolicy == nil {
@@ -314,13 +326,7 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 	if evidence.Onboarding && evidence.Phase == "qualify" {
 		checks = append(append([]model.Check(nil), checks...), model.Check{Name: "qlty-qualification", Mode: "autofix", Command: []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}, TimeoutSeconds: 600, ReportFormat: "sarif"})
 	}
-	for _, check := range checks {
-		timeout := check.TimeoutSeconds
-		if timeout <= 0 {
-			timeout = 600
-		}
-		manifest.Commands = append(manifest.Commands, verification.JobCommand{Name: check.Name, Mode: check.Mode, Command: check.Command, TimeoutSeconds: timeout, DependsOn: check.DependsOn, Required: check.Required, OutputPaths: check.OutputPaths, ReportFormat: check.ReportFormat, Environment: check.Environment})
-	}
+	manifest.Commands = verificationJobCommands(checks)
 	return manifest, manifest.Validate()
 }
 
@@ -404,10 +410,12 @@ func (e *Engine) finishProjectSetup(ctx context.Context, record model.Record, op
 		}
 	}
 	if failure == nil {
-		_, hash, err := policy.Load(project.Path)
-		if err != nil || hash != project.PolicyHash {
+		if _, err := e.projectPolicy(ctx, project); err != nil {
 			failure = errors.New("project policy changed during verification; setup result rejected")
 		}
+	}
+	if failure == nil && evidence.Manifest.OfflineDockerImage != "" {
+		project.OfflineQualification, failure = offlineSetupQualification(ctx, project, evidence)
 	}
 	op.Input, op.FinishedAt, op.Owner = evidence, time.Now().UTC().Format(time.RFC3339Nano), e.owner
 	op.Stage, op.Error, project.Status = "complete", "", "approved"
@@ -416,6 +424,9 @@ func (e *Engine) finishProjectSetup(ctx context.Context, record model.Record, op
 	}
 	if ctx.Err() != nil {
 		op.Stage, op.Error, op.FinishedAt, project.Status = "queued", "", "", "draft"
+	}
+	if project.Status != "approved" {
+		project.OfflineQualification = nil
 	}
 	changes := []store.Change{{Kind: "operations", ID: record.ID, Value: op, Expected: record.Version}, {Kind: "projects", ID: project.ID, Value: project, Expected: projectRecord.Version}}
 	if err := e.Store.Write(finish, changes, nil); err != nil {

@@ -29,14 +29,17 @@ func (d *Dashboard) configuredProjects(projects []model.Project, snapshot contro
 
 func (d *Dashboard) projectLabel(project model.Project) string {
 	label := tview.Escape(project.Name)
+	if project.Status == "error" {
+		return "[red]Setup ERR[-] " + label
+	}
 	status, ok := d.projectHealth[project.ID]
 	if !ok {
 		return label
 	}
 	if status.Status == "OK" {
-		return label + " [green]OK[-]"
+		return label + " [green]Git OK[-]"
 	}
-	return label + " [red]ERR[-]"
+	return label + " [red]Git ERR[-]"
 }
 
 func (d *Dashboard) showProjectHealth() {

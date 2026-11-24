@@ -23,7 +23,7 @@ func (c *configurationChanges) projectValues(doc Document) error {
 			continue
 		}
 		seen[path] = true
-		status, err := c.onboardProject(path, previous[path])
+		status, err := c.onboardProject(path, previous[path], doc.Workers.Ideation.OnRegistrationEnabled())
 		if err != nil {
 			return err
 		}
@@ -51,7 +51,7 @@ func (c *configurationChanges) projectHealthBindings() (map[string]model.Project
 	return bindings, nil
 }
 
-func (c *configurationChanges) onboardProject(path string, previous model.ProjectStatus) (model.ProjectStatus, error) {
+func (c *configurationChanges) onboardProject(path string, previous model.ProjectStatus, ideate bool) (model.ProjectStatus, error) {
 	status := model.ProjectStatus{Path: path, Status: "ERR"}
 	if !filepath.IsAbs(path) {
 		status.Detail = "Absolute local Git repository path required"
@@ -69,6 +69,21 @@ func (c *configurationChanges) onboardProject(path string, previous model.Projec
 	// A resolved alias may now point at a different repository.
 	status.ProjectID = ""
 	status.CanonicalPath = canonical
+	if previous.ProjectID != "" && previous.CanonicalPath == canonical {
+		record, err := c.source.store.Get(c.ctx, "projects", previous.ProjectID)
+		if err == nil {
+			project, decodeErr := store.Decode[model.Project](record)
+			if decodeErr != nil {
+				return status, decodeErr
+			}
+			if project.ManagedPolicy && project.Path == canonical {
+				status.Status, status.ProjectID = "OK", record.ID
+				return status, nil
+			}
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return status, err
+		}
+	}
 	project, err := projectregistry.Load(ctx, filepath.Base(canonical), canonical)
 	if err != nil {
 		status.Detail = "Onboarding failed: " + err.Error()
@@ -80,10 +95,10 @@ func (c *configurationChanges) onboardProject(path string, previous model.Projec
 	}
 	status.Status = "OK"
 	status.ProjectID = project.ID
-	return status, c.registerProject(project)
+	return status, c.registerProject(project, ideate)
 }
 
-func (c *configurationChanges) registerProject(project model.Project) error {
+func (c *configurationChanges) registerProject(project model.Project, ideate bool) error {
 	_, err := c.source.store.Get(c.ctx, "projects", project.ID)
 	if err == nil {
 		// Preserve previously onboarded project choices and runtime state.
@@ -101,6 +116,6 @@ func (c *configurationChanges) registerProject(project model.Project) error {
 	if err := c.appendValue("projects", project.ID, project); err != nil {
 		return err
 	}
-	c.values = append(c.values, store.InitialProjectWork(project.ID, time.Now())...)
+	c.values = append(c.values, store.ProjectRegistrationWork(project.ID, time.Now(), ideate)...)
 	return nil
 }

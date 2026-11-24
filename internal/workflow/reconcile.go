@@ -36,6 +36,9 @@ func (e *Engine) reconcileProject(ctx context.Context, p model.Project) {
 		e.reconcileAgenticProject(ctx, p)
 		return
 	}
+	if localOnlyProject(p) {
+		return
+	}
 	issues, err := e.GitHub.Issues(ctx, p.Repo)
 	if err != nil {
 		if ctx.Err() == nil {

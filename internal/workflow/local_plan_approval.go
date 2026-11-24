@@ -91,9 +91,20 @@ func (e *Engine) approveLocalPlan(ctx context.Context, task *model.ExecutionPlan
 	if err := validateDetailedPlan(plan); err != nil {
 		return nil, fmt.Errorf("plan approval requires a complete implementation specification: %w", err)
 	}
-	project, err := e.localPlanApprovalProject(ctx, task.ProjectID, plan)
+	project, projectVersion, err := e.localPlanApprovalProject(ctx, task.ProjectID, plan)
 	if err != nil {
 		return nil, err
+	}
+	if project.ManagedPolicy && project.Status != "approved" {
+		return nil, errors.New("finish project setup before approving its execution plan")
+	}
+	if project.Policy.OfflineDockerImage != "" {
+		if task.IdeaID == "" {
+			return nil, errors.New("managed offline verification requires a canonical idea plan")
+		}
+		if _, err := e.qualifiedOfflineProject(ctx, project); err != nil {
+			return nil, err
+		}
 	}
 	if task.IdeaID != "" {
 		if err := validatePairCapacity(e.settings(ctx), project); err != nil {
@@ -109,6 +120,9 @@ func (e *Engine) approveLocalPlan(ctx context.Context, task *model.ExecutionPlan
 	references, guards, err := e.approvalConfiguration(ctx, task.ProjectID)
 	if err != nil {
 		return nil, err
+	}
+	if project.ManagedPolicy && references[0].Version != projectVersion {
+		return nil, store.ErrConflict
 	}
 	plan.Approval = &model.PlanApproval{DocumentHash: hash, PlanVersion: task.PlanVersion, References: references, ConfigurationHash: evidenceDigest(references)}
 	plan.Specification = content
@@ -133,17 +147,27 @@ func (e *Engine) readLocalPlanApproval(task model.ExecutionPlan, hash string) (s
 	return content, plan, err
 }
 
-func (e *Engine) localPlanApprovalProject(ctx context.Context, id string, plan model.PlanSpecification) (model.Project, error) {
-	project, err := e.Project(ctx, id)
+func (e *Engine) localPlanApprovalProject(ctx context.Context, id string, plan model.PlanSpecification) (model.Project, int, error) {
+	record, err := e.Store.Get(ctx, "projects", id)
 	if err != nil {
-		return project, err
+		return model.Project{}, 0, err
+	}
+	project, err := store.Decode[model.Project](record)
+	if err != nil {
+		return project, record.Version, err
+	}
+	if project.ManagedPolicy || project.PolicyHash == "" {
+		project.Policy, err = e.projectPolicy(ctx, project)
+		if err != nil {
+			return project, record.Version, err
+		}
 	}
 	for _, file := range plan.Where {
 		if !policy.AllowedPath(project.Policy, file) {
-			return project, fmt.Errorf("local plan path is outside project policy: %s", file)
+			return project, record.Version, fmt.Errorf("local plan path is outside project policy: %s", file)
 		}
 	}
-	return project, nil
+	return project, record.Version, nil
 }
 
 func (e *Engine) freshLocalPlanVersion(ctx context.Context, task *model.ExecutionPlan, content string) error {

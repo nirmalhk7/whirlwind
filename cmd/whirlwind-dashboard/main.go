@@ -59,7 +59,14 @@ func loadSnapshot(ctx context.Context, data string) (control.Snapshot, error) {
 	if _, err := os.Stat(controlPath); err == nil {
 		snapshot, started, callErr := loadOnlineSnapshot(ctx, control.NewClient(controlPath))
 		if callErr == nil {
-			loadProviderStatuses(ctx, control.NewClient(controlPath), snapshot)
+			client := control.NewClient(controlPath)
+			allowProbes, err := loadDispatchHealth(ctx, client, snapshot)
+			if err != nil {
+				return nil, err
+			}
+			if allowProbes {
+				loadProviderStatuses(ctx, client, snapshot)
+			}
 			return finishOnlineSnapshot(ctx, data, snapshot)
 		}
 		if ctx.Err() != nil {

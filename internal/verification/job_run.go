@@ -18,9 +18,12 @@ import (
 func (r *jobRunner) run(ctx context.Context, observe func(JobEvent) error) (JobReport, error) {
 	m := r.manifest
 	report := JobReport{Purpose: m.Purpose, ProjectID: m.ProjectID, OperationID: m.OperationID, ManifestHash: m.Digest(), PlanID: m.PlanID, PlanVersion: m.PlanVersion, PlanHash: m.PlanHash, ConfigurationHash: m.ConfigurationHash, CandidateCommit: m.CandidateCommit, CandidateTree: m.CandidateTree, Passed: true, Results: []JobResult{}}
-	stage, err := r.prepareCheckout(ctx)
+	stage, err := r.prepareJobInput(ctx)
 	if err != nil {
 		return report, err
+	}
+	if r.offline != nil {
+		defer func() { _ = os.RemoveAll(stage) }()
 	}
 	byName := map[string]JobResult{}
 	for index, command := range m.Commands {
@@ -90,6 +93,9 @@ func (r *jobRunner) command(ctx context.Context, stage string, index int, comman
 		return result, err
 	}
 	r.started[index] = true
+	if r.offline != nil {
+		return r.runOfflineDockerCheck(ctx, stage, index, command, result, stdout, stderr)
+	}
 	return r.executeCommand(ctx, stage, index, command, result, stdout, stderr)
 }
 

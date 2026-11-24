@@ -79,7 +79,7 @@ func agenticFixtureCoding(ctx context.Context, in provider.Input, hooks provider
 		return provider.Output{}, err
 	}
 	red, err := hooks.RunCheck(ctx, checkID)
-	if err != nil || red.Passed || !strings.Contains(red.Output, "TestResult") {
+	if err != nil || red.Passed || red.Phase != "red" || !strings.Contains(red.Output, "TestResult") {
 		return provider.Output{}, fmt.Errorf("expected failing regression: %+v %v", red, err)
 	}
 	if err := os.WriteFile(filepath.Join(in.CWD, agenticResultFile), []byte("package result\n\nfunc Result() bool {\n\treturn true\n}\n"), 0600); err != nil {

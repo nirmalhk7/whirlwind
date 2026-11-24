@@ -31,6 +31,9 @@ func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) (resul
 	if _, err := e.Project(ctx, p.ID); err != nil {
 		return err
 	}
+	if err := e.CheckIdeationPrerequisites(ctx, p); err != nil {
+		return err
+	}
 	ctx, finish, err := e.ensureIdeationOperation(ctx, p, day)
 	if err != nil {
 		return err

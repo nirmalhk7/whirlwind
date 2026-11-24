@@ -126,10 +126,11 @@ func syncIdeaHistoryTx(ctx context.Context, tx *sql.Tx, i model.Idea, at string)
 }
 
 func ideaRevisionAllowed(old, idea model.Idea) bool {
+	cancelledBeforeClaim := old.DecisionStatus == "approved" && idea.DecisionStatus == "error" && idea.ErrorReason == model.PlannerCancellationReason && idea.PlanID == ""
 	if old.ProjectID != idea.ProjectID || old.RunID != idea.RunID || old.Direction != idea.Direction || old.PredecessorID != idea.PredecessorID || old.RevisitReason != idea.RevisitReason ||
 		((old.DecisionStatus != "draft" || old.ArchivedAt != "") && (old.Title != idea.Title || ideaContent(old) != ideaContent(idea))) ||
 		(old.ArchivedAt != "" && (idea.ArchivedAt != old.ArchivedAt || idea.DecisionStatus != old.DecisionStatus)) ||
-		!ideaTransition(old.DecisionStatus, idea.DecisionStatus) {
+		(!ideaTransition(old.DecisionStatus, idea.DecisionStatus) && !cancelledBeforeClaim) {
 		return false
 	}
 	return true
