@@ -24,6 +24,7 @@ type Dashboard struct {
 	inbox                        *tview.List
 	inboxIdeaCount               int
 	inboxTaskIDs                 []string
+	setupNotice                  *projectSetupNotice
 	plans                        *tview.List
 	runs                         *tview.List
 	runRows                      []runRow

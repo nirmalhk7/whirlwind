@@ -32,6 +32,9 @@ func messageText(message any) string {
 }
 
 func (d *Dashboard) viewMessage(index int) {
+	if d.openProjectSetupNotice(index) {
+		return
+	}
 	if index >= 0 && index < len(d.directionRows) {
 		d.directions.SetCurrentItem(index)
 		if idea, version, ok := d.ideaRecord(d.directionRows[index].ID); ok {
