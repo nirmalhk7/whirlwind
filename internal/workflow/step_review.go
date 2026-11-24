@@ -270,7 +270,13 @@ func (step *taskStep) applyReview(review model.Review) error {
 	}
 	step.task.Stage = "repair"
 	step.task.Handoff.NextAction = "correct unresolved review findings"
-	return step.progress(step.ctx, &step.task)
+	// The new review, its progress, and the next stage share one fenced write.
+	progress, err := step.collectProgress(step.ctx, &step.task, &review)
+	if err != nil {
+		return err
+	}
+	step.pending = append(step.pending, progress)
+	return nil
 }
 
 func criticalApprovalMessage(task model.ExecutionPlan, policyHash string) string {
