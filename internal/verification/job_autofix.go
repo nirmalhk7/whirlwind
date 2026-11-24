@@ -24,12 +24,12 @@ type AutofixProposal struct {
 }
 
 func (r *jobRunner) prepareFixCheckout(ctx context.Context, index int) (string, error) {
-	parent := fmt.Sprintf("fixes/%03d", index)
-	if err := r.root.MkdirAll(parent, 0700); err != nil {
+	relative := autofixCheckoutDir(index)
+	if err := r.root.MkdirAll(filepath.Dir(relative), 0700); err != nil {
 		return "", err
 	}
-	stage := filepath.Join(r.root.Name(), parent, "checkout")
-	if _, err := r.git(ctx, r.root.Name(), "clone", "--no-hardlinks", "--no-checkout", "--", r.manifest.Repository, stage); err != nil {
+	stage, err := r.cloneDisposableCheckout(ctx, relative)
+	if err != nil {
 		return "", err
 	}
 	if _, err := r.git(ctx, stage, "checkout", "--detach", r.manifest.CandidateCommit); err != nil {

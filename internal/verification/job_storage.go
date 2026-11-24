@@ -147,12 +147,12 @@ func (r *jobRunner) gitRaw(ctx context.Context, cwd string, args ...string) (str
 }
 
 func (r *jobRunner) prepareCheckout(ctx context.Context) (string, error) {
-	stage := filepath.Join(r.root.Name(), "checkout")
+	stage := filepath.Join(r.root.Name(), verificationCheckoutDir)
 	if err := r.root.MkdirAll("host-home", 0700); err != nil {
 		return "", err
 	}
-	if _, err := r.root.Stat("checkout"); os.IsNotExist(err) {
-		if _, err := r.git(ctx, r.root.Name(), "clone", "--no-hardlinks", "--no-checkout", "--", r.manifest.Repository, stage); err != nil {
+	if _, err := r.root.Lstat(verificationCheckoutDir); os.IsNotExist(err) {
+		if _, err := r.cloneDisposableCheckout(ctx, verificationCheckoutDir); err != nil {
 			return "", err
 		}
 		if _, err := r.git(ctx, stage, "checkout", "--detach", r.manifest.CandidateCommit); err != nil {

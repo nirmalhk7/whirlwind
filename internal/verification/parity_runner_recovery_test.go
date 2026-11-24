@@ -231,9 +231,15 @@ func TestParityRunnerCopiesFrozenExternalQualityConfiguration(t *testing.T) {
 	if !report.Passed || len(report.Results) != 1 || report.Results[0].Output != "config_version = \"0\"\n" {
 		t.Fatalf("approved external configuration was not copied into staging: %+v", report)
 	}
-	info, err := os.Lstat(filepath.Join(manifest.Root, "checkout", ".qlty", "qlty.toml"))
-	if err != nil || !info.Mode().IsRegular() {
-		t.Fatal("staged configuration must be a real file")
+	if _, err := os.Lstat(filepath.Join(manifest.Root, verificationCheckoutDir)); !os.IsNotExist(err) {
+		t.Fatalf("completed staging checkout was not released: %v", err)
+	}
+	saved, err := os.ReadFile(filepath.Join(manifest.Root, "manifest.json"))
+	requireVerificationSuccess(t, err)
+	var retained JobManifest
+	requireVerificationSuccess(t, json.Unmarshal(saved, &retained))
+	if retained.Quality == nil || retained.Quality.Files[recoveryQltyConfigPath] != report.Results[0].Output {
+		t.Fatal("retained frozen configuration does not match the command evidence")
 	}
 	if _, err := os.Stat(filepath.Join(manifest.Repository, ".qlty")); !os.IsNotExist(err) {
 		t.Fatal("runner wrote external Qlty config into original repository")
