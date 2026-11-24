@@ -87,7 +87,7 @@ func (d *Dashboard) viewSavedMessage(index int) {
 }
 
 func (d *Dashboard) showKeyboardHelp() {
-	view := tview.NewTextView().SetScrollable(true).SetText(strings.ReplaceAll(keyboardShortcuts, " | ", "\n") + "\n\nVim: :wq submits; unchanged cancels.\nRun logs: Ctrl-C returns to dashboard.")
+	view := tview.NewTextView().SetScrollable(true).SetText(strings.ReplaceAll(keyboardShortcuts, " | ", "\n") + "\n\nVim: :wq submits; unchanged cancels.\nRun logs: Esc or Ctrl-C returns to dashboard.")
 	view.SetBorder(true).SetTitle(" Keyboard instructions · Esc to close ")
 	d.modal = view
 	d.SetRoot(view, true).SetFocus(view)

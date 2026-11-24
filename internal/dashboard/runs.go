@@ -88,6 +88,9 @@ func (d *Dashboard) refreshRuns() {
 		}
 		if row.operation != nil {
 			label := "Ideation"
+			if row.operation.RegistrationIdeation() {
+				label = "Auto ideation"
+			}
 			if row.operation.Kind == "project_setup" {
 				label = "Project setup: " + projectSetupPhaseLabel(row.operation.Input)
 			}
@@ -133,6 +136,9 @@ func (d *Dashboard) refreshRuns() {
 }
 
 func runStatus(attempt model.Attempt) string {
+	if attempt.Status == model.AttemptAwaitingPlanPublication {
+		return "awaiting plan publication"
+	}
 	if attempt.Status == "complete" {
 		return "completed"
 	}

@@ -43,6 +43,7 @@ func (d *Dashboard) Present(snapshot control.Snapshot) {
 	d.refreshDirections()
 	d.refreshPlans()
 	d.refreshRuns()
+	d.refreshAgentInspection()
 	d.refreshCurrentInbox()
 	d.showProjectHealth()
 }
