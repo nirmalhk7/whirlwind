@@ -23,17 +23,10 @@ func (e localCommandExecutor) Execute(ctx context.Context, request control.Reque
 		go func() { time.Sleep(100 * time.Millisecond); e.shutdown() }()
 		return map[string]string{"status": "stopping"}, nil
 	}
-	command := httpapi.LocalCommand{
-		Operation: request.Operation, ProjectID: request.ProjectID, PlanID: request.PlanID,
-		ResourceID: request.ResourceID, ExpectedVersion: request.ExpectedVersion,
-		DiffOffset:  request.DiffOffset,
-		ContentHash: request.ContentHash, IdempotencyKey: request.IdempotencyKey,
-		Payload: request.Payload,
-	}
 	if e.api == nil {
 		return nil, errors.New("local domain handlers unavailable")
 	}
-	result, err := e.api.ExecuteLocal(ctx, command)
+	result, err := e.api.ExecuteLocal(ctx, request)
 	if err != nil {
 		return nil, err
 	}

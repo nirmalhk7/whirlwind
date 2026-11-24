@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -358,7 +359,7 @@ func TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery(t *test
 func TestFinalizationApprovalRequestBindsExactCandidateAndReview(t *testing.T) {
 	provenance := model.Provenance{Task: dashboardPlanOne, PlanVersion: 4, Head: "reviewed-candidate", PolicyHash: "policy-current", VerificationID: "verification-current", ReviewID: "review-current"}
 	plan := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", Risk: "critical", PlanVersion: 4, ReviewedCommit: provenance.Head, ReviewID: provenance.ReviewID, VerificationID: provenance.VerificationID, PlanDocument: &model.PlanDocument{ApprovedHash: dashboardFixtureApprovedPlanID}}
-	view := finalizationReport{Task: plan, Review: model.Review{Provenance: &provenance, Adherence: &model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}}, Adherence: model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: "policy-current", Diff: finalizationDiffPage{Content: "diff --git a/file b/file\n+approved candidate\n"}, Accepted: true}
+	view := control.FinalizationReport{Task: plan, Review: model.Review{Provenance: &provenance, Adherence: &model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}}, Adherence: model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: "policy-current", Diff: control.FinalizationDiffPage{Content: "diff --git a/file b/file\n+approved candidate\n"}, Accepted: true}
 	request, err := finalizationApprovalRequest(plan, 17, "policy-current", view)
 	if err != nil {
 		t.Fatal(err)
@@ -366,11 +367,12 @@ func TestFinalizationApprovalRequestBindsExactCandidateAndReview(t *testing.T) {
 	if request.Operation != "finalization.approve" || request.PlanID != plan.ID || request.ExpectedVersion != 17 || request.IdempotencyKey == "" {
 		t.Fatalf("finalization action lost task CAS/receipt binding: %+v", request)
 	}
-	var approval finalizationApprovalPayload
+	var approval map[string]any
 	if err := json.Unmarshal(request.Payload, &approval); err != nil {
 		t.Fatal(err)
 	}
-	if approval.PlanVersion != plan.PlanVersion || approval.ApprovedPlanHash != dashboardFixtureApprovedPlanID || approval.ReviewedCommit != plan.ReviewedCommit || approval.ReviewID != plan.ReviewID || approval.VerificationID != plan.VerificationID || approval.PolicyHash != "policy-current" {
+	want := map[string]any{"plan_version": float64(plan.PlanVersion), "approved_plan_hash": dashboardFixtureApprovedPlanID, "reviewed_commit": provenance.Head, "review_id": provenance.ReviewID, "verification_id": provenance.VerificationID, "policy_hash": provenance.PolicyHash}
+	if !maps.Equal(approval, want) {
 		t.Fatalf("approval request did not bind the exact reviewed candidate: %+v", approval)
 	}
 	view.Task.ReviewedCommit = "newer-candidate"
@@ -382,7 +384,7 @@ func TestFinalizationApprovalRequestBindsExactCandidateAndReview(t *testing.T) {
 func TestCriticalFinalizationFormShowsExactDiffReportAndLocalOnlyAction(t *testing.T) {
 	provenance := model.Provenance{Task: dashboardPlanOne, PlanVersion: 4, Head: "reviewed-candidate", PolicyHash: "policy-current", VerificationID: "verification-current", ReviewID: "review-current"}
 	plan := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", Risk: "critical", PlanVersion: 4, ReviewedCommit: provenance.Head, ReviewID: provenance.ReviewID, VerificationID: provenance.VerificationID, PlanDocument: &model.PlanDocument{ApprovedHash: dashboardFixtureApprovedPlanID}}
-	report := finalizationReport{Task: plan, Review: model.Review{Summary: "Candidate review summary", Provenance: &provenance, Adherence: &model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}}, Adherence: model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: "policy-current", Diff: finalizationDiffPage{Content: "diff --git a/file b/file\n+exact reviewed code\n"}, Accepted: true}
+	report := control.FinalizationReport{Task: plan, Review: model.Review{Summary: "Candidate review summary", Provenance: &provenance, Adherence: &model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}}, Adherence: model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: "policy-current", Diff: control.FinalizationDiffPage{Content: "diff --git a/file b/file\n+exact reviewed code\n"}, Accepted: true}
 	d := New()
 	screen := tcell.NewSimulationScreen("UTF-8")
 	d.SetScreen(screen)
