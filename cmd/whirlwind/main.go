@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"whirlwind/internal/control"
@@ -48,6 +49,15 @@ func serveSupervisor(ctx context.Context, engine *workflow.Engine, dispatcher co
 		return err
 	}
 	defer func() { _ = server.Close() }()
+	closeQueues, err := control.ListenRoleQueue(ctx, strings.TrimSuffix(socket, ".sock")+"-queues.sock", func(ctx context.Context, queue, action string, request control.RoleQueueRequest) (control.RoleQueueAdmission, error) {
+		work := workflow.RoleWork{ProjectID: request.ProjectID, PlanID: request.PlanID, IdeaID: request.IdeaID, Version: request.Version, Queue: queue}
+		result, err := engine.RequestRoleQueue(ctx, action, work)
+		return control.RoleQueueAdmission{ProjectID: result.ProjectID, PlanID: result.PlanID, Version: result.Version, Status: result.Status}, err
+	})
+	if err != nil {
+		return err
+	}
+	defer closeQueues()
 	engineDone := make(chan struct{})
 	go func() { defer close(engineDone); engine.Run(ctx) }()
 	<-ctx.Done()

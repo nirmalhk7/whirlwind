@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"slices"
 	"sort"
 
 	"whirlwind/internal/model"
@@ -22,15 +23,15 @@ func (e *Engine) dispatch(ctx context.Context) {
 	}
 	counts := e.runningCounts(records)
 	projects, queues := dispatchQueues(records)
-	projects, err = e.rotateDispatchProjects(ctx, projects)
+	cursor, err := e.loadDispatchCursor(ctx)
 	if err != nil {
 		return
 	}
-	e.dispatchProjectQueues(ctx, projects, queues, counts)
+	e.dispatchProjectQueues(ctx, rotateDispatchProjects(projects, cursor.ProjectID), queues, counts, rotatedDispatchRoles(cursor.RoleQueue))
 }
 
 func dispatchQueues(records []model.Record) ([]string, map[string][]model.ExecutionPlan) {
-	sort.SliceStable(records, func(i, j int) bool { return records[i].CreatedOrder < records[j].CreatedOrder })
+	sort.SliceStable(records, func(i, j int) bool { return roleQueueRowBefore(records[i], records[j]) })
 	queues := map[string][]model.ExecutionPlan{}
 	var projects []string
 	for _, record := range records {
@@ -46,36 +47,46 @@ func dispatchQueues(records []model.Record) ([]string, map[string][]model.Execut
 	return projects, queues
 }
 
-func (e *Engine) rotateDispatchProjects(ctx context.Context, projects []string) ([]string, error) {
-	cursor, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans")
+func (e *Engine) loadDispatchCursor(ctx context.Context) (dispatchCursor, error) {
+	record, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans")
 	if errors.Is(err, store.ErrNotFound) {
-		return projects, nil
+		return dispatchCursor{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return dispatchCursor{}, err
 	}
-	last, err := store.Decode[dispatchCursor](cursor)
-	if err != nil {
-		return nil, err
-	}
-	n := sort.SearchStrings(projects, last.ProjectID)
-	if n < len(projects) && projects[n] == last.ProjectID {
-		n++
-	}
-	return append(append([]string{}, projects[n:]...), projects[:n]...), nil
+	return store.Decode[dispatchCursor](record)
 }
 
-func (e *Engine) dispatchProjectQueues(ctx context.Context, projects []string, queues map[string][]model.ExecutionPlan, counts map[string]int) {
+func rotateDispatchProjects(projects []string, last string) []string {
+	index := sort.SearchStrings(projects, last)
+	if index < len(projects) && projects[index] == last {
+		index++
+	}
+	return append(append([]string{}, projects[index:]...), projects[:index]...)
+}
+
+func rotatedDispatchRoles(last string) []string {
+	roles := []string{PlannerQueue, CodingQueue, ReviewerQueue, FinalizerQueue}
+	next := slices.Index(roles, last) + 1
+	return append(append(slices.Clone(roles[next:]), roles[:next]...), "")
+}
+
+func (e *Engine) dispatchProjectQueues(ctx context.Context, projects []string, queues map[string][]model.ExecutionPlan, counts map[string]int, roles []string) {
 	for {
 		remaining := false
-		for _, project := range projects {
-			queue := queues[project]
-			if len(queue) == 0 {
-				continue
+		for _, role := range roles {
+			for _, project := range projects {
+				queue := queues[project]
+				index := slices.IndexFunc(queue, func(plan model.ExecutionPlan) bool { return roleQueue(plan.Stage) == role })
+				if index < 0 {
+					continue
+				}
+				remaining = true
+				plan := queue[index]
+				queues[project] = slices.Delete(queue, index, index+1)
+				_, _ = e.dispatchTask(ctx, plan, counts, 0)
 			}
-			remaining = true
-			queues[project] = queue[1:]
-			_, _ = e.dispatchTask(ctx, queue[0], counts, 0)
 		}
 		if !remaining {
 			return
@@ -85,6 +96,7 @@ func (e *Engine) dispatchProjectQueues(ctx context.Context, projects []string, q
 
 type dispatchCursor struct {
 	ProjectID string `json:"project_id"`
+	RoleQueue string `json:"role_queue,omitempty"`
 }
 
 func runnableStage(stage string) bool {
@@ -123,7 +135,7 @@ func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, cou
 	if !e.hasDispatchCapacity(ctx, task.ID) {
 		return false, nil
 	}
-	if err := e.advanceDispatchCursor(ctx, task.ProjectID); err != nil {
+	if err := e.advanceDispatchCursor(ctx, task.ProjectID, roleQueue(task.Stage)); err != nil {
 		return false, err
 	}
 	run, cancel := context.WithCancel(ctx)
@@ -160,14 +172,14 @@ func (e *Engine) hasDispatchCapacity(ctx context.Context, id string) bool {
 	return !busy && len(e.running) < settings.GlobalSlots
 }
 
-func (e *Engine) advanceDispatchCursor(ctx context.Context, projectID string) error {
+func (e *Engine) advanceDispatchCursor(ctx context.Context, projectID, queue string) error {
 	expected := 0
 	if current, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans"); err == nil {
 		expected = current.Version
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return err
 	}
-	return e.Store.Put(ctx, "dispatch_cursors", "execution_plans", dispatchCursor{ProjectID: projectID}, expected)
+	return e.Store.Put(ctx, "dispatch_cursors", "execution_plans", dispatchCursor{ProjectID: projectID, RoleQueue: queue}, expected)
 }
 
 func stepFailed(err error) bool {

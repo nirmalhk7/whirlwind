@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"time"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
@@ -137,7 +138,7 @@ func (e *Engine) admitRolePlan(ctx context.Context, request rolePop) rolePopResu
 	if err != nil {
 		return rolePopResult{err: err}
 	}
-	if e.roleQueueHasEarlierWork(records, record.CreatedOrder, request.work) {
+	if e.roleQueueHasEarlierWork(records, record, request.work) {
 		return rolePopResult{}
 	}
 	if err := request.caller.Err(); err != nil {
@@ -147,9 +148,9 @@ func (e *Engine) admitRolePlan(ctx context.Context, request rolePop) rolePopResu
 	return rolePopResult{scheduled, err}
 }
 
-func (e *Engine) roleQueueHasEarlierWork(records []model.Record, order int64, work RoleWork) bool {
+func (e *Engine) roleQueueHasEarlierWork(records []model.Record, target model.Record, work RoleWork) bool {
 	for _, earlier := range records {
-		if earlier.CreatedOrder >= order {
+		if !roleQueueRowBefore(earlier, target) {
 			continue
 		}
 		plan, err := store.Decode[model.ExecutionPlan](earlier)
@@ -222,4 +223,18 @@ func (e *Engine) requireQueuedDelivery(ctx context.Context, project model.Projec
 		return errors.Join(errors.New("finalizer queue requires current accepted review and verification"), err)
 	}
 	return nil
+}
+
+// A new resource version enters the queue when its transaction commits. Older
+// rows without a persisted time use their immutable creation order.
+func roleQueueRowBefore(left, right model.Record) bool {
+	first, a := time.Parse(time.RFC3339Nano, left.UpdatedAt)
+	second, b := time.Parse(time.RFC3339Nano, right.UpdatedAt)
+	if a == nil && b == nil && !first.Equal(second) {
+		return first.Before(second)
+	}
+	if (a == nil) != (b == nil) {
+		return a != nil
+	}
+	return left.CreatedOrder < right.CreatedOrder
 }

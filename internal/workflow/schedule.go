@@ -26,6 +26,8 @@ type IdeationSchedule struct {
 	// content-validation repair attempts and does not run uniqueness checks.
 	NoveltyRepairAttempts int    `json:"novelty_repair_attempts,omitempty"`
 	Cron                  string `json:"cron"`
+	IntervalMinutes       int    `json:"interval_minutes,omitempty"`
+	IntervalTimezone      string `json:"interval_timezone,omitempty"`
 }
 
 func (s IdeationSchedule) OnRegistrationEnabled() bool {
@@ -53,6 +55,23 @@ func (s *IdeationSchedule) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	switch {
+	case decoded.IntervalMinutes != 0 && input.Cron == nil:
+		if input.Enabled != nil && !*input.Enabled {
+			decoded.IntervalMinutes = 0
+			decoded.IntervalTimezone = ""
+		}
+		if input.Time != nil || input.Zone != nil {
+			if _, err := legacyIdeationCron(input.Enabled, input.Time, input.Zone); err != nil {
+				return err
+			}
+			if input.Zone != nil && decoded.IntervalMinutes != 0 {
+				if decoded.IntervalTimezone != "" && decoded.IntervalTimezone != *input.Zone {
+					return fmt.Errorf("conflicting ideation interval time zones")
+				}
+				decoded.IntervalTimezone = *input.Zone
+			}
+		}
+		decoded.Cron = ""
 	case input.Cron != nil:
 		if input.Enabled != nil || input.Time != nil || input.Zone != nil {
 			return fmt.Errorf("ideation cron cannot be combined with legacy schedule fields")
@@ -110,6 +129,10 @@ func (s IdeationSchedule) Validate() error {
 	if s.HistoryRunTokenBudget > perRetrieval*attempts {
 		return fmt.Errorf("ideation total history budget cannot exceed %d tokens for %d bounded generation attempts", perRetrieval*attempts, attempts)
 	}
+	if s.IntervalMinutes != 0 || s.IntervalTimezone != "" {
+		_, err := s.intervalLocation()
+		return err
+	}
 	_, err := s.cronSpec()
 	return err
 }
@@ -138,9 +161,35 @@ func (s IdeationSchedule) cronSpec() (*cron.SpecSchedule, error) {
 	return schedule.(*cron.SpecSchedule), nil
 }
 
+// Interval slots are anchored to UTC, so repeated display hours stay distinct.
+func (s IdeationSchedule) intervalLocation() (*time.Location, error) {
+	if s.IntervalMinutes < 1 || s.IntervalMinutes > 10080 || strings.TrimSpace(s.Cron) != "" {
+		return nil, fmt.Errorf("ideation interval_minutes must be 1–10080 and cannot be combined with cron")
+	}
+	zone := s.IntervalTimezone
+	if zone == "" {
+		zone = "America/Denver"
+	}
+	location, err := time.LoadLocation(zone)
+	if err != nil || zone == "Local" {
+		return nil, fmt.Errorf("invalid ideation interval timezone %q", zone)
+	}
+	return location, nil
+}
+
 // latestOccurrence catches up only the most recent matching minute.
 // The parser provides a forward search, so bracket and bisect the last match.
 func (s IdeationSchedule) latestOccurrence(now time.Time) (time.Time, error) {
+	if s.IntervalMinutes != 0 || s.IntervalTimezone != "" {
+		location, err := s.intervalLocation()
+		if err != nil {
+			return time.Time{}, err
+		}
+		interval := int64(s.IntervalMinutes) * 60
+		seconds := now.Unix()
+		offset := (seconds%interval + interval) % interval
+		return time.Unix(seconds-offset, 0).In(location), nil
+	}
 	spec, err := s.cronSpec()
 	if err != nil || spec == nil {
 		return time.Time{}, err
