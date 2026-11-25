@@ -88,6 +88,8 @@ Whirlwind creates one current SQLite schema directly, without schema versions or
 
 Target repositories may use any language and supply their own approved commands to the local verifier. Native managed Qlty setup selects only Gitleaks from the catalog and qualifies the installed scanner before recording readiness. The approved Qlty command runs in isolated staging with the approved base exposed as `HEAD`, and scanner state lives outside the checkout. See [project quality setup](docs/go-backend.md#project-quality-setup) for the command and evidence requirements.
 
+After a verification report is saved and runtime cleanup is confirmed, the verifier releases disposable Git staging. It retains the report, journal, configured artifacts, autofix patches, and qualified scanner runtime.
+
 ## Visual identity
 
 | Color | Hex | Purpose |
