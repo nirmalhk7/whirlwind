@@ -33,18 +33,7 @@ func TestManagedPolicyApprovalAtomicallySchedulesQualification(t *testing.T) {
 
 	command.Operation, command.IdempotencyKey = "project.policy.approve", "policy-once"
 	command.ExpectedVersion, command.ContentHash = preview.Version, preview.Hash
-	if _, err := server.Store.DB.Exec("CREATE TRIGGER block_policy_receipt BEFORE INSERT ON idempotency BEGIN SELECT RAISE(ABORT,'receipt failure'); END"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := server.ExecuteLocal(ctx, command); err == nil {
-		t.Fatal("approval succeeded without a durable receipt")
-	}
-	if _, err := server.Store.Get(ctx, policy.ManagedPolicyResource, project.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("failed commit persisted approval: %v", err)
-	}
-	if _, err := server.Store.DB.Exec("DROP TRIGGER block_policy_receipt"); err != nil {
-		t.Fatal(err)
-	}
+	assertPolicyApprovalRequiresDurableReceipt(t, server, command)
 	approved, err := server.ExecuteLocal(ctx, command)
 	requireAPISuccess(t, err)
 	if replay, err := server.ExecuteLocal(ctx, command); err != nil || string(replay) != string(approved) {
@@ -60,6 +49,29 @@ func TestManagedPolicyApprovalAtomicallySchedulesQualification(t *testing.T) {
 	if err != nil || approvedDocument.Content != document {
 		t.Fatalf("stored policy text changed: %+v %v", approvedDocument, err)
 	}
+	assertPolicyApprovalSchedulesOnlyNewSetup(t, server, project.ID)
+}
+
+func assertPolicyApprovalRequiresDurableReceipt(t *testing.T, server *Server, command LocalCommand) {
+	t.Helper()
+	ctx := t.Context()
+	if _, err := server.Store.DB.Exec("CREATE TRIGGER block_policy_receipt BEFORE INSERT ON idempotency BEGIN SELECT RAISE(ABORT,'receipt failure'); END"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.ExecuteLocal(ctx, command); err == nil {
+		t.Fatal("approval succeeded without a durable receipt")
+	}
+	if _, err := server.Store.Get(ctx, policy.ManagedPolicyResource, command.ProjectID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("failed commit persisted approval: %v", err)
+	}
+	if _, err := server.Store.DB.Exec("DROP TRIGGER block_policy_receipt"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertPolicyApprovalSchedulesOnlyNewSetup(t *testing.T, server *Server, projectID string) {
+	t.Helper()
+	ctx := t.Context()
 	operations, err := server.Store.List(ctx, "operations")
 	if err != nil || len(operations) != 2 {
 		t.Fatalf("qualification count: %d, %v", len(operations), err)
@@ -70,7 +82,7 @@ func TestManagedPolicyApprovalAtomicallySchedulesQualification(t *testing.T) {
 		if record.ID == "old-setup" {
 			want = "cancelled"
 		}
-		if err != nil || operation.Subject != project.ID || operation.Kind != "project_setup" || operation.Stage != want {
+		if err != nil || operation.Subject != projectID || operation.Kind != "project_setup" || operation.Stage != want {
 			t.Fatalf("qualification transition: %+v, %v", operation, err)
 		}
 	}

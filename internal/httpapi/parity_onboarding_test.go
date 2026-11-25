@@ -130,13 +130,24 @@ func TestProjectSetupRetryCreatesNewDurableOperation(t *testing.T) {
 	if err != nil || oldOperation.Stage != "failed" || oldOperation.Error == "" {
 		t.Fatalf("retry erased prior failure evidence: %+v (%v)", oldOperation, err)
 	}
+	assertSetupRetryDoesNotDuplicateOnboarding(t, server, ctx, project.ID)
+	stale := command
+	stale.ExpectedVersion = 1
+	stale.IdempotencyKey = "stale-retry"
+	if _, err := server.ExecuteLocal(ctx, stale); err == nil {
+		t.Fatal("stale project version started another setup retry")
+	}
+}
+
+func assertSetupRetryDoesNotDuplicateOnboarding(t *testing.T, server *Server, ctx context.Context, projectID string) {
+	t.Helper()
 	operations, err := server.Store.List(ctx, "operations")
 	requireAPISuccess(t, err)
 	setupCount, ideationCount := 0, 0
 	for _, record := range operations {
 		operation, err := store.Decode[model.Operation](record)
 		requireAPISuccess(t, err)
-		if operation.Subject != project.ID {
+		if operation.Subject != projectID {
 			continue
 		}
 		if operation.Kind == "project_setup" {
@@ -148,12 +159,6 @@ func TestProjectSetupRetryCreatesNewDurableOperation(t *testing.T) {
 	}
 	if setupCount != 2 || ideationCount != 1 {
 		t.Fatalf("retry duplicated initial onboarding work: setup=%d ideation=%d", setupCount, ideationCount)
-	}
-	stale := command
-	stale.ExpectedVersion = 1
-	stale.IdempotencyKey = "stale-retry"
-	if _, err := server.ExecuteLocal(ctx, stale); err == nil {
-		t.Fatal("stale project version started another setup retry")
 	}
 }
 
