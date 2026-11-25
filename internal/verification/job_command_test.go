@@ -72,3 +72,9 @@ func assertJobCommandResolution(t *testing.T, stage string, tc jobCommandResolut
 		t.Fatal("resolved arguments alias the approved command")
 	}
 }
+
+func TestResolveJobCommandRejectsEmptyCommand(t *testing.T) {
+	if _, err := resolveJobCommand(t.TempDir(), JobCommand{}); err == nil {
+		t.Fatal("empty command accepted")
+	}
+}
