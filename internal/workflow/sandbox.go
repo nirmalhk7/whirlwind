@@ -23,39 +23,19 @@ func (a *agentRun) prepareExecutionProfile(chosen model.Provider) error {
 		return fmt.Errorf("sandbox setup required: %w", err)
 	}
 
-	if a.input.Purpose == "idea_planning" {
-		if a.input.Role != "plan" || !a.input.ReadOnly {
-			return fmt.Errorf("invalid output: Planner output requires read-only Planner role")
-		}
-		output, err := filepath.EvalSymlinks(a.input.PlannerOutputDirectory)
-		if err != nil {
-			return err
-		}
-		relative, err := filepath.Rel(profile.CWD, output)
-		if err != nil || !filepath.IsLocal(relative) || relative == "." {
-			return fmt.Errorf("invalid output: Planner output escapes assigned worktree")
-		}
-		profile.WriteRoots = []string{output}
+	if err := configurePlannerProfile(&profile, a.input); err != nil {
+		return err
 	}
+
 	profile.MCPBroker = a.input.MCPBroker
 	if a.input.Role == "code" {
 		profile.ReadRoots = append(profile.ReadRoots, a.autofixReadRoots...)
 	}
 	profile.MCPBrokerToken = a.input.MCPBrokerToken
 	if a.input.NativeIntegrations {
-		if err := provider.ProvisionNativeIntegrations(&profile, chosen); err != nil {
+		if err := provisionNativeProfile(&profile, chosen); err != nil {
 			return err
 		}
-		var digests []string
-		for _, file := range profile.NativeFiles {
-			raw, err := os.ReadFile(file.Source)
-			if err != nil {
-				return err
-			}
-			sum := sha256.Sum256(raw)
-			digests = append(digests, fmt.Sprintf("%s:%x", file.Source, sum))
-		}
-		profile.NativeConfigDigest = evidenceDigest(digests)
 	}
 	profile.AllowedPaths = append([]string{}, a.project.Policy.AllowedPaths...)
 	if err := a.protectHookSettings(&profile); err != nil {
@@ -68,6 +48,42 @@ func (a *agentRun) prepareExecutionProfile(chosen model.Provider) error {
 		return err
 	}
 	a.input.Execution = &profile
+	return nil
+}
+
+func configurePlannerProfile(profile *execution.Profile, input provider.Input) error {
+
+	if input.Purpose == "idea_planning" {
+		if input.Role != "plan" || !input.ReadOnly {
+			return fmt.Errorf("invalid output: Planner output requires read-only Planner role")
+		}
+		output, err := filepath.EvalSymlinks(input.PlannerOutputDirectory)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(profile.CWD, output)
+		if err != nil || !filepath.IsLocal(relative) || relative == "." {
+			return fmt.Errorf("invalid output: Planner output escapes assigned worktree")
+		}
+		profile.WriteRoots = []string{output}
+	}
+	return nil
+}
+
+func provisionNativeProfile(profile *execution.Profile, chosen model.Provider) error {
+	if err := provider.ProvisionNativeIntegrations(profile, chosen); err != nil {
+		return err
+	}
+	var digests []string
+	for _, file := range profile.NativeFiles {
+		raw, err := os.ReadFile(file.Source)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(raw)
+		digests = append(digests, fmt.Sprintf("%s:%x", file.Source, sum))
+	}
+	profile.NativeConfigDigest = evidenceDigest(digests)
 	return nil
 }
 
