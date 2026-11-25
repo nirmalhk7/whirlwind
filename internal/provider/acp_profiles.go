@@ -43,22 +43,7 @@ func ACPProfileByID(id string) (ACPProfile, bool) {
 func ResolveExecutionProvider(p model.Provider) (model.Provider, error) {
 	switch p.Kind {
 	case "acp":
-		if p.ACPProfile != "" {
-			if _, ok := ACPProfileByID(p.ACPProfile); !ok {
-				return p, fmt.Errorf("provider %s references unknown ACP profile %q", p.ID, p.ACPProfile)
-			}
-		}
-		if len(p.Command) == 0 && p.ACPProfile != "" {
-			profile, ok := ACPProfileByID(p.ACPProfile)
-			if !ok {
-				return p, fmt.Errorf("provider %s references unknown ACP profile %q", p.ID, p.ACPProfile)
-			}
-			p.Command = profile.Command
-		}
-		if len(p.Command) == 0 {
-			return p, fmt.Errorf("provider %s has no ACP command; install an ACP agent or select a bundled profile", p.ID)
-		}
-		return p, nil
+		return resolveACPCommand(p)
 	case "codex", "claude":
 		if len(p.ModelCommand) > 0 {
 			profile := p.Kind
@@ -71,6 +56,22 @@ func ResolveExecutionProvider(p model.Provider) (model.Provider, error) {
 	default:
 		return p, fmt.Errorf("provider %s has unsupported execution transport %q; configure an ACP agent", p.ID, p.Kind)
 	}
+}
+
+func resolveACPCommand(p model.Provider) (model.Provider, error) {
+	if p.ACPProfile != "" {
+		profile, ok := ACPProfileByID(p.ACPProfile)
+		if !ok {
+			return p, fmt.Errorf("provider %s references unknown ACP profile %q", p.ID, p.ACPProfile)
+		}
+		if len(p.Command) == 0 {
+			p.Command = profile.Command
+		}
+	}
+	if len(p.Command) == 0 {
+		return p, fmt.Errorf("provider %s has no ACP command; install an ACP agent or select a bundled profile", p.ID)
+	}
+	return p, nil
 }
 
 // ACPProfileIDForCommand identifies a bundled command without accepting a

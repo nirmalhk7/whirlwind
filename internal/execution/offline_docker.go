@@ -152,25 +152,32 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 	if workloadErr != nil {
 		return id, nil, false, workloadErr
 	}
-	var state struct {
-		Status    string
-		ExitCode  int
-		Error     string
-		OOMKilled bool
-	}
+	var state offlineContainerState
 	outcome, cancelOutcome := context.WithTimeout(ctx, 15*time.Second)
 	defer cancelOutcome()
 	if err := d.inspect(outcome, &state, "container", "inspect", dockerFormatOption, "{{json .State}}", id); err != nil {
 		return id, nil, false, err
 	}
+	exit, err = confirmedOfflineExit(state, startErr)
+	return id, exit, false, err
+}
+
+type offlineContainerState struct {
+	Status    string
+	ExitCode  int
+	Error     string
+	OOMKilled bool
+}
+
+func confirmedOfflineExit(state offlineContainerState, startErr error) (*int, error) {
 	if state.Status != "exited" || state.Error != "" || state.OOMKilled || state.ExitCode < 0 || state.ExitCode > 255 {
-		return id, nil, false, errors.New("offline check has no completed container process outcome")
+		return nil, errors.New("offline check has no completed container process outcome")
 	}
 	var exited *exec.ExitError
 	if (state.ExitCode == 0 && startErr != nil) || (state.ExitCode != 0 && (!errors.As(startErr, &exited) || exited.ExitCode() != state.ExitCode)) {
-		return id, nil, false, errors.New("container exit status disagrees with the Docker attach outcome")
+		return nil, errors.New("container exit status disagrees with the Docker attach outcome")
 	}
-	return id, &state.ExitCode, false, nil
+	return &state.ExitCode, nil
 }
 
 func (d *OfflineDocker) verifyContainer(ctx context.Context, id, key, source string, argv []string) error {
