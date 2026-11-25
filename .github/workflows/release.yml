@@ -67,7 +67,9 @@ jobs:
         env:
           RELEASE_TARGET: ${{ matrix.target }}
         run: |
-          actual_target="$(go env GOOS GOARCH | paste -sd -)"
+          target_os="$(go env GOOS)"
+          target_arch="$(go env GOARCH)"
+          actual_target="$target_os-$target_arch"
           test "$actual_target" = "$RELEASE_TARGET"
           bundle="whirlwind-$RELEASE_TARGET"
           mkdir -p "$RUNNER_TEMP/$bundle"
