@@ -24,6 +24,7 @@ type tddCheck struct {
 	CheckID          string               `json:"check_id"`
 	Passed           bool                 `json:"passed"`
 	Phase            string               `json:"phase"`
+	ValidationError  string               `json:"validation_error,omitempty"`
 	Snapshot         string               `json:"snapshot"`
 	Production       string               `json:"production"`
 	Tests            string               `json:"tests"`
@@ -118,7 +119,7 @@ func (r *codingCheckRun) persist(ctx context.Context) error {
 		return err
 	}
 	r.entry.Task, r.entry.Unit, r.entry.PlanVersion = a.task.ID, a.input.UnitID, a.task.PlanVersion
-	r.entry.CheckID, r.entry.Passed, r.entry.Phase = r.check.Name, r.gatePassed, r.phase
+	r.entry.CheckID, r.entry.Passed, r.entry.Phase = r.check.Name, r.qualifiedPass(), r.phase
 	r.entry.AttemptID, r.entry.OutputArtifact, r.entry.At = a.id, artifact.ID, time.Now().UTC().Format(time.RFC3339Nano)
 	return a.Store.Put(ctx, "tdd_checks", store.ID(), r.entry, 0)
 }
@@ -134,28 +135,9 @@ func (r *codingCheckRun) determinePhase(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	checks := structuredChecks([]model.Check{r.check})
-	if a.task.IdeaID != "" {
-		checks, err = brokerCheckCommands(r.current.Policy, r.check.Name)
-		if err != nil {
-			return "", err
-		}
-	}
-	baseline, err := a.qualityBaseline(ctx, r.current, a.task, checks)
+	baseline, err := r.codingPhaseBaseline(ctx)
 	if err != nil {
 		return "", err
-	}
-	if a.task.IdeaID != "" {
-		selected := verification.Report{Passed: baseline.Passed}
-		for _, result := range baseline.Results {
-			if result.Name == r.check.Name {
-				selected.Results = append(selected.Results, result)
-			}
-		}
-		if len(selected.Results) != 1 {
-			return "", errors.New("baseline omitted requested broker check")
-		}
-		baseline = selected
 	}
 	phase, err := r.phaseAgainstBaseline(ctx, origin, baseline)
 	if err != nil {
@@ -165,6 +147,39 @@ func (r *codingCheckRun) determinePhase(ctx context.Context) (string, error) {
 		err = r.advanceOrigin(ctx, originRecord.Version)
 	}
 	return phase, err
+}
+
+func (r *codingCheckRun) codingPhaseBaseline(ctx context.Context) (verification.Report, error) {
+	a := r.attempt
+	var err error
+	checks := structuredChecks([]model.Check{r.check})
+	if a.task.IdeaID != "" {
+		checks, err = brokerCheckCommands(r.current.Policy, r.check.Name)
+		if err != nil {
+			return verification.Report{}, err
+		}
+	}
+	baseline, err := a.qualityBaseline(ctx, r.current, a.task, checks)
+	if err != nil {
+		return verification.Report{}, err
+	}
+	if a.task.IdeaID == "" {
+		return baseline, nil
+	}
+	return singleBrokerBaseline(baseline, r.check.Name)
+}
+
+func singleBrokerBaseline(baseline verification.Report, checkName string) (verification.Report, error) {
+	selected := verification.Report{Passed: baseline.Passed}
+	for _, result := range baseline.Results {
+		if result.Name == checkName {
+			selected.Results = append(selected.Results, result)
+		}
+	}
+	if len(selected.Results) != 1 {
+		return verification.Report{}, errors.New("baseline omitted requested broker check")
+	}
+	return selected, nil
 }
 
 func (r *codingCheckRun) advanceOrigin(ctx context.Context, version int) error {
@@ -196,7 +211,12 @@ func (r *codingCheckRun) output() provider.CheckResult {
 	if r.entry.BaselineAccepted {
 		output += "\nBaseline comparison: preexisting failures remain visible; no new or worsened findings. Raw exit status retained."
 	}
-	return provider.CheckResult{CheckID: r.check.Name, Snapshot: r.entry.Snapshot, Passed: r.gatePassed, Phase: r.phase, BaselineAccepted: r.entry.BaselineAccepted, ExitCode: r.result.ExitCode, Output: output, OutputArtifact: r.artifact.ID, DurationMS: r.result.DurationMS, Truncated: r.result.Truncated}
+	return provider.CheckResult{CheckID: r.check.Name, Snapshot: r.entry.Snapshot, Passed: r.qualifiedPass(), Phase: r.phase, ValidationError: r.entry.ValidationError,
+		BaselineAccepted: r.entry.BaselineAccepted, ExitCode: r.result.ExitCode, Output: output, OutputArtifact: r.artifact.ID, DurationMS: r.result.DurationMS, Truncated: r.result.Truncated}
+}
+
+func (r *codingCheckRun) qualifiedPass() bool {
+	return r.phase == "green" && r.gatePassed
 }
 
 type codingOrigin struct {

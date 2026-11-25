@@ -44,6 +44,9 @@ func (s *Server) startIdeation(ctx context.Context, command LocalCommand) (any, 
 	if err := normalizeIdeationBrief(&input.IdeationBrief); err != nil {
 		return nil, err
 	}
+	if err := s.Engine.CheckIdeationPrerequisites(ctx, project); err != nil {
+		return nil, err
+	}
 	if err := s.saveIdeationBrief(ctx, project.ID, input.IdeationBrief); err != nil {
 		return nil, err
 	}

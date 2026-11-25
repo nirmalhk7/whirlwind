@@ -94,7 +94,7 @@ func baselineSARIF(output string) ([]baselineFinding, error) {
 // invocations and structurally valid findings. It does not require zero findings.
 func ValidateJobSARIF(output []byte) error {
 	if len(output) == 0 {
-		return errors.New("Qlty SARIF evidence is empty")
+		return errors.New("empty Qlty SARIF evidence")
 	}
 	if _, err := baselineSARIF(string(output)); err != nil {
 		return fmt.Errorf("invalid Qlty SARIF evidence: %w", err)

@@ -108,11 +108,11 @@ func startCommandWithCleanup(ctx context.Context, cancel context.CancelFunc, cmd
 	}
 	r.diagnostics.Add(1)
 	go func() {
-		defer pipes.stderr.Close()
+		defer closeRPCReader("diagnostics", pipes.stderr)
 		r.readStderr(pipes.stderr)
 	}()
 	go func() {
-		defer pipes.output.Close()
+		defer closeRPCReader("output", pipes.output)
 		r.read(pipes.output)
 	}()
 	return r, nil
@@ -158,6 +158,10 @@ func (r *RPC) handle(m Message) {
 	if len(m.ID) == 0 {
 		return
 	}
+	r.sendCallbackReply(m, v, e, trackAction)
+}
+
+func (r *RPC) sendCallbackReply(m Message, v any, e error, trackAction bool) {
 	reply := map[string]any{"jsonrpc": "2.0", "id": m.ID}
 	if e != nil {
 		reply["error"] = map[string]any{"code": -32603, "message": e.Error()}

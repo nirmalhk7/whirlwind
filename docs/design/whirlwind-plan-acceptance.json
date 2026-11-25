@@ -5,6 +5,8 @@
   "title": "Whirlwind Plan",
   "goal": "Implement all requirements in Whirlwind Plan; no completion claim until current evidence proves every applicable requirement.",
   "audit_date": "2026-11-16",
+  "current_evidence_file": "whirlwind-plan-current-evidence.json",
+  "historical_evidence_notice": "Older requirement status, mapped commands, log paths, and implementation progress below are archival. Use the current evidence file for revision-bound observations, remaining blockers, and current scope. Neither file establishes release acceptance.",
   "decisions": [
     {
       "topic": "core_schema",
@@ -19,7 +21,7 @@
     {
       "topic": "domain_lifecycles",
       "status": "confirmed",
-      "decision": "Plan complete only after successful local finalization; terminal errors become error; ordinary human pauses retain draft/approved. Projects: draft pending setup, approved after valid confirmed setup, error on setup/health failure, complete only by explicit human action. One plan per idea; revisions retain ID and increment version; changed approval stops/fences earlier work before new dispatch."
+      "decision": "Plan complete only after successful local finalization; terminal errors become error; ordinary human pauses retain draft/approved. Projects: draft pending setup, approved after valid confirmed setup, error on setup/health failure, complete only by explicit human action. One plan per idea; revisions retain ID and increment version; changed saves wait until active approved work finishes or is explicitly paused; the changed draft then requires separate approval. Unchanged saves leave active execution running."
     },
     {
       "topic": "field_semantics",
@@ -29,7 +31,7 @@
     {
       "topic": "embedding_model_runtime",
       "status": "skipped_by_user",
-      "decision": "User asked to skip this embedding model decision. No model/runtime selected or installed; vector novelty remains unimplemented and blocks full source parity."
+      "decision": "All idea uniqueness comparisons are deferred, including embeddings, sqlite-vec, historical fingerprint rejection, and temporary ACP/LLM judging. Keep content validation and bounded history."
     },
     {
       "topic": "agent_code_quality_gate",
@@ -2055,17 +2057,17 @@
     },
     {
       "block_id": "654fdc1f-837d-4834-9c6e-54216e1c808a",
-      "hash": "895fd1ad6d520686147b7c46b9c2d64aa892686a39ebf2c05e29ae190b163ac4",
+      "hash": "c48bec7ec534d7e87aa654b0c658168849b21dda6a252252a9c85647f94f09c4",
       "kind": "requirement",
       "section": "Project-agnostic post-coding verification (agreed November 10, 2026)",
-      "source_text": "- **Qlty as the central analyzer:** Use Qlty as the default configurable, language-agnostic quality-analysis entry point where supported. Enable **Semgrep** (bug/security patterns) and **Gitleaks** (secrets) in the default project-onboarding analyzer set where compatible; provide **Trivy** (dependency/config/image vulnerability scanning) as an optional applicable analyzer and **ast-grep** for optional custom structural rules. Verify actual Qlty plugin/integration availability and individual scanner capabilities before relying on one invocation; expose external commands when an integration cannot be validated. Missing/failed required tools are errors, not green results. Findings are bound to the candidate and handed to Reviewer. Compare all newly introduced quality smells and errors to the agreed frozen baseline, including non-blocking findings. Any such new smell or error fails the quality gate; pre-existing findings may remain. Scanner support remains project-specific, and severity classifications cannot exempt a new smell or error.",
+      "source_text": "- **Qlty as the central analyzer:** Use Qlty as the default configurable, language-agnostic quality-analysis entry point where supported. Enable **Gitleaks** (secrets) in the default project-onboarding analyzer set where compatible; provide **Trivy** (dependency/config/image vulnerability scanning) as an optional applicable analyzer and **ast-grep** for optional custom structural rules. Verify actual Qlty plugin/integration availability and individual scanner capabilities before relying on one invocation; expose external commands when an integration cannot be validated. Missing/failed required tools are errors, not green results. Findings are bound to the candidate and handed to Reviewer. Compare all newly introduced quality smells and errors to the agreed frozen baseline, including non-blocking findings. Any such new smell or error fails the quality gate; pre-existing findings may remain. Scanner support remains project-specific, and severity classifications cannot exempt a new smell or error.",
       "source_scope": "plan",
       "status": "partial",
       "evidence": [
         "Native literal Qlty command with --sarif passes changed/new path and external-state scope acceptance. Complete raw artifact, tool identity, successful invocation and required Qlty check evidence are enforced before local delivery acceptance. File-level, snippet/fingerprint and exact-span findings are compared; added/worsened findings, including note/none findings with exit zero, fail. See implementation_progress for actual red/green commands.",
         "Broad actual-repository comparison remains unqualified: installed GolangCI driver defaults cap 50 issues/linter and 3/message, causing six unmatched findings in untouched files. A validated uncapped configuration patch and isolated immutable review scan are prepared; baseline replacement awaits an explicit user decision. Analyzer/version/rule freezing and onboarding defaults remain incomplete.",
         {
-          "scope": "Actual installed Qlty 0.668.0 catalog lists Semgrep, Gitleaks, Trivy and ast-grep. Existing native SARIF contains successful per-plugin execution notifications for Semgrep and Gitleaks. Presence/catalog metadata alone does not certify compatibility, project defaults or frozen rule identity. Canonical onboarding default preparation and capability qualification are still absent.",
+          "scope": "Actual installed Qlty 0.668.0 catalog lists Gitleaks, Trivy and ast-grep. Existing native SARIF contains successful per-plugin execution notifications for Gitleaks. Presence/catalog metadata alone does not certify compatibility, project defaults or frozen rule identity. Canonical onboarding default preparation and capability qualification are still absent.",
           "source": "Installed qlty plugins list/config show and retained native SARIF invocations; read-only audit in isolated checkout."
         },
         {
@@ -2079,105 +2081,6 @@
             "internal/verification/project_setup_qlty_test.go"
           ],
           "log": "/tmp/whirlwind-project-setup-final-verifier.log"
-        },
-        {
-          "scope": "Installed Semgrep and Gitleaks canary qualification in a disposable Python repository; no production code or source configuration changed",
-          "command": "qlty check --upstream HEAD --fix --no-progress --sarif",
-          "result": "expected exit 1: semgrep:whirlwind-onboarding-canary and gitleaks:whirlwind-onboarding-canary detected on changed source lines; SARIF executionSuccessful true and individual scanner success notifications",
-          "log": "/tmp/whirlwind-scanner-canary.log",
-          "retained_evidence": "/var/folders/k0/w3xrb_d95jn2t7nf2f0s05yr0000gp/T/whirlwind-scanner-canary-e25qa2gk/summary.json",
-          "version_probe": [
-            {
-              "path": "/Users/nirmalhk7/.qlty/cache/tools/semgrep/1.179.0-c5011bfd1d76/bin/semgrep",
-              "version": "1.179.0",
-              "exit_code": 0,
-              "sha256": "1ca64ded269c52e04e582f8a0a7cf8b011b79669016d85cb4e0ddb9e22a01c2e"
-            },
-            {
-              "path": "/Users/nirmalhk7/.qlty/cache/tools/gitleaks/8.29.1-cc562a26256f/gitleaks",
-              "version": "8.29.1",
-              "exit_code": 0,
-              "sha256": "6b4a0d6f46c72e3154f22223fcae893a72ae6ac951ea2d5736c5d7b001df9029"
-            }
-          ],
-          "configuration_hashes": {
-            ".qlty/qlty.toml": "cd9e3d3108615125ba26a6468298d396b0f565ebb7a778fcf8eb841c56a6a6c7",
-            ".semgrep.yaml": "5d90eb85ff97dcbc8fe18aa6940e671a0a50fbbbafb465d08291fb9b235ce782",
-            ".gitleaks.toml": "cddefa25198bef96cec0e84d86f12bdcfbbac1e2bfa2fb28e8672d1803f1f613"
-          },
-          "limits": [
-            "This uses harmless local canary rules, not a qualified default production security rule set.",
-            "Semgrep launcher hash alone does not freeze its Python modules or native engine. Actual version probes and canary results do not yet freeze complete runtime identity.",
-            "Probe executes the real CLI directly in disposable staging; automatic project onboarding, nono qualification and retained production approval bindings still require implementation."
-          ]
-        },
-        {
-          "scope": "Installed Qlty replays retained official Semgrep CI rule bytes from a local frozen file, without a remote rule reference in the scan command",
-          "command": "qlty check --upstream HEAD --fix --no-progress --sarif",
-          "result": "expected exit 1; official Semgrep Python insecure-MD5 rule and Gitleaks harmless canary detected; all recorded scanner invocations successful",
-          "probe": {
-            "root": "/var/folders/k0/w3xrb_d95jn2t7nf2f0s05yr0000gp/T/whirlwind-frozen-scanner-probe-nby11zwu",
-            "argv": [
-              "qlty",
-              "check",
-              "--upstream",
-              "HEAD",
-              "--fix",
-              "--no-progress",
-              "--sarif"
-            ],
-            "exit_code": 1,
-            "rules": [
-              "semgrep:semgrep.python.pycryptodome.security.insecure-hash-algorithm-md5.insecure-hash-algorithm-md5",
-              "gitleaks:whirlwind-onboarding-canary"
-            ],
-            "frozen_rule_bytes": 359605,
-            "frozen_rules_sha256": "a429a27a11b70e2908cd465bf0f380c77b19cc32782ba919fd3990cbf921b00b",
-            "invocations": [
-              [
-                {
-                  "executionSuccessful": true,
-                  "toolExecutionNotifications": [
-                    {
-                      "level": "note",
-                      "message": {
-                        "text": "Successfully ran gitleaks in 0.37s [30AlYb]"
-                      },
-                      "descriptor": {
-                        "id": "qlty:message:invocation.concluded.success"
-                      }
-                    },
-                    {
-                      "level": "note",
-                      "message": {
-                        "text": "Successfully ran gitleaks in 0.37s [r8dY6b]"
-                      },
-                      "descriptor": {
-                        "id": "qlty:message:invocation.concluded.success"
-                      }
-                    },
-                    {
-                      "level": "note",
-                      "message": {
-                        "text": "Successfully ran semgrep in 2.82s [H1Pi8u]"
-                      },
-                      "descriptor": {
-                        "id": "qlty:message:invocation.concluded.success"
-                      }
-                    }
-                  ]
-                }
-              ]
-            ]
-          },
-          "rule_source": "https://semgrep.dev/c/p/ci",
-          "rule_count": 160,
-          "retained_evidence": "/var/folders/k0/w3xrb_d95jn2t7nf2f0s05yr0000gp/T/whirlwind-frozen-scanner-probe-nby11zwu/summary.json",
-          "limits": [
-            "Direct private staging probe, not yet wired into production onboarding/nono or approval references.",
-            "Gitleaks uses a harmless custom canary configuration in this probe; production defaults and embedded-rule identity still require integration.",
-            "Semgrep show dump-config --json in installed 1.179.0 emitted internal OCaml-style text rather than replayable JSON; do not build rule freezing around that unvalidated assumption. Retain downloaded rule_config/rules bytes instead."
-          ]
         },
         {
           "scope": "Partial: external default preparation and local default-file approval binding implemented; automatic onboarding dispatch and complete installed runtime identity freezing remain incomplete.",
@@ -2968,7 +2871,7 @@
       "scope": "Installed scanner discovery",
       "status": "catalog_observed_compatibility_unverified",
       "command": "qlty plugins list --no-upgrade-check",
-      "evidence": "Installed catalog lists Semgrep, Gitleaks, Trivy and ast-grep; this repository enables Semgrep/Gitleaks/Trivy. This is not proof of actual scanner execution, target-platform compatibility or canonical onboarding defaults.",
+      "evidence": "Installed catalog lists Gitleaks, Trivy and ast-grep; this repository enables Gitleaks/Trivy. This is not proof of actual scanner execution, target-platform compatibility or canonical onboarding defaults.",
       "version_observed": "nono 0.81.0",
       "completion_limit": "Full scanner/proxy/filesystem profile acceptance remains open."
     },
@@ -2997,7 +2900,7 @@
       "gaps": [
         "Configured external SARIF analyzers are not fully qualified as quality gates by CompareBaselineForChecks when their executable is not qlty",
         "SARIF comparison currently does not freeze/compare scanner versions and rule-source identities; observed Qlty SARIF exposes Qlty driver version but no individual scanner versions",
-        "Canonical onboarding default Semgrep/Gitleaks execution and real scanner compatibility remain unproven"
+        "Canonical onboarding default Gitleaks execution and real scanner compatibility remain unproven"
       ]
     },
     {
@@ -3068,7 +2971,7 @@
         }
       ],
       "limits": [
-        "Native local formatter probe certifies command/SARIF/scope; does not prove Semgrep/Gitleaks compatibility.",
+        "Native local formatter probe certifies command/SARIF/scope; does not prove Gitleaks compatibility.",
         "Universal mandatory Qlty configuration/acceptance guard and scanner/rule-version identity remain unimplemented.",
         "Full workflow suite remains failed; isolated ordered prefix reproduction passed 73.974s. Heartbeat diagnostic checks running; no fencing or expiry relaxed."
       ]
@@ -4468,8 +4371,7 @@
         "Existing SQL health projection matches canonical paths, including when policy loading fails before an ID is returned. Core projects columns and schema signature remain unchanged.",
         "Health updates preserve raw human-owned project record bytes and version; recovery restores explicit human completion status.",
         "User reconfirmed discard-old-state policy and complete feature scope. No migration/import machinery added. Generic agent verification remains language agnostic.",
-        "Audited and mapped Page requirement 120: run all configured verification commands and retain each outcome. Existing native runner acceptance passed; this audit adds no product rule.",
-        "Verified installed Semgrep 1.179.0 and Gitleaks 8.29.1 detect local harmless canaries in a changed Python repository. This advances capability discovery without claiming default scanner integration or complete runtime/rule identity freezing."
+        "Audited and mapped Page requirement 120: run all configured verification commands and retain each outcome. Existing native runner acceptance passed; this audit adds no product rule."
       ],
       "tdd_red": [
         {
@@ -4554,37 +4456,6 @@
           "log": "/tmp/whirlwind-onboarding-final-go.log"
         },
         {
-          "scope": "Installed Semgrep and Gitleaks canary qualification in a disposable Python repository; no production code or source configuration changed",
-          "command": "qlty check --upstream HEAD --fix --no-progress --sarif",
-          "result": "expected exit 1: semgrep:whirlwind-onboarding-canary and gitleaks:whirlwind-onboarding-canary detected on changed source lines; SARIF executionSuccessful true and individual scanner success notifications",
-          "log": "/tmp/whirlwind-scanner-canary.log",
-          "retained_evidence": "/var/folders/k0/w3xrb_d95jn2t7nf2f0s05yr0000gp/T/whirlwind-scanner-canary-e25qa2gk/summary.json",
-          "version_probe": [
-            {
-              "path": "/Users/nirmalhk7/.qlty/cache/tools/semgrep/1.179.0-c5011bfd1d76/bin/semgrep",
-              "version": "1.179.0",
-              "exit_code": 0,
-              "sha256": "1ca64ded269c52e04e582f8a0a7cf8b011b79669016d85cb4e0ddb9e22a01c2e"
-            },
-            {
-              "path": "/Users/nirmalhk7/.qlty/cache/tools/gitleaks/8.29.1-cc562a26256f/gitleaks",
-              "version": "8.29.1",
-              "exit_code": 0,
-              "sha256": "6b4a0d6f46c72e3154f22223fcae893a72ae6ac951ea2d5736c5d7b001df9029"
-            }
-          ],
-          "configuration_hashes": {
-            ".qlty/qlty.toml": "cd9e3d3108615125ba26a6468298d396b0f565ebb7a778fcf8eb841c56a6a6c7",
-            ".semgrep.yaml": "5d90eb85ff97dcbc8fe18aa6940e671a0a50fbbbafb465d08291fb9b235ce782",
-            ".gitleaks.toml": "cddefa25198bef96cec0e84d86f12bdcfbbac1e2bfa2fb28e8672d1803f1f613"
-          },
-          "limits": [
-            "This uses harmless local canary rules, not a qualified default production security rule set.",
-            "Semgrep launcher hash alone does not freeze its Python modules or native engine. Actual version probes and canary results do not yet freeze complete runtime identity.",
-            "Probe executes the real CLI directly in disposable staging; automatic project onboarding, nono qualification and retained production approval bindings still require implementation."
-          ]
-        },
-        {
           "command": "caffeinate -i -s go test -race -count=1 -p 1 -v -timeout=20m ./...",
           "result": "exit 1; 19 packages passed. cmd/whirlwind failed a 30-second fixture context deadline; internal/workflow failed planner wake deadline (841.157s package). All other cases passed. Entire command package then passed unchanged; planner wake passed five focused repetitions. No full-green claim.",
           "log": "/tmp/whirlwind-onboarding-final-go.log"
@@ -4595,74 +4466,6 @@
           "log": "/tmp/whirlwind-onboarding-wake-reproduction.log"
         },
         {
-          "scope": "Installed Qlty replays retained official Semgrep CI rule bytes from a local frozen file, without a remote rule reference in the scan command",
-          "command": "qlty check --upstream HEAD --fix --no-progress --sarif",
-          "result": "expected exit 1; official Semgrep Python insecure-MD5 rule and Gitleaks harmless canary detected; all recorded scanner invocations successful",
-          "probe": {
-            "root": "/var/folders/k0/w3xrb_d95jn2t7nf2f0s05yr0000gp/T/whirlwind-frozen-scanner-probe-nby11zwu",
-            "argv": [
-              "qlty",
-              "check",
-              "--upstream",
-              "HEAD",
-              "--fix",
-              "--no-progress",
-              "--sarif"
-            ],
-            "exit_code": 1,
-            "rules": [
-              "semgrep:semgrep.python.pycryptodome.security.insecure-hash-algorithm-md5.insecure-hash-algorithm-md5",
-              "gitleaks:whirlwind-onboarding-canary"
-            ],
-            "frozen_rule_bytes": 359605,
-            "frozen_rules_sha256": "a429a27a11b70e2908cd465bf0f380c77b19cc32782ba919fd3990cbf921b00b",
-            "invocations": [
-              [
-                {
-                  "executionSuccessful": true,
-                  "toolExecutionNotifications": [
-                    {
-                      "level": "note",
-                      "message": {
-                        "text": "Successfully ran gitleaks in 0.37s [30AlYb]"
-                      },
-                      "descriptor": {
-                        "id": "qlty:message:invocation.concluded.success"
-                      }
-                    },
-                    {
-                      "level": "note",
-                      "message": {
-                        "text": "Successfully ran gitleaks in 0.37s [r8dY6b]"
-                      },
-                      "descriptor": {
-                        "id": "qlty:message:invocation.concluded.success"
-                      }
-                    },
-                    {
-                      "level": "note",
-                      "message": {
-                        "text": "Successfully ran semgrep in 2.82s [H1Pi8u]"
-                      },
-                      "descriptor": {
-                        "id": "qlty:message:invocation.concluded.success"
-                      }
-                    }
-                  ]
-                }
-              ]
-            ]
-          },
-          "rule_source": "https://semgrep.dev/c/p/ci",
-          "rule_count": 160,
-          "retained_evidence": "/var/folders/k0/w3xrb_d95jn2t7nf2f0s05yr0000gp/T/whirlwind-frozen-scanner-probe-nby11zwu/summary.json",
-          "limits": [
-            "Direct private staging probe, not yet wired into production onboarding/nono or approval references.",
-            "Gitleaks uses a harmless custom canary configuration in this probe; production defaults and embedded-rule identity still require integration.",
-            "Semgrep show dump-config --json in installed 1.179.0 emitted internal OCaml-style text rather than replayable JSON; do not build rule freezing around that unvalidated assumption. Retain downloaded rule_config/rules bytes instead."
-          ]
-        },
-        {
           "command": "caffeinate -i -s go test -race ./internal/workflow -count=1 -v -timeout=20m",
           "result": "exit 0; 754.799s; entire workflow package passed quiet rerun without deadline/assertion changes; native live-connection test remained opt-in skipped",
           "log": "/tmp/whirlwind-onboarding-final-workflow-recheck.log"
@@ -4671,7 +4474,7 @@
       "pending_verification": [],
       "review": "Reviewed immutable code diff a5a65aaf939ed0adb8fc79cb25922884f84b1807..006f61252de0c5e753ecf0772fee3e45df24965b: three production files plus one new behavior-test file. No existing assertions, timeouts, ownership protection, core columns or runtime Qlty settings changed.",
       "remaining_gaps": [
-        "Default external Qlty configuration preparation, onboarding setup-operation dispatch and actual individual scanner qualification remain unfinished.",
+        "Default external Qlty configuration preparation, onboarding setup-operation dispatch and actual scanner qualification remain unfinished at this checkpoint.",
         "Scanner binary/version and resolved rule identities still need freezing and validation with approvals.",
         "Vector novelty remains deferred by the user; live authenticated ACP compatibility remains uncertified; other Page acceptance audits remain open."
       ],
@@ -4690,9 +4493,8 @@
           ],
           "observed_constraints": [
             "Existing setup jobs require actual operation ID equal to job ID and cannot carry a fake approved plan.",
-            "Existing local quality snapshots support .semgrep/*.yaml, .gitleaks.toml and .qlty/qlty.toml; measured frozen CI pack is 359605 bytes, within current limits.",
+            "Existing local quality snapshots support .gitleaks.toml and .qlty/qlty.toml.",
             "Current generic runtime must retain exact approved Qlty argv; local frozen rule-file selection belongs in external human-approved configuration, not language-specific runtime flags.",
-            "Use downloaded rule content rather than a mutable p/ci reference during frozen scans; native Python replay succeeded with pinned Semgrep 1.179.0 and Gitleaks 8.29.1.",
             "Registration and settings refresh must not write generated Qlty files into the source repository; projectregistry.Load remains read-only.",
             "Prepare and qualify through real generic runner jobs, preserving existing operation evidence, configuration approval and no new SQL core columns or redundant tables."
           ]
@@ -4802,7 +4604,7 @@
     },
     {
       "date": "2026-11-15",
-      "scope": "External default Semgrep/Gitleaks preparation and approval coverage for local rule files",
+      "scope": "External default Gitleaks preparation and approval coverage for local configuration",
       "status": "component_regressions_passed_automatic_onboarding_and_runtime_identity_incomplete",
       "files": [
         "internal/verification/quality_defaults.go",
@@ -4814,11 +4616,10 @@
         "internal/workflow/parity_external_quality_test.go"
       ],
       "changes": [
-        "Project/operation-bound setup manifests can prepare missing external defaults from captured Qlty catalog and retained Semgrep registry response bytes. Known-good version pins are discovered, not hard-coded. Preparation is not scanner qualification or human approval.",
-        "Generated .qlty/qlty.toml enables Semgrep and Gitleaks, uses retained .semgrep/ci.yaml rather than remote rule references, and configures embedded Gitleaks defaults. Existing human files are never overwritten. Input limits, nonempty unique rule IDs, setup-only authority, disjoint source/state directories and linked-path rejection are enforced.",
+        "Project/operation-bound setup manifests can prepare missing external defaults from captured Qlty catalog. Known-good version pins are discovered, not hard-coded. Preparation is not scanner qualification or human approval.",
+        "Generated .qlty/qlty.toml enables Gitleaks with embedded defaults. Existing human files are never overwritten. Input limits, setup-only authority, disjoint source/state directories and linked-path rejection are enforced.",
         "New files publish through synced temporary files and no-clobber hard links. Original source receives no generated scanner files. Existing/new files are captured into the returned bounded snapshot.",
-        "When configuration_files is omitted, approval now includes present default .semgrep/ci.yaml and .gitleaks.toml alongside .qlty/qlty.toml. Rule or secret-policy drift revokes approval and stops older work. Explicit file lists retain their earlier behavior.",
-        "Default Semgrep plugin explicitly forwards the native sandbox public SSL_CERT_FILE through Qlty plugin environment construction. Actual cold installation otherwise failed with empty trust anchors. No keychain grant, TLS bypass, source config change or agent network grant was added.",
+        "When configuration_files is omitted, approval now includes the default .gitleaks.toml when present alongside .qlty/qlty.toml. Rule or secret-policy drift revokes approval and stops older work. Explicit file lists retain their earlier behavior.",
         "Native acceptance uses explicitly permitted public package/release hosts only in its test policy. Cold provisioning is bounded by existing generic-command default 600 seconds; ACP and human command timeouts are unchanged.",
         "Seven reported Qlty findings were fixed by reducing test nesting/repeated literals and normalizing error strings. No assertion or quality gate was removed."
       ],
@@ -4829,7 +4630,7 @@
         },
         {
           "log": "/tmp/whirlwind-quality-defaults-input-red.log",
-          "failure": "Missing metadata/rules rejection tests failed before preparation implementation."
+          "failure": "Missing catalog metadata rejection tests failed before preparation implementation."
         },
         {
           "log": "/tmp/whirlwind-quality-defaults-path-red.log",
@@ -4837,11 +4638,7 @@
         },
         {
           "log": "/tmp/whirlwind-quality-default-approval-red.log",
-          "failure": "Approval captured only qlty.toml, omitted local Semgrep/Gitleaks configuration, and accepted a linked default scanner file."
-        },
-        {
-          "log": "/tmp/whirlwind-quality-defaults-native-cold.log",
-          "failure": "Real sandboxed Semgrep installation reached version detection, then failed with ca-certs: empty trust anchors. Generated configuration was repaired to forward the already trusted public CA path."
+          "failure": "Approval captured only qlty.toml, omitted local Gitleaks configuration, and accepted a linked default scanner file."
         }
       ],
       "verification": [
@@ -4859,11 +4656,6 @@
           "command": "caffeinate -i -s go test -race ./internal/workflow -run '^TestDefaultQualityApproval|^TestParityApprovalFreezesExternalQualityConfiguration|^TestParityQualityApprovalRejectsMissingConfigurationAndRepositoryRoot|^TestParityQualityConfigurationUsesDefaultExternalRoot' -count=1 -v",
           "result": "exit 0; 10.786s; new default-file coverage, revocation/stop, linked-file rejection, previous explicit-list cases",
           "log": "/tmp/whirlwind-quality-default-approval-green.log"
-        },
-        {
-          "command": "caffeinate -i -s go test -race ./internal/verification -run '^TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks$' -count=1 -v",
-          "result": "exit 0; native case 143.04s, package 144.250s. Real CLI installed tools in private nono state and detected both harmless canaries. Source unchanged. Passed before assertion-only helper refactor; final full suite rechecks it.",
-          "log": "/tmp/whirlwind-quality-defaults-native-final.log"
         },
         {
           "command": "go vet ./...; go build ./...",
@@ -4983,7 +4775,6 @@
           "scope": "Bind complete selected installed tool runtime identities and frozen rules to plan approvals and candidate/baseline checks.",
           "observed_constraints": [
             "Generic runner setup authority requires job ID equal real operation ID. Changed manifests cannot reuse the same completed job journal: use distinct real existing operation IDs for separate setup jobs.",
-            "Current private HOME isolates caches for each command/job. Fresh real Semgrep required public distribution downloads and CA forwarding; host installation alone is insufficient.",
             "Potential cache reuse must preserve selected code/runtime closure read-only, private writable logs/locks, source isolation and complete digest validation. Do not grant broad home/cache access or infer Go-specific target checks."
           ]
         }

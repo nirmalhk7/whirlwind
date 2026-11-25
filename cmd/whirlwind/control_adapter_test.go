@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +16,19 @@ import (
 	"whirlwind/internal/store"
 	"whirlwind/internal/workflow"
 )
+
+func TestFinalizationInspectionForwardsDiffOffset(t *testing.T) {
+	database, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	executor := localCommandExecutor{api: httpapi.New(database, nil, "")}
+	_, err = executor.Execute(context.Background(), control.Request{Operation: "finalization.inspect", PlanID: "plan", DiffOffset: -1})
+	if err == nil || !strings.Contains(err.Error(), "diff offset is outside the supported range") {
+		t.Fatalf("inspection did not reject invalid diff offset: %v", err)
+	}
+}
 
 func TestProjectSetupRetryTraversesSupervisorIPCAndCommandAdapter(t *testing.T) {
 	ctx := context.Background()

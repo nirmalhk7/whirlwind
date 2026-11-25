@@ -18,7 +18,7 @@
 __pycache__/
 *.pyc
 
-# Local development tooling.
-/node_modules/
+# Local source-check tools
 /.tools/
+/node_modules/
 /.venv/

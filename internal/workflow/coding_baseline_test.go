@@ -12,6 +12,10 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	codingBaselineFixtureOldTests = "old-tests"
+)
+
 type codingBaselineOutcome struct{ name, action string }
 
 func codingBaselineResult(tests ...codingBaselineOutcome) verification.Result {
@@ -122,4 +126,88 @@ func TestCodingBaselinePreservesTestFirstRedAndNonRegressionGate(t *testing.T) {
 	assertCodingBaselinePhase(t, run, base, "red", false)
 	run = codingBaselineFixture(t, base)
 	assertCodingBaselinePhase(t, run, base, "invalid", false)
+}
+
+func TestCodingInvalidRegressionNeverClaimsACompletedPass(t *testing.T) {
+	base := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"})
+	red := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"}, codingBaselineOutcome{"TestRegression", "fail"})
+	green := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"})
+	run := codingBaselineFixture(t, green)
+	saveCodingBaselineRed(t, run, "recorded-red", red)
+
+	var err error
+	run.phase, err = run.phaseAgainstBaseline(t.Context(), codingOrigin{Production: "original", Tests: codingBaselineFixtureOldTests},
+		verification.Report{Passed: base.Passed, Results: []verification.Result{base}})
+	requireWorkflowSuccess(t, err)
+	got := run.output()
+	if got.Phase != "invalid" || got.Passed || got.ExitCode == nil || *got.ExitCode != 0 ||
+		!strings.Contains(got.ValidationError, "omitted regression test") || !strings.Contains(got.ValidationError, "example/TestRegression") {
+		t.Fatalf("an aggregate pass was mistaken for valid regression evidence: %+v", got)
+	}
+}
+
+func TestCodingInvalidRegressionRetainsRawResultAndSpecificDiagnostic(t *testing.T) {
+	ctx := t.Context()
+	base := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"})
+	red := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"}, codingBaselineOutcome{"TestRegression", "fail"})
+	green := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"}, codingBaselineOutcome{"TestRegression", "skip"})
+	run := codingBaselineFixture(t, green)
+	saveCodingBaselineRed(t, run, "recorded-red", red)
+	a := run.attempt
+	a.id = "candidate-attempt"
+	run.current = model.Project{ID: a.task.ProjectID, PolicyHash: "fixture-policy"}
+	run.check.Command = base.Command
+	run.entry.Snapshot = "stored-candidate"
+	run.entry.Files = map[string]string{"main.go": "implemented", "main_test.go": "regression"}
+	requireWorkflowSuccess(t, a.Store.Put(ctx, "sessions", a.id, model.Attempt{AttemptID: a.id, Task: a.task.ID, Role: "code"}, 0))
+	origin := codingOrigin{Production: "original", Tests: codingBaselineFixtureOldTests}
+	requireWorkflowSuccess(t, a.Store.Put(ctx, "tdd_origins", codingOriginKey(a.task, a.input.UnitID), origin, 0))
+	baseline := verification.Report{Passed: true, Results: []verification.Result{base}}
+	// Use the persisted baseline precisely as the real check would; no
+	// platform-specific sandbox or agent is needed to exercise its gate.
+	key := qualityBaselineKey(a.task, run.current.PolicyHash, structuredChecks([]model.Check{run.check}))
+	requireWorkflowSuccess(t, a.Store.Put(ctx, "quality_baselines", key, baseline, 0))
+	requireWorkflowSuccess(t, run.persist(ctx))
+	rows, err := a.Store.List(ctx, "tdd_checks")
+	requireWorkflowSuccess(t, err)
+	saved, err := store.Decode[tddCheck](rows[len(rows)-1])
+	requireWorkflowSuccess(t, err)
+	if saved.Phase != "invalid" || saved.Passed || saved.RawResult == nil || !saved.RawResult.Passed ||
+		saved.RawResult.ExitCode == nil || *saved.RawResult.ExitCode != 0 || !strings.Contains(saved.ValidationError, "did not explicitly pass") {
+		t.Fatalf("stored invalid check lost the reason or raw process result: %+v", saved)
+	}
+	_, artifact, err := a.Store.Artifact(ctx, saved.OutputArtifact)
+	requireWorkflowSuccess(t, err)
+	if string(artifact) != green.Output {
+		t.Fatal("validation diagnosis changed the retained raw test evidence")
+	}
+	if pairs := currentTDDPairs(rows, a.task, run.entry.Files); len(pairs) != 0 {
+		t.Fatal("invalid evidence became eligible as a reviewed red/green pair")
+	}
+}
+
+func TestCodingInvalidRegressionExplainsMissingRedAndRunnerProblems(t *testing.T) {
+	base := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"})
+	baseline := verification.Report{Passed: true, Results: []verification.Result{base}}
+	origin := codingOrigin{Production: "original", Tests: codingBaselineFixtureOldTests}
+	for _, tc := range []struct {
+		name, want string
+		run        func() verification.Result
+	}{
+		{"missing recorded red", "no matching test-first red", func() verification.Result { return base }},
+		{"runner never started", "runtime bootstrap failed", func() verification.Result {
+			return verification.Result{Name: base.Name, Command: base.Command, Error: "runtime bootstrap failed"}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			run := codingBaselineFixture(t, tc.run())
+			var err error
+			run.phase, err = run.phaseAgainstBaseline(t.Context(), origin, baseline)
+			requireWorkflowSuccess(t, err)
+			got := run.output()
+			if got.Phase != "invalid" || got.Passed || !strings.Contains(got.ValidationError, tc.want) {
+				t.Fatalf("invalid check lost its reason: %+v", got)
+			}
+		})
+	}
 }

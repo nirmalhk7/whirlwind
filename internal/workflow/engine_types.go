@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"whirlwind/internal/github"
@@ -12,6 +13,7 @@ import (
 )
 
 type Engine struct {
+	dispatchHealth           atomic.Pointer[model.DispatchHealth]
 	Store                    *store.Store
 	GitHub                   github.Client
 	Root                     string
@@ -28,6 +30,7 @@ type Engine struct {
 	runnerWait               sync.WaitGroup
 	closing                  bool
 	wake                     chan struct{}
+	rolePops                 chan rolePop
 	providerStatuses         providerStatusCache
 	retryWait                func(context.Context, time.Duration) error
 	attemptTimeout           time.Duration

@@ -7,6 +7,24 @@ import (
 	"testing"
 )
 
+func TestLocalPlanInspectionReturnsSavedMarkdown(t *testing.T) {
+	s, plan := workflowLocalPlan(t)
+	response, err := s.ExecuteLocal(context.Background(), LocalCommand{Operation: "inspect.plan", PlanID: plan.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Content string `json:"content"`
+		Hash    string `json:"hash"`
+	}
+	if err := json.Unmarshal(response, &document); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(document.Content, "# ") || document.Hash == "" {
+		t.Fatalf("inspection omitted Markdown or content hash: %s", response)
+	}
+}
+
 func TestParityPlanDocumentCommandsSaveAndReplayActualContent(t *testing.T) {
 	s, plan := workflowLocalPlan(t)
 	ctx := context.Background()

@@ -196,23 +196,15 @@ func TestExpiredWorkerLeaseFencesLateResultsForEveryRole(t *testing.T) {
 		t.Run(role, func(t *testing.T) {
 			e, task, cwd := testEngine(t)
 			project, err := e.Project(context.Background(), task.ProjectID)
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireWorkflowSuccess(t, err)
 			attempt := newLeaseTestAttempt(e, task, project, cwd, "expired-"+role)
 			attempt.input.Role = role
-			if err := attempt.launch(); err != nil {
-				t.Fatal(err)
-			}
+			requireWorkflowSuccess(t, attempt.launch())
 			state := storedAttempt(t, e, attempt.id)
 			state.LeaseExpiresAt = time.Now().UTC().Add(-time.Second).Format(time.RFC3339Nano)
 			record, err := e.Store.Get(context.Background(), "sessions", attempt.id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := e.Store.Put(context.Background(), "sessions", attempt.id, state, record.Version); err != nil {
-				t.Fatal(err)
-			}
+			requireWorkflowSuccess(t, err)
+			requireWorkflowSuccess(t, e.Store.Put(context.Background(), "sessions", attempt.id, state, record.Version))
 			if err := attempt.finish(provider.Output{Text: "late response"}, nil, time.Now().Add(-time.Second)); !errors.Is(err, store.ErrConflict) {
 				t.Fatalf("expired %s owner committed a late result: %v", role, err)
 			}

@@ -13,16 +13,16 @@ import (
 )
 
 // PrepareQualityDefaults publishes only missing external configuration files.
-// Captured catalog/rule bytes are inputs, not proof that scanners executed.
+// The captured catalog supplies the scanner version. Qualification verifies execution.
 // The resulting configuration still needs qualification and human approval.
-func (m JobManifest) PrepareQualityDefaults(catalog, registry []byte) (model.QualitySnapshot, error) {
+func (m JobManifest) PrepareQualityDefaults(catalog []byte) (model.QualitySnapshot, error) {
 	if err := m.validateDefinition(); err != nil {
 		return model.QualitySnapshot{}, err
 	}
 	if m.Purpose != ProjectSetupPurpose || m.Quality == nil {
 		return model.QualitySnapshot{}, errors.New("only project setup may prepare external defaults")
 	}
-	files, err := defaultQualityFiles(catalog, registry)
+	files, err := defaultQualityFiles(catalog)
 	if err != nil {
 		return model.QualitySnapshot{}, err
 	}
@@ -55,12 +55,8 @@ func (m JobManifest) PrepareQualityDefaults(catalog, registry []byte) (model.Qua
 	return snapshot, snapshot.Validate()
 }
 
-func defaultQualityFiles(catalog, registry []byte) (map[string]string, error) {
-	versions, err := defaultScannerVersions(catalog)
-	if err != nil {
-		return nil, err
-	}
-	rules, err := frozenSemgrepRules(registry)
+func defaultQualityFiles(catalog []byte) (map[string]string, error) {
+	version, err := defaultGitleaksVersion(catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -69,21 +65,12 @@ func defaultQualityFiles(catalog, registry []byte) (map[string]string, error) {
 name = "default"
 default = true
 [[plugin]]
-name = "semgrep"
-version = %s
-[[plugin]]
 name = "gitleaks"
 version = %s
-[[plugins.definitions.semgrep.environment]]
-name = "SSL_CERT_FILE"
-value = "${env.SSL_CERT_FILE}"
-[plugins.definitions.semgrep.drivers.lint]
-script = "semgrep --metrics=off --disable-version-check --config .semgrep/ci.yaml --sarif --output=${tmpfile} ${target}"
-`, tomlQualityString(versions["semgrep"]), tomlQualityString(versions["gitleaks"]))
+`, tomlQualityString(version))
 	return map[string]string{
-		".qlty/qlty.toml":  configuration,
-		".semgrep/ci.yaml": rules,
-		".gitleaks.toml":   "[extend]\nuseDefault = true\n",
+		".qlty/qlty.toml": configuration,
+		".gitleaks.toml":  "[extend]\nuseDefault = true\n",
 	}, nil
 }
 
@@ -92,9 +79,9 @@ func tomlQualityString(value string) string {
 	return string(encoded)
 }
 
-func defaultScannerVersions(raw []byte) (map[string]string, error) {
+func defaultGitleaksVersion(raw []byte) (string, error) {
 	if len(raw) > 4<<20 {
-		return nil, errors.New("qlty catalog exceeds retained limit")
+		return "", errors.New("qlty catalog exceeds retained limit")
 	}
 	var catalog struct {
 		Plugins struct {
@@ -105,56 +92,11 @@ func defaultScannerVersions(raw []byte) (map[string]string, error) {
 		} `yaml:"plugins"`
 	}
 	if err := yaml.Unmarshal(raw, &catalog); err != nil {
-		return nil, fmt.Errorf("read Qlty scanner catalog: %w", err)
+		return "", fmt.Errorf("read Qlty scanner catalog: %w", err)
 	}
-	versions := map[string]string{}
-	for _, name := range []string{"semgrep", "gitleaks"} {
-		definition := catalog.Plugins.Definitions[name]
-		_, hasLint := definition.Drivers["lint"]
-		if strings.TrimSpace(definition.Version) == "" || !hasLint {
-			return nil, fmt.Errorf("qlty catalog lacks version or lint capability for %s", name)
-		}
-		versions[name] = definition.Version
+	definition := catalog.Plugins.Definitions["gitleaks"]
+	if _, hasLint := definition.Drivers["lint"]; strings.TrimSpace(definition.Version) == "" || !hasLint {
+		return "", errors.New("qlty catalog lacks version or lint capability for gitleaks")
 	}
-	return versions, nil
-}
-
-func frozenSemgrepRules(raw []byte) (string, error) {
-	if len(raw) > 4<<20 {
-		return "", errors.New("semgrep rule response exceeds retained limit")
-	}
-	var response map[string]json.RawMessage
-	content := raw
-	if err := json.Unmarshal(raw, &response); err == nil {
-		if wrapped, ok := response["rule_config"]; ok {
-			var text string
-			if err := json.Unmarshal(wrapped, &text); err == nil {
-				content = []byte(text)
-			} else {
-				content = wrapped
-			}
-		}
-	}
-	var configuration struct {
-		Rules []struct {
-			ID string `yaml:"id"`
-		} `yaml:"rules"`
-	}
-	if len(content) == 0 || len(content) > 1<<20 {
-		return "", errors.New("frozen Semgrep rules exceed configuration limit")
-	}
-	if err := yaml.Unmarshal(content, &configuration); err != nil {
-		return "", fmt.Errorf("read frozen Semgrep rules: %w", err)
-	}
-	if len(configuration.Rules) == 0 {
-		return "", errors.New("frozen Semgrep rule set is empty")
-	}
-	seen := map[string]bool{}
-	for _, rule := range configuration.Rules {
-		if strings.TrimSpace(rule.ID) == "" || seen[rule.ID] {
-			return "", errors.New("frozen Semgrep rules require unique nonempty IDs")
-		}
-		seen[rule.ID] = true
-	}
-	return string(content), nil
+	return definition.Version, nil
 }

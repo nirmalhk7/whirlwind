@@ -1,5 +1,27 @@
 package model
 
+import (
+	"slices"
+)
+
+type Issue struct {
+	Number    int      `json:"number"`
+	Title     string   `json:"title"`
+	Body      string   `json:"body"`
+	UpdatedAt string   `json:"updated_at"`
+	State     string   `json:"state"`
+	Labels    []string `json:"labels"`
+	URL       string   `json:"url"`
+}
+
+// Eligible requires an open issue carrying the whirlwind:ready label before automatic execution.
+func (i Issue) Eligible() bool {
+	if i.State != "OPEN" && i.State != "open" {
+		return false
+	}
+	return slices.Contains(i.Labels, "whirlwind:ready")
+}
+
 type ExecutionPlan struct {
 	IdeaID                 string                  `json:"idea_id,omitempty"`
 	IdeationRunID          string                  `json:"ideation_run_id,omitempty"`
@@ -76,17 +98,4 @@ type Unit struct {
 	Worktree     string   `json:"worktree,omitempty"`
 	Branch       string   `json:"branch,omitempty"`
 	Commit       string   `json:"commit,omitempty"`
-}
-
-type Handoff struct {
-	AutofixProposals  []AutofixHandoff `json:"autofix_proposals,omitempty"`
-	Version           int              `json:"version"`
-	Worktree          string           `json:"worktree"`
-	Branch            string           `json:"branch"`
-	Commits           []string         `json:"commits"`
-	Checkpoints       []string         `json:"checkpoints"`
-	CompletedWork     []string         `json:"completed_work"`
-	CompletedCriteria []string         `json:"completed_criteria"`
-	FailingTests      []string         `json:"failing_tests"`
-	NextAction        string           `json:"next_action"`
 }

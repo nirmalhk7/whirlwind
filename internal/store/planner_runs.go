@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"time"
 
 	"whirlwind/internal/model"
@@ -17,7 +19,8 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 	if err := json.Unmarshal(data, &attempt); err != nil {
 		return err
 	}
-	if err := validatePlannerAttemptRevision(before, attempt); err != nil {
+	previous, err := previousPlannerAttempt(before, attempt)
+	if err != nil {
 		return err
 	}
 	if attempt.IdeaID == "" {
@@ -26,25 +29,93 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 	if attempt.Role != "plan" || attempt.AttemptID != id {
 		return ErrConflict
 	}
+	if err := ensurePlannerAttemptRun(ctx, tx, attempt, len(before) == 0); err != nil {
+		return err
+	}
+	if !attempt.Finished || attempt.Status == "complete" || attempt.Status == model.AttemptAwaitingPlanPublication {
+		return nil
+	}
+	return finishFailedPlannerAttempt(ctx, tx, attempt, previous)
+}
+
+func ensurePlannerAttemptRun(ctx context.Context, tx *sql.Tx, attempt model.Attempt, newAttempt bool) error {
 	idea, version, err := plannerAttemptIdeaTx(ctx, tx, attempt)
 	if err != nil {
 		return err
 	}
-	if len(before) == 0 {
-		if err := createPlannerRunTx(ctx, tx, id, attempt, idea, version); err != nil {
-			return err
-		}
-	} else if err := validateExistingPlannerRunTx(ctx, tx, id, idea.ID); err != nil {
+	if !newAttempt {
+		return validateExistingPlannerRunTx(ctx, tx, attempt.AttemptID, idea.ID)
+	}
+	plan, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", attempt.Task)
+	if err != nil {
 		return err
 	}
-	if attempt.Finished && attempt.Status != "complete" {
-		result, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='error',error_reason=?,finished_at=? WHERE planner_run_id=? AND status='in_process'", attempt.Error, attempt.FinishedAt, id)
-		if err != nil {
+	if plan.Stage != "planning" || plan.PlanVersion != attempt.PlanVersion {
+		return ErrConflict
+	}
+	return createPlannerRunTx(ctx, tx, attempt.AttemptID, attempt, idea, version)
+}
+
+func finishFailedPlannerAttempt(ctx context.Context, tx *sql.Tx, attempt, previous model.Attempt) error {
+	id := attempt.AttemptID
+	if plannerPublicationCandidate(previous) {
+		if attempt.Status == "cancelled" {
+			if err := checkPlannerCancellationFileTx(ctx, tx, id); err != nil {
+				return err
+			}
+		}
+		if err := finalizePlannerMetricTx(ctx, tx, id, false); err != nil {
 			return err
 		}
-		return requireOneRow(result)
 	}
-	return nil
+	result, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='error',error_reason=?,finished_at=? WHERE planner_run_id=? AND status='in_process'", attempt.Error, attempt.FinishedAt, id)
+	if err != nil {
+		return err
+	}
+	return requireOneRow(result)
+}
+
+// CommitPlannerPublication holds the SQLite writer lock from the checked plan
+// transition through the atomic file publication. A stale lease or cancellation
+// therefore prevents the publisher from running. If the process stops after the
+// file is in place, restart can reuse it at the persisted PlannerRunLocation.
+func (s *Store) CommitPlannerPublication(ctx context.Context, plan model.ExecutionPlan, expected int, publish func() error) error {
+	if staged(ctx) != nil || expected < 1 || plan.IdeaID == "" || plan.Stage != "plan_approval" {
+		return ErrConflict
+	}
+	err := s.Transaction(ctx, func(tx *sql.Tx) error {
+		if err := put(ctx, tx, "execution_plans", plan.ID, plan, expected); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return publish()
+	})
+	if err != nil {
+		return err
+	}
+	return s.syncCommittedRunLogs(ctx, []Change{{Kind: "execution_plans", ID: plan.ID}})
+}
+
+// A file can survive a crash after publication but before SQL commit. Detect
+// it under the same writer lock and keep it available for the original plan.
+func checkPlannerCancellationFileTx(ctx context.Context, tx *sql.Tx, attemptID string) error {
+	var path sql.NullString
+	if err := tx.QueryRowContext(ctx, "SELECT markdown_path FROM planner_runs WHERE planner_run_id=?", attemptID).Scan(&path); err != nil {
+		return err
+	}
+	if !path.Valid || path.String == "" {
+		return nil
+	}
+	_, err := os.Lstat(path.String)
+	if err == nil {
+		return fmt.Errorf("%w: Planner Markdown is already published; allow recovery to finish the plan", ErrConflict)
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 // PlannerRunLocation pins the publication destination before writing the file.
@@ -109,6 +180,9 @@ func failPlannerIdeaTx(ctx context.Context, tx *sql.Tx, plan model.ExecutionPlan
 		return nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := failUnpublishedPlannerSessionTx(ctx, tx, plan, now); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='error',error_reason=?,finished_at=? WHERE idea_id=? AND status='in_process'", plan.Error, now, idea.ID); err != nil {
 		return err
 	}
@@ -116,17 +190,17 @@ func failPlannerIdeaTx(ctx context.Context, tx *sql.Tx, plan model.ExecutionPlan
 	return put(ctx, tx, "ideas", idea.ID, idea, version)
 }
 
-func validatePlannerAttemptRevision(before []byte, attempt model.Attempt) error {
+func previousPlannerAttempt(before []byte, attempt model.Attempt) (model.Attempt, error) {
 	var old model.Attempt
 	if len(before) > 0 {
 		if err := json.Unmarshal(before, &old); err != nil {
-			return err
+			return old, err
 		}
 		if old.IdeaID != attempt.IdeaID {
-			return ErrConflict
+			return old, ErrConflict
 		}
 	}
-	return nil
+	return old, nil
 }
 
 func plannerAttemptIdeaTx(ctx context.Context, tx *sql.Tx, attempt model.Attempt) (model.Idea, int, error) {
@@ -157,9 +231,12 @@ func createPlannerRunTx(ctx context.Context, tx *sql.Tx, id string, attempt mode
 	}
 	if idea.DecisionStatus == "approved" {
 		idea.DecisionStatus, idea.ErrorReason = "in_process", ""
-		if err := put(ctx, tx, "ideas", idea.ID, idea, version); err != nil {
-			return err
-		}
+	}
+	// Every new claim, including a fallback, advances the idea version.
+	// A cancellation that observed no active claim cannot miss one that
+	// commits before that cancellation's version check.
+	if err := put(ctx, tx, "ideas", idea.ID, idea, version); err != nil {
+		return err
 	}
 	_, err := tx.ExecContext(ctx, "INSERT INTO planner_runs(planner_run_id,idea_id,idea_run_id,timestamp,status) VALUES(?,?,?,?,'in_process')", id, idea.ID, idea.RunID, attempt.StartedAt)
 	if err != nil {
@@ -204,12 +281,22 @@ func completePlannerPublicationTx(ctx context.Context, tx *sql.Tx, plan model.Ex
 	if idea.ID != plan.IdeaID || idea.ProjectID != plan.ProjectID || idea.RunID != plan.IdeationRunID || plan.PlanDocument == nil || plan.PlanDocument.Path == "" || plan.PlanDocument.Hash == "" || plan.Plan == nil || len(plan.Plan.Requirements) == 0 {
 		return ErrConflict
 	}
-	attempt, _, err := txResource[model.Attempt](ctx, tx, "sessions", plan.LastAttemptID)
+	attempt, attemptVersion, err := txResource[model.Attempt](ctx, tx, "sessions", plan.LastAttemptID)
 	if err != nil {
 		return err
 	}
-	if attempt.Task != plan.ID || !attempt.Finished || attempt.Status != "complete" || attempt.Success == nil || !*attempt.Success {
+	if attempt.Task != plan.ID || attempt.PlanVersion != plan.PlanVersion || !plannerPublicationCandidate(attempt) {
 		return ErrConflict
+	}
+	if attempt.Status == model.AttemptAwaitingPlanPublication {
+		success := true
+		attempt.Status, attempt.Success = "complete", &success
+		if err := put(ctx, tx, "sessions", attempt.AttemptID, attempt, attemptVersion); err != nil {
+			return err
+		}
+		if err := finalizePlannerMetricTx(ctx, tx, attempt.AttemptID, true); err != nil {
+			return err
+		}
 	}
 	result, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='completed',plan_id=?,finished_at=? WHERE planner_run_id=? AND status='in_process' AND markdown_path=?", plan.ID, attempt.FinishedAt, plan.LastAttemptID, plan.PlanDocument.Path)
 	if err != nil {

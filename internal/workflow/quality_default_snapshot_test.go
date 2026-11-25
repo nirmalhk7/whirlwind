@@ -9,8 +9,8 @@ import (
 
 const defaultSnapshotSecretPath = ".gitleaks.toml"
 
-func TestDefaultQualityApprovalFreezesLocalRuleAndSecretConfiguration(t *testing.T) {
-	for _, changed := range []string{".semgrep/ci.yaml", defaultSnapshotSecretPath} {
+func TestDefaultQualityApprovalFreezesQltyAndSecretConfiguration(t *testing.T) {
+	for _, changed := range []string{".qlty/qlty.toml", defaultSnapshotSecretPath} {
 		t.Run(changed, func(t *testing.T) {
 			assertDefaultQualityApprovalDrift(t, changed)
 		})
@@ -30,7 +30,7 @@ func assertDefaultQualityApprovalDrift(t *testing.T, changed string) {
 	}
 	saved, _ := localStoredTask(t, e, plan.ID)
 	snapshot, err := approvedQualitySnapshot(saved)
-	if err != nil || snapshot == nil || len(snapshot.Files) != 3 {
+	if err != nil || snapshot == nil || len(snapshot.Files) != len(files) {
 		t.Fatalf("default approval omitted local scanner policy: %+v %v", snapshot, err)
 	}
 	for path, content := range files {
@@ -75,7 +75,6 @@ func writeDefaultQualitySnapshotFixture(t *testing.T, root string) map[string]st
 	files := map[string]string{
 		".qlty/qlty.toml":         externalQltyEmptyConfig,
 		defaultSnapshotSecretPath: "[extend]\nuseDefault = true\n",
-		".semgrep/ci.yaml":        "rules:\n- id: original\n  pattern: print(...)\n  languages: [python]\n  severity: WARNING\n  message: Local rule\n",
 	}
 	for path, content := range files {
 		path = filepath.Join(root, "config", path)

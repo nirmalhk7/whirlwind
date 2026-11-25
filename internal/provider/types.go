@@ -9,6 +9,8 @@ import (
 )
 
 type Input struct {
+	AgentHooks             model.AgentHookChecks `json:"agent_hooks,omitzero"`
+	hookRuntimeDir         string
 	PlannerOutputDirectory string
 	PlannerPublicationPath string
 	ReadinessOnly          bool
@@ -35,12 +37,14 @@ type Input struct {
 	Policy                 model.Policy
 	ReadOnly               bool
 }
+
 type ToolEvidence struct {
 	Ref     string `json:"ref"`
 	Tool    string `json:"tool"`
 	CallID  string `json:"call_id"`
 	Success bool   `json:"success"`
 }
+
 type Output struct {
 	ToolCalls         []ToolEvidence        `json:"tool_calls,omitempty"`
 	Integrations      []model.Integration   `json:"integrations,omitempty"`
@@ -53,12 +57,14 @@ type Output struct {
 	Tokens            *int64                `json:"tokens,omitempty"`
 	Cost              *float64              `json:"cost,omitempty"`
 }
+
 type Permission struct {
 	Tool    string          `json:"tool"`
 	Command []string        `json:"command,omitempty"`
 	Paths   []string        `json:"paths,omitempty"`
 	Raw     json.RawMessage `json:"raw"`
 }
+
 type Hooks struct {
 	FinalizeDelivery func(context.Context) (FinalizationResult, error)
 	RunCheck         func(context.Context, string) (CheckResult, error)
@@ -66,12 +72,15 @@ type Hooks struct {
 	Event            func(string, any)
 	Permission       func(context.Context, Permission) (bool, error)
 }
+
 type Adapter interface {
 	// Run executes or resumes one agent prompt and exposes events, questions, and permissions through hooks.
 	Run(context.Context, Input, Hooks) (Output, error)
 }
+
 type CheckResult struct {
 	Phase            string `json:"phase,omitempty"`
+	ValidationError  string `json:"validation_error,omitempty"`
 	BaselineAccepted bool   `json:"baseline_accepted,omitempty"`
 	ExecutionProfile string `json:"execution_profile"`
 	CheckID          string `json:"check_id"`
@@ -84,4 +93,3 @@ type CheckResult struct {
 	Truncated        bool   `json:"truncated"`
 	DurationMS       int64  `json:"duration_ms"`
 }
-type ProcessAdapter struct{ Provider model.Provider }

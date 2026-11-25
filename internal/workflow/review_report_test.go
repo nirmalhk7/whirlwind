@@ -6,10 +6,27 @@ import (
 	"os"
 	"testing"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 	"whirlwind/internal/verification"
 )
+
+func TestManagedReviewerRejectsOfflineDockerEvidence(t *testing.T) {
+	identity := verification.RuntimeIdentity{Kind: "nono", Launcher: "/native", ExecutionID: "check", Generation: 1,
+		SandboxID: "sandbox", SandboxName: "sandbox", LifecycleFile: "/lifecycle", GatewayName: "gateway", GatewayEndpoint: "http://127.0.0.1", Workspace: "workspace", CleanupVerified: true}
+	if !runtimeIdentityComplete(identity) {
+		t.Fatal("the positive control must supply complete managed evidence")
+	}
+	identity.Kind = execution.OfflineDockerKind
+	if runtimeIdentityComplete(identity) {
+		t.Fatal("offline Docker acquired managed runtime authority")
+	}
+	result := verification.JobResult{Status: "pass", Result: verification.Result{Passed: true, Runtime: identity}}
+	if _, err := completeRunnerStreams(verification.JobManifest{}, verification.JobReport{Passed: true, Results: []verification.JobResult{result}}); err == nil {
+		t.Fatal("standalone offline evidence was accepted for managed Review or Finalizer")
+	}
+}
 
 const acceptedCandidateRevision = "candidate-sha"
 
@@ -92,7 +109,7 @@ func (f *acceptedReviewFixture) completeReport(t *testing.T) verification.Report
 	zero := 0
 	report := verification.Report{Passed: true, Results: make([]verification.Result, 0, len(checks))}
 	for index, check := range checks {
-		identity := acceptedCheckRuntime(fmt.Sprintf("check-run-%d", index))
+		identity := acceptedCheckRuntime(fmt.Sprintf("%s-check-run-%d", f.task.VerificationID, index))
 		result := verification.Result{Name: check.Name, Command: append([]string(nil), check.Command...), Passed: true, ExitCode: &zero, Runtime: identity}
 		if isQltyVerification(&result) {
 			result.Output = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty"}},"invocations":[{"executionSuccessful":true}],"results":[]}]}`
@@ -207,6 +224,7 @@ func qltyResultIndex(t *testing.T, report verification.Report) int {
 func acceptedExitZeroQltyAdvisory(t *testing.T, f *acceptedReviewFixture, raw verification.Result) verification.Result {
 	t.Helper()
 	raw.Output = unchangedQltySmellSARIF
+	raw.QualityIdentity = setupQltyFixtureIdentity(t.TempDir())
 	zero := 0
 	raw.ExitCode, raw.Passed = &zero, false
 	raw.Error = "qlty reported 1 code smells; repair findings before review"

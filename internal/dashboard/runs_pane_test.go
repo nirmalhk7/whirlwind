@@ -11,6 +11,10 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	runsFixtureReviewModel = "review-model"
+)
+
 func runList(d *Dashboard) *tview.List {
 	d.focus = 2
 	return d.focusedPanel().(*tview.List)
@@ -28,7 +32,7 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 		"sessions": {
 			record("old", model.Attempt{AttemptID: "old", ProjectID: "p", Role: "code", Provider: "codex", Model: "old-model", Status: "complete", Finished: true, StartedAt: "2026-11-08T09:00:00Z"}),
 			record("latest", model.Attempt{AttemptID: "latest", ProjectID: "p", Role: "ideate", Provider: "cursor", ResolvedModel: "live-model", EffectiveThinking: &model.ThinkingChoice{Value: "high"}, Status: "running", StartedAt: "2026-11-08T12:00:00+02:00"}),
-			record("failed", model.Attempt{AttemptID: "failed", Task: "t", Role: "review", Provider: "claude", Model: "review-model", Thinking: &model.ThinkingChoice{Value: "low"}, Status: "failed", StartedAt: "2026-11-08T09:30:00Z", Error: "provider disconnected"}),
+			record("failed", model.Attempt{AttemptID: "failed", Task: "t", Role: "review", Provider: "claude", Model: runsFixtureReviewModel, Thinking: &model.ThinkingChoice{Value: "low"}, Status: "failed", StartedAt: "2026-11-08T09:30:00Z", Error: "provider disconnected"}),
 			record("other", model.Attempt{AttemptID: "other", ProjectID: "other", Role: "plan", Provider: "hidden", Status: "running", StartedAt: "2026-11-09T10:00:00Z"}),
 		},
 	})
@@ -38,6 +42,25 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 		t.Fatalf("Runs did not replace Plans: %s", view)
 	}
 	list := runList(d)
+	assertNewestRunRows(t, list)
+	first, second := list.GetItemText(0)
+	if !strings.Contains(first, "running") || !strings.Contains(second, "high") {
+		t.Fatalf("missing effective run state: %s %s", first, second)
+	}
+	list.SetCurrentItem(1)
+	for _, want := range []string{runsFixtureReviewModel, "low", "failed", "provider disconnected", "2026-11-08T09:30:00Z"} {
+		if !strings.Contains(d.detail.GetText(false), want) {
+			t.Errorf("selected run detail missing %q", want)
+		}
+	}
+	last, _ := list.GetItemText(2)
+	if !strings.Contains(last, "completed") {
+		t.Fatalf("completed run mislabeled: %s", last)
+	}
+}
+
+func assertNewestRunRows(t *testing.T, list *tview.List) {
+	t.Helper()
 	if list.GetItemCount() != 3 {
 		t.Fatalf("want 3 project runs, got %d", list.GetItemCount())
 	}
@@ -46,25 +69,11 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 		if !strings.Contains(primary, want) {
 			t.Errorf("row %d: %q", i, primary)
 		}
-		for _, field := range []string{[]string{"live-model", "review-model", "old-model"}[i], "2026-11-08"} {
+		for _, field := range []string{[]string{"live-model", runsFixtureReviewModel, "old-model"}[i], "2026-11-08"} {
 			if !strings.Contains(secondary, field) {
 				t.Errorf("run row missing %q: %s", field, secondary)
 			}
 		}
-	}
-	first, second := list.GetItemText(0)
-	if !strings.Contains(first, "running") || !strings.Contains(second, "high") {
-		t.Fatalf("missing effective run state: %s %s", first, second)
-	}
-	list.SetCurrentItem(1)
-	for _, want := range []string{"review-model", "low", "failed", "provider disconnected", "2026-11-08T09:30:00Z"} {
-		if !strings.Contains(d.detail.GetText(false), want) {
-			t.Errorf("selected run detail missing %q", want)
-		}
-	}
-	last, _ := list.GetItemText(2)
-	if !strings.Contains(last, "completed") {
-		t.Fatalf("completed run mislabeled: %s", last)
 	}
 }
 
@@ -139,7 +148,9 @@ func TestInboxTaskInspectionRemainsSelectedAcrossRunRefresh(t *testing.T) {
 	d.input(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone))
 	chooser := d.modal.(*tview.List)
 	chooser.SetCurrentItem(1)
-	chooser.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	chooser.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {
+		// This fixture drives list selection without a tview focus dispatcher.
+	})
 	d.Present(snapshot)
 	task, _, ok := d.selectedPlanRecord()
 	if !ok || task.ID != "second" {
@@ -157,5 +168,30 @@ func TestUnreadableRunsClearStaleHistory(t *testing.T) {
 	}
 	if len(d.runRows) != 0 || d.runID != "" {
 		t.Fatal("unreadable history retained stale selection")
+	}
+}
+
+func TestPlannerRunStatusReportsPublicationRatherThanProviderExit(t *testing.T) {
+	d := New(t.TempDir())
+	attempt := model.Attempt{AttemptID: "plan-run", Provider: "fixture", Role: "plan", Finished: true, Status: model.AttemptAwaitingPlanPublication}
+	present := func() (row string, details string) {
+		d.Present(control.Snapshot{"sessions": {record(attempt.AttemptID, attempt)}})
+		row, _ = runList(d).GetItemText(0)
+		return row, d.detail.GetText(false)
+	}
+	row, details := present()
+	if !strings.Contains(row, "awaiting plan publication") || !strings.Contains(details, "Status: awaiting plan publication") {
+		t.Fatalf("pending publication not visible: %q\n%s", row, details)
+	}
+	attempt.Status = "failed"
+	attempt.Error = "Planner did not write the assigned plan.md; retry planning"
+	row, details = present()
+	if !strings.Contains(row, "failed") || !strings.Contains(details, attempt.Error) {
+		t.Fatalf("publication failure not visible: %q\n%s", row, details)
+	}
+	attempt.Status, attempt.Error = "complete", ""
+	row, _ = present()
+	if !strings.Contains(row, "completed") {
+		t.Fatalf("verified publication not shown as complete: %q", row)
 	}
 }

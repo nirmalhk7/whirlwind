@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"whirlwind/internal/process"
@@ -48,21 +49,27 @@ func RegisterStandaloneRuntime(profile Profile) error {
 	locator := standaloneLocator(profile)
 	locator.OwnerPID, locator.OwnerStarted = owner.PID, owner.Started
 	return updateStandaloneRegistry(profile.SupervisorDir, func(registry *standaloneRegistry) error {
-		for index, existing := range registry.Executions {
-			if existing.ExecutionID == locator.ExecutionID {
-				if !sameStandaloneAuthority(existing, locator) || existing.OwnerPID != locator.OwnerPID || existing.OwnerStarted != locator.OwnerStarted {
-					return fmt.Errorf("%w: standalone runtime identity conflicts with its registry entry", ErrIsolationUnverified)
-				}
-				if existing.State == "cleanup_pending" {
-					return fmt.Errorf("%w: standalone runtime still requires cleanup", ErrIsolationUnverified)
-				}
-				locator.SandboxID = existing.SandboxID
-				registry.Executions[index] = locator
-				return nil
-			}
+		index := registry.locatorIndex(locator.ExecutionID)
+		if index < 0 {
+			registry.Executions = append(registry.Executions, locator)
+			return nil
 		}
-		registry.Executions = append(registry.Executions, locator)
+		existing := registry.Executions[index]
+		if !sameStandaloneAuthority(existing, locator) || existing.OwnerPID != locator.OwnerPID || existing.OwnerStarted != locator.OwnerStarted {
+			return fmt.Errorf("%w: standalone runtime identity conflicts with its registry entry", ErrIsolationUnverified)
+		}
+		if existing.State == "cleanup_pending" {
+			return fmt.Errorf("%w: standalone runtime still requires cleanup", ErrIsolationUnverified)
+		}
+		locator.SandboxID = existing.SandboxID
+		registry.Executions[index] = locator
 		return nil
+	})
+}
+
+func (registry *standaloneRegistry) locatorIndex(executionID string) int {
+	return slices.IndexFunc(registry.Executions, func(locator StandaloneRuntimeLocator) bool {
+		return locator.ExecutionID == executionID
 	})
 }
 
@@ -85,21 +92,19 @@ func PinStandaloneSandboxID(profile Profile, sandboxID string) error {
 	}
 	expected := standaloneLocator(profile)
 	return updateStandaloneRegistry(profile.SupervisorDir, func(registry *standaloneRegistry) error {
-		for index := range registry.Executions {
-			existing := registry.Executions[index]
-			if existing.ExecutionID != profile.ExecutionID {
-				continue
-			}
-			if !sameStandaloneAuthority(existing, expected) || existing.State != "active" && existing.State != "cleanup_pending" {
-				return fmt.Errorf("%w: standalone runtime registry authority changed before sandbox ID pin", ErrIsolationUnverified)
-			}
-			if existing.SandboxID != "" && existing.SandboxID != sandboxID {
-				return fmt.Errorf("%w: discovered sandbox ID conflicts with durable standalone identity", ErrIsolationUnverified)
-			}
-			registry.Executions[index].SandboxID = sandboxID
-			return nil
+		index := registry.locatorIndex(profile.ExecutionID)
+		if index < 0 {
+			return fmt.Errorf("%w: standalone runtime registry entry is missing", ErrIsolationUnverified)
 		}
-		return fmt.Errorf("%w: standalone runtime registry entry is missing", ErrIsolationUnverified)
+		existing := registry.Executions[index]
+		if !sameStandaloneAuthority(existing, expected) || existing.State != "active" && existing.State != "cleanup_pending" {
+			return fmt.Errorf("%w: standalone runtime registry authority changed before sandbox ID pin", ErrIsolationUnverified)
+		}
+		if existing.SandboxID != "" && existing.SandboxID != sandboxID {
+			return fmt.Errorf("%w: discovered sandbox ID conflicts with durable standalone identity", ErrIsolationUnverified)
+		}
+		registry.Executions[index].SandboxID = sandboxID
+		return nil
 	})
 }
 

@@ -7,6 +7,8 @@ import (
 	"whirlwind/internal/store"
 )
 
+var ideationDirectionCategories = model.DirectionCategories()
+
 type directionEntry struct {
 	direction    model.Direction
 	version      int
@@ -85,20 +87,20 @@ func addDirectionRecord(groups map[string]*directionGeneration, record model.Rec
 }
 
 func summarizeDirectionGeneration(group *directionGeneration) {
-	present := make(map[string]bool, len(model.DirectionCategories()))
+	present := make(map[string]bool, len(ideationDirectionCategories))
 	for _, entry := range group.entries {
-		if model.IsDirectionCategory(entry.direction.Category) {
+		if isIdeationCategory(entry.direction.Category) {
 			present[entry.direction.Category] = true
 		}
 	}
-	for _, category := range model.DirectionCategories() {
+	for _, category := range ideationDirectionCategories {
 		if present[category] {
 			group.categoryCount++
 			continue
 		}
 		group.missing = append(group.missing, category)
 	}
-	group.complete = !group.legacy && len(group.entries) == len(model.DirectionCategories()) && group.categoryCount == len(model.DirectionCategories())
+	group.complete = !group.legacy && len(group.entries) == len(ideationDirectionCategories) && group.categoryCount == len(ideationDirectionCategories)
 	sort.SliceStable(group.entries, func(i, j int) bool { return directionEntryBefore(group.entries[i], group.entries[j]) })
 }
 
@@ -124,11 +126,20 @@ func directionGenerationBefore(left, right directionGeneration) bool {
 	return left.day > right.day
 }
 
+func isIdeationCategory(category string) bool {
+	for _, expected := range ideationDirectionCategories {
+		if category == expected {
+			return true
+		}
+	}
+	return false
+}
+
 func categoryOrder(category string) int {
-	for index, expected := range model.DirectionCategories() {
+	for index, expected := range ideationDirectionCategories {
 		if category == expected {
 			return index
 		}
 	}
-	return len(model.DirectionCategories())
+	return len(ideationDirectionCategories)
 }

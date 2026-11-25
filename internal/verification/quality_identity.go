@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -18,6 +19,10 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"whirlwind/internal/model"
+)
+
+const (
+	qualityInstallationDebugSuffix = "-installation-debug-files"
 )
 
 const qualityRuntimeByteLimit = int64(512 << 20)
@@ -53,10 +58,6 @@ func hashQltyExecutableAt(executable, pathValue, cwd string) (string, error) {
 	}
 	hash, _, err := hashRegularFile(path, 256<<20)
 	return hash, err
-}
-
-func lookPathIn(executable, pathValue string) (string, error) {
-	return lookPathInCWD(executable, pathValue, "")
 }
 
 func lookPathInCWD(executable, pathValue, cwd string) (string, error) {
@@ -95,58 +96,83 @@ func captureQualityIdentityWithCatalog(output, runtimeDir, executable string, sn
 }
 
 func captureQualityIdentityWithCatalogPath(output, runtimeDir, executable string, snapshot *model.QualitySnapshot, expectedBinarySHA256, observedCatalogHash, pathValue string) (*model.QualityIdentity, error) {
-	return captureQualityIdentityWithCatalogAt(output, runtimeDir, executable, snapshot, expectedBinarySHA256, observedCatalogHash, pathValue, "")
-}
-
-func captureQualityIdentityWithCatalogAt(output, runtimeDir, executable string, snapshot *model.QualitySnapshot, expectedBinarySHA256, observedCatalogHash, pathValue, cwd string) (*model.QualityIdentity, error) {
 	if snapshot == nil || len(output) == 0 || len(output) > 1<<20 || runtimeDir == "" {
 		return nil, errors.New("missing frozen configuration, SARIF, or isolated runtime directory")
 	}
 	if err := validateFrozenRuleSources(snapshot.Files); err != nil {
 		return nil, err
 	}
+	version, qltyHash, err := observedQltyBinary(output, executable, pathValue, expectedBinarySHA256)
+	if err != nil {
+		return nil, err
+	}
+	configurationHash, catalogHash, err := observedQltyConfiguration(snapshot, observedCatalogHash)
+	if err != nil {
+		return nil, err
+	}
+	installation, err := observeQltyInstallation(runtimeDir, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	identity := &model.QualityIdentity{Version: 1, QltyVersion: version, QltyBinarySHA256: qltyHash, ConfigurationHash: configurationHash, ToolRuntimeHash: installation.hash, PluginCatalogHash: catalogHash, ToolRuntimePath: installation.path, Tools: installation.tools}
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	return identity, nil
+}
+
+func observedQltyBinary(output, executable, pathValue, expectedBinarySHA256 string) (string, string, error) {
 	version, err := qltyReportVersion(output)
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
-	qltyHash, err := hashQltyExecutableAt(executable, pathValue, cwd)
+	qltyHash, err := hashQltyExecutableInPath(executable, pathValue)
 	if err != nil {
-		return nil, fmt.Errorf("hash Qlty binary: %w", err)
+		return "", "", fmt.Errorf("hash Qlty binary: %w", err)
 	}
 	if expectedBinarySHA256 != "" && qltyHash != expectedBinarySHA256 {
-		return nil, errors.New("executed Qlty binary changed during scan")
+		return "", "", errors.New("executed Qlty binary changed during scan")
 	}
+	return version, qltyHash, nil
+}
+
+func observedQltyConfiguration(snapshot *model.QualitySnapshot, observedCatalogHash string) (string, string, error) {
 	configurationHash, err := qualityConfigurationHash(snapshot.Files)
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 	catalogHash := observedCatalogHash
 	if snapshot.Identity != nil {
 		catalogHash = snapshot.Identity.PluginCatalogHash
 	} else if !qualityCatalogHashPattern.MatchString(catalogHash) {
-		return nil, errors.New("effective Qlty plugin catalog was not verified")
+		return "", "", errors.New("effective Qlty plugin catalog was not verified")
 	}
+	return configurationHash, catalogHash, nil
+}
+
+type qltyInstallationEvidence struct {
+	hash, path string
+	tools      []model.QualityToolIdentity
+}
+
+func observeQltyInstallation(runtimeDir string, snapshot *model.QualitySnapshot) (qltyInstallationEvidence, error) {
 	toolRoot := filepath.Join(runtimeDir, "home", ".qlty", "cache", "tools")
 	tools, err := installedQualityTools(toolRoot)
 	if err != nil {
-		return nil, err
+		return qltyInstallationEvidence{}, err
 	}
 	runtimeHash, err := hashQualityTree(toolRoot)
 	if err != nil {
-		return nil, fmt.Errorf("hash installed Qlty scanner runtime: %w", err)
+		return qltyInstallationEvidence{}, fmt.Errorf("hash installed Qlty scanner runtime: %w", err)
 	}
 	runtimeIdentityPath, err := filepath.EvalSymlinks(toolRoot)
 	if err != nil {
-		return nil, fmt.Errorf("resolve installed Qlty scanner runtime path: %w", err)
+		return qltyInstallationEvidence{}, fmt.Errorf("resolve installed Qlty scanner runtime path: %w", err)
 	}
 	if snapshot.Identity != nil {
 		runtimeIdentityPath = snapshot.Identity.ToolRuntimePath
 	}
-	identity := &model.QualityIdentity{Version: 1, QltyVersion: version, QltyBinarySHA256: qltyHash, ConfigurationHash: configurationHash, ToolRuntimeHash: runtimeHash, PluginCatalogHash: catalogHash, ToolRuntimePath: runtimeIdentityPath, Tools: tools}
-	if err := identity.Validate(); err != nil {
-		return nil, err
-	}
-	return identity, nil
+	return qltyInstallationEvidence{hash: runtimeHash, path: runtimeIdentityPath, tools: tools}, nil
 }
 
 // HashQltyPluginCatalog returns a stable digest of the effective plugin
@@ -157,11 +183,11 @@ func HashQltyPluginCatalog(output []byte) (string, error) {
 	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(output, &document); err != nil || len(document.Content) != 1 {
-		return "", errors.New("Qlty plugin catalog is not valid YAML")
+		return "", errors.New("invalid YAML in Qlty plugin catalog")
 	}
 	root := document.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return "", errors.New("Qlty plugin catalog has no mapping root")
+		return "", errors.New("missing mapping root in Qlty plugin catalog")
 	}
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value == "plugins" {
@@ -169,13 +195,13 @@ func HashQltyPluginCatalog(output []byte) (string, error) {
 			canonicalizeQltyCatalogNode(plugins)
 			canonical, err := yaml.Marshal(plugins)
 			if err != nil || len(canonical) == 0 {
-				return "", errors.New("Qlty plugin catalog is empty or invalid")
+				return "", errors.New("empty or invalid Qlty plugin catalog")
 			}
 			hash := sha256.Sum256(canonical)
 			return hex.EncodeToString(hash[:]), nil
 		}
 	}
-	return "", errors.New("Qlty config output lacks effective plugins catalog")
+	return "", errors.New("missing effective plugins catalog in Qlty config output")
 }
 
 func canonicalizeQltyCatalogNode(node *yaml.Node) {
@@ -196,30 +222,16 @@ func canonicalizeQltyCatalogNode(node *yaml.Node) {
 	}
 }
 
-var remoteRuleReference = regexp.MustCompile(`(?i)(https?://|git@|[[:space:]"']p/[a-z0-9_./-]+)`)
-var remoteSemgrepRuleConfig = regexp.MustCompile(`(?im)^\s*(?:config|configs|include)\s*:\s*["']?(?:https?://|git@|p/[a-z0-9_./-]+)`)
-var localRulePath = regexp.MustCompile(`\.semgrep/[a-zA-Z0-9_./-]+\.(yaml|yml)`)
+var remoteRuleReference = regexp.MustCompile(`(?i)(https?://|git@)`)
+var astGrepRemoteRuleReference = regexp.MustCompile(`(?im)^\s*(?:config|configs|include)\s*:\s*["']?(?:https?://|git@)`)
 
 func validateFrozenRuleSources(files map[string]string) error {
-	known := make(map[string]bool, len(files))
-	for path := range files {
-		known[path] = true
-	}
 	for path, content := range files {
-		if strings.HasPrefix(path, ".qlty/") {
-			if remoteRuleReference.MatchString(content) {
-				return errors.New("external Qlty sources and remote rule references cannot be frozen; use approved local rule files")
-			}
-			for _, reference := range localRulePath.FindAllString(content, -1) {
-				if strings.HasPrefix(reference, ".semgrep/") && !known[reference] {
-					return fmt.Errorf("Qlty references unfrozen local rule file %s", reference)
-				}
-			}
+		if strings.HasPrefix(path, ".qlty/") && remoteRuleReference.MatchString(content) {
+			return errors.New("external Qlty sources and remote rule references cannot be frozen; use approved local rule files")
 		}
-		if strings.HasPrefix(path, ".semgrep/") || strings.HasPrefix(path, "semgrep.") || path == "sgconfig.yml" {
-			if remoteSemgrepRuleConfig.MatchString(content) {
-				return fmt.Errorf("Semgrep rule file %s contains a remote reference; freeze rules locally", path)
-			}
+		if path == "sgconfig.yml" && astGrepRemoteRuleReference.MatchString(content) {
+			return errors.New("ast-grep configuration contains a remote rule reference; freeze rules locally")
 		}
 	}
 	return nil
@@ -239,16 +251,16 @@ func qltyReportVersion(output string) (string, error) {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal([]byte(output), &report); err != nil || report.Version != "2.1.0" || len(report.Runs) == 0 {
-		return "", errors.New("Qlty SARIF lacks complete runtime version evidence")
+		return "", errors.New("missing complete runtime version evidence in Qlty SARIF")
 	}
 	version := ""
 	for _, run := range report.Runs {
 		driver := run.Tool.Driver
 		if driver.Name != "qlty" || strings.TrimSpace(driver.Version) == "" || strings.TrimSpace(driver.SemanticVersion) == "" || strings.ContainsAny(driver.Version+driver.SemanticVersion, "\x00\r\n") {
-			return "", errors.New("Qlty SARIF lacks Qlty driver version")
+			return "", errors.New("missing driver version in Qlty SARIF")
 		}
 		if version != "" && version != driver.Version {
-			return "", errors.New("Qlty SARIF contains incompatible driver versions")
+			return "", errors.New("incompatible driver versions in Qlty SARIF")
 		}
 		version = driver.Version
 	}
@@ -284,44 +296,64 @@ func installedQualityTools(root string) ([]model.QualityToolIdentity, error) {
 	}
 	tools := []model.QualityToolIdentity{}
 	for _, toolEntry := range entries {
-		if !toolEntry.IsDir() || strings.HasSuffix(toolEntry.Name(), "-installation-debug-files") {
+		if !toolEntry.IsDir() || strings.HasSuffix(toolEntry.Name(), qualityInstallationDebugSuffix) {
 			continue
 		}
-		toolName := toolEntry.Name()
-		if !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`).MatchString(toolName) {
-			return nil, fmt.Errorf("invalid installed Qlty tool name %q", toolName)
-		}
-		packages, err := os.ReadDir(filepath.Join(root, toolName))
+		packages, err := installedQualityPackages(root, toolEntry.Name())
 		if err != nil {
 			return nil, err
 		}
-		for _, pkg := range packages {
-			if !pkg.IsDir() || strings.HasSuffix(pkg.Name(), "-installation-debug-files") {
-				continue
-			}
-			match := qualityPackageDirectory.FindStringSubmatch(pkg.Name())
-			if match == nil || strings.TrimSpace(match[1]) == "" {
-				return nil, fmt.Errorf("unrecognized installed Qlty tool package %s/%s", toolName, pkg.Name())
-			}
-			marker := filepath.Join(root, toolName, pkg.Name()+".done")
-			info, err := os.Lstat(marker)
-			if err != nil || !info.Mode().IsRegular() {
-				return nil, fmt.Errorf("Qlty tool package %s/%s lacks completed-install marker", toolName, pkg.Name())
-			}
-			hasAssets, err := qualityPackageHasAssets(filepath.Join(root, toolName, pkg.Name()))
-			if err != nil || !hasAssets {
-				return nil, fmt.Errorf("Qlty tool package %s/%s contains no runtime assets", toolName, pkg.Name())
-			}
-			tools = append(tools, model.QualityToolIdentity{Name: toolName, Version: match[1], Fingerprint: match[2]})
-		}
+		tools = append(tools, packages...)
 	}
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name+"@"+tools[i].Version < tools[j].Name+"@"+tools[j].Version
 	})
 	if len(tools) == 0 {
-		return nil, errors.New("Qlty installed no scanner runtime packages")
+		return nil, errors.New("no scanner runtime packages were installed by Qlty")
 	}
 	return tools, nil
+}
+
+var qualityToolName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+
+func installedQualityPackages(root, toolName string) ([]model.QualityToolIdentity, error) {
+	if !qualityToolName.MatchString(toolName) {
+		return nil, fmt.Errorf("invalid installed Qlty tool name %q", toolName)
+	}
+	toolRoot := filepath.Join(root, toolName)
+	packages, err := os.ReadDir(toolRoot)
+	if err != nil {
+		return nil, err
+	}
+	var tools []model.QualityToolIdentity
+	for _, pkg := range packages {
+		if !pkg.IsDir() || strings.HasSuffix(pkg.Name(), qualityInstallationDebugSuffix) {
+			continue
+		}
+		identity, err := installedQualityPackage(toolRoot, toolName, pkg.Name())
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, identity)
+	}
+	return tools, nil
+}
+
+func installedQualityPackage(toolRoot, toolName, name string) (model.QualityToolIdentity, error) {
+	var identity model.QualityToolIdentity
+	match := qualityPackageDirectory.FindStringSubmatch(name)
+	if match == nil || strings.TrimSpace(match[1]) == "" {
+		return identity, fmt.Errorf("unrecognized installed Qlty tool package %s/%s", toolName, name)
+	}
+	info, err := os.Lstat(filepath.Join(toolRoot, name+".done"))
+	if err != nil || !info.Mode().IsRegular() {
+		return identity, fmt.Errorf("missing completed-install marker for Qlty tool package %s/%s", toolName, name)
+	}
+	hasAssets, err := qualityPackageHasAssets(filepath.Join(toolRoot, name))
+	if err != nil || !hasAssets {
+		return identity, fmt.Errorf("no runtime assets in Qlty tool package %s/%s", toolName, name)
+	}
+	return model.QualityToolIdentity{Name: toolName, Version: match[1], Fingerprint: match[2]}, nil
 }
 
 func qualityPackageHasAssets(root string) (bool, error) {
@@ -348,87 +380,105 @@ func qualityPackageHasAssets(root string) (bool, error) {
 func hashQualityTree(root string) (string, error) {
 	info, err := os.Lstat(root)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("Qlty scanner runtime directory is missing or unsafe")
+		return "", errors.New("missing or unsafe Qlty scanner runtime directory")
 	}
 	rooted, err := os.OpenRoot(root)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = rooted.Close() }()
-	hash := sha256.New()
-	var total int64
-	count := 0
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == root {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() && strings.HasSuffix(entry.Name(), "-installation-debug-files") {
-			return filepath.SkipDir
-		}
-		count++
-		if count > qualityRuntimeFileLimit {
-			return errors.New("Qlty scanner runtime exceeds file-count limit")
-		}
-		writeQualityRecordField(hash, []byte(filepath.ToSlash(relative)))
-		info, err := rooted.Lstat(filepath.ToSlash(relative))
-		if err != nil {
-			return err
-		}
-		var mode [4]byte
-		binary.BigEndian.PutUint32(mode[:], uint32(info.Mode().Perm()&^0222))
-		writeQualityRecordField(hash, mode[:])
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := rooted.Readlink(filepath.ToSlash(relative))
-			if err != nil {
-				return err
-			}
-			canonicalTarget, err := rootedQualityLinkTarget(rooted, relative, target)
-			if err != nil {
-				return fmt.Errorf("Qlty scanner runtime symlink %s -> %q is unsafe: %w", filepath.ToSlash(relative), target, err)
-			}
-			writeQualityRecordField(hash, []byte("symlink"))
-			writeQualityRecordField(hash, []byte(filepath.ToSlash(canonicalTarget)))
-			return nil
-		}
-		if info.IsDir() {
-			writeQualityRecordField(hash, []byte("directory"))
-			return nil
-		}
-		if !info.Mode().IsRegular() {
-			return errors.New("Qlty scanner runtime contains a special file")
-		}
-		writeQualityRecordField(hash, []byte("file"))
-		file, err := rooted.Open(filepath.ToSlash(relative))
-		if err != nil {
-			return err
-		}
-		fileHash := sha256.New()
-		written, copyErr := io.Copy(fileHash, io.LimitReader(file, qualityRuntimeByteLimit-total+1))
-		closeErr := file.Close()
-		total += written
-		if total > qualityRuntimeByteLimit {
-			return errors.New("Qlty scanner runtime exceeds byte limit")
-		}
-		if err := errors.Join(copyErr, closeErr); err != nil {
-			return err
-		}
-		var size [8]byte
-		binary.BigEndian.PutUint64(size[:], uint64(written))
-		writeQualityRecordField(hash, size[:])
-		writeQualityRecordField(hash, fileHash.Sum(nil))
-		return nil
-	})
-	if err != nil {
+	tree := qualityTreeHasher{root: rooted, digest: sha256.New()}
+	if err := filepath.WalkDir(root, tree.recordEntry); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return hex.EncodeToString(tree.digest.Sum(nil)), nil
+}
+
+type qualityTreeHasher struct {
+	root   *os.Root
+	digest hash.Hash
+	bytes  int64
+	count  int
+}
+
+func (tree *qualityTreeHasher) recordEntry(path string, entry os.DirEntry, walkErr error) error {
+	root := tree.root.Name()
+	if walkErr != nil || path == root {
+		return walkErr
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return err
+	}
+	if entry.IsDir() && strings.HasSuffix(entry.Name(), qualityInstallationDebugSuffix) {
+		return filepath.SkipDir
+	}
+	tree.count++
+	if tree.count > qualityRuntimeFileLimit {
+		return errors.New("file-count limit exceeded by Qlty scanner runtime")
+	}
+	return tree.recordPath(relative)
+}
+
+func (tree *qualityTreeHasher) recordPath(relative string) error {
+	path := filepath.ToSlash(relative)
+	writeQualityRecordField(tree.digest, []byte(path))
+	info, err := tree.root.Lstat(path)
+	if err != nil {
+		return err
+	}
+	var mode [4]byte
+	binary.BigEndian.PutUint32(mode[:], uint32(info.Mode().Perm()&^0222))
+	writeQualityRecordField(tree.digest, mode[:])
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		return tree.recordLink(relative)
+	case info.IsDir():
+		writeQualityRecordField(tree.digest, []byte("directory"))
+		return nil
+	case info.Mode().IsRegular():
+		return tree.recordFile(path)
+	default:
+		return errors.New("special file in Qlty scanner runtime")
+	}
+}
+
+func (tree *qualityTreeHasher) recordLink(relative string) error {
+	path := filepath.ToSlash(relative)
+	target, err := tree.root.Readlink(path)
+	if err != nil {
+		return err
+	}
+	canonicalTarget, err := rootedQualityLinkTarget(tree.root, relative, target)
+	if err != nil {
+		return fmt.Errorf("unsafe symlink %s -> %q in Qlty scanner runtime: %w", path, target, err)
+	}
+	writeQualityRecordField(tree.digest, []byte("symlink"))
+	writeQualityRecordField(tree.digest, []byte(filepath.ToSlash(canonicalTarget)))
+	return nil
+}
+
+func (tree *qualityTreeHasher) recordFile(path string) error {
+	writeQualityRecordField(tree.digest, []byte("file"))
+	file, err := tree.root.Open(path)
+	if err != nil {
+		return err
+	}
+	fileHash := sha256.New()
+	written, copyErr := io.Copy(fileHash, io.LimitReader(file, qualityRuntimeByteLimit-tree.bytes+1))
+	closeErr := file.Close()
+	tree.bytes += written
+	if tree.bytes > qualityRuntimeByteLimit {
+		return errors.New("byte limit exceeded by Qlty scanner runtime")
+	}
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		return err
+	}
+	var size [8]byte
+	binary.BigEndian.PutUint64(size[:], uint64(written))
+	writeQualityRecordField(tree.digest, size[:])
+	writeQualityRecordField(tree.digest, fileHash.Sum(nil))
+	return nil
 }
 
 func rootedQualityLinkTarget(root *os.Root, linkPath, target string) (string, error) {
@@ -459,6 +509,22 @@ func rootedQualityLinkTarget(root *os.Root, linkPath, target string) (string, er
 }
 
 func copyApprovedQualityTree(ctx context.Context, source, destination, expectedHash string) error {
+	if err := validateQualityCopyPaths(source, destination, expectedHash); err != nil {
+		return err
+	}
+	sourceRoot, err := os.OpenRoot(source)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sourceRoot.Close() }()
+	copier := qualityTreeCopier{source: sourceRoot, destination: destination}
+	if err := copier.materialize(ctx); err != nil {
+		return err
+	}
+	return verifyQualityTreeCopy(source, destination, expectedHash)
+}
+
+func validateQualityCopyPaths(source, destination, expectedHash string) error {
 	if !filepath.IsAbs(source) || !filepath.IsAbs(destination) || qualityPathsOverlap(source, destination) || filepath.Base(source) != "tools" {
 		return errors.New("approved Qlty runtime paths must be distinct absolute paths")
 	}
@@ -471,95 +537,10 @@ func copyApprovedQualityTree(ctx context.Context, source, destination, expectedH
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	sourceRoot, err := os.OpenRoot(source)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = sourceRoot.Close() }()
-	if err := os.MkdirAll(destination, 0700); err != nil {
-		return err
-	}
-	total, count := int64(0), 0
-	type directoryMode struct {
-		path string
-		mode os.FileMode
-	}
-	directories := []directoryMode{}
-	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == source {
-			return nil
-		}
-		relative, err := filepath.Rel(source, path)
-		if err != nil || !filepath.IsLocal(relative) {
-			return errors.New("unsafe scanner runtime path")
-		}
-		count++
-		if count > qualityRuntimeFileLimit {
-			return errors.New("approved scanner runtime exceeds file-count limit")
-		}
-		info, err := sourceRoot.Lstat(filepath.ToSlash(relative))
-		if err != nil {
-			return err
-		}
-		destinationPath := filepath.Join(destination, relative)
-		switch {
-		case info.IsDir():
-			if err := os.Mkdir(destinationPath, 0700); err != nil {
-				return err
-			}
-			directories = append(directories, directoryMode{path: destinationPath, mode: info.Mode().Perm()})
-			return nil
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := sourceRoot.Readlink(filepath.ToSlash(relative))
-			if err != nil {
-				return err
-			}
-			canonical, err := rootedQualityLinkTarget(sourceRoot, relative, target)
-			if err != nil {
-				return err
-			}
-			link, err := filepath.Rel(filepath.Dir(destinationPath), filepath.Join(destination, canonical))
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, destinationPath)
-		case info.Mode().IsRegular():
-			input, err := sourceRoot.Open(filepath.ToSlash(relative))
-			if err != nil {
-				return err
-			}
-			output, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm()&^0222)
-			if err != nil {
-				_ = input.Close()
-				return err
-			}
-			written, copyErr := io.Copy(output, io.LimitReader(contextReader{ctx: ctx, reader: input}, qualityRuntimeByteLimit-total+1))
-			total += written
-			if total > qualityRuntimeByteLimit {
-				copyErr = errors.Join(copyErr, errors.New("approved scanner runtime exceeds byte limit"))
-			}
-			return errors.Join(copyErr, input.Close(), output.Close())
-		default:
-			return errors.New("Qlty scanner runtime contains a special file")
-		}
-	})
-	if err != nil {
-		return err
-	}
-	for index := len(directories) - 1; index >= 0; index-- {
-		if err := os.Chmod(directories[index].path, directories[index].mode&^0222); err != nil {
-			return err
-		}
-	}
-	if err := os.Chmod(destination, 0500); err != nil {
-		return err
-	}
+	return nil
+}
+
+func verifyQualityTreeCopy(source, destination, expectedHash string) error {
 	after, err := hashQualityTree(source)
 	if err != nil || after != expectedHash {
 		return errors.New("approved Qlty scanner runtime changed during copy")
@@ -569,6 +550,119 @@ func copyApprovedQualityTree(ctx context.Context, source, destination, expectedH
 		return errors.New("copied Qlty scanner runtime failed identity verification")
 	}
 	return nil
+}
+
+type qualityCopyDirectory struct {
+	path string
+	mode os.FileMode
+}
+
+type qualityTreeCopier struct {
+	source      *os.Root
+	destination string
+	bytes       int64
+	count       int
+	directories []qualityCopyDirectory
+}
+
+func (copier *qualityTreeCopier) materialize(ctx context.Context) error {
+	if err := os.MkdirAll(copier.destination, 0700); err != nil {
+		return err
+	}
+	err := filepath.WalkDir(copier.source.Name(), func(path string, _ os.DirEntry, walkErr error) error {
+		return copier.copyEntry(ctx, path, walkErr)
+	})
+	if err != nil {
+		return err
+	}
+	// Seal directories from the leaves upward after their contents exist.
+	for index := len(copier.directories) - 1; index >= 0; index-- {
+		dir := copier.directories[index]
+		if err := os.Chmod(dir.path, dir.mode&^0222); err != nil {
+			return err
+		}
+	}
+	return os.Chmod(copier.destination, 0500)
+}
+
+func (copier *qualityTreeCopier) copyEntry(ctx context.Context, path string, walkErr error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	root := copier.source.Name()
+	if walkErr != nil || path == root {
+		return walkErr
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil || !filepath.IsLocal(relative) {
+		return errors.New("unsafe scanner runtime path")
+	}
+	copier.count++
+	if copier.count > qualityRuntimeFileLimit {
+		return errors.New("approved scanner runtime exceeds file-count limit")
+	}
+	return copier.copyPath(ctx, relative)
+}
+
+func (copier *qualityTreeCopier) copyPath(ctx context.Context, relative string) error {
+	info, err := copier.source.Lstat(filepath.ToSlash(relative))
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(copier.destination, relative)
+	switch {
+	case info.IsDir():
+		return copier.createDirectory(target, info.Mode().Perm())
+	case info.Mode()&os.ModeSymlink != 0:
+		return copier.copyLink(relative, target)
+	case info.Mode().IsRegular():
+		return copier.copyFile(ctx, relative, target, info.Mode().Perm())
+	default:
+		return errors.New("special file in Qlty scanner runtime")
+	}
+}
+
+func (copier *qualityTreeCopier) createDirectory(target string, mode os.FileMode) error {
+	if err := os.Mkdir(target, 0700); err != nil {
+		return err
+	}
+	copier.directories = append(copier.directories, qualityCopyDirectory{path: target, mode: mode})
+	return nil
+}
+
+func (copier *qualityTreeCopier) copyLink(relative, destination string) error {
+	target, err := copier.source.Readlink(filepath.ToSlash(relative))
+	if err != nil {
+		return err
+	}
+	canonical, err := rootedQualityLinkTarget(copier.source, relative, target)
+	if err != nil {
+		return err
+	}
+	link, err := filepath.Rel(filepath.Dir(destination), filepath.Join(copier.destination, canonical))
+	if err != nil {
+		return err
+	}
+	return os.Symlink(link, destination)
+}
+
+func (copier *qualityTreeCopier) copyFile(ctx context.Context, relative, destination string, mode os.FileMode) error {
+	input, err := copier.source.Open(filepath.ToSlash(relative))
+	if err != nil {
+		return err
+	}
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode&^0222)
+	if err != nil {
+		_ = input.Close()
+		return err
+	}
+	reader := contextReader{ctx: ctx, reader: input}
+	written, copyErr := io.Copy(output, io.LimitReader(reader, qualityRuntimeByteLimit-copier.bytes+1))
+	copier.bytes += written
+	if copier.bytes > qualityRuntimeByteLimit {
+		copyErr = errors.Join(copyErr, errors.New("approved scanner runtime exceeds byte limit"))
+	}
+	return errors.Join(copyErr, input.Close(), output.Close())
 }
 
 type contextReader struct {

@@ -14,34 +14,54 @@ func (s *Store) RecoverInterrupted(ctx context.Context, owner string) error {
 	changes := []Change{}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, kind := range []string{"sessions", "operations", "verification", "publications", "mutations", "budget_reservations", "recovery_episodes"} {
-		records, err := s.List(ctx, kind)
+		recovered, err := s.interruptedChanges(ctx, kind, owner, now)
 		if err != nil {
 			return err
 		}
-		for _, r := range records {
-			change, err := interruptedRecord(kind, r, owner, now)
-			if err != nil {
-				return err
-			}
-			if change != nil {
-				if kind == "operations" {
-					value, ok := change.Value.(map[string]any)
-					if ok && value["kind"] == "ideation" && value["failure_kind"] == "interrupted" {
-						waiting, err := s.ideationHasPendingDecision(ctx, r.ID)
-						if err != nil {
-							return err
-						}
-						value["stage"], value["error"], value["finished_at"] = "queued", "", ""
-						if waiting {
-							value["stage"], value["error"] = "paused", "Pending human decision retained after restart"
-						}
-					}
-				}
-				changes = append(changes, *change)
-			}
-		}
+		changes = append(changes, recovered...)
 	}
 	return s.commitRecovery(ctx, owner, changes)
+}
+
+func (s *Store) interruptedChanges(ctx context.Context, kind, owner, now string) ([]Change, error) {
+	records, err := s.List(ctx, kind)
+	if err != nil {
+		return nil, err
+	}
+	var changes []Change
+	for _, record := range records {
+		change, err := interruptedRecord(kind, record, owner, now)
+		if err != nil {
+			return nil, err
+		}
+		if change == nil {
+			continue
+		}
+		if err := s.retainInterruptedIdeationDecision(ctx, *change); err != nil {
+			return nil, err
+		}
+		changes = append(changes, *change)
+	}
+	return changes, nil
+}
+
+func (s *Store) retainInterruptedIdeationDecision(ctx context.Context, change Change) error {
+	if change.Kind != "operations" {
+		return nil
+	}
+	value, ok := change.Value.(map[string]any)
+	if !ok || value["kind"] != "ideation" || value["failure_kind"] != "interrupted" {
+		return nil
+	}
+	waiting, err := s.ideationHasPendingDecision(ctx, change.ID)
+	if err != nil {
+		return err
+	}
+	value["stage"], value["error"], value["finished_at"] = "queued", "", ""
+	if waiting {
+		value["stage"], value["error"] = "paused", "Pending human decision retained after restart"
+	}
+	return nil
 }
 
 func interruptedRecord(kind string, record model.Record, owner, now string) (*Change, error) {

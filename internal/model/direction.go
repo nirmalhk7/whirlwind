@@ -32,3 +32,16 @@ type Direction struct {
 	Day                string        `json:"day"`
 	Selected           bool          `json:"selected"`
 }
+
+type Handoff struct {
+	AutofixProposals  []AutofixHandoff `json:"autofix_proposals,omitempty"`
+	Version           int              `json:"version"`
+	Worktree          string           `json:"worktree"`
+	Branch            string           `json:"branch"`
+	Commits           []string         `json:"commits"`
+	Checkpoints       []string         `json:"checkpoints"`
+	CompletedWork     []string         `json:"completed_work"`
+	CompletedCriteria []string         `json:"completed_criteria"`
+	FailingTests      []string         `json:"failing_tests"`
+	NextAction        string           `json:"next_action"`
+}

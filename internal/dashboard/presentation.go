@@ -27,10 +27,17 @@ func (d *Dashboard) Present(snapshot control.Snapshot) {
 	d.snapshot, d.projectRows, d.updating = snapshot, projects, true
 	d.refreshAgents()
 	d.projects.Clear()
+	d.projectAliases = make(map[string]string)
+	for _, project := range projects {
+		for _, alias := range project.CheckoutAliases {
+			d.projectAliases[alias] = project.ID
+		}
+	}
+	selectedProject := d.checkoutProjectID(d.projectID)
 	selected := 0
 	for i, project := range projects {
 		d.projects.AddItem(d.projectLabel(project), "", 0, nil)
-		if project.ID == d.projectID {
+		if project.ID == selectedProject {
 			selected = i
 		}
 	}
@@ -45,6 +52,7 @@ func (d *Dashboard) Present(snapshot control.Snapshot) {
 	d.refreshDirections()
 	d.refreshPlans()
 	d.refreshRuns()
+	d.refreshAgentInspection()
 	d.refreshCurrentInbox()
 	d.showProjectHealth()
 }

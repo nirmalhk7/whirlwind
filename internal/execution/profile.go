@@ -32,6 +32,8 @@ type MCPBroker struct {
 	Path       string `json:"path"`
 }
 type Profile struct {
+	ProtectedFiles      []string                           `json:"protected_files,omitempty"`
+	LifecycleHook       *lifecycleHook                     `json:"lifecycle_hook,omitempty"`
 	Credentials         map[string]model.NetworkCredential `json:"credentials,omitempty"`
 	MCPBrokerToken      string                             `json:"-"`
 	SupervisorDir       string                             `json:"-"`
@@ -53,6 +55,7 @@ type Profile struct {
 	CommandHash         string                             `json:"command_hash,omitempty"`
 	AllowedPaths        []string                           `json:"allowed_paths,omitempty"`
 	CWD                 string                             `json:"cwd"`
+	CommandCWD          string                             `json:"command_cwd,omitempty"`
 	ReadOnly            bool                               `json:"read_only"`
 	PolicyHash          string                             `json:"policy_hash"`
 	ReadRoots           []string                           `json:"read_roots"`

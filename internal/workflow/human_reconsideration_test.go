@@ -31,23 +31,15 @@ func TestHumanReconsiderationFlowsThroughIdeationOnce(t *testing.T) {
 	old.ProjectID = prepared.project.ID
 	old.Status = "rejected"
 	old.RejectionReason = "The earlier change lacked current evidence"
-	if err := prepared.engine.Store.Put(ctx, "directions", old.ID, old, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, prepared.engine.Store.Put(ctx, "directions", old.ID, old, 0))
 	oldRecord, err := prepared.engine.Store.Get(ctx, "directions", old.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	prompt, _, snapshot, _, err := prepared.engine.prepareDiscovery(ctx, prepared.project)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if prompt == "" {
 		t.Fatal("expected initial repository discovery prompt")
 	}
-	if err := prepared.engine.saveDiscoverySnapshot(ctx, prepared.project.ID, snapshot); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, prepared.engine.saveDiscoverySnapshot(ctx, prepared.project.ID, snapshot))
 	const humanReason = "The current team explicitly wants this reconsidered despite unchanged evidence"
 	request := model.ProposalReconsideration{
 		ID:                        "human-reconsideration-request",
@@ -57,14 +49,10 @@ func TestHumanReconsiderationFlowsThroughIdeationOnce(t *testing.T) {
 		Status:                    "pending",
 		RequestedDirectionVersion: oldRecord.Version + 1,
 	}
-	if err := prepared.engine.Store.Put(ctx, "proposal_reconsiderations", request.ID, request, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, prepared.engine.Store.Put(ctx, "proposal_reconsiderations", request.ID, request, 0))
 	old.Status = "reconsider_requested"
 	old.Selected = false
-	if err := prepared.engine.Store.Put(ctx, "directions", old.ID, old, oldRecord.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, prepared.engine.Store.Put(ctx, "directions", old.ID, old, oldRecord.Version))
 	if _, err := prepared.engine.Store.PendingProposalReconsideration(ctx, prepared.project.ID, old.ID, humanReason); err != nil {
 		t.Fatalf("host request was not active before ideation: %v", err)
 	}
@@ -88,16 +76,12 @@ func TestHumanReconsiderationFlowsThroughIdeationOnce(t *testing.T) {
 	}
 
 	rows, err := prepared.engine.Store.List(ctx, "directions")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	var published model.Direction
 	count := 0
 	for _, row := range rows {
 		direction, decodeErr := store.Decode[model.Direction](row)
-		if decodeErr != nil {
-			t.Fatal(decodeErr)
-		}
+		requireWorkflowSuccess(t, decodeErr)
 		if direction.PredecessorID == old.ID {
 			published = direction
 			count++
@@ -107,9 +91,7 @@ func TestHumanReconsiderationFlowsThroughIdeationOnce(t *testing.T) {
 		t.Fatalf("human reconsideration did not publish exactly one unselected linked proposal: count=%d proposal=%+v", count, published)
 	}
 	requestRecord, err := prepared.engine.Store.Get(ctx, "proposal_reconsiderations", request.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	consumed, err := store.Decode[model.ProposalReconsideration](requestRecord)
 	if err != nil || consumed.Status != "consumed" || consumed.CandidateID != published.ID {
 		t.Fatalf("human authorization was not consumed by its one publication: %+v err=%v", consumed, err)

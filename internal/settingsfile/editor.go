@@ -18,6 +18,8 @@ type FileView struct {
 	Revision string `json:"revision,omitempty"`
 }
 
+func (s *Source) SettingsPath() string { return s.path }
+
 // Snapshot returns the exact bytes accepted at startup, independent of later disk edits.
 func (s *Source) Snapshot() FileView { return s.startup }
 

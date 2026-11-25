@@ -40,3 +40,14 @@ func TestRefreshPreservesSelectedProjectAndPlan(t *testing.T) {
 		t.Fatalf("refresh lost selection: %q / %q", project, plan)
 	}
 }
+
+func TestClosingModalRestoresPreviouslyFocusedPanel(t *testing.T) {
+	d := New()
+	dashboardScreen(t, d)
+	d.SetFocus(d.inbox)
+	d.showKeyboardHelp()
+	d.closeModal()
+	if d.GetFocus() != d.inbox {
+		t.Fatalf("closing modal moved keyboard focus away from Inbox: %T", d.GetFocus())
+	}
+}

@@ -34,6 +34,10 @@ func TestACPFilesystemRespectsWorkspaceAndReadOnly(t *testing.T) {
 	if e != nil || v.(map[string]any)["content"] != "two" {
 		t.Fatalf(valueErrorFormat, v, e)
 	}
+	v, e = c.Handle(context.Background(), clientMessage("fs/read_text_file", map[string]any{"path": "read.txt", "line": 2, "limit": 10}))
+	if e != nil || v.(map[string]any)["content"] != "two\nthree" {
+		t.Fatalf(valueErrorFormat, v, e)
+	}
 	if _, e = c.Handle(context.Background(), clientMessage("fs/write_text_file", map[string]any{"path": filepath.Join(root, "escape", "secret"), "content": "bad"})); e == nil {
 		t.Fatal("symlink escape allowed")
 	}

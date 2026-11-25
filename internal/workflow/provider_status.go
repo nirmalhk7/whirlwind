@@ -31,7 +31,7 @@ func (e *Engine) ProviderStatuses(ctx context.Context) (model.ProviderStatuses, 
 		return model.ProviderStatuses{}, err
 	}
 	if settings.ProviderStatusCheckSeconds < 1 {
-		settings.ProviderStatusCheckSeconds = 30
+		settings.ProviderStatusCheckSeconds = model.DefaultProviderStatusCheckSeconds
 	}
 	encoded, _ := json.Marshal(struct {
 		Records  []model.Record

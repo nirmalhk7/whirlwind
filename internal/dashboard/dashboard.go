@@ -25,6 +25,7 @@ type Dashboard struct {
 	inbox                        *tview.List
 	inboxIdeaCount               int
 	inboxTaskIDs                 []string
+	setupNotice                  *projectSetupNotice
 	plans                        *tview.List
 	runs                         *tview.List
 	runRows                      []runRow
@@ -34,6 +35,7 @@ type Dashboard struct {
 	status                       *tview.TextView
 	runnerStatus                 *tview.TextView
 	agents                       *tview.TextView
+	agentInspection              *tview.TextView
 	focus                        int
 	snapshot                     control.Snapshot
 	root                         tview.Primitive
@@ -49,6 +51,7 @@ type Dashboard struct {
 	directionRows                []model.Direction
 	planRows                     []model.ExecutionPlan
 	projectID                    string
+	projectAliases               map[string]string
 	directionID                  string
 	planID                       string
 	updating                     bool
@@ -67,39 +70,7 @@ func New(dataDirectories ...string) *Dashboard {
 		d.dataDirectory = filepath.Join(home, ".local", "share", "whirlwind", "parity-v1")
 	}
 	d.EnableMouse(true)
-	d.inbox = tview.NewList().ShowSecondaryText(false).SetHighlightFullLine(true).SetSelectedBackgroundColor(tcell.ColorWhite).SetSelectedTextColor(tcell.ColorBlack)
-	d.inbox.SetMouseCapture(func(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
-		if action == tview.MouseLeftClick {
-			x, y := event.Position()
-			left, top, width, height := d.inbox.GetInnerRect()
-			offset, _ := d.inbox.GetOffset()
-			if x >= left && x < left+width && y >= top && y < top+height {
-				index := offset + y - top
-				if index < len(d.inboxMessages) {
-					d.inbox.SetCurrentItem(index)
-					d.focus = 3
-					d.SetFocus(d.inbox)
-					d.viewMessage(index)
-					return action, nil
-				}
-			}
-		}
-		return action, event
-	})
-	d.inbox.SetBorder(true).SetTitle(inboxTitle)
-	d.inbox.SetSelectedFunc(func(index int, _, _ string, _ rune) {
-		if index >= 0 && index < len(d.directionRows) {
-			d.directions.SetCurrentItem(index)
-			d.confirmDirection()
-		} else if index >= 0 && index < len(d.inboxTaskIDs) {
-			d.openInboxSelection(index)
-		}
-	})
-	d.inbox.SetChangedFunc(func(index int, _, _ string, _ rune) {
-		if !d.updating && index < len(d.directionRows) {
-			d.directions.SetCurrentItem(index)
-		}
-	})
+	d.initializeInbox()
 	d.projects.SetSelectedBackgroundColor(tcell.ColorDefault).SetSelectedTextColor(tcell.ColorWhite)
 	d.runs = tview.NewList().ShowSecondaryText(true)
 	d.runs.SetBorder(true).SetTitle(" Runs ")
@@ -111,7 +82,7 @@ func New(dataDirectories ...string) *Dashboard {
 	d.directions.SetBorder(true).SetTitle(inboxTitle)
 	d.plans.SetBorder(true).SetTitle(" Plans ")
 	d.agents = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
-	d.agents.SetBorder(true).SetTitle(" Agents ")
+	d.agents.SetBorder(true).SetTitle(" Agents · Enter ")
 	d.agents.SetText("No configured agents")
 	d.projects.AddItem("No projects", "", 0, nil)
 	d.directions.AddItem("No inbox items", "", 0, nil)
@@ -147,6 +118,46 @@ func New(dataDirectories ...string) *Dashboard {
 	d.directions.SetSelectedFunc(func(_ int, _, _ string, _ rune) { d.confirmDirection() })
 	d.plans.SetChangedFunc(d.selectPlan)
 	return d
+}
+
+func (d *Dashboard) initializeInbox() {
+	d.inbox = tview.NewList().ShowSecondaryText(false).SetHighlightFullLine(true).SetSelectedBackgroundColor(tcell.ColorWhite).SetSelectedTextColor(tcell.ColorBlack)
+	d.inbox.SetMouseCapture(d.captureInboxClick)
+	d.inbox.SetBorder(true).SetTitle(inboxTitle)
+	d.inbox.SetSelectedFunc(func(index int, _, _ string, _ rune) {
+		if index >= 0 && index < len(d.directionRows) {
+			d.directions.SetCurrentItem(index)
+			d.confirmDirection()
+		} else if index >= 0 && index < len(d.inboxTaskIDs) {
+			d.openInboxSelection(index)
+		}
+	})
+	d.inbox.SetChangedFunc(func(index int, _, _ string, _ rune) {
+		if !d.updating && index < len(d.directionRows) {
+			d.directions.SetCurrentItem(index)
+		}
+	})
+}
+
+func (d *Dashboard) captureInboxClick(action tview.MouseAction, event *tcell.EventMouse) (tview.MouseAction, *tcell.EventMouse) {
+	if action != tview.MouseLeftClick {
+		return action, event
+	}
+	x, y := event.Position()
+	left, top, width, height := d.inbox.GetInnerRect()
+	offset, _ := d.inbox.GetOffset()
+	if x < left || x >= left+width || y < top || y >= top+height {
+		return action, event
+	}
+	index := offset + y - top
+	if index >= len(d.inboxMessages) {
+		return action, event
+	}
+	d.inbox.SetCurrentItem(index)
+	d.focus = 3
+	d.SetFocus(d.inbox)
+	d.viewMessage(index)
+	return action, nil
 }
 
 func (d *Dashboard) SetCommandHandler(handler func(context.Context, control.Request) (json.RawMessage, error)) {

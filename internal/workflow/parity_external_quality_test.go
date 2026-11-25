@@ -11,6 +11,7 @@ import (
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/policy"
+	"whirlwind/internal/verification"
 )
 
 const (
@@ -171,12 +172,15 @@ func TestParitySupervisorStagesQualityJobsUnderApprovedExternalRoot(t *testing.T
 	if err != nil {
 		t.Fatalf("supervisor ignored approved external storage root: %v", err)
 	}
-	if !strings.Contains(string(raw), "config_version") {
-		t.Fatal("supervisor omitted frozen quality configuration from manifest")
+	var manifest verification.JobManifest
+	requireWorkflowSuccess(t, json.Unmarshal(raw, &manifest))
+	if manifest.Quality == nil || manifest.Quality.Files[".qlty/"+externalQltyConfigFilename] != externalQltyEmptyConfig {
+		t.Fatal("supervisor omitted the exact frozen quality configuration from the retained manifest")
 	}
-	copied, err := os.ReadFile(filepath.Join(root, "jobs", run.id, "checkout", ".qlty", externalQltyConfigFilename))
-	if err != nil || string(copied) != externalQltyEmptyConfig {
-		t.Fatalf("frozen config not copied to disposable checkout: %q %v", copied, err)
+	if report.Results[0].Runtime.CleanupVerified {
+		if _, err := os.Lstat(filepath.Join(manifest.Root, "checkout")); !os.IsNotExist(err) {
+			t.Fatalf("verified external staging checkout was not released: %v", err)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(project.Path, ".qlty")); !os.IsNotExist(err) {
 		t.Fatal("quality job changed original repository")

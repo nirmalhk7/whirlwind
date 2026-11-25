@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"whirlwind/internal/model"
 )
 
 type CommandExecutor interface {
@@ -13,8 +15,9 @@ type CommandExecutor interface {
 }
 
 type SupervisorDispatcher struct {
-	DB       *sql.DB
-	Commands CommandExecutor
+	DB             *sql.DB
+	Commands       CommandExecutor
+	DispatchHealth func() model.DispatchHealth
 }
 
 func (d SupervisorDispatcher) Handle(ctx context.Context, request Request) (Response, error) {
@@ -27,8 +30,14 @@ func (d SupervisorDispatcher) Handle(ctx context.Context, request Request) (Resp
 		result, err = d.records(ctx, request)
 	case "inspect.events":
 		result, err = d.events(ctx, request)
+	case DispatchHealthOperation:
+		if d.DispatchHealth == nil {
+			err = ErrDispatchHealthUnavailable
+		} else {
+			result = d.DispatchHealth()
+		}
 	default:
-		if !allowedOperations[request.Operation] || (strings.HasPrefix(request.Operation, inspectOperationPrefix) && request.Operation != "inspect.plan" && request.Operation != "inspect.artifact") {
+		if !allowedAdapterOperation(request.Operation) {
 			return Response{}, fmt.Errorf("unsupported local operation %q", request.Operation)
 		}
 		if d.Commands == nil {
@@ -37,4 +46,16 @@ func (d SupervisorDispatcher) Handle(ctx context.Context, request Request) (Resp
 		result, err = d.Commands.Execute(ctx, request)
 	}
 	return Response{RequestID: request.RequestID, Result: result}, err
+}
+
+func allowedAdapterOperation(operation string) bool {
+	if !allowedOperations[operation] {
+		return false
+	}
+	switch operation {
+	case "inspect.plan", "inspect.artifact", "inspect.memory":
+		return true
+	default:
+		return !strings.HasPrefix(operation, inspectOperationPrefix)
+	}
 }

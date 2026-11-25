@@ -14,6 +14,18 @@ import (
 	"time"
 )
 
+const (
+	finalizationInspectOperation = "finalization.inspect"
+	RoleQueuePushOperation       = "queue.push"
+	RoleQueuePopOperation        = "queue.pop"
+)
+
+const (
+	maxIPCMessage = 1 << 20
+	maxDiffCursor = 64 << 20
+	ipcTimeout    = 15 * time.Second
+)
+
 type LocalServer struct {
 	listener net.Listener
 	path     string

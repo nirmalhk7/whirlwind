@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createMCPGateway } from "./mcp-gateway.mjs";
 import { randomBytes } from "node:crypto";
 import { codingRules } from "./scope.mjs";
+import { lifecycleHookExit, prepareLifecycleHook } from "./lifecycle-hooks.mjs";
 
 const bridge = dirname(fileURLToPath(import.meta.url));
 const inside = (root, path) => {
@@ -17,6 +18,31 @@ const inside = (root, path) => {
     !isAbsolute(rel)
   );
 };
+
+function networkDomainGrants(domains) {
+  const plainDomains = [];
+  const endpointDomains = new Map();
+  for (const domain of domains) {
+    const url = URL.canParse(domain) ? new URL(domain) : null;
+    if (!url || !["https:", "http:"].includes(url.protocol) || url.pathname === "/") {
+      plainDomains.push(domain);
+      continue;
+    }
+    const paths = endpointDomains.get(url.hostname) ?? new Set();
+    paths.add(url.pathname);
+    endpointDomains.set(url.hostname, paths);
+  }
+  return {
+    plainDomains,
+    // nono 0.81.0 uses one credential-less route per hostname. Pass its
+    // endpoint rules together so subsequent path grants cannot replace it.
+    endpointDomains: Array.from(endpointDomains, ([domain, paths]) => ({
+      domain,
+      endpoints: Array.from(paths, (path) => ({ method: "*", path })),
+    })),
+  };
+}
+
 let scratch,
   temporary = false,
   control,
@@ -35,6 +61,8 @@ try {
   if (process.platform !== "darwin")
     throw new Error("Execution requires macOS; inspection remains available");
   const cwd = await realpath(profile.cwd);
+  const commandCwd = profile.command_cwd ? await realpath(profile.command_cwd) : cwd;
+  if (!inside(cwd, commandCwd)) throw new Error("Command directory escapes workspace");
   const nono = process.env.WHIRLWIND_NONO_CLI || "nono";
   const version = spawnSync(nono, ["--version"], { encoding: "utf8", timeout: 5000 });
   if (version.status !== 0 || version.stdout.trim() !== "nono 0.81.0")
@@ -169,6 +197,7 @@ try {
     )
   )
     throw new Error("Configure explicit bounded network domains");
+  const { plainDomains, endpointDomains } = networkDomainGrants(domains);
   const system = [
     "/bin",
     "/sbin",
@@ -266,6 +295,7 @@ try {
     filesystem,
     network: {
       block: domains.length === 0 && services.length === 0,
+      allow_domain: endpointDomains,
       open_port: port ? [port] : [],
       custom_credentials: nativeCredentials,
       credentials: services,
@@ -275,13 +305,36 @@ try {
   if (process.platform === "darwin") {
     const escapedControl = control.replace(/[.+^${}()|[\]\\]/g, "\\$&");
     const publicCA = `(allow file-read* (regex ${JSON.stringify(`^${escapedControl}/state/nono/sessions/intercept-[^/]+/intercept-ca\\.pem$`)}))`;
+    const protectedSettings = new Set();
+    for (const file of profile.protected_files ?? []) {
+      const location = join(await realpath(dirname(file)), basename(file));
+      if (!inside(cwd, location) || location === cwd)
+        throw new Error("Protected settings must be within workspace");
+      for (const candidate of [location, await realpath(file)].filter(
+        (path) => inside(cwd, path) && path !== cwd,
+      )) {
+        // Protect the file and prevent replacing it by moving an ancestor.
+        for (let path = candidate; path !== cwd; path = dirname(path)) protectedSettings.add(path);
+      }
+    }
     policy.unsafe_macos_seatbelt_rules = [
       '(allow file-write-data (literal "/dev/null"))',
       ...codingRules(profile, cwd),
       ...(domains.length || services.length ? [publicCA] : []),
       ...protectedPaths.map((path) => `(deny file-write* (subpath ${JSON.stringify(path)}))`),
+      ...Array.from(
+        protectedSettings,
+        (path) => `(deny file-write* (literal ${JSON.stringify(path)}))`,
+      ),
     ];
   }
+  const hook = await prepareLifecycleHook(
+    profile.lifecycle_hook,
+    control,
+    { ...profile, cwd },
+    nono,
+  );
+  if (hook) policy.session_hooks = hook.hooks;
   const policyFile = join(control, "profile.json");
   await writeFile(policyFile, JSON.stringify(policy), { mode: 0o600, flag: "wx" });
   const proxyURL = port ? `http://whirlwind:${token}@127.0.0.1:${port}` : undefined;
@@ -291,7 +344,7 @@ try {
     XDG_STATE_HOME: join(control, "state"),
     XDG_DATA_HOME: join(control, "data"),
     PATH: dirname(await realpath(process.execPath)) + delimiter + (process.env.PATH ?? ""),
-    PWD: cwd,
+    PWD: commandCwd,
     OPENSSL_CONF: "/dev/null",
     SSL_CERT_FILE:
       process.platform === "darwin"
@@ -326,7 +379,7 @@ try {
     "--profile",
     policyFile,
     "--allow-cwd",
-    ...domains.flatMap((domain) => ["--allow-domain", domain]),
+    ...plainDomains.flatMap((domain) => ["--allow-domain", domain]),
     "--",
     process.execPath,
     resolve(bridge, "../sandbox/initialize-state.mjs"),
@@ -338,12 +391,13 @@ try {
     "--",
     ...command,
   ];
-  const child = spawn(nono, args, { cwd, stdio: "inherit", env });
+  const child = spawn(nono, args, { cwd: commandCwd, stdio: "inherit", env });
   for (const signal of ["SIGINT", "SIGTERM"]) process.once(signal, () => child.kill(signal));
-  process.exitCode = await new Promise((ok, bad) => {
+  const status = await new Promise((ok, bad) => {
     child.once("error", bad);
     child.once("exit", (code, signal) => ok(code ?? (signal ? 128 : 1)));
   });
+  process.exitCode = await lifecycleHookExit(hook, status);
 } catch (error) {
   console.error(`nono execution failed: ${error.message}`);
   process.exitCode = 1;

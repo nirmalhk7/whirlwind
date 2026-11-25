@@ -87,7 +87,7 @@ func createDeliveryBranchRef(ctx context.Context, source, ref, commit, zero stri
 }
 
 func emptyObjectID(ctx context.Context, repo string) (string, error) {
-	format, err := submissionGitRun(ctx, repo, "rev-parse", "--show-object-format")
+	format, err := submissionGitRun(ctx, repo, gitRevParseCommand, "--show-object-format")
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +113,7 @@ func createDetachedDeliveryWorktree(ctx context.Context, source, target, commit 
 }
 
 func validateDetachedDeliveryWorktree(ctx context.Context, source, target, commit string) error {
-	top, err := submissionGitRun(ctx, target, "rev-parse", "--show-toplevel")
+	top, err := submissionGitRun(ctx, target, gitRevParseCommand, "--show-toplevel")
 	if err != nil || top != target {
 		return errors.New("delivery worktree path is occupied by another directory")
 	}
@@ -125,7 +125,7 @@ func validateDetachedDeliveryWorktree(ctx context.Context, source, target, commi
 	if err != nil || commonSource != commonTarget {
 		return errors.New("existing delivery worktree belongs to a different Git repository")
 	}
-	head, err := submissionGitRun(ctx, target, "rev-parse", "HEAD")
+	head, err := submissionGitRun(ctx, target, gitRevParseCommand, "HEAD")
 	if err != nil || head != commit {
 		return errors.New("existing delivery worktree does not match accepted commit")
 	}

@@ -17,10 +17,17 @@ import (
 	"whirlwind/internal/testutil/openshell"
 )
 
+const (
+	deliveryFixtureBranch   = "codex/delivery/task-v1"
+	deliveryFixtureHeadRefs = "refs/heads/"
+	deliveryFixtureRevParse = "rev-parse"
+	deliveryFixturePath     = "candidate.txt"
+)
+
 func TestPromoteReviewedSnapshotKeepsExactCommitAndCreatesDetachedWorktree(t *testing.T) {
 	repo := newSubmissionRepository(t)
 	delivery := filepath.Join(filepath.Dir(repo.source), "delivery")
-	branch := "codex/delivery/task-v1"
+	branch := deliveryFixtureBranch
 
 	commit, err := promoteReviewedSnapshot(context.Background(), repo.source, delivery, branch, repo.base, repo.reviewed)
 	if err != nil {
@@ -29,16 +36,16 @@ func TestPromoteReviewedSnapshotKeepsExactCommitAndCreatesDetachedWorktree(t *te
 	if commit != repo.reviewed {
 		t.Fatalf("promoted commit %q, want exact reviewed commit %q", commit, repo.reviewed)
 	}
-	if got := submissionGit(t, repo.source, "rev-parse", "refs/heads/"+branch); got != repo.reviewed {
+	if got := submissionGit(t, repo.source, deliveryFixtureRevParse, deliveryFixtureHeadRefs+branch); got != repo.reviewed {
 		t.Fatalf("delivery branch points at %s, want reviewed commit %s", got, repo.reviewed)
 	}
-	if got := submissionGit(t, delivery, "rev-parse", "HEAD"); got != repo.reviewed {
+	if got := submissionGit(t, delivery, deliveryFixtureRevParse, "HEAD"); got != repo.reviewed {
 		t.Fatalf("delivery worktree HEAD=%s, want reviewed commit %s", got, repo.reviewed)
 	}
 	if _, err := github.Run(context.Background(), delivery, "git", "symbolic-ref", "-q", "HEAD"); err == nil {
 		t.Fatal("delivery worktree is attached to a branch")
 	}
-	if got := submissionGit(t, delivery, "rev-parse", "HEAD^{tree}"); got != submissionGit(t, repo.source, "rev-parse", repo.reviewed+"^{tree}") {
+	if got := submissionGit(t, delivery, deliveryFixtureRevParse, "HEAD^{tree}"); got != submissionGit(t, repo.source, deliveryFixtureRevParse, repo.reviewed+"^{tree}") {
 		t.Fatal("delivery worktree tree differs from reviewed tree")
 	}
 }
@@ -46,8 +53,8 @@ func TestPromoteReviewedSnapshotKeepsExactCommitAndCreatesDetachedWorktree(t *te
 func TestPromoteReviewedSnapshotRecoversAfterRefBeforeWorktree(t *testing.T) {
 	repo := newSubmissionRepository(t)
 	delivery := filepath.Join(filepath.Dir(repo.source), "delivery")
-	branch := "codex/delivery/task-v1"
-	submissionGit(t, repo.source, "update-ref", "refs/heads/"+branch, repo.reviewed)
+	branch := deliveryFixtureBranch
+	submissionGit(t, repo.source, "update-ref", deliveryFixtureHeadRefs+branch, repo.reviewed)
 	if _, err := os.Stat(delivery); !os.IsNotExist(err) {
 		t.Fatalf("precondition failed: delivery worktree already exists: %v", err)
 	}
@@ -55,7 +62,7 @@ func TestPromoteReviewedSnapshotRecoversAfterRefBeforeWorktree(t *testing.T) {
 	if err != nil || commit != repo.reviewed {
 		t.Fatalf("promotion did not recover after ref checkpoint: commit=%q err=%v", commit, err)
 	}
-	if got := submissionGit(t, delivery, "rev-parse", "HEAD"); got != repo.reviewed {
+	if got := submissionGit(t, delivery, deliveryFixtureRevParse, "HEAD"); got != repo.reviewed {
 		t.Fatalf("recovered worktree points at %s, want %s", got, repo.reviewed)
 	}
 }
@@ -66,20 +73,20 @@ func TestPromoteReviewedSnapshotRejectsChangedCandidateAndExistingBranch(t *test
 		if err := os.WriteFile(filepath.Join(repo.source, "unreviewed.txt"), []byte("change\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := promoteReviewedSnapshot(context.Background(), repo.source, filepath.Join(filepath.Dir(repo.source), "delivery"), "codex/delivery/task-v1", repo.base, repo.reviewed)
+		_, err := promoteReviewedSnapshot(context.Background(), repo.source, filepath.Join(filepath.Dir(repo.source), "delivery"), deliveryFixtureBranch, repo.base, repo.reviewed)
 		if err == nil {
 			t.Fatal("dirty candidate was promoted")
 		}
 	})
 	t.Run("competing delivery branch", func(t *testing.T) {
 		repo := newSubmissionRepository(t)
-		branch := "codex/delivery/task-v1"
+		branch := deliveryFixtureBranch
 		submissionGit(t, repo.source, "branch", branch, repo.base)
 		_, err := promoteReviewedSnapshot(context.Background(), repo.source, filepath.Join(filepath.Dir(repo.source), "delivery"), branch, repo.base, repo.reviewed)
 		if err == nil {
 			t.Fatal("existing branch was overwritten")
 		}
-		if got := submissionGit(t, repo.source, "rev-parse", "refs/heads/"+branch); got != repo.base {
+		if got := submissionGit(t, repo.source, deliveryFixtureRevParse, deliveryFixtureHeadRefs+branch); got != repo.base {
 			t.Fatalf("existing branch moved from %s to %s", repo.base, got)
 		}
 	})
@@ -101,7 +108,7 @@ func TestDeliverySnapshotRejectsForeignCloneAtSameReviewedCommit(t *testing.T) {
 func TestDeliveryBranchCASDoesNotOverwriteCompetingCreator(t *testing.T) {
 	repo := newSubmissionRepository(t)
 	ref := "refs/heads/codex/delivery/task-v1"
-	competing := submissionGit(t, repo.source, "rev-parse", repo.base)
+	competing := submissionGit(t, repo.source, deliveryFixtureRevParse, repo.base)
 	submissionGit(t, repo.source, "update-ref", ref, competing)
 	zero, err := emptyObjectID(context.Background(), repo.source)
 	if err != nil {
@@ -111,7 +118,7 @@ func TestDeliveryBranchCASDoesNotOverwriteCompetingCreator(t *testing.T) {
 	if err == nil {
 		t.Fatal("compare-and-swap branch creation overwrote a competing creator")
 	}
-	if got := submissionGit(t, repo.source, "rev-parse", ref); got != competing {
+	if got := submissionGit(t, repo.source, deliveryFixtureRevParse, ref); got != competing {
 		t.Fatalf("competing branch moved from %s to %s", competing, got)
 	}
 }
@@ -123,15 +130,15 @@ func TestSubmittingRequiresAcceptedReportBeforeCreatingDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := submissionGit(t, project.Path, "rev-parse", "HEAD")
-	if err := os.WriteFile(filepath.Join(project.Path, "candidate.txt"), []byte("reviewed candidate\n"), 0600); err != nil {
+	base := submissionGit(t, project.Path, deliveryFixtureRevParse, "HEAD")
+	if err := os.WriteFile(filepath.Join(project.Path, deliveryFixturePath), []byte("reviewed candidate\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	submissionGit(t, project.Path, "add", "candidate.txt")
+	submissionGit(t, project.Path, "add", deliveryFixturePath)
 	submissionGit(t, project.Path, "commit", "-m", "candidate")
 	task.Stage = "submitting"
 	task.Worktree, task.Base = project.Path, base
-	task.ReviewedCommit = submissionGit(t, project.Path, "rev-parse", "HEAD")
+	task.ReviewedCommit = submissionGit(t, project.Path, deliveryFixtureRevParse, "HEAD")
 	task.Branch = "main"
 	task.ChecksPassed = true
 	record, err := e.Store.Get(ctx, "execution_plans", task.ID)
@@ -150,13 +157,14 @@ func TestSubmittingRequiresAcceptedReportBeforeCreatingDelivery(t *testing.T) {
 }
 
 func TestPublishingRoutesToLocalDeliveryWithoutRemotePublication(t *testing.T) {
-	step := &taskStep{task: model.ExecutionPlan{Stage: "publishing"}}
-	finished, err := step.publishing()
-	if finished || err != nil || step.task.Stage != "submitting" {
-		t.Fatalf("publishing did not route to local delivery: finished=%v stage=%q err=%v", finished, step.task.Stage, err)
-	}
-	if err := step.publishPullRequest("publication", model.Publication{}, 0); err == nil {
-		t.Fatal("direct remote publication path was not denied")
+	ctx := context.Background()
+	e, task, _, record := acceptedDeliveryFixture(t)
+	task.Stage = "publishing"
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, task, record.Version))
+	requireWorkflowSuccess(t, e.Step(ctx, task.ID))
+	updated, _ := localStoredTask(t, e, task.ID)
+	if updated.Stage != "submitting" || updated.PR != "" {
+		t.Fatalf("saved publishing task did not resume as local delivery: stage=%q pr=%q", updated.Stage, updated.PR)
 	}
 }
 
@@ -164,19 +172,7 @@ func TestAcceptedCandidateCompletesAsExactLocalDelivery(t *testing.T) {
 	ctx := context.Background()
 	e, task, project, record := acceptedDeliveryFixture(t)
 	step := &taskStep{Engine: e, ctx: ctx, project: project, task: task, record: record}
-	for range 3 {
-		finished, err := step.submitting()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if finished {
-			break
-		}
-		if err := e.Store.Put(ctx, "execution_plans", task.ID, step.task, step.record.Version); err != nil {
-			t.Fatal(err)
-		}
-		step.record.Version++
-	}
+	advanceLocalDeliveryFixture(t, ctx, e, task, step)
 	if step.task.Stage != "complete" || step.task.Delivery == nil || step.task.Delivery.Stage != "complete" {
 		t.Fatalf("local delivery did not complete: stage=%s delivery=%+v", step.task.Stage, step.task.Delivery)
 	}
@@ -184,10 +180,10 @@ func TestAcceptedCandidateCompletesAsExactLocalDelivery(t *testing.T) {
 	if delivery.ReviewedCommit != task.ReviewedCommit || delivery.Base != task.Base || delivery.ReviewID != task.ReviewID || delivery.VerificationID != task.VerificationID {
 		t.Fatalf("delivery provenance changed: %+v", delivery)
 	}
-	if got := submissionGit(t, task.Worktree, "rev-parse", "refs/heads/"+delivery.Branch); got != task.ReviewedCommit {
+	if got := submissionGit(t, task.Worktree, deliveryFixtureRevParse, deliveryFixtureHeadRefs+delivery.Branch); got != task.ReviewedCommit {
 		t.Fatalf("delivery branch points at %s, want reviewed commit %s", got, task.ReviewedCommit)
 	}
-	if got := submissionGit(t, delivery.Worktree, "rev-parse", "HEAD"); got != task.ReviewedCommit {
+	if got := submissionGit(t, delivery.Worktree, deliveryFixtureRevParse, "HEAD"); got != task.ReviewedCommit {
 		t.Fatalf("finalizer worktree points at %s, want reviewed commit %s", got, task.ReviewedCommit)
 	}
 	if delivery.Message != "Exact candidate accepted for local delivery." || len(delivery.UnmetRequirements) != 0 || delivery.Adherence == nil || delivery.Adherence.Score <= 80 {
@@ -211,23 +207,11 @@ func TestAcceptedDeliveryShowsEveryUnmetRequirementToFinalizer(t *testing.T) {
 		if index == 5 {
 			status, explanation = "unverified", "No evidence was supplied for this requirement."
 		}
-		judgments[index] = model.RequirementResult{ID: id, Status: status, Code: []string{"candidate.txt"}, Evidence: []string{"candidate evidence"}, Explanation: explanation}
+		judgments[index] = model.RequirementResult{ID: id, Status: status, Code: []string{deliveryFixturePath}, Evidence: []string{"candidate evidence"}, Explanation: explanation}
 	}
 	e, task, project, record := acceptedDeliveryFixtureWith(t, requirements, judgments, &prompt)
 	step := &taskStep{Engine: e, ctx: ctx, project: project, task: task, record: record}
-	for range 3 {
-		finished, err := step.submitting()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if finished {
-			break
-		}
-		if err := e.Store.Put(ctx, "execution_plans", task.ID, step.task, step.record.Version); err != nil {
-			t.Fatal(err)
-		}
-		step.record.Version++
-	}
+	advanceLocalDeliveryFixture(t, ctx, e, task, step)
 	delivery := step.task.Delivery
 	if step.task.Stage != "complete" || delivery == nil || delivery.Adherence == nil {
 		t.Fatalf("accepted local delivery did not complete: stage=%s delivery=%+v", step.task.Stage, delivery)
@@ -240,6 +224,23 @@ func TestAcceptedDeliveryShowsEveryUnmetRequirementToFinalizer(t *testing.T) {
 	}
 	if !strings.Contains(prompt, delivery.UnmetRequirements[0]) || strings.Contains(prompt, "there should be none") {
 		t.Fatalf("finalizer was not given the truthful unmet requirement: %q", prompt)
+	}
+}
+
+func advanceLocalDeliveryFixture(t *testing.T, ctx context.Context, e *Engine, task model.ExecutionPlan, step *taskStep) {
+	t.Helper()
+	for range 3 {
+		finished, err := step.submitting()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if finished {
+			break
+		}
+		if err := e.Store.Put(ctx, "execution_plans", task.ID, step.task, step.record.Version); err != nil {
+			t.Fatal(err)
+		}
+		step.record.Version++
 	}
 }
 
@@ -271,14 +272,14 @@ func acceptedDeliveryFixtureOptions(t *testing.T, requirements []model.Requireme
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := submissionGit(t, project.Path, "rev-parse", "HEAD")
-	if err := os.WriteFile(filepath.Join(project.Path, "candidate.txt"), []byte("reviewed candidate\n"), 0600); err != nil {
+	base := submissionGit(t, project.Path, deliveryFixtureRevParse, "HEAD")
+	if err := os.WriteFile(filepath.Join(project.Path, deliveryFixturePath), []byte("reviewed candidate\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	submissionGit(t, project.Path, "add", "candidate.txt")
+	submissionGit(t, project.Path, "add", deliveryFixturePath)
 	submissionGit(t, project.Path, "commit", "-m", "candidate")
 	task.Stage, task.Worktree, task.Branch = "submitting", project.Path, "main"
-	task.Base, task.ReviewedCommit = base, submissionGit(t, project.Path, "rev-parse", "HEAD")
+	task.Base, task.ReviewedCommit = base, submissionGit(t, project.Path, deliveryFixtureRevParse, "HEAD")
 	task.ReviewID, task.VerificationID, task.ChecksPassed = task.ID+":1:1", "verification-1", true
 	taskRecord, err := e.Store.Get(ctx, "execution_plans", task.ID)
 	if err != nil {
@@ -300,7 +301,7 @@ func acceptedDeliveryFixtureOptions(t *testing.T, requirements []model.Requireme
 		t.Fatal(err)
 	}
 	if len(judgments) == 0 {
-		judgments = []model.RequirementResult{{ID: "REQ-RESULT", Status: "pass", Code: []string{"candidate.txt"}, Evidence: []string{"verified candidate"}, Explanation: "Candidate satisfies the requirement."}}
+		judgments = []model.RequirementResult{{ID: "REQ-RESULT", Status: "pass", Code: []string{deliveryFixturePath}, Evidence: []string{"verified candidate"}, Explanation: "Candidate satisfies the requirement."}}
 	}
 	review := model.Review{Requirements: judgments, Provenance: &provenance}
 	if err := e.Store.Put(ctx, "reviews", task.ReviewID, review, 0); err != nil {

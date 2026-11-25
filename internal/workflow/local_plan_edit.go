@@ -33,19 +33,41 @@ func (e *Engine) SaveLocalPlan(ctx context.Context, id string, expected int, has
 		}
 		return fmt.Errorf("%w: approved plan version is still active; wait until it finishes or explicitly pause it before saving changes", store.ErrConflict)
 	}
-	plan, err := parseEditedLocalPlan(content)
+	plan, project, err := e.readEditedPlan(ctx, task, content)
 	if err != nil {
 		return err
 	}
-	project, err := e.localPlanApprovalProject(ctx, task.ProjectID, plan)
+	return e.savePlanRevision(ctx, localPlanRevision{record: record, task: task, plan: plan, project: project, content: content})
+}
+
+func (e *Engine) readEditedPlan(ctx context.Context, task model.ExecutionPlan, content string) (model.PlanSpecification, model.Project, error) {
+	plan, err := parseEditedLocalPlan(content)
 	if err != nil {
-		return err
+		return model.PlanSpecification{}, model.Project{}, err
+	}
+	project, _, err := e.localPlanApprovalProject(ctx, task.ProjectID, plan)
+	if err != nil {
+		return model.PlanSpecification{}, model.Project{}, err
 	}
 	if task.IdeaID != "" {
 		if err := validatePlanCommandReferences(project.Policy, plan); err != nil {
-			return err
+			return model.PlanSpecification{}, model.Project{}, err
 		}
 	}
+	return plan, project, nil
+}
+
+type localPlanRevision struct {
+	record  model.Record
+	task    model.ExecutionPlan
+	plan    model.PlanSpecification
+	project model.Project
+	content string
+}
+
+func (e *Engine) savePlanRevision(ctx context.Context, revision localPlanRevision) error {
+	task, plan, project, content := revision.task, revision.plan, revision.project, revision.content
+	id, expected := revision.record.ID, revision.record.Version
 	task.PlanVersion++
 	task.PlanDocument = nil
 	if err := e.restoreLocalPlanIdentity(ctx, project, &task); err != nil {

@@ -62,12 +62,15 @@ func scannerBaselineChecks(checks []model.Check) []model.Check {
 }
 
 func (e *Engine) captureQualityBaseline(ctx context.Context, p model.Project, t model.ExecutionPlan, checks []model.Check, key string) (verification.Report, error) {
+	if p.Policy.OfflineDockerImage != "" {
+		return e.captureLocalQualityBaseline(ctx, p, t, checks, p.Path, t.Base)
+	}
 	path := filepath.Join(e.Root, "baselines", key)
 	if err := e.worktree(ctx, p.Path, path, "codex/whirlwind-base-"+key[:20], t.Base); err != nil {
 		return verification.Report{}, err
 	}
 	if t.IdeaID != "" {
-		return e.captureLocalQualityBaseline(ctx, p, t, checks, path)
+		return e.captureLocalQualityBaseline(ctx, p, t, checks, path, "")
 	}
 	profile, err := execution.ForPolicy(path, true, p.PolicyHash, p.Policy.Sandbox)
 	if err != nil {
@@ -76,10 +79,16 @@ func (e *Engine) captureQualityBaseline(ctx context.Context, p model.Project, t 
 	return e.runOwnedChecks(ctx, path, checks, profile, runtimeCheckOwner{TaskID: t.ID, VerificationID: key, Role: "verify"})
 }
 
-func (e *Engine) captureLocalQualityBaseline(ctx context.Context, p model.Project, t model.ExecutionPlan, checks []model.Check, path string) (verification.Report, error) {
+func (e *Engine) captureLocalQualityBaseline(ctx context.Context, p model.Project, t model.ExecutionPlan, checks []model.Check, path, head string) (verification.Report, error) {
 	baselinePlan := t
 	baselinePlan.Worktree, baselinePlan.VerificationID = path, ""
-	run, err := e.startVerification(ctx, p, &baselinePlan)
+	var run *verificationRun
+	var err error
+	if head != "" {
+		run, err = e.startVerificationAt(ctx, p, &baselinePlan, head)
+	} else {
+		run, err = e.startVerification(ctx, p, &baselinePlan)
+	}
 	if err != nil {
 		return verification.Report{}, err
 	}

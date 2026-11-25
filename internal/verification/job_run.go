@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,45 +19,82 @@ import (
 func (r *jobRunner) run(ctx context.Context, observe func(JobEvent) error) (JobReport, error) {
 	m := r.manifest
 	report := JobReport{Purpose: m.Purpose, ProjectID: m.ProjectID, OperationID: m.OperationID, ManifestHash: m.Digest(), PlanID: m.PlanID, PlanVersion: m.PlanVersion, PlanHash: m.PlanHash, ConfigurationHash: m.ConfigurationHash, CandidateCommit: m.CandidateCommit, CandidateTree: m.CandidateTree, Passed: true, Results: []JobResult{}}
-	stage, err := r.prepareCheckout(ctx)
-	if err != nil {
-		return report, err
+	pending := jobCommandRun{byName: map[string]JobResult{}, observe: observe}
+	if m.OfflineDockerImage != "" {
+		stage, err := r.prepareJobInput(ctx)
+		if err != nil {
+			return report, err
+		}
+		pending.stage = stage
+		defer func() { _ = os.RemoveAll(pending.stage) }()
 	}
-	byName := map[string]JobResult{}
 	for index, command := range m.Commands {
-		result, exists := r.results[index]
-		if !exists {
-			reason := r.blockedCommandReason(index, command, byName)
-			result, err = r.command(ctx, stage, index, command, reason, observe)
-			if err != nil {
-				return report, err
-			}
-			event := JobEvent{Type: "result", ManifestHash: m.Digest(), Index: index, Result: &result}
-			if err := r.record(event, observe); err != nil {
-				return report, err
-			}
-			r.results[index] = result
+		result, err := r.obtainJobResult(ctx, index, command, &pending)
+		if err != nil {
+			return report, err
 		}
-		byName[command.Name] = result
-		report.Results = append(report.Results, result)
-		if result.QualityIdentity != nil {
-			if report.QualityIdentity == nil {
-				report.QualityIdentity = result.QualityIdentity
-			} else if !model.SameQualityIdentity(report.QualityIdentity, result.QualityIdentity) {
-				return report, errors.New("Qlty checks produced incompatible runtime identities")
-			}
-		}
-		if requiredJobCommandFailed(command, result) {
-			report.Passed = false
+		pending.byName[command.Name] = result
+		if err := report.appendCommandResult(command, result); err != nil {
+			return report, err
 		}
 	}
-	if err := report.Validate(m); err != nil {
-		return report, err
+	return report, r.completeJobReport(report)
+}
+
+type jobCommandRun struct {
+	stage   string
+	byName  map[string]JobResult
+	observe func(JobEvent) error
+}
+
+func (r *jobRunner) obtainJobResult(ctx context.Context, index int, command JobCommand, pending *jobCommandRun) (JobResult, error) {
+	if result, exists := r.results[index]; exists {
+		return result, nil
+	}
+	if pending.stage == "" {
+		stage, err := r.prepareCheckout(ctx)
+		if err != nil {
+			return JobResult{}, err
+		}
+		pending.stage = stage
+	}
+	reason := r.blockedCommandReason(index, command, pending.byName)
+	result, err := r.command(ctx, pending.stage, index, command, reason, pending.observe)
+	if err != nil {
+		return result, err
+	}
+	event := JobEvent{Type: "result", ManifestHash: r.manifest.Digest(), Index: index, Result: &result}
+	if err := r.record(event, pending.observe); err != nil {
+		return result, err
+	}
+	r.results[index] = result
+	return result, nil
+}
+
+func (report *JobReport) appendCommandResult(command JobCommand, result JobResult) error {
+	report.Results = append(report.Results, result)
+	if !mergeJobQualityIdentity(&report.QualityIdentity, result.QualityIdentity) {
+		return errors.New(jobQualityIdentityConflict)
+	}
+	if requiredJobCommandFailed(command, result) {
+		report.Passed = false
+	}
+	return nil
+}
+
+func (r *jobRunner) completeJobReport(report JobReport) error {
+	if err := report.Validate(r.manifest); err != nil {
+		return err
 	}
 	if err := writeJobJSON(r.root, "report.json", report); err != nil {
-		return report, err
+		return err
 	}
-	return report, nil
+	if err := r.releaseCompletedStaging(report); err != nil {
+		// Evidence is already valid and durable. A transient filesystem error
+		// cannot change the result; reopening this journal retries cleanup.
+		log.Printf("release verification staging for job %s: %v", r.manifest.JobID, err)
+	}
+	return nil
 }
 
 func (r *jobRunner) command(ctx context.Context, stage string, index int, command JobCommand, blocked string, observe func(JobEvent) error) (JobResult, error) {
@@ -90,6 +128,9 @@ func (r *jobRunner) command(ctx context.Context, stage string, index int, comman
 		return result, err
 	}
 	r.started[index] = true
+	if r.offline != nil {
+		return r.runOfflineDockerCheck(ctx, stage, index, command, result, stdout, stderr)
+	}
 	return r.executeCommand(ctx, stage, index, command, result, stdout, stderr)
 }
 
@@ -106,98 +147,14 @@ func (r *jobRunner) executeCommand(ctx context.Context, stage string, index int,
 	started := time.Now()
 	run, cancel := context.WithTimeout(ctx, time.Duration(command.TimeoutSeconds)*time.Second)
 	defer cancel()
-	profile, err := r.commandProfile(stage, command)
-	if err == nil {
-		profile.RuntimeDir = filepath.Join(r.root.Name(), "runtime", command.Name)
-		if createErr := os.MkdirAll(profile.RuntimeDir, 0700); createErr != nil {
-			err = createErr
-		}
-		if err == nil && isQltyCheckCommand(command.Command) && r.manifest.Quality != nil && r.manifest.Quality.Identity != nil {
-			approved := r.manifest.Quality.Identity
-			jobsRoot, pathErr := filepath.EvalSymlinks(filepath.Join(r.manifest.Quality.Root, "jobs"))
-			if pathErr != nil {
-				err = errors.New("approved Qlty runtime jobs root is unavailable")
-			}
-			canonicalRuntime := ""
-			if err == nil {
-				canonicalRuntime, pathErr = filepath.EvalSymlinks(approved.ToolRuntimePath)
-				if pathErr != nil || canonicalRuntime != approved.ToolRuntimePath {
-					err = errors.New("approved Qlty runtime path is missing or non-canonical")
-				}
-			}
-			if err == nil {
-				relativeRuntime, relErr := filepath.Rel(jobsRoot, canonicalRuntime)
-				if relErr != nil || !filepath.IsLocal(relativeRuntime) || filepath.Base(canonicalRuntime) != "tools" {
-					err = errors.New("approved Qlty runtime path is outside retained quality job evidence")
-				}
-			}
-			if err == nil && qualityPathsOverlap(stage, approved.ToolRuntimePath) {
-				err = errors.New("approved Qlty runtime path overlaps candidate source")
-			}
-			if err == nil {
-				toolDestination := filepath.Join(profile.RuntimeDir, "home", ".qlty", "cache", "tools")
-				if copyErr := copyApprovedQualityTree(run, approved.ToolRuntimePath, toolDestination, approved.ToolRuntimeHash); copyErr != nil {
-					err = fmt.Errorf("prepare approved Qlty scanner runtime: %w", copyErr)
-				} else {
-					profile.ReadRoots = append(profile.ReadRoots, approved.ToolRuntimePath)
-				}
-			}
-		}
-		if err == nil {
-			keys := make([]string, 0, len(command.Environment))
-			for key := range command.Environment {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			profile.Environment = append(profile.Environment, keys...)
-			profile, err = execution.PinRuntime(run, profile, r.manifest.JobID+"-"+command.Name, 1, time.Now().Add(time.Duration(command.TimeoutSeconds)*time.Second).UTC().Format(time.RFC3339Nano), filepath.Join(r.root.Name(), "executions"))
-		}
-	}
-	qltyBinaryBefore := ""
-	qltyExecutable := ""
-	observedCatalogHash := ""
+	profile, err := r.prepareCommandRuntime(run, stage, command)
+	var quality jobQltyEvidence
 	if isQltyCheckCommand(command.Command) {
 		if r.manifest.Quality == nil {
-			return result, errors.New("Qlty verification requires frozen external quality configuration")
+			return result, errors.New("verification with Qlty requires frozen external quality configuration")
 		}
 		if err == nil {
-			if err = validateFrozenRuleSources(r.manifest.Quality.Files); err == nil {
-				resolvedCommand, resolveErr := resolveJobCommand(stage, command)
-				if resolveErr != nil {
-					err = resolveErr
-				} else {
-					qltyExecutable = resolvedCommand[0]
-					qltyBinaryBefore, err = hashQltyExecutable(qltyExecutable)
-				}
-				if err == nil && r.manifest.Quality.Identity != nil && qltyBinaryBefore != r.manifest.Quality.Identity.QltyBinarySHA256 {
-					err = errors.New("executed Qlty binary differs from approved identity")
-				}
-			}
-		}
-		if err == nil {
-			probe := JobCommand{Name: command.Name + "-catalog-probe", Command: []string{command.Command[0], "config", "show", "--no-upgrade-check"}, TimeoutSeconds: min(command.TimeoutSeconds, 60)}
-			var catalogOutput, catalogDiagnostics capped
-			_, probeErr := executeJobProcess(run, stage, probe, profile, &catalogOutput, &catalogDiagnostics)
-			if probeErr != nil {
-				err = fmt.Errorf("Qlty plugin catalog preflight failed: %w", probeErr)
-			} else {
-				observedCatalog, catalogErr := HashQltyPluginCatalog(catalogOutput.data)
-				if catalogErr != nil {
-					err = errors.New("effective Qlty plugin catalog differs from approved identity; rerun project setup and approval")
-				} else {
-					observedCatalogHash = observedCatalog
-					approvedCatalog := ""
-					var approvedErr error
-					if expected := r.manifest.Quality.Identity; expected != nil {
-						approvedCatalog = expected.PluginCatalogHash
-					} else {
-						approvedCatalog, approvedErr = HashQltyPluginCatalog(r.manifest.Quality.PluginCatalog)
-					}
-					if approvedErr != nil || observedCatalog != approvedCatalog {
-						err = errors.New("effective Qlty plugin catalog differs from approved identity; rerun project setup and approval")
-					}
-				}
-			}
+			quality, err = r.preflightQlty(run, stage, command, profile)
 		}
 	}
 	var out, diagnostics capped
@@ -215,31 +172,154 @@ func (r *jobRunner) executeCommand(ctx context.Context, stage string, index int,
 		return result, err
 	}
 	if baselineQlty(result.Result) && result.Status != "error" && result.Status != "timeout" {
-		if expected := r.manifest.Quality.Identity; expected != nil {
-			approvedRuntimeHash, runtimeErr := hashQualityTree(expected.ToolRuntimePath)
-			if runtimeErr != nil || approvedRuntimeHash != expected.ToolRuntimeHash {
-				result.Passed, result.Status = false, "error"
-				result.Error = "approved Qlty scanner runtime changed during candidate execution"
-			}
-		}
-		identity, identityErr := captureQualityIdentityWithCatalog(string(out.data), profile.RuntimeDir, qltyExecutable, r.manifest.Quality, qltyBinaryBefore, observedCatalogHash)
-		if result.Status == "error" {
-			// Preserve the integrity error recorded above.
-		} else if identityErr != nil {
-			result.Passed, result.Status = false, "error"
-			result.Error = "quality runtime identity unavailable: " + identityErr.Error()
-		} else if expected := r.manifest.Quality.Identity; expected != nil && !model.SameQualityIdentity(expected, identity) {
-			result.Passed, result.Status = false, "error"
-			result.Error = "quality runtime identity changed; rerun project setup and approval"
-		} else {
-			result.QualityIdentity = identity
-		}
+		r.acceptQltyIdentity(&result, out.data, profile.RuntimeDir, quality)
 	}
 	r.captureCommandEvidence(ctx, stage, index, command, &result, out, diagnostics)
 	result.DurationMS = time.Since(started).Milliseconds()
 	result.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	r.finishCommand(ctx, frozenStage, profile, &result)
 	return result, nil
+}
+
+func (r *jobRunner) prepareCommandRuntime(ctx context.Context, stage string, command JobCommand) (execution.Profile, error) {
+	profile, err := r.commandProfile(stage, command)
+	if err != nil {
+		return profile, err
+	}
+	profile.RuntimeDir = filepath.Join(r.root.Name(), "runtime", command.Name)
+	if err := os.MkdirAll(profile.RuntimeDir, 0700); err != nil {
+		return profile, err
+	}
+	if isQltyCheckCommand(command.Command) && r.manifest.Quality != nil && r.manifest.Quality.Identity != nil {
+		if err := r.installApprovedQltyRuntime(ctx, stage, &profile); err != nil {
+			return profile, err
+		}
+	}
+	keys := make([]string, 0, len(command.Environment))
+	for key := range command.Environment {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	profile.Environment = append(profile.Environment, keys...)
+	deadline := time.Now().Add(time.Duration(command.TimeoutSeconds) * time.Second).UTC().Format(time.RFC3339Nano)
+	return execution.PinRuntime(ctx, profile, r.manifest.JobID+"-"+command.Name, 1, deadline, filepath.Join(r.root.Name(), "executions"))
+}
+
+func (r *jobRunner) installApprovedQltyRuntime(ctx context.Context, stage string, profile *execution.Profile) error {
+	quality := r.manifest.Quality
+	approved := quality.Identity
+	if err := validateApprovedQltyRuntimePath(quality.Root, approved.ToolRuntimePath); err != nil {
+		return err
+	}
+	if qualityPathsOverlap(stage, approved.ToolRuntimePath) {
+		return errors.New("approved Qlty runtime path overlaps candidate source")
+	}
+	destination := filepath.Join(profile.RuntimeDir, "home", ".qlty", "cache", "tools")
+	if err := copyApprovedQualityTree(ctx, approved.ToolRuntimePath, destination, approved.ToolRuntimeHash); err != nil {
+		return fmt.Errorf("prepare approved Qlty scanner runtime: %w", err)
+	}
+	profile.ReadRoots = append(profile.ReadRoots, approved.ToolRuntimePath)
+	return nil
+}
+
+func validateApprovedQltyRuntimePath(qualityRoot, runtime string) error {
+	jobsRoot, err := filepath.EvalSymlinks(filepath.Join(qualityRoot, "jobs"))
+	if err != nil {
+		return errors.New("approved Qlty runtime jobs root is unavailable")
+	}
+	canonical, err := filepath.EvalSymlinks(runtime)
+	if err != nil || canonical != runtime {
+		return errors.New("approved Qlty runtime path is missing or non-canonical")
+	}
+	relative, err := filepath.Rel(jobsRoot, canonical)
+	if err != nil || !filepath.IsLocal(relative) || filepath.Base(canonical) != "tools" {
+		return errors.New("approved Qlty runtime path is outside retained quality job evidence")
+	}
+	return nil
+}
+
+type jobQltyEvidence struct {
+	executable  string
+	binaryHash  string
+	catalogHash string
+}
+
+func (r *jobRunner) preflightQlty(ctx context.Context, stage string, command JobCommand, profile execution.Profile) (jobQltyEvidence, error) {
+	var evidence jobQltyEvidence
+	quality := r.manifest.Quality
+	err := validateFrozenRuleSources(quality.Files)
+	if err == nil {
+		evidence.executable, evidence.binaryHash, err = resolveQltyJobBinary(stage, command)
+	}
+	if err == nil && quality.Identity != nil && evidence.binaryHash != quality.Identity.QltyBinarySHA256 {
+		err = errors.New("executed Qlty binary differs from approved identity")
+	}
+	if err == nil {
+		evidence.catalogHash, err = r.qualifyQltyCatalog(ctx, stage, command, profile)
+	}
+	return evidence, err
+}
+
+func resolveQltyJobBinary(stage string, command JobCommand) (string, string, error) {
+	resolved, err := resolveJobCommand(stage, command)
+	if err != nil {
+		return "", "", err
+	}
+	binaryHash, err := hashQltyExecutable(resolved[0])
+	return resolved[0], binaryHash, err
+}
+
+func (r *jobRunner) qualifyQltyCatalog(ctx context.Context, stage string, command JobCommand, profile execution.Profile) (string, error) {
+	probe := JobCommand{
+		Name:           command.Name + "-catalog-probe",
+		Command:        []string{command.Command[0], "config", "show", "--no-upgrade-check"},
+		TimeoutSeconds: min(command.TimeoutSeconds, 60),
+	}
+	var output, diagnostics capped
+	if _, err := executeJobProcess(ctx, stage, probe, profile, &output, &diagnostics); err != nil {
+		return "", fmt.Errorf("preflight check for the Qlty plugin catalog failed: %w", err)
+	}
+	const mismatch = "effective Qlty plugin catalog differs from approved identity; rerun project setup and approval"
+	observed, err := HashQltyPluginCatalog(output.data)
+	if err != nil {
+		return "", errors.New(mismatch)
+	}
+	quality := r.manifest.Quality
+	var approved string
+	if quality.Identity != nil {
+		approved = quality.Identity.PluginCatalogHash
+	} else {
+		approved, err = HashQltyPluginCatalog(quality.PluginCatalog)
+	}
+	if err != nil || observed != approved {
+		return observed, errors.New(mismatch)
+	}
+	return observed, nil
+}
+
+func (r *jobRunner) acceptQltyIdentity(result *JobResult, output []byte, runtimeDir string, evidence jobQltyEvidence) {
+	quality := r.manifest.Quality
+	expected := quality.Identity
+	if expected != nil {
+		hash, err := hashQualityTree(expected.ToolRuntimePath)
+		if err != nil || hash != expected.ToolRuntimeHash {
+			result.Passed, result.Status = false, "error"
+			result.Error = "approved Qlty scanner runtime changed during candidate execution"
+		}
+	}
+	identity, err := captureQualityIdentityWithCatalog(string(output), runtimeDir, evidence.executable, quality, evidence.binaryHash, evidence.catalogHash)
+	switch {
+	case result.Status == "error":
+		// Preserve the integrity error recorded above.
+	case err != nil:
+		result.Passed, result.Status = false, "error"
+		result.Error = "quality runtime identity unavailable: " + err.Error()
+	case expected != nil && !model.SameQualityIdentity(expected, identity):
+		result.Passed, result.Status = false, "error"
+		result.Error = "quality runtime identity changed; rerun project setup and approval"
+	default:
+		result.QualityIdentity = identity
+	}
 }
 
 func (r *jobRunner) blockedCommandReason(index int, command JobCommand, byName map[string]JobResult) string {

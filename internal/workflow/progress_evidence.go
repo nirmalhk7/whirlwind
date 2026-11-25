@@ -9,21 +9,21 @@ import (
 	"whirlwind/internal/store"
 )
 
-func (e *Engine) measuredProgress(ctx context.Context, t *model.ExecutionPlan) (bool, error) {
+func (e *Engine) measuredProgress(ctx context.Context, t *model.ExecutionPlan, review *model.Review) (bool, store.Change, error) {
 	failing, err := e.progressFailingChecks(ctx, t)
 	if err != nil {
-		return false, err
+		return false, store.Change{}, err
 	}
-	blockers, err := e.progressBlockingFindings(ctx, t)
+	blockers, err := e.progressBlockingFindings(ctx, t, review)
 	if err != nil {
-		return false, err
+		return false, store.Change{}, err
 	}
 	criteria := completedCriteria(t)
-	observed := model.ProgressEvidence{ChecksKnown: t.VerificationID != "" || len(t.Handoff.FailingTests) > 0 || t.ChecksPassed, ReviewKnown: t.ReviewID != "", PlanVersion: t.PlanVersion, FailingChecks: len(failing), BlockingFindings: len(blockers), CompletedCriteria: len(criteria)}
+	observed := model.ProgressEvidence{ChecksKnown: t.VerificationID != "" || len(t.Handoff.FailingTests) > 0 || t.ChecksPassed, ReviewKnown: review != nil || t.ReviewID != "", PlanVersion: t.PlanVersion, FailingChecks: len(failing), BlockingFindings: len(blockers), CompletedCriteria: len(criteria)}
 	improved := progressImproved(t.Progress, observed)
 	t.Progress = mergeProgress(t.Progress, observed)
 	evidence := map[string]any{"plan_id": t.ID, "plan_version": t.PlanVersion, "observed": observed, "improved": improved, "diff_fingerprint": t.Fingerprint}
-	return improved, e.Store.Put(ctx, "progress", store.ID(), evidence, 0)
+	return improved, store.Change{Kind: "progress", ID: store.ID(), Value: evidence}, nil
 }
 
 func (e *Engine) progressFailingChecks(ctx context.Context, t *model.ExecutionPlan) (map[string]bool, error) {
@@ -58,9 +58,8 @@ func (e *Engine) progressFailingChecks(ctx context.Context, t *model.ExecutionPl
 	return failing, nil
 }
 
-func (e *Engine) progressBlockingFindings(ctx context.Context, t *model.ExecutionPlan) (map[string]bool, error) {
-	blockers := map[string]bool{}
-	if t.ReviewID != "" {
+func (e *Engine) progressBlockingFindings(ctx context.Context, t *model.ExecutionPlan, current *model.Review) (map[string]bool, error) {
+	if current == nil && t.ReviewID != "" {
 		record, err := e.Store.Get(ctx, "reviews", t.ReviewID)
 		if err != nil {
 			return nil, err
@@ -69,7 +68,11 @@ func (e *Engine) progressBlockingFindings(ctx context.Context, t *model.Executio
 		if err != nil {
 			return nil, err
 		}
-		for _, finding := range review.Findings {
+		current = &review
+	}
+	blockers := map[string]bool{}
+	if current != nil {
+		for _, finding := range current.Findings {
 			if finding.Blocking && !finding.Resolved {
 				blockers[finding.ID+finding.File+finding.Message] = true
 			}

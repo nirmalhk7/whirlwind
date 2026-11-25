@@ -1,4 +1,6 @@
-# Go adapter and onboarding verification
+# Historical native Codex adapter and onboarding verification
+
+This is a historical native Codex record from October 2026. It does not certify the current configured ACP profiles. Use [configured ACP acceptance](acp-configured-acceptance.md) for current commands and qualification limits.
 
 Verified on October 12, 2026 with Go 1.27.1 on macOS arm64 and installed `codex-cli 0.160.0`.
 
@@ -28,12 +30,14 @@ Protocol fixtures validate initialization order, client identity, ACP capabiliti
 
 Codex protocol shapes were checked against the installed CLI's generated JSON schema and [official app-server documentation](https://learn.chatgpt.com/docs/app-server). ACP replay behavior follows [ACP session setup](https://agentclientprotocol.com/protocol/v1/session-setup).
 
-## Reproduce
+## Archived commands (native transport; not current setup)
+
+The current qualification command below replaces the historical default-based roundtrip. Its current incomplete results are recorded in [configured ACP acceptance](acp-configured-acceptance.md).
 
 ```sh
 go test -race -count=1 ./...
 go vet ./...
-WHIRLWIND_TEST_CODEX_LIVE=1 go test -race -count=1 -v ./internal/provider -run '^TestCodexLiveRoundTrip$'
+WHIRLWIND_TEST_ACP_CONFIGURED_LIVE=1 WHIRLWIND_LIVE_SETTINGS="$PWD/settings.yaml" go test -race -count=1 -v ./internal/workflow -run '^TestConfiguredACPLiveAcceptance$' -timeout=8m
 ```
 
 The live test skips unless explicitly enabled; a skipped run does not verify Codex inference. It uses existing login and creates a real Codex test conversation, consuming normal account usage. In the restricted Codex sandbox, process cleanup tests require permission to invoke `/bin/ps`; the full suite and live test passed outside that restriction.

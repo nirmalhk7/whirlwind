@@ -1,6 +1,9 @@
 # Local orchestration, accounting and execution boundaries
 
-> This document records earlier orchestration/accounting contracts, including legacy sandbox and publication paths. Current execution uses ACP in nono and local finalization; see [workflow modes](workflow-modes.md) and [nono setup](nono-setup.md). Retained compatibility code and tests do not make these older paths the default workflow.
+> Historical orchestration and accounting reference for the earlier task and
+> Anthropic Sandbox Runtime paths. Do not use it to configure current local
+> plan execution, publication or quotas. See [current workflows](workflow-modes.md),
+> [nono setup](nono-setup.md), and the [support matrix](support.md).
 
 Whirlwind turns a selected objective into a reviewed change on one local machine. Selection authorizes planning; a ready-labeled external issue becomes a candidate and an `awaiting_selection` task. Selecting the current candidate revision records objective, scope, policy hash and source fingerprint atomically with its task binding. Legacy tasks need explicit adoption. Ordinary technical decisions remain with agents inside that scope.
 

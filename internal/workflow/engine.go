@@ -13,7 +13,7 @@ import (
 
 // New constructs the workflow engine with default process adapters, a unique lease owner, and execution tracking.
 func New(s *store.Store, g github.Client, root string) *Engine {
-	return &Engine{Store: s, GitHub: g, Root: root, Adapter: func(p model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: p} }, owner: store.ID(), running: map[string]context.CancelFunc{}, active: map[string]int{}, wake: make(chan struct{}, 1)}
+	return &Engine{Store: s, GitHub: g, Root: root, Adapter: func(p model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: p} }, owner: store.ID(), running: map[string]context.CancelFunc{}, active: map[string]int{}, wake: make(chan struct{}, 1), rolePops: make(chan rolePop)}
 }
 
 // Wake is a coalesced hint. Durable state remains the source of dispatch eligibility.
@@ -32,7 +32,7 @@ func (e *Engine) Run(ctx context.Context) {
 	defer ticker.Stop()
 	lastSettingsError := ""
 	nextReconcile := time.Now().Add(5 * time.Minute)
-	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
+	if err := e.checkDispatchRecovery(ctx); err != nil {
 		log.Printf("reconcile standalone sandbox runtimes: %v", err)
 	}
 	if !e.settings(ctx).Stopped {
@@ -53,6 +53,8 @@ func (e *Engine) Run(ctx context.Context) {
 			lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
 		case <-e.wake:
 			lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
+		case pop := <-e.rolePops:
+			pop.result <- e.popRoleWork(ctx, pop)
 		}
 	}
 }
@@ -69,7 +71,7 @@ func (e *Engine) runCycle(ctx context.Context, lastSettingsError string, nextRec
 		e.StopAll()
 		return "", nextReconcile
 	}
-	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
+	if err := e.checkDispatchRecovery(ctx); err != nil {
 		log.Printf("standalone sandbox runtime recovery blocks dispatch: %v", err)
 		return lastSettingsError, nextReconcile
 	}
@@ -100,5 +102,9 @@ func (e *Engine) Project(ctx context.Context, id string) (model.Project, error) 
 	if err != nil {
 		return model.Project{}, err
 	}
-	return store.Decode[model.Project](r)
+	project, err := store.Decode[model.Project](r)
+	if err == nil && project.ManagedPolicy {
+		project.Policy, err = e.projectPolicy(ctx, project)
+	}
+	return project, err
 }

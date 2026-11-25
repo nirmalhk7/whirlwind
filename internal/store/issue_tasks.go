@@ -21,14 +21,14 @@ func (s *Store) IngestIssue(ctx context.Context, p model.Project, i model.Issue)
 }
 
 func ingestIssueTx(ctx context.Context, tx *sql.Tx, project model.Project, issue model.Issue, task *model.ExecutionPlan) error {
-	id, e := issueTaskID(ctx, tx, project, issue)
+	key, id, e := issueBinding(ctx, tx, project.Repo, issue.Number)
 	if errors.Is(e, sql.ErrNoRows) {
 		return createIssueTask(ctx, tx, project, issue, task)
 	}
 	if e != nil {
 		return e
 	}
-	return refreshIngestedIssue(issueTaskRefresh{ctx: ctx, tx: tx, id: id, project: project, issue: issue, task: task})
+	return refreshIngestedIssue(issueTaskRefresh{ctx: ctx, tx: tx, id: id, repoKey: key, project: project, issue: issue, task: task})
 }
 
 func refreshIngestedIssue(input issueTaskRefresh) error {
@@ -36,8 +36,14 @@ func refreshIngestedIssue(input issueTaskRefresh) error {
 	if err != nil {
 		return err
 	}
+	if prior.ProjectID != input.project.ID {
+		// A repository may have multiple checkouts, including retired identities.
+		// Its existing binding remains owned by the original checkout.
+		*input.task = prior
+		return nil
+	}
 	if prior.Cancelled() && input.issue.Eligible() && newCancelledSource(prior.Issue, input.issue) {
-		if _, err := input.tx.ExecContext(input.ctx, "DELETE FROM issue_plans WHERE repo=? AND issue=?", input.project.Repo, input.issue.Number); err != nil {
+		if _, err := input.tx.ExecContext(input.ctx, "DELETE FROM issue_plans WHERE repo=? AND issue=?", input.repoKey, input.issue.Number); err != nil {
 			return err
 		}
 		return createIssueTask(input.ctx, input.tx, input.project, input.issue, input.task)
@@ -48,10 +54,13 @@ func refreshIngestedIssue(input issueTaskRefresh) error {
 	return issueCandidate(input.ctx, input.tx, input.project, *input.task)
 }
 
-func issueTaskID(ctx context.Context, tx *sql.Tx, project model.Project, issue model.Issue) (string, error) {
-	var id string
-	err := tx.QueryRowContext(ctx, "SELECT plan_id FROM issue_plans WHERE repo=? AND issue=?", project.Repo, issue.Number).Scan(&id)
-	return id, err
+// IssueBoundToPlan reports whether the repository issue owns the plan.
+func (s *Store) IssueBoundToPlan(ctx context.Context, repo string, number int, planID string) (bool, error) {
+	_, bound, err := issueBinding(ctx, s.DB, repo, number)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && bound == planID, err
 }
 
 func loadIssueTask(ctx context.Context, tx *sql.Tx, id string) (model.ExecutionPlan, error) {
@@ -80,6 +89,7 @@ type issueTaskRefresh struct {
 	ctx     context.Context
 	tx      *sql.Tx
 	id      string
+	repoKey string
 	project model.Project
 	issue   model.Issue
 	task    *model.ExecutionPlan
@@ -107,16 +117,19 @@ func refreshIssueTask(input issueTaskRefresh) error {
 // BindIssue atomically associates a planner task with its published GitHub issue.
 func (s *Store) BindIssue(ctx context.Context, repo string, t model.ExecutionPlan, expected int) error {
 	return s.Transaction(ctx, func(tx *sql.Tx) error {
-		var other string
-		err := tx.QueryRowContext(ctx, "SELECT plan_id FROM issue_plans WHERE repo=? AND issue=?", repo, t.Issue.Number).Scan(&other)
-		if err == nil && other != t.ID {
+		_, other, err := issueBinding(ctx, tx, repo, t.Issue.Number)
+		if errors.Is(err, sql.ErrNoRows) {
+			result, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO issue_plans(repo,issue,plan_id) VALUES(?,?,?)", repo, t.Issue.Number, t.ID)
+			if err != nil {
+				return err
+			}
+			if err := requireOneRow(result); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return err
+		} else if other != t.ID {
 			return ErrConflict
-		}
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO issue_plans(repo,issue,plan_id) VALUES(?,?,?)", repo, t.Issue.Number, t.ID); err != nil {
-			return err
 		}
 		return put(ctx, tx, "execution_plans", t.ID, t, expected)
 	})
@@ -125,6 +138,12 @@ func (s *Store) BindIssue(ctx context.Context, repo string, t model.ExecutionPla
 // SaveDirections stores a direction run and records whether all four categories
 // were produced in one transaction. Incomplete runs remain visible for recovery.
 func (s *Store) SaveDirections(ctx context.Context, project, day string, directions []model.Direction) error {
+	return s.SaveDirectionsForSlot(ctx, project, day, day, directions)
+}
+
+// SaveDirectionsForSlot saves directions with their display date and deduplicates
+// automatic scheduling by its occurrence rather than by the whole date.
+func (s *Store) SaveDirectionsForSlot(ctx context.Context, project, day, slot string, directions []model.Direction) error {
 	groupID := ID()
 	return s.Transaction(ctx, func(tx *sql.Tx) error {
 		for _, d := range directions {
@@ -132,29 +151,34 @@ func (s *Store) SaveDirections(ctx context.Context, project, day string, directi
 				return err
 			}
 		}
-		key := project + ":" + day
+		key := project + ":" + slot
 		var version int
 		err := tx.QueryRowContext(ctx, "SELECT version FROM resources WHERE kind='schedules' AND id=?", key).Scan(&version)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		present := map[string]bool{}
-		for _, direction := range directions {
-			present[direction.Category] = true
-		}
-		missing := make([]string, 0, 4)
-		for _, category := range model.DirectionCategories() {
-			if !present[category] {
-				missing = append(missing, category)
-			}
-		}
-		stage := "complete"
-		if len(directions) != 4 || len(missing) != 0 {
-			stage = "incomplete"
-		}
+		stage, missing := summarizeDirectionSlot(directions)
 		state := map[string]any{"stage": stage, "day": day, "project": project, "missing_categories": missing}
 		return put(ctx, tx, "schedules", key, state, version)
 	})
+}
+
+func summarizeDirectionSlot(directions []model.Direction) (string, []string) {
+	present := map[string]bool{}
+	for _, direction := range directions {
+		present[direction.Category] = true
+	}
+	missing := make([]string, 0, 4)
+	for _, category := range []string{"expand", "optimize", "harden", "simplify"} {
+		if !present[category] {
+			missing = append(missing, category)
+		}
+	}
+	stage := "complete"
+	if len(directions) != 4 || len(missing) != 0 {
+		stage = "incomplete"
+	}
+	return stage, missing
 }
 
 func insertDirectionIfNew(ctx context.Context, tx *sql.Tx, project, groupID string, direction model.Direction) error {

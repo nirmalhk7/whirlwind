@@ -15,6 +15,14 @@ import (
 	"whirlwind/internal/testutil/openshell"
 )
 
+const (
+	cursorFixtureAgentName           = "agent-fixture"
+	cursorFixtureGatewayEndpointFlag = "--gateway-endpoint"
+	cursorFixtureGatewayFlag         = "--gateway"
+	cursorFixtureMCPFile             = ".cursor/mcp.json"
+	cursorFixtureWorkspaceFlag       = "--workspace"
+)
+
 func TestCursorMCPServerPreservesTransportAndCredentials(t *testing.T) {
 	for _, test := range []struct {
 		name, raw, want string
@@ -101,8 +109,8 @@ func TestCursorIntegrationsProbeRunsNativeCLIInsideSandbox(t *testing.T) {
 	project := t.TempDir()
 	provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
 	home := os.Getenv("HOME")
-	writeNativeFixture(t, filepath.Join(home, ".cursor/mcp.json"), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
-	command := filepath.Join(project, "agent-fixture")
+	writeNativeFixture(t, filepath.Join(home, cursorFixtureMCPFile), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
+	command := filepath.Join(project, cursorFixtureAgentName)
 	writeNativeFixture(t, command, `#!/bin/sh
 if [ "$(cat "$HOME/.cursor/auth.json")" != 'synthetic test credential' ]; then exit 13; fi
 if [ -e "$HOME/.codex/auth.json" ] || [ -e "$CLAUDE_CONFIG_DIR/.credentials.json" ]; then exit 14; fi
@@ -148,8 +156,8 @@ func TestCursorProbeUsesDistinctSandboxAndPreservesMainRuntime(t *testing.T) {
 	makeCursorSandboxIDsDistinct(t, fixture)
 	project := t.TempDir()
 	provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
-	writeNativeFixture(t, filepath.Join(os.Getenv("HOME"), ".cursor/mcp.json"), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
-	command := filepath.Join(project, "agent-fixture")
+	writeNativeFixture(t, filepath.Join(os.Getenv("HOME"), cursorFixtureMCPFile), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
+	command := filepath.Join(project, cursorFixtureAgentName)
 	writeNativeFixture(t, command, `#!/bin/sh
 if [ "$1" = mcp ] && [ "$2" = list-tools ]; then
   printf '%s' '{"tools":[{"name":"read_ci","annotations":{"readOnlyHint":true}}]}'
@@ -185,8 +193,8 @@ exit 12
 		t.Fatal(err)
 	}
 	if err := rpc.Close(); err != nil {
-		_, _ = fixture.RunCLI(t, "sandbox", "stop", profile.SandboxName, "--gateway", profile.GatewayName, "--gateway-endpoint", profile.GatewayEndpoint, "--workspace", profile.Workspace)
-		_, _ = fixture.RunCLI(t, "sandbox", "delete", profile.SandboxName, "--gateway", profile.GatewayName, "--gateway-endpoint", profile.GatewayEndpoint, "--workspace", profile.Workspace)
+		_, _ = fixture.RunCLI(t, "sandbox", "stop", profile.SandboxName, cursorFixtureGatewayFlag, profile.GatewayName, cursorFixtureGatewayEndpointFlag, profile.GatewayEndpoint, cursorFixtureWorkspaceFlag, profile.Workspace)
+		_, _ = fixture.RunCLI(t, "sandbox", "delete", profile.SandboxName, cursorFixtureGatewayFlag, profile.GatewayName, cursorFixtureGatewayEndpointFlag, profile.GatewayEndpoint, cursorFixtureWorkspaceFlag, profile.Workspace)
 		_ = completeStandaloneProfile(profile)
 		t.Fatalf("main ACP sandbox cleanup failed after distinct probe resource: %v", err)
 	}
@@ -195,7 +203,7 @@ exit 12
 		t.Fatalf("probe and main ACP must use distinct sandbox resource IDs: %v", createdIDs)
 	}
 	assertCursorProbeCleanup(t, registryDir)
-	listed, err := fixture.RunCLI(t, "sandbox", "list", "--output", "json", "--gateway", "whirlwind-test-local", "--gateway-endpoint", "http://127.0.0.1:8080", "--workspace", "default")
+	listed, err := fixture.RunCLI(t, "sandbox", "list", "--output", "json", cursorFixtureGatewayFlag, "whirlwind-test-local", cursorFixtureGatewayEndpointFlag, "http://127.0.0.1:8080", cursorFixtureWorkspaceFlag, "default")
 	if err != nil || strings.Contains(string(listed), `"sandboxes":[{`) {
 		t.Fatalf("Cursor probe or ACP sandbox remains after caller cleanup: %s %v", listed, err)
 	}
@@ -240,7 +248,7 @@ func TestCursorIntegrationProbeFailureRedactsBothOutputStreams(t *testing.T) {
 	fixture.EnableCommandExecution()
 	project := t.TempDir()
 	provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
-	command := filepath.Join(project, "agent-fixture")
+	command := filepath.Join(project, cursorFixtureAgentName)
 	writeNativeFixture(t, command, "#!/bin/sh\nif [ \"$(cat \"$HOME/.cursor/auth.json\")\" != 'synthetic test credential' ]; then exit 13; fi\nprintf '%s' 'stdout-private-token'\nprintf '%s' 'stderr-private-token' >&2\nexit 9\n")
 	if err := os.Chmod(command, 0700); err != nil {
 		t.Fatal(err)
@@ -263,8 +271,8 @@ func TestCursorIntegrationProbeFailureRedactsBothOutputStreams(t *testing.T) {
 		fixture.FailList(t)
 		project := t.TempDir()
 		provider := model.Provider{ID: "cursor", Kind: "acp", ACPProfile: "cursor"}
-		writeNativeFixture(t, filepath.Join(os.Getenv("HOME"), ".cursor/mcp.json"), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
-		command := filepath.Join(project, "agent-fixture")
+		writeNativeFixture(t, filepath.Join(os.Getenv("HOME"), cursorFixtureMCPFile), `{"mcpServers":{"ci":{"command":"node","args":["ci.mjs"]}}}`)
+		command := filepath.Join(project, cursorFixtureAgentName)
 		writeNativeFixture(t, command, "#!/bin/sh\nexit 0\n")
 		if err := os.Chmod(command, 0700); err != nil {
 			t.Fatal(err)

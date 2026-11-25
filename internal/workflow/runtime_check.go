@@ -55,12 +55,27 @@ func (e *Engine) runOwnedCheck(ctx context.Context, cwd string, check model.Chec
 		}
 		return report.Results[0], nil
 	}
-	if err := e.reconcileRuntimeJobs(ctx, owner); err != nil {
+	runtime, err := e.pinOwnedCheck(ctx, check, profile, owner)
+	if err != nil {
 		return verification.Result{}, err
+	}
+	report, runErr := verification.RunObservedWithProfile(ctx, cwd, []model.Check{check}, runtime.profile, nil)
+	return e.finishOwnedCheck(ctx, runtime, check.Name, report, runErr)
+}
+
+type ownedCheckRuntime struct {
+	job     runtimeCheckJob
+	version int
+	profile execution.Profile
+}
+
+func (e *Engine) pinOwnedCheck(ctx context.Context, check model.Check, profile execution.Profile, owner runtimeCheckOwner) (ownedCheckRuntime, error) {
+	if err := e.reconcileRuntimeJobs(ctx, owner); err != nil {
+		return ownedCheckRuntime{}, err
 	}
 	job, version, err := e.beginRuntimeCheck(ctx, check, owner)
 	if err != nil {
-		return verification.Result{}, err
+		return ownedCheckRuntime{}, err
 	}
 	profile.SupervisorDir = job.SupervisorDir
 	profile.ExecutionID = job.ExecutionID
@@ -68,31 +83,28 @@ func (e *Engine) runOwnedCheck(ctx context.Context, cwd string, check model.Chec
 	profile.DeadlineAt = job.DeadlineAt
 	pinned, err := execution.PinRuntime(ctx, profile, job.ExecutionID, job.ExecutionGeneration, job.DeadlineAt, job.SupervisorDir)
 	if err != nil {
-		return verification.Result{}, e.finishRuntimeCheck(ctx, job, version, err, verification.RuntimeIdentity{})
+		return ownedCheckRuntime{}, e.finishRuntimeCheck(ctx, job, version, err, verification.RuntimeIdentity{})
 	}
 	job = runtimeCheckJobForProfile(job, pinned)
 	version, err = e.persistRuntimeCheck(ctx, job, version)
 	if err != nil {
-		return verification.Result{}, err
+		return ownedCheckRuntime{}, err
 	}
-	report, runErr := verification.RunObservedWithProfile(ctx, cwd, []model.Check{check}, pinned, nil)
-	if len(report.Results) == 1 {
-		result := report.Results[0]
-		if finishErr := e.finishRuntimeCheck(ctx, job, version, resultError(result), result.Runtime); finishErr != nil {
-			return result, finishErr
-		}
-		if runErr != nil {
-			return result, runErr
-		}
-		return result, nil
-	}
-	if runErr != nil || len(report.Results) != 1 {
+	return ownedCheckRuntime{job: job, version: version, profile: pinned}, nil
+}
+
+func (e *Engine) finishOwnedCheck(ctx context.Context, runtime ownedCheckRuntime, name string, report verification.Report, runErr error) (verification.Result, error) {
+	if len(report.Results) != 1 {
 		if runErr == nil {
-			runErr = fmt.Errorf("check %s returned no complete result", check.Name)
+			runErr = fmt.Errorf("check %s returned no complete result", name)
 		}
-		return verification.Result{}, e.finishRuntimeCheck(ctx, job, version, runErr, verification.RuntimeIdentity{})
+		return verification.Result{}, e.finishRuntimeCheck(ctx, runtime.job, runtime.version, runErr, verification.RuntimeIdentity{})
 	}
-	return verification.Result{}, nil
+	result := report.Results[0]
+	if finishErr := e.finishRuntimeCheck(ctx, runtime.job, runtime.version, resultError(result), result.Runtime); finishErr != nil {
+		return result, finishErr
+	}
+	return result, runErr
 }
 
 func (e *Engine) reconcileRuntimeJobs(ctx context.Context, owner runtimeCheckOwner) error {

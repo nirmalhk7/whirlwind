@@ -44,7 +44,7 @@ func TestSARIFValidNotificationsPreserveCleanEvidence(t *testing.T) {
 		for _, raw := range []string{
 			`[]`,
 			`[{"message":{"text":"scanner completed"}}]`,
-			`[{"level":"note","message":{"text":"Successfully ran semgrep in 1.00s [fixture]"}}]`,
+			`[{"level":"note","message":{"text":"Successfully ran gitleaks in 1.00s [fixture]"}}]`,
 			`[{"level":"none","message":{"text":"scanner completed"}}]`,
 			`[{"level":"warning","message":{"text":"diagnostic advisory"}}]`,
 			`[{"level":"note","message":{"id":"completed","arguments":["scanner"]}}]`,

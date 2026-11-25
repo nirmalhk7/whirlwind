@@ -265,3 +265,21 @@ func TestParityIdeaNavigationShowsSeparateDisplayTitle(t *testing.T) {
 		t.Fatalf("navigation replaced title with What: %q", main)
 	}
 }
+
+func TestParityApprovedIdeaOffersCancellationBeforeProviderStarts(t *testing.T) {
+	d, idea, requests := parityIdeaDashboard(t, "approved")
+	d.confirmDirection()
+	form, ok := d.modal.(*tview.Form)
+	if !ok || form.GetFormItemCount() != 0 {
+		t.Fatal("approved idea did not open a read-only view")
+	}
+	pressIdeaButton(t, form, "Cancel planning")
+	select {
+	case request := <-requests:
+		if request.Operation != "planner.cancel" || request.ResourceID != idea.ID || request.ProjectID != idea.ProjectID || request.ExpectedVersion != 4 {
+			t.Fatalf("wrong queued cancellation: %+v", request)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued cancellation unavailable")
+	}
+}

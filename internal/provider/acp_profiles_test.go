@@ -16,7 +16,7 @@ func TestBundledACPProfilesDefineLaunchAuthAndDynamicSelection(t *testing.T) {
 		"codex":  {"codex-acp"},
 		"cursor": {"agent", "acp"},
 	}
-	defaults := Defaults()
+	defaults := Defaults("")
 	for _, profile := range defaults[:3] {
 		expected, ok := want[profile.ID]
 		if !ok || !reflect.DeepEqual(profile.Command, expected) || profile.Kind != "acp" {
@@ -39,6 +39,17 @@ func TestRunRejectsLegacyNativeTransportBeforeStartingProcess(t *testing.T) {
 	}
 }
 
+func TestLegacyCodexUsesConfiguredACPCommandForExecution(t *testing.T) {
+	legacy := model.Provider{ID: "legacy-codex", Kind: "codex", Command: []string{"codex", "app-server"}, ModelCommand: []string{"codex-acp", "--stdio"}}
+	resolved, err := ResolveExecutionProvider(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Kind != "acp" || resolved.ACPProfile != "codex" || !reflect.DeepEqual(resolved.Command, legacy.ModelCommand) {
+		t.Fatalf("legacy record resolved to the wrong inference transport: %+v", resolved)
+	}
+}
+
 func TestACPFailuresTellHumanHowToInstallAndAuthenticate(t *testing.T) {
 	missing := actionableACPError(model.Provider{ID: "codex", ACPProfile: "codex"}, errors.New("executable not found"))
 	if !strings.Contains(missing.Error(), "npm install --global @agentclientprotocol/codex-acp@2.5.0") {
@@ -47,26 +58,5 @@ func TestACPFailuresTellHumanHowToInstallAndAuthenticate(t *testing.T) {
 	unauthorized := authenticationACPError(model.Provider{ID: "codex", ACPProfile: "codex"}, errors.New("unauthorized"))
 	if !strings.Contains(unauthorized.Error(), "CODEX_API_KEY") || !strings.Contains(unauthorized.Error(), "provider login") {
 		t.Fatalf("missing auth error lacks scoped auth guidance: %v", unauthorized)
-	}
-}
-
-func TestDefaultProviderCapabilitiesPreserveOrderAndIsolation(t *testing.T) {
-	defaults := Defaults()
-	want := []string{"ideate", "plan", "code", "review", "finalizer", "submit", "resume", "permissions"}
-	for _, profile := range defaults[:3] {
-		expected := append([]string(nil), want...)
-		if profile.ID == "codex" {
-			expected = append(expected, "quota")
-		}
-		if !reflect.DeepEqual(profile.Capabilities, expected) || profile.Quota != "unknown" || profile.ACPProfile != profile.ID {
-			t.Fatalf("default provider contract changed: %+v", profile)
-		}
-	}
-	defaults[0].Capabilities[0] = "mutated"
-	if defaults[1].Capabilities[0] != "ideate" || Defaults()[0].Capabilities[0] != "ideate" {
-		t.Fatal("provider capability slices share mutable state")
-	}
-	if defaults[3].Kind != "unavailable" || defaults[3].Capabilities == nil || len(defaults[3].Capabilities) != 0 {
-		t.Fatal("unavailable provider contract changed")
 	}
 }

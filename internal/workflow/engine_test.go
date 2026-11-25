@@ -18,6 +18,10 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	engineFixtureResultRequirement = "REQ-RESULT"
+)
+
 const resultFile = "result.txt"
 
 type fakeGitHub struct{}
@@ -47,17 +51,6 @@ func (fakeGitHub) RegisterWebhook(context.Context, string, string, string) error
 // PRState keeps fixture PRs open so reconciliation does not complete them.
 func (fakeGitHub) PRState(context.Context, string, string) (string, error) { return "OPEN", nil }
 
-type recordingGitHub struct {
-	fakeGitHub
-	prBody string
-}
-
-// CreatePR captures the PR body for assertions and returns the fixture publication result.
-func (g *recordingGitHub) CreatePR(_ context.Context, _, _, _, _, _, body string) (string, error) {
-	g.prBody = body
-	return "https://github.com/o/r/pull/1", nil
-}
-
 type fakeAgent struct{ score float64 }
 
 // Run returns a fixture plan or review, or writes the expected coding result inside the supplied worktree.
@@ -67,7 +60,7 @@ func (f fakeAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks)
 		b, _ := json.Marshal(model.PlanSpecification{
 			Objective: "Add file", What: "Add result.txt", Why: "Result is missing", Benefit: "Result becomes available", Where: []string{resultFile},
 			Scope: []string{"Create the result file in the approved worktree."}, Exclusions: []string{"Do not change unrelated files."}, Steps: []string{"Add a failing result check.", "Create result.txt.", "Run the configured result check."},
-			AcceptanceCriteria: []string{"file exists"}, Requirements: []model.Requirement{{ID: "REQ-RESULT", Outcome: "result.txt exists in the candidate worktree.", EvidenceMethod: "Run the configured test -f result.txt check."}},
+			AcceptanceCriteria: []string{"file exists"}, Requirements: []model.Requirement{{ID: engineFixtureResultRequirement, Outcome: "result.txt exists in the candidate worktree.", EvidenceMethod: "Run the configured test -f result.txt check."}},
 			RepositoryTestCommands: [][]string{{"sh", "-c", "test -f result.txt"}}, RepositoryTestInventory: "Configured: .whirlwind.yaml checks.test: sh -c 'test -f result.txt'", RepositoryBuildInventory: "None configured: .whirlwind.yaml inspected.",
 			Units: []model.Unit{{ID: "one", Objective: "add result.txt", AllowedPaths: []string{resultFile}}},
 		})
@@ -171,7 +164,7 @@ func putFixtureAgent(t *testing.T, s *store.Store, role string, value any) {
 func TestIssueToPRUsesWorktreeAndVerification(t *testing.T) {
 	ctx := context.Background()
 	e, task, project, record := acceptedDeliveryFixture(t)
-	sourceHead := submissionGit(t, project.Path, "rev-parse", "HEAD")
+	sourceHead := submissionGit(t, project.Path, gitRevParseCommand, "HEAD")
 	sourceStatus := submissionGit(t, project.Path, "status", "--porcelain")
 	done := completeAcceptedLocalDeliveryFixture(t, e, task, project, record)
 	if done.Stage != "complete" || done.Delivery == nil || done.Delivery.Stage != "complete" || !done.ChecksPassed || done.PR != "" {
@@ -180,7 +173,7 @@ func TestIssueToPRUsesWorktreeAndVerification(t *testing.T) {
 	if done.Delivery.Worktree == project.Path || done.Delivery.ReviewedCommit != task.ReviewedCommit {
 		t.Fatalf("local delivery is not an isolated copy of the accepted candidate: %+v", done.Delivery)
 	}
-	if sourceHeadAfter := submissionGit(t, project.Path, "rev-parse", "HEAD"); sourceHeadAfter != sourceHead {
+	if sourceHeadAfter := submissionGit(t, project.Path, gitRevParseCommand, "HEAD"); sourceHeadAfter != sourceHead {
 		t.Fatalf("local delivery changed source checkout HEAD: before=%s after=%s", sourceHead, sourceHeadAfter)
 	}
 	if sourceStatusAfter := submissionGit(t, project.Path, "status", "--porcelain"); sourceStatusAfter != sourceStatus {
@@ -210,7 +203,7 @@ func TestSelectedDirectionPublishesPlanBeforeCoding(t *testing.T) {
 		t.Fatalf("coding started before separate local plan approval: %+v", planned)
 	}
 	view, err := e.ReadLocalPlan(ctx, planned.ID)
-	if err != nil || view.Hash == "" || len(view.Plan.Requirements) != 1 || view.Plan.Requirements[0].ID != "REQ-RESULT" {
+	if err != nil || view.Hash == "" || len(view.Plan.Requirements) != 1 || view.Plan.Requirements[0].ID != engineFixtureResultRequirement {
 		t.Fatalf("selected direction did not publish its reviewable specification: %+v %v", view, err)
 	}
 	if _, err := e.Store.Get(ctx, "plan_versions", planned.ID+":1"); !errors.Is(err, store.ErrNotFound) {
@@ -221,31 +214,33 @@ func TestSelectedDirectionPublishesPlanBeforeCoding(t *testing.T) {
 // TestFailedChecksDoNotStartReview verifies failed required checks send the task to repair rather than AI review.
 func TestFailedChecksDoNotStartReview(t *testing.T) {
 	fixture := newAgenticReviewFixture(t, true)
-	if err := fixture.e.Step(fixture.ctx, fixture.task.ID); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, fixture.e.Step(fixture.ctx, fixture.task.ID))
 	blocked, _ := localStoredTask(t, fixture.e, fixture.task.ID)
 	if blocked.Stage != "repair" || blocked.ChecksPassed || blocked.ReviewID != "" || blocked.Delivery != nil || blocked.PlanDocument == nil || blocked.PlanDocument.ApprovedHash == "" {
 		t.Fatalf("failed configured check reached review or bypassed human plan approval: %+v", blocked)
 	}
-	plan, err := fixture.e.Store.Get(fixture.ctx, "plan_versions", blocked.ID+":1")
-	if err != nil {
-		t.Fatal(err)
+	assertFailedCheckRuntimeEvidence(t, fixture, blocked)
+	if candidateHead := submissionGit(fixture.t, blocked.Worktree, gitRevParseCommand, "HEAD"); candidateHead == "" {
+		t.Fatal("candidate worktree was not preserved")
 	}
-	if !strings.Contains(string(plan.Data), "REQ-RESULT") {
+	fixture.verifyTDD(blocked)
+	assertNoFixtureReview(t, fixture, blocked.ID)
+}
+
+func assertFailedCheckRuntimeEvidence(t *testing.T, fixture *agenticWorkflowFixture, blocked model.ExecutionPlan) {
+	t.Helper()
+	plan, err := fixture.e.Store.Get(fixture.ctx, "plan_versions", blocked.ID+":1")
+	requireWorkflowSuccess(t, err)
+	if !strings.Contains(string(plan.Data), engineFixtureResultRequirement) {
 		t.Fatalf("frozen requirement snapshot missing: %s", plan.Data)
 	}
 	record, err := fixture.e.Store.Get(fixture.ctx, "verification", blocked.VerificationID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	var evidence struct {
 		Stage  string              `json:"stage"`
 		Report verification.Report `json:"report"`
 	}
-	if err := json.Unmarshal(record.Data, &evidence); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, json.Unmarshal(record.Data, &evidence))
 	if evidence.Stage != "failed" || evidence.Report.Passed {
 		t.Fatalf("failed configured check evidence not retained: %+v", evidence)
 	}
@@ -264,27 +259,21 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 		t.Fatalf("failed check artifact unavailable: %v", err)
 	}
 	jobRecord, err := fixture.e.Store.Get(fixture.ctx, "runtime_jobs", failure.Runtime.ExecutionID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	job, err := store.Decode[runtimeCheckJob](jobRecord)
 	if err != nil || job.Stage != "complete" || !job.CleanupVerified || job.TaskID != blocked.ID || job.VerificationID != blocked.VerificationID || job.Role != "verify" || job.CheckID != "failing" {
 		t.Fatalf("failed check runtime owner proof mismatch: job=%+v err=%v", job, err)
 	}
-	if candidateHead := submissionGit(fixture.t, blocked.Worktree, "rev-parse", "HEAD"); candidateHead == "" {
-		t.Fatal("candidate worktree was not preserved")
-	}
-	fixture.verifyTDD(blocked)
+}
+
+func assertNoFixtureReview(t *testing.T, fixture *agenticWorkflowFixture, blockedID string) {
+	t.Helper()
 	reviews, err := fixture.e.Store.List(fixture.ctx, "reviews")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	for _, saved := range reviews {
 		review, err := store.Decode[model.Review](saved)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if review.Provenance != nil && review.Provenance.Task == blocked.ID {
+		requireWorkflowSuccess(t, err)
+		if review.Provenance != nil && review.Provenance.Task == blockedID {
 			t.Fatalf("reviewer started despite failed configured check: %+v", review)
 		}
 	}

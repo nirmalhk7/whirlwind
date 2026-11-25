@@ -1,5 +1,7 @@
 package model
 
+const DefaultProviderStatusCheckSeconds = 30
+
 type ProviderStatus struct {
 	QuotaPool     string         `json:"quota_pool,omitempty"`
 	QuotaSnapshot *QuotaSnapshot `json:"quota_snapshot,omitempty"`

@@ -47,6 +47,10 @@ func (b *Batch) put(ctx context.Context, s *Store, c Change) error {
 	if err = checkExpectedVersion(record, err, c.Expected); err != nil {
 		return err
 	}
+	if c.isVersionPrecondition() {
+		b.changes = append(b.changes, c)
+		return nil
+	}
 	data, err := json.Marshal(c.Value)
 	if err != nil {
 		return err
@@ -101,10 +105,19 @@ func (s *Store) Write(ctx context.Context, changes []Change, receipt *Receipt) e
 
 func (s *Store) persistChanges(ctx context.Context, changes []Change, receipt *Receipt) error {
 	if s.Source != nil && !bypassSource(ctx) {
+		var settingsWrites []Change
+		refresh := false
 		for _, c := range changes {
 			if ConfigurationKind(c.Kind) {
-				return s.Source.Persist(ctx, changes, func() error { return s.write(ctx, changes, receipt) })
+				refresh = true
+				if !c.isVersionPrecondition() {
+					settingsWrites = append(settingsWrites, c)
+				}
 			}
+		}
+		if refresh {
+			// Refresh authoritative settings before checking versions in SQLite.
+			return s.Source.Persist(ctx, settingsWrites, func() error { return s.write(ctx, changes, receipt) })
 		}
 	}
 	return s.write(ctx, changes, receipt)

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -36,7 +37,13 @@ func (c *Client) Call(ctx context.Context, request Request) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("connect to local supervisor at %s: %w", c.path, err)
 	}
-	defer conn.Close()
+	defer func() {
+		// The server may already have committed a decision. Report a socket
+		// cleanup error without invalidating its received receipt.
+		if err := conn.Close(); err != nil {
+			log.Printf("close supervisor connection: %v", err)
+		}
+	}()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	} else {

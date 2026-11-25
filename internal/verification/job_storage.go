@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/process"
 )
 
@@ -19,12 +21,14 @@ const (
 )
 
 type jobRunner struct {
-	manifest JobManifest
-	root     *os.Root
-	lock     *os.File
-	journal  *os.File
-	results  map[int]JobResult
-	started  map[int]bool
+	manifest      JobManifest
+	root          *os.Root
+	lock          *os.File
+	journal       *os.File
+	results       map[int]JobResult
+	started       map[int]bool
+	offline       *execution.OfflineDocker
+	offlineConfig string
 }
 
 func openJob(m JobManifest) (*jobRunner, error) {
@@ -63,6 +67,9 @@ func openJob(m JobManifest) (*jobRunner, error) {
 }
 
 func (r *jobRunner) close() {
+	if r.offlineConfig != "" {
+		_ = os.RemoveAll(r.offlineConfig)
+	}
 	if r.journal != nil {
 		_ = r.journal.Close()
 	}
@@ -126,14 +133,7 @@ func (r *jobRunner) git(ctx context.Context, cwd string, args ...string) (string
 }
 
 func (r *jobRunner) gitRaw(ctx context.Context, cwd string, args ...string) (string, error) {
-	command := process.Command(ctx, "git", append([]string{"-c", "core.hooksPath=/dev/null", "-C", cwd}, args...)...)
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(r.root.Name(), "host-home"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0"}
-	for _, entry := range command.Env {
-		if strings.HasPrefix(entry, "WHIRLWIND_PROCESS_TOKEN=") {
-			env = append(env, entry)
-		}
-	}
-	command.Env = env
+	command := r.gitCommand(ctx, cwd, args...)
 	var output capped
 	command.Stdout, command.Stderr = &output, &output
 	err := process.Run(command)
@@ -146,39 +146,72 @@ func (r *jobRunner) gitRaw(ctx context.Context, cwd string, args ...string) (str
 	return string(output.data), nil
 }
 
+func (r *jobRunner) gitCommand(ctx context.Context, cwd string, args ...string) *exec.Cmd {
+	command := process.Command(ctx, "git", append([]string{"-c", "core.hooksPath=/dev/null", "-C", cwd}, args...)...)
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(r.root.Name(), "host-home"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0"}
+	if r.manifest.OfflineDockerImage != "" {
+		env = append(env, "GIT_NO_LAZY_FETCH=1", "GIT_NO_REPLACE_OBJECTS=1")
+	}
+	for _, entry := range command.Env {
+		if strings.HasPrefix(entry, "WHIRLWIND_PROCESS_TOKEN=") {
+			env = append(env, entry)
+		}
+	}
+	command.Env = env
+	return command
+}
+
 func (r *jobRunner) prepareCheckout(ctx context.Context) (string, error) {
-	stage := filepath.Join(r.root.Name(), "checkout")
+	stage := filepath.Join(r.root.Name(), verificationCheckoutDir)
 	if err := r.root.MkdirAll("host-home", 0700); err != nil {
 		return "", err
 	}
-	if _, err := r.root.Stat("checkout"); os.IsNotExist(err) {
-		if _, err := r.git(ctx, r.root.Name(), "clone", "--no-hardlinks", "--no-checkout", "--", r.manifest.Repository, stage); err != nil {
-			return "", err
-		}
-		if _, err := r.git(ctx, stage, "checkout", "--detach", r.manifest.CandidateCommit); err != nil {
-			return "", err
-		}
-		if err := r.prepareQualityConfiguration(stage); err != nil {
-			return "", err
-		}
-	} else if err != nil {
+	current, err := r.checkoutOwnership(verificationCheckoutDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return r.cloneDisposableCheckout(ctx, verificationCheckoutDir, func(draft string) error {
+			if err := r.populateDisposableCheckout(ctx, draft); err != nil {
+				return err
+			}
+			return r.validateCheckout(ctx, draft)
+		})
+	}
+	if err != nil {
 		return "", err
 	}
-	head, err := r.git(ctx, stage, "rev-parse", "HEAD")
-	if err != nil || head != r.manifest.CandidateCommit {
-		return "", errors.New("verification checkout candidate mismatch")
-	}
-	tree, err := r.git(ctx, stage, "rev-parse", "HEAD^{tree}")
-	if err != nil || tree != r.manifest.CandidateTree {
-		return "", errors.New("verification checkout tree mismatch")
-	}
-	if _, err := r.git(ctx, stage, "cat-file", "-e", r.manifest.BaseCommit+"^{commit}"); err != nil {
+	saved, err := r.readCheckoutOwnership(verificationCheckoutDir)
+	if err == nil {
+		if err := saved.verifyDirectory(current); err != nil {
+			return "", err
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	if err := r.validateFrozenCheckout(ctx, stage); err != nil {
+	if err := r.validateCheckout(ctx, stage); err != nil {
 		return "", err
 	}
 	return stage, nil
+}
+
+func (r *jobRunner) populateDisposableCheckout(ctx context.Context, stage string) error {
+	if _, err := r.git(ctx, stage, "checkout", "--detach", r.manifest.CandidateCommit); err != nil {
+		return err
+	}
+	return r.prepareQualityConfiguration(stage)
+}
+
+func (r *jobRunner) validateCheckout(ctx context.Context, stage string) error {
+	head, err := r.git(ctx, stage, "rev-parse", "HEAD")
+	if err != nil || head != r.manifest.CandidateCommit {
+		return errors.New("verification checkout candidate mismatch")
+	}
+	tree, err := r.git(ctx, stage, "rev-parse", "HEAD^{tree}")
+	if err != nil || tree != r.manifest.CandidateTree {
+		return errors.New("verification checkout tree mismatch")
+	}
+	if _, err := r.git(ctx, stage, "cat-file", "-e", r.manifest.BaseCommit+"^{commit}"); err != nil {
+		return err
+	}
+	return r.validateFrozenCheckout(ctx, stage)
 }
 
 func verificationRootPath(m JobManifest) (string, error) {

@@ -9,28 +9,11 @@ import (
 	"regexp"
 	"strings"
 
+	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 	"whirlwind/internal/process"
 	"whirlwind/internal/store"
-	"whirlwind/internal/workflow"
 )
-
-type localFinalizationView struct {
-	Task             model.ExecutionPlan  `json:"plan_id"`
-	Review           model.Review         `json:"review"`
-	Adherence        model.Adherence      `json:"adherence"`
-	ApprovedPlanHash string               `json:"approved_plan_hash"`
-	PolicyHash       string               `json:"policy_hash"`
-	Diff             finalizationDiffPage `json:"diff"`
-	Accepted         bool                 `json:"accepted"`
-}
-
-type finalizationDiffPage struct {
-	Content    string `json:"content"`
-	Offset     int64  `json:"offset"`
-	NextOffset int64  `json:"next_offset"`
-	HasMore    bool   `json:"has_more"`
-}
 
 const finalizationDiffPageBytes = 64 * 1024
 const finalizationDiffScanLimit = 64 * 1024 * 1024
@@ -80,7 +63,7 @@ func (s *Server) approveLocalFinalization(ctx context.Context, command LocalComm
 	if _, err := localID(command.PlanID); err != nil {
 		return nil, err
 	}
-	var approval workflow.LocalFinalizationApproval
+	var approval model.LocalFinalizationApproval
 	if err := json.Unmarshal(localPayload(command.Payload), &approval); err != nil {
 		return nil, err
 	}
@@ -98,7 +81,7 @@ func (s *Server) approveLocalFinalization(ctx context.Context, command LocalComm
 	return body, err
 }
 
-func validateFinalizationApproval(approval workflow.LocalFinalizationApproval) error {
+func validateFinalizationApproval(approval model.LocalFinalizationApproval) error {
 	if approval.PlanVersion < 1 || approval.ApprovedPlanHash == "" || approval.ReviewedCommit == "" || approval.ReviewID == "" || approval.VerificationID == "" || approval.PolicyHash == "" {
 		return errors.New("local finalization approval requires the exact approved plan, candidate, review, verification, and policy identities")
 	}
@@ -125,7 +108,7 @@ func (s *Server) inspectFinalization(ctx context.Context, command LocalCommand) 
 	if err != nil {
 		return nil, err
 	}
-	view := localFinalizationView{Task: task, Review: review, Adherence: adherence, ApprovedPlanHash: approvedPlanHash(task), PolicyHash: project.PolicyHash, Accepted: accepted}
+	view := control.FinalizationReport{Task: task, Review: review, Adherence: adherence, ApprovedPlanHash: task.ApprovedPlanHash(), PolicyHash: project.PolicyHash, Accepted: accepted}
 	if task.Stage == "approval" {
 		if !accepted {
 			return nil, errors.New("critical candidate no longer has an accepted review report")
@@ -143,35 +126,28 @@ func (s *Server) inspectFinalization(ctx context.Context, command LocalCommand) 
 	return json.Marshal(view)
 }
 
-func approvedPlanHash(task model.ExecutionPlan) string {
-	if task.PlanDocument == nil {
-		return ""
-	}
-	return task.PlanDocument.ApprovedHash
-}
-
-func exactCandidateDiffPage(ctx context.Context, task model.ExecutionPlan, offset int64) (finalizationDiffPage, error) {
+func exactCandidateDiffPage(ctx context.Context, task model.ExecutionPlan, offset int64) (control.FinalizationDiffPage, error) {
 	if task.Worktree == "" || !pinnedGitCommit.MatchString(task.Base) || !pinnedGitCommit.MatchString(task.ReviewedCommit) {
-		return finalizationDiffPage{}, errors.New("critical candidate is missing its worktree or pinned commit identities")
+		return control.FinalizationDiffPage{}, errors.New("critical candidate is missing its worktree or pinned commit identities")
 	}
 	head, _, err := runBoundedGit(ctx, task.Worktree, finalizationDiffScanLimit, "rev-parse", "HEAD")
 	if err != nil {
-		return finalizationDiffPage{}, err
+		return control.FinalizationDiffPage{}, err
 	}
 	if strings.TrimSpace(head) != task.ReviewedCommit {
-		return finalizationDiffPage{}, fmt.Errorf("critical candidate changed after review: expected %s, found %s", task.ReviewedCommit, head)
+		return control.FinalizationDiffPage{}, fmt.Errorf("critical candidate changed after review: expected %s, found %s", task.ReviewedCommit, head)
 	}
 	status, statusOverflow, err := runBoundedGit(ctx, task.Worktree, finalizationDiffScanLimit, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
-		return finalizationDiffPage{}, err
+		return control.FinalizationDiffPage{}, err
 	}
 	if status != "" || statusOverflow {
-		return finalizationDiffPage{}, errors.New("critical candidate worktree changed after review; refresh review before local finalization")
+		return control.FinalizationDiffPage{}, errors.New("critical candidate worktree changed after review; refresh review before local finalization")
 	}
 	return runCandidateDiffPage(ctx, task, offset)
 }
 
-func runCandidateDiffPage(ctx context.Context, task model.ExecutionPlan, offset int64) (finalizationDiffPage, error) {
+func runCandidateDiffPage(ctx context.Context, task model.ExecutionPlan, offset int64) (control.FinalizationDiffPage, error) {
 	output := &diffPageWriter{offset: offset}
 	diagnostics := &boundedOutput{limit: 4096}
 	command := process.Command(ctx, "git", "-c", "core.pager=cat", "-c", "diff.external=", "diff", "--no-ext-diff", "--no-textconv", "--binary", task.Base+"..."+task.ReviewedCommit)
@@ -179,7 +155,7 @@ func runCandidateDiffPage(ctx context.Context, task model.ExecutionPlan, offset 
 	command.Env = safeGitEnvironment(command.Env)
 	command.Stdout, command.Stderr = output, diagnostics
 	if err := process.Run(command); err != nil {
-		return finalizationDiffPage{}, fmt.Errorf("git candidate diff failed: %w: %s", err, diagnostics.String())
+		return control.FinalizationDiffPage{}, fmt.Errorf("git candidate diff failed: %w: %s", err, diagnostics.String())
 	}
 	return output.page()
 }
@@ -241,15 +217,15 @@ func (writer *diffPageWriter) appendLine() {
 	}
 }
 
-func (writer *diffPageWriter) page() (finalizationDiffPage, error) {
+func (writer *diffPageWriter) page() (control.FinalizationDiffPage, error) {
 	if writer.overflow {
-		return finalizationDiffPage{}, fmt.Errorf("exact candidate diff exceeds the %d-byte scan limit", finalizationDiffScanLimit)
+		return control.FinalizationDiffPage{}, fmt.Errorf("exact candidate diff exceeds the %d-byte scan limit", finalizationDiffScanLimit)
 	}
 	if writer.lineTooLong {
-		return finalizationDiffPage{}, fmt.Errorf("exact candidate diff contains a line longer than %d bytes", finalizationDiffLineLimit)
+		return control.FinalizationDiffPage{}, fmt.Errorf("exact candidate diff contains a line longer than %d bytes", finalizationDiffLineLimit)
 	}
 	if writer.offset > writer.total {
-		return finalizationDiffPage{}, errors.New("finalization diff offset is past the end of the exact candidate diff")
+		return control.FinalizationDiffPage{}, errors.New("finalization diff offset is past the end of the exact candidate diff")
 	}
 	if len(writer.line) > 0 && !writer.pageFull {
 		if len(writer.content) > 0 && len(writer.content)+len(writer.line) > finalizationDiffPageBytes {
@@ -262,10 +238,10 @@ func (writer *diffPageWriter) page() (finalizationDiffPage, error) {
 	if writer.nextOffset == 0 {
 		writer.nextOffset = writer.offset
 	}
-	return finalizationDiffPage{Content: string(writer.content), Offset: writer.offset, NextOffset: writer.nextOffset, HasMore: writer.hasMore}, nil
+	return control.FinalizationDiffPage{Content: string(writer.content), Offset: writer.offset, NextOffset: writer.nextOffset, HasMore: writer.hasMore}, nil
 }
 
-func pageStoredDiff(diff string, offset int64) (finalizationDiffPage, error) {
+func pageStoredDiff(diff string, offset int64) (control.FinalizationDiffPage, error) {
 	writer := &diffPageWriter{offset: offset}
 	_, _ = writer.Write([]byte(diff))
 	return writer.page()

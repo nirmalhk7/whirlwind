@@ -69,12 +69,8 @@ func (execution *agentAttempt) launch() error {
 		return err
 	}
 	deadline := started.Add(a.attemptTimeoutLimit())
-	if profile := a.input.Execution; profile != nil && execprofile.IsManagedLauncher(profile.Launcher) {
-		pinned, err := execprofile.PinRuntime(a.ctx, *profile, execution.id, generation, deadline.Format(time.RFC3339Nano), filepath.Join(a.Root, "supervisor", "executions"))
-		if err != nil {
-			return err
-		}
-		a.input.Execution = &pinned
+	if err := execution.pinLaunchProfile(generation, deadline); err != nil {
+		return err
 	}
 	configHash := a.input.ExecutionProfile
 	runtimeKind, runtimeLauncher := attemptRuntimeKind(a.input.Execution)
@@ -90,20 +86,9 @@ func (execution *agentAttempt) launch() error {
 		execution.state.GatewayEndpoint = a.input.Execution.GatewayEndpoint
 		execution.state.Workspace = a.input.Execution.Workspace
 	}
-	expected := 0
-	if a.pairAttempt != "" {
-		record, err := a.Store.Get(a.ctx, "sessions", execution.id)
-		if err != nil {
-			return err
-		}
-		queued, err := store.Decode[model.Attempt](record)
-		if err != nil {
-			return err
-		}
-		if queued.Status != "queued" || queued.Finished || queued.Owner != a.owner || queued.Task != a.task.ID || queued.ProjectID != a.project.ID || queued.PlanVersion != a.task.PlanVersion || queued.Role != a.input.Role {
-			return store.ErrConflict
-		}
-		expected = record.Version
+	expected, err := execution.queuedLaunchVersion()
+	if err != nil {
+		return err
 	}
 	if err := a.Store.Put(a.ctx, "sessions", execution.id, execution.state, expected); err != nil {
 		return err
@@ -117,10 +102,38 @@ func (execution *agentAttempt) launch() error {
 	if err := execution.captureInput(); err != nil {
 		return err
 	}
-	if err := execution.saveStarted(); err != nil {
-		return err
+	return execution.saveStarted()
+}
+
+func (execution *agentAttempt) pinLaunchProfile(generation int, deadline time.Time) error {
+	a := execution.agentRun
+	if profile := a.input.Execution; profile != nil && execprofile.IsManagedLauncher(profile.Launcher) {
+		pinned, err := execprofile.PinRuntime(a.ctx, *profile, execution.id, generation, deadline.Format(time.RFC3339Nano), filepath.Join(a.Root, "supervisor", "executions"))
+		if err != nil {
+			return err
+		}
+		a.input.Execution = &pinned
 	}
 	return nil
+}
+
+func (execution *agentAttempt) queuedLaunchVersion() (int, error) {
+	a := execution.agentRun
+	if a.pairAttempt == "" {
+		return 0, nil
+	}
+	record, err := a.Store.Get(a.ctx, "sessions", execution.id)
+	if err != nil {
+		return 0, err
+	}
+	queued, err := store.Decode[model.Attempt](record)
+	if err != nil {
+		return 0, err
+	}
+	if queued.Status != "queued" || queued.Finished || queued.Owner != a.owner || queued.Task != a.task.ID || queued.ProjectID != a.project.ID || queued.PlanVersion != a.task.PlanVersion || queued.Role != a.input.Role {
+		return 0, store.ErrConflict
+	}
+	return record.Version, nil
 }
 
 func (a *agentRun) recordPrelaunchFailure(attempt *agentAttempt, chosen model.Provider, failure error) error {
@@ -171,7 +184,7 @@ func (a *agentAttempt) captureInput() error {
 	if err != nil {
 		return err
 	}
-	snapshot, err := store.SafeJSON(model.AttemptInput{ExecutionProfile: a.input.ExecutionProfile, Handoff: a.task.Handoff, Policy: a.project.Policy, Provider: provider.ExecutionProvider(a.chosen, a.input.Thinking), ReadOnly: a.input.ReadOnly, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, Model: a.input.Model, Thinking: a.input.Thinking})
+	snapshot, err := store.SafeJSON(model.AttemptInput{AgentHooks: a.input.AgentHooks, ExecutionProfile: a.input.ExecutionProfile, Handoff: a.task.Handoff, Policy: a.project.Policy, Provider: provider.ExecutionProvider(a.chosen, a.input.Thinking), ReadOnly: a.input.ReadOnly, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, Model: a.input.Model, Thinking: a.input.Thinking})
 	if err != nil {
 		return err
 	}

@@ -118,19 +118,10 @@ func (a *agentAttempt) startWorkerHeartbeatAtInterval(ctx context.Context, inter
 				return
 			case at := <-ticker.C:
 				if err := a.recordWorkerHeartbeat(ctx, at); err != nil {
-					if errors.Is(err, ErrRuntimeHealthLost) {
-						a.mu.Lock()
-						if a.eventErr == nil {
-							a.eventErr = err
-						}
-						cancel := a.cancel
-						a.mu.Unlock()
-						if cancel != nil {
-							cancel()
-						}
-					} else {
-						a.persistenceError(fmt.Errorf("worker heartbeat rejected: %w", err))
+					if !errors.Is(err, ErrRuntimeHealthLost) {
+						err = attemptPersistenceFailure(fmt.Errorf("worker heartbeat rejected: %w", err))
 					}
+					a.stopForAttemptError(err)
 					return
 				}
 			}

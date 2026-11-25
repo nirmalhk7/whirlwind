@@ -48,7 +48,11 @@ func runnerChecksNeedBaseline(checks []model.Check) bool {
 func completeRunnerStreams(manifest verification.JobManifest, raw verification.JobReport) (verification.Report, error) {
 	report := verification.Report{Passed: raw.Passed}
 	for index, result := range raw.Results {
-		if result.Autofix != nil || result.Status == "error" || result.Status == "timeout" || !runtimeIdentityComplete(result.Runtime) || !result.Runtime.CleanupVerified {
+		owned := runtimeIdentityComplete(result.Runtime)
+		if manifest.OfflineDockerImage != "" {
+			owned = managedOfflineResult(manifest, result)
+		}
+		if result.Autofix != nil || result.Status == "error" || result.Status == "timeout" || !owned || !result.Runtime.CleanupVerified {
 			return report, errors.New("runner report contains incomplete execution or pending source fixes")
 		}
 		value := result.Result

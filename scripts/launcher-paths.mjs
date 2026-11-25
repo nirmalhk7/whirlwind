@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// Shared by the supervisor, dashboard, and legacy ownership configuration.
+// Shared by the supervisor and dashboard.
 // Relative overrides resolve against the real checkout, never the caller's cwd.
 export async function launcherPaths(env = process.env) {
   const root = await realpath(

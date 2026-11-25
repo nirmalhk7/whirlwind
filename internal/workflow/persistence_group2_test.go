@@ -72,36 +72,24 @@ func TestUncertainPublicationReconcilesFrozenIntent(t *testing.T) {
 	if err != nil || finished || step.task.Delivery == nil || step.task.Delivery.Stage != "prepared" {
 		t.Fatalf("local delivery intent not prepared: finished=%v delivery=%+v err=%v", finished, step.task.Delivery, err)
 	}
-	if err := e.Store.Put(ctx, "execution_plans", step.task.ID, step.task, step.record.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", step.task.ID, step.task, step.record.Version))
 	step.record.Version++
 	delivery := *step.task.Delivery
 	if commit, err := promoteReviewedSnapshot(ctx, delivery.OriginalWorktree, delivery.Worktree, delivery.Branch, delivery.Base, delivery.ReviewedCommit); err != nil || commit != delivery.ReviewedCommit {
 		t.Fatalf("simulate promotion before supervisor acknowledgement: commit=%q err=%v", commit, err)
 	}
 	storePath := filepath.Join(e.Root, "state.db")
-	if err := e.Store.Close(); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Close())
 	reopened, err := store.Open(storePath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	t.Cleanup(func() { _ = reopened.Close() })
 	restarted := New(reopened, e.GitHub, e.Root)
 	project, err = restarted.Project(ctx, task.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	taskRecord, err := reopened.Get(ctx, "execution_plans", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	task, err = store.Decode[model.ExecutionPlan](taskRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	finalizer := &countingLocalDeliveryAdapter{}
 	restarted.Adapter = func(model.Provider) provider.Adapter { return finalizer }
 	step = &taskStep{Engine: restarted, ctx: ctx, project: project, task: task, record: taskRecord}
@@ -109,21 +97,15 @@ func TestUncertainPublicationReconcilesFrozenIntent(t *testing.T) {
 	if err != nil || finished || step.task.Delivery.Stage != "snapshot_ready" {
 		t.Fatalf("recovery did not recognize completed promotion: finished=%v delivery=%+v err=%v", finished, step.task.Delivery, err)
 	}
-	if err := reopened.Put(ctx, "execution_plans", step.task.ID, step.task, step.record.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, reopened.Put(ctx, "execution_plans", step.task.ID, step.task, step.record.Version))
 	step.record.Version++
 	if finished, err = step.submitting(); err != nil || !finished {
 		t.Fatalf("recovered local delivery did not finish: finished=%v err=%v", finished, err)
 	}
 	completedRecord, err := reopened.Get(ctx, "execution_plans", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	completed, err := store.Decode[model.ExecutionPlan](completedRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if completed.Stage != "complete" || completed.Delivery == nil || completed.Delivery.Stage != "complete" || finalizer.calls != 1 {
 		t.Fatalf("local delivery recovery duplicated or lost finalization: stage=%s delivery=%+v finalizer_calls=%d", completed.Stage, completed.Delivery, finalizer.calls)
 	}

@@ -12,7 +12,7 @@ import (
 
 func (d SupervisorDispatcher) snapshot(ctx context.Context, request Request) (Snapshot, error) {
 	if d.DB == nil {
-		return nil, errors.New("supervisor state database unavailable")
+		return nil, errors.New(stateDatabaseUnavailable)
 	}
 	snapshot := Snapshot{}
 	for _, kind := range []string{"projects", "execution_plans", "ideas", "operations", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plan_versions", "agents", "providers", "project_status", "settings"} {

@@ -29,28 +29,12 @@ func (a ProcessAdapter) ReadQuotaWithSupervisorDir(ctx context.Context, cwd, sup
 	return a.readCodexQuotaWithSupervisorDir(ctx, cwd, supervisorDir)
 }
 
-func (a ProcessAdapter) readCodexQuota(ctx context.Context, cwd string) (string, string, error) {
-	supervisorDir, err := defaultStandaloneSupervisorDir()
-	if err != nil {
-		return "unknown", "", err
-	}
-	return a.readCodexQuotaWithSupervisorDir(ctx, cwd, supervisorDir)
-}
-
 func (a ProcessAdapter) readCodexQuotaWithSupervisorDir(ctx context.Context, cwd, supervisorDir string) (string, string, error) {
 	data, err := a.readCodexQuotaDataWithSupervisorDir(ctx, cwd, supervisorDir)
 	if err != nil {
 		return "unknown", "", err
 	}
 	return Quota(data)
-}
-
-func (a ProcessAdapter) readCodexQuotaData(ctx context.Context, cwd string) (result json.RawMessage, err error) {
-	supervisorDir, err := defaultStandaloneSupervisorDir()
-	if err != nil {
-		return nil, err
-	}
-	return a.readCodexQuotaDataWithSupervisorDir(ctx, cwd, supervisorDir)
 }
 
 func (a ProcessAdapter) readCodexQuotaDataWithSupervisorDir(ctx context.Context, cwd, supervisorDir string) (result json.RawMessage, err error) {

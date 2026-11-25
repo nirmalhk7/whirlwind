@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
 	"whirlwind/internal/verification"
@@ -11,7 +12,10 @@ import (
 )
 
 func (step *taskStep) repair() (bool, error) {
-	var err error
+	project, err := repairProject(step.project, step.task.Plan)
+	if err != nil {
+		return true, err
+	}
 	step.task.Submission = nil
 	step.task.Approved = false
 	step.task.Approval = nil
@@ -19,19 +23,33 @@ func (step *taskStep) repair() (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	out, runErr := step.agent(step.ctx, step.project, step.task, provider.Input{Role: "code", CWD: step.task.Worktree, Prompt: prompt, ReadOnly: false, SessionID: ""})
+	out, runErr := step.agent(step.ctx, project, step.task, provider.Input{Role: "code", CWD: step.task.Worktree, Prompt: prompt})
 	if runErr != nil {
 		return true, runErr
 	}
 	step.task.LastAttemptID = out.AttemptID
 	step.task.ImplementationAttempts = append(step.task.ImplementationAttempts, out.AttemptID)
-	if err = step.commit(step.ctx, step.project, step.task.Worktree, "Address review findings"); err != nil {
+	if err = step.commit(step.ctx, project, step.task.Worktree, "Address review findings"); err != nil {
 		return true, err
 	}
 	if err = step.verifyRepair(); err != nil {
 		return true, err
 	}
 	return false, nil
+}
+
+func repairProject(project model.Project, plan *model.PlanSpecification) (model.Project, error) {
+	if plan == nil {
+		return project, errors.New("repair requires an approved plan")
+	}
+	if err := ValidateUnitScopes(project, plan.Units); err != nil {
+		return project, err
+	}
+	project.Policy.AllowedPaths = nil
+	for _, unit := range plan.Units {
+		project.Policy.AllowedPaths = append(project.Policy.AllowedPaths, unit.AllowedPaths...)
+	}
+	return project, nil
 }
 
 func (step *taskStep) verifyRepair() error {

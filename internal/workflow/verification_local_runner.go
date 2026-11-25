@@ -19,7 +19,7 @@ import (
 func (run *verificationRun) runLocalChecks(policy model.Policy, checks []model.Check, observe func(verification.Result) error) (reportValue verification.Report, resultErr error) {
 	defer func() {
 		if resultErr != nil && !errors.Is(resultErr, store.ErrPersistence) {
-			resultErr = errors.Join(verification.ErrJobSetup, resultErr)
+			resultErr = fmt.Errorf("%w: %w", verification.ErrJobSetup, resultErr)
 		}
 	}()
 
@@ -45,13 +45,16 @@ func (run *verificationRun) runLocalChecks(policy model.Policy, checks []model.C
 }
 
 func localVerifierBinary() (string, error) {
-	binary := os.Getenv("WHIRLWIND_VERIFY_BIN")
-	if binary == "" {
-		var err error
-		binary, err = exec.LookPath("whirlwind-verify")
+	if configured := os.Getenv("WHIRLWIND_VERIFY_BIN"); configured != "" {
+		binary, err := exec.LookPath(configured)
 		if err != nil {
-			return "", fmt.Errorf("local verifier missing; install whirlwind-verify or configure WHIRLWIND_VERIFY_BIN: %w", err)
+			return "", fmt.Errorf("configured local verifier %q is unavailable (WHIRLWIND_VERIFY_BIN): %w", configured, err)
 		}
+		return binary, nil
+	}
+	binary, err := exec.LookPath("whirlwind-verify")
+	if err != nil {
+		return "", fmt.Errorf("local verifier missing; install whirlwind-verify or configure WHIRLWIND_VERIFY_BIN: %w", err)
 	}
 	return binary, nil
 }
@@ -62,14 +65,22 @@ func (run *verificationRun) localCheckManifest(policy model.Policy, checks []mod
 	if err != nil {
 		return verification.JobManifest{}, err
 	}
-	profile, err := execution.ForPolicy(task.Worktree, true, task.PlanDocument.PolicyHash, policy.Sandbox)
-	if err != nil {
-		return verification.JobManifest{}, err
+	manifest := verification.JobManifest{Version: 1, JobID: run.id, PlanID: task.ID, PlanVersion: task.PlanVersion, PlanHash: task.PlanDocument.ApprovedHash, ConfigurationHash: verificationConfigurationHash(*task), CandidateCommit: run.head, CandidateTree: tree, BaseCommit: task.Base, Repository: task.Worktree, Root: filepath.Join(run.engine.Root, "verification", run.id), Sandbox: policy.Sandbox}
+	manifest.Commands = verificationJobCommands(checks)
+	if policy.OfflineDockerImage != "" {
+		if err := run.bindOfflineManifest(&manifest, policy); err != nil {
+			return verification.JobManifest{}, err
+		}
+	} else {
+		profile, err := execution.ForPolicy(task.Worktree, true, task.PlanDocument.PolicyHash, policy.Sandbox)
+		if err != nil {
+			return verification.JobManifest{}, err
+		}
+		if !execution.IsNonoLauncher(profile.Launcher) {
+			return verification.JobManifest{}, errors.New("canonical local verification requires native nono")
+		}
+		manifest.Launcher = profile.Launcher
 	}
-	if !execution.IsNonoLauncher(profile.Launcher) {
-		return verification.JobManifest{}, errors.New("canonical local verification requires native nono")
-	}
-	manifest := verification.JobManifest{Version: 1, JobID: run.id, PlanID: task.ID, PlanVersion: task.PlanVersion, PlanHash: task.PlanDocument.ApprovedHash, ConfigurationHash: verificationConfigurationHash(*task), CandidateCommit: run.head, CandidateTree: tree, BaseCommit: task.Base, Repository: task.Worktree, Root: filepath.Join(run.engine.Root, "verification", run.id), Launcher: profile.Launcher, Sandbox: policy.Sandbox}
 	quality, err := approvedQualitySnapshot(*task)
 	if err != nil {
 		return verification.JobManifest{}, err
@@ -77,13 +88,6 @@ func (run *verificationRun) localCheckManifest(policy model.Policy, checks []mod
 	if quality != nil {
 		manifest.Quality = quality
 		manifest.Root = filepath.Join(quality.Root, "jobs", run.id)
-	}
-	for _, check := range checks {
-		timeout := check.TimeoutSeconds
-		if timeout <= 0 {
-			timeout = 600
-		}
-		manifest.Commands = append(manifest.Commands, verification.JobCommand{Name: check.Name, Mode: check.Mode, Command: append([]string{}, check.Command...), TimeoutSeconds: timeout, OutputPaths: append([]string{}, check.OutputPaths...), DependsOn: append([]string{}, check.DependsOn...), Required: check.Required, ReportFormat: check.ReportFormat, Environment: check.Environment})
 	}
 	if err := manifest.Validate(); err != nil {
 		return verification.JobManifest{}, err

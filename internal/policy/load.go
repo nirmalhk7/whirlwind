@@ -31,11 +31,22 @@ func Load(path string) (model.Policy, string, error) {
 	if err = decoder.Decode(&p); err != nil {
 		return p, "", err
 	}
-	if err = Validate(p); err != nil {
+	if err = validateCommittedPolicy(p); err != nil {
 		return p, "", err
 	}
 	sum := sha256.Sum256(b)
 	return p, hex.EncodeToString(sum[:]), nil
+}
+
+func validateCommittedPolicy(p model.Policy) error {
+	switch {
+	case p.OfflineDockerImage != "":
+		return errors.New("offline Docker requires an approved external project policy")
+	case p.ProjectMemory:
+		return errors.New("project memory requires an approved external project policy")
+	default:
+		return Validate(p)
+	}
 }
 
 func committedPolicy(path string) ([]byte, error) {

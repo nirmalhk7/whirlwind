@@ -4,7 +4,6 @@ import (
 	"errors"
 	"slices"
 	"sort"
-	"time"
 
 	"whirlwind/internal/model"
 )
@@ -37,17 +36,4 @@ func Route(ps []model.Provider, role string, preferred []string, outcomes map[st
 	}
 	sort.SliceStable(c, func(i, j int) bool { return rank(c[i]) > rank(c[j]) })
 	return c[0], nil
-}
-
-func providerReady(p model.Provider) bool {
-	if !p.Available || p.Kind == "unavailable" {
-		return false
-	}
-	if p.Quota == "exhausted" {
-		reset, e := time.Parse(time.RFC3339, p.ResetAt)
-		if e != nil || time.Now().Before(reset) {
-			return false
-		}
-	}
-	return true
 }

@@ -10,13 +10,15 @@ import (
 	"whirlwind/prompts/agents"
 )
 
+var directionCategories = model.DirectionCategories()
+
 func missingDirectionCategories(directions []model.Direction) []string {
 	present := map[string]bool{}
 	for _, direction := range directions {
 		present[direction.Category] = true
 	}
-	missing := make([]string, 0, len(model.DirectionCategories()))
-	for _, category := range model.DirectionCategories() {
+	missing := make([]string, 0, len(directionCategories))
+	for _, category := range directionCategories {
 		if !present[category] {
 			missing = append(missing, category)
 		}
@@ -28,7 +30,7 @@ func validateCompleteDirections(directions []model.Direction) error {
 	if err := validateDirections(directions, nil, 4); err != nil {
 		return err
 	}
-	if len(directions) != len(model.DirectionCategories()) || len(missingDirectionCategories(directions)) != 0 {
+	if len(directions) != len(directionCategories) || len(missingDirectionCategories(directions)) != 0 {
 		return fmt.Errorf("ideation requires exactly one candidate in each category; missing: %s", strings.Join(missingDirectionCategories(directions), ", "))
 	}
 	return nil
@@ -59,10 +61,14 @@ func validateDirectionContent(direction model.Direction) error {
 	if len(strings.Fields(direction.Description)) > agents.MaxIdeaDescriptionWords {
 		return fmt.Errorf("idea description exceeds %d words", agents.MaxIdeaDescriptionWords)
 	}
-	if !model.IsDirectionCategory(direction.Category) {
+	for _, category := range directionCategories {
+		if direction.Category == category {
+			return nil
+		}
+	}
+	{
 		return errors.New("each idea needs category expand, optimize, harden, or simplify")
 	}
-	return nil
 }
 
 // directionKey normalizes wording for diagnostic topic extraction.

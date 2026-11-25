@@ -9,11 +9,12 @@ import (
 )
 
 type providerMetric struct {
-	Provider string `json:"provider"`
-	Role     string `json:"role"`
-	Success  bool   `json:"success"`
-	Category string `json:"category"`
-	Task     string `json:"plan_id"`
+	Provider                string `json:"provider"`
+	Role                    string `json:"role"`
+	Success                 bool   `json:"success"`
+	Category                string `json:"category"`
+	Task                    string `json:"plan_id"`
+	AwaitingPlanPublication bool   `json:"awaiting_plan_publication"`
 }
 
 // outcomes computes provider success rates for comparable roles and repository categories once at least five outcomes are available.
@@ -25,7 +26,7 @@ func (e *Engine) outcomes(ctx context.Context, role, category string) map[string
 	for _, record := range records {
 		var metric providerMetric
 		_ = json.Unmarshal(record.Data, &metric)
-		if metric.Role != role || metric.Category != category {
+		if metric.Role != role || metric.Category != category || metric.AwaitingPlanPublication {
 			continue
 		}
 		success, include := e.metricOutcome(ctx, metric, decisions)

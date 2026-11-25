@@ -11,9 +11,11 @@ import (
 )
 
 type configurationChanges struct {
-	source *Source
-	ctx    context.Context
-	values []store.Change
+	source               *Source
+	ctx                  context.Context
+	values               []store.Change
+	checkoutIDs          map[string]string
+	registeredByCheckout map[string][]checkoutRegistration
 }
 
 func (s *Source) configurationChanges(ctx context.Context, doc Document) ([]store.Change, error) {
@@ -37,7 +39,7 @@ func (c *configurationChanges) settingsValues(doc Document) error {
 	if err := c.appendValue("settings", "global", doc.Workers); err != nil {
 		return err
 	}
-	state := model.WorkflowConfig{ActiveMode: model.EffectiveMode(c.source.activeMode), ConfiguredMode: model.EffectiveMode(doc.Mode), RestartRequired: model.EffectiveMode(c.source.activeMode) != model.EffectiveMode(doc.Mode), Integrations: doc.Integrations}
+	state := model.WorkflowConfig{ActiveMode: model.EffectiveMode(c.source.activeMode), ConfiguredMode: model.EffectiveMode(doc.Mode), RestartRequired: model.EffectiveMode(c.source.activeMode) != model.EffectiveMode(doc.Mode), Integrations: doc.Integrations, AgentHooks: doc.AgentHooks}
 	if err := c.appendValue("workflow_config", "global", state); err != nil {
 		return err
 	}

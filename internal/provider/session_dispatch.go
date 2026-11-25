@@ -5,25 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
-	"sync/atomic"
 )
-
-type providerSession struct {
-	checkServers   []any
-	nativeServers  []any
-	nativeCalls    map[string]nativeCall
-	nativePolicies map[string]string
-	ctx            context.Context
-	input          Input
-	hooks          Hooks
-	client         *Client
-	rpc            *RPC
-	mu             sync.Mutex
-	output         Output
-	replaying      atomic.Bool
-	messageID      string
-}
 
 func (s *providerSession) handle(c context.Context, m Message) (any, error) {
 	s.captureIntegrationTool(m)

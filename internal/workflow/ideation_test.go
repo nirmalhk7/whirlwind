@@ -137,7 +137,7 @@ func TestIdeationRepairsOnlyMissingCategoriesAndPreservesAcceptedCandidates(t *t
 			seen[direction.Category]++
 		}
 	}
-	for _, category := range model.DirectionCategories() {
+	for _, category := range directionCategories {
 		if seen[category] != 1 {
 			t.Fatalf("category %s count=%d, want one: %v", category, seen[category], seen)
 		}

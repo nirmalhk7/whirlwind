@@ -13,6 +13,7 @@ type Check struct {
 	Command          []string          `json:"command" yaml:"command"`
 	TimeoutSeconds   int               `json:"timeout_seconds" yaml:"timeout_seconds"`
 }
+
 type RiskRule struct {
 	APISymbols []string `json:"api_symbols,omitempty" yaml:"api_symbols"`
 	CodeTypes  []string `json:"code_types,omitempty" yaml:"code_types"`
@@ -20,13 +21,17 @@ type RiskRule struct {
 	Paths      []string `json:"paths" yaml:"paths"`
 	Checks     []Check  `json:"checks" yaml:"checks"`
 }
+
 type Embeddings struct {
 	Endpoint string `json:"endpoint" yaml:"endpoint"`
 	Model    string `json:"model" yaml:"model"`
 	KeyEnv   string `json:"key_env" yaml:"key_env"`
 	Enabled  bool   `json:"enabled" yaml:"enabled"`
 }
+
 type Policy struct {
+	OfflineDockerImage string         `json:"offline_docker_image,omitempty" yaml:"offline_docker_image"`
+	ProjectMemory      bool           `json:"project_memory,omitempty" yaml:"project_memory"`
 	Quality            *QualityPolicy `json:"quality,omitempty" yaml:"quality"`
 	AdaptiveRouting    bool           `json:"adaptive_routing,omitempty" yaml:"adaptive_routing"`
 	Sandbox            *SandboxPolicy `json:"sandbox,omitempty" yaml:"sandbox"`

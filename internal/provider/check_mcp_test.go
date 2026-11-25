@@ -11,6 +11,10 @@ import (
 	"whirlwind/internal/execution"
 )
 
+const (
+	fixtureMCPTokenHeader = "X-Whirlwind-MCP-Token"
+)
+
 func TestCheckMCPHandlerUsesAuthenticatedJSONRPCBrokerEndpoint(t *testing.T) {
 	ctx := context.Background()
 	s := &providerSession{input: Input{ReadOnly: true, Role: "review"}, hooks: Hooks{RunCheck: func(_ context.Context, id string) (CheckResult, error) {
@@ -19,21 +23,21 @@ func TestCheckMCPHandlerUsesAuthenticatedJSONRPCBrokerEndpoint(t *testing.T) {
 	token := strings.Repeat("d", 64)
 	handler := checkMCPHandler(ctx, s, token)
 	request := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
-	request.Header.Set("X-Whirlwind-MCP-Token", token)
+	request.Header.Set(fixtureMCPTokenHeader, token)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"name":"run_check"`) {
 		t.Fatalf("check MCP tool list unavailable over broker endpoint: %d %s", response.Code, response.Body.String())
 	}
 	request = httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_check","arguments":{"check_id":"tests"}}}`))
-	request.Header.Set("X-Whirlwind-MCP-Token", token)
+	request.Header.Set(fixtureMCPTokenHeader, token)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "approved-check-output") {
 		t.Fatalf("check MCP result unavailable over broker endpoint: %d %s", response.Code, response.Body.String())
 	}
 	request = httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{}}`))
-	request.Header.Set("X-Whirlwind-MCP-Token", "wrong")
+	request.Header.Set(fixtureMCPTokenHeader, "wrong")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {

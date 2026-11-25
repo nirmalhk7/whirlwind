@@ -23,10 +23,8 @@ func (s *Store) ReserveBudget(ctx context.Context, r model.BudgetReservation, bu
 			return err
 		}
 		budget = effectiveBudget
-		canonical := false
-		if plan, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", r.TaskID); err == nil {
-			canonical = plan.IdeaID != "" && r.Role != "ideate"
-		} else if !errors.Is(err, ErrNotFound) {
+		canonical, err := usesAccountingBudget(ctx, tx, r)
+		if err != nil {
 			return err
 		}
 		validation := budget.Validate
@@ -40,20 +38,31 @@ func (s *Store) ReserveBudget(ctx context.Context, r model.BudgetReservation, bu
 		if err != nil {
 			return err
 		}
-		remaining, reserve, err := 0, verificationReserve{}, error(nil)
-		if canonical {
-			remaining = r.RuntimeSeconds
-			if remaining <= 0 || (r.Kind != "verification" && remaining > 300) {
-				remaining = 300
-			}
-		} else {
-			remaining, reserve, err = validateRuntimeBudget(r, budget, report)
-		}
+		remaining, reserve, err := reservationRuntime(r, budget, report, canonical)
 		if err != nil {
 			return err
 		}
 		return persistBudgetReservation(budgetReservationInput{ctx: ctx, tx: tx, reservation: r, budget: budget, report: report, remaining: remaining, reserve: reserve})
 	})
+}
+
+func usesAccountingBudget(ctx context.Context, tx *sql.Tx, reservation model.BudgetReservation) (bool, error) {
+	plan, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", reservation.TaskID)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil && plan.IdeaID != "" && reservation.Role != "ideate", err
+}
+
+func reservationRuntime(r model.BudgetReservation, budget model.BudgetPolicy, report model.UsageReport, canonical bool) (int, verificationReserve, error) {
+	if !canonical {
+		return validateRuntimeBudget(r, budget, report)
+	}
+	remaining := r.RuntimeSeconds
+	if remaining <= 0 || (r.Kind != "verification" && remaining > 300) {
+		remaining = 300
+	}
+	return remaining, verificationReserve{}, nil
 }
 
 type budgetReservationInput struct {

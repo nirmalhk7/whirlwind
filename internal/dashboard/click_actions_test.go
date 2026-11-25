@@ -133,29 +133,7 @@ func TestFooterKeepsKeyboardHelpAfterStatusUpdates(t *testing.T) {
 }
 
 func TestRunClickOrEnterShowsOnlyThatRunsFullSavedLogs(t *testing.T) {
-	directory := t.TempDir()
-	t.Setenv("WHIRLWIND_DATA_DIR", directory)
-	database, err := store.Open(filepath.Join(directory, "whirlwind.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := context.Background()
-	snapshot := control.Snapshot{}
-	for _, id := range []string{"first", "second"} {
-		attempt := model.Attempt{AttemptID: id, Role: "ideate", Model: id, StartedAt: "2026-11-09T10:00:00Z"}
-		if err := database.Put(ctx, "sessions", id, attempt, 0); err != nil {
-			t.Fatal(err)
-		}
-		snapshot["sessions"] = append(snapshot["sessions"], record(id, attempt))
-		for _, body := range []string{id + " prompt", strings.Repeat(id+" log\n", 80000) + id + " FINAL"} {
-			if _, err := database.Capture(ctx, id, "output", "text/plain", []byte(body), store.AttemptPayloadLimit, false); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := database.Close(); err != nil {
-		t.Fatal(err)
-	}
+	snapshot := seedSavedRunLogs(t)
 	for _, line := range []int{0, 1, 2} {
 		t.Run(string(rune('0'+line)), func(t *testing.T) {
 			capture := captureRunTail(t, "first FINAL")
@@ -191,6 +169,34 @@ func TestRunClickOrEnterShowsOnlyThatRunsFullSavedLogs(t *testing.T) {
 
 		})
 	}
+}
+
+func seedSavedRunLogs(t *testing.T) control.Snapshot {
+	t.Helper()
+	directory := t.TempDir()
+	t.Setenv("WHIRLWIND_DATA_DIR", directory)
+	database, err := store.Open(filepath.Join(directory, "whirlwind.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	snapshot := control.Snapshot{}
+	for _, id := range []string{"first", "second"} {
+		attempt := model.Attempt{AttemptID: id, Role: "ideate", Model: id, StartedAt: "2026-11-09T10:00:00Z"}
+		if err := database.Put(ctx, "sessions", id, attempt, 0); err != nil {
+			t.Fatal(err)
+		}
+		snapshot["sessions"] = append(snapshot["sessions"], record(id, attempt))
+		for _, body := range []string{id + " prompt", strings.Repeat(id+" log\n", 80000) + id + " FINAL"} {
+			if _, err := database.Capture(ctx, id, "output", "text/plain", []byte(body), store.AttemptPayloadLimit, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return snapshot
 }
 
 func TestInboxSelectionHighlightsFullWidth(t *testing.T) {

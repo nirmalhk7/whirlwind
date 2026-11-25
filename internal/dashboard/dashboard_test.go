@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,12 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+)
+
+const (
+	dashboardFixtureApprovedPolicy       = "policy-current"
+	dashboardFixturePrimaryRequirement   = "WW-001"
+	dashboardFixtureSecondaryRequirement = "WW-055"
 )
 
 const (
@@ -299,11 +306,11 @@ func TestDashboardLabelsRawScoresAndShowsComputedAcceptanceEvidence(t *testing.T
 	d.Present(control.Snapshot{
 		"projects": {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo"})},
 		"execution_plans": {record(dashboardPlanOne, model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Score: 9, Delivery: &model.LocalDelivery{
-			Stage: "accepted", Score: 9, Adherence: &model.Adherence{Score: 92.5}, UnmetRequirements: []string{"WW-055"},
+			Stage: "accepted", Score: 9, Adherence: &model.Adherence{Score: 92.5}, UnmetRequirements: []string{dashboardFixtureSecondaryRequirement},
 		}})},
 	})
 	view := d.detail.GetText(false)
-	for _, expected := range []string{"Stored plan score (raw; not acceptance evidence): 9", "Computed adherence: 92.5%", "WW-055"} {
+	for _, expected := range []string{"Stored plan score (raw; not acceptance evidence): 9", "Computed adherence: 92.5%", dashboardFixtureSecondaryRequirement} {
 		if !strings.Contains(view, expected) {
 			t.Errorf("inspection omitted correct acceptance score provenance %q: %s", expected, view)
 		}
@@ -328,7 +335,7 @@ func TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery(t *test
 	provenance := &model.Provenance{Task: dashboardPlanOne, PlanVersion: 3, Head: "candidate-commit", Base: "base-commit", PolicyHash: "policy-hash", VerificationID: "verification-1", ReviewID: "review-1"}
 	task := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", PlanVersion: 3, ReviewedCommit: provenance.Head, VerificationID: provenance.VerificationID, ReviewID: provenance.ReviewID, Score: 9}
 	adherenceProvenance := *provenance
-	review := model.Review{Provenance: provenance, Adherence: &model.Adherence{Score: 87.5, Total: 2, Provenance: adherenceProvenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}, {ID: "WW-055", Status: "fail"}}}}
+	review := model.Review{Provenance: provenance, Adherence: &model.Adherence{Score: 87.5, Total: 2, Provenance: adherenceProvenance, Results: []model.RequirementResult{{ID: dashboardFixturePrimaryRequirement, Status: "pass"}, {ID: dashboardFixtureSecondaryRequirement, Status: "fail"}}}}
 	d := New()
 	d.Present(control.Snapshot{
 		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo", PolicyHash: provenance.PolicyHash})},
@@ -336,7 +343,7 @@ func TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery(t *test
 		"reviews":         {record(provenance.ReviewID, review)},
 	})
 	view := d.detail.GetText(false)
-	for _, expected := range []string{"Computed adherence: 87.5%", "WW-055"} {
+	for _, expected := range []string{"Computed adherence: 87.5%", dashboardFixtureSecondaryRequirement} {
 		if !strings.Contains(view, expected) {
 			t.Errorf("critical approval inspection omitted saved review evidence %q: %s", expected, view)
 		}
@@ -345,7 +352,7 @@ func TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery(t *test
 		t.Fatalf("legacy score was presented as review adherence: %s", view)
 	}
 	stale := review
-	stale.Adherence = &model.Adherence{Score: 100, Total: 2, Provenance: model.Provenance{Task: dashboardPlanOne, PlanVersion: 2, Head: "older-candidate", PolicyHash: provenance.PolicyHash, VerificationID: provenance.VerificationID, ReviewID: provenance.ReviewID}, Results: []model.RequirementResult{{ID: "WW-055", Status: "pass"}}}
+	stale.Adherence = &model.Adherence{Score: 100, Total: 2, Provenance: model.Provenance{Task: dashboardPlanOne, PlanVersion: 2, Head: "older-candidate", PolicyHash: provenance.PolicyHash, VerificationID: provenance.VerificationID, ReviewID: provenance.ReviewID}, Results: []model.RequirementResult{{ID: dashboardFixtureSecondaryRequirement, Status: "pass"}}}
 	d.Present(control.Snapshot{
 		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, Name: "Repo", PolicyHash: provenance.PolicyHash})},
 		"execution_plans": {record(dashboardPlanOne, task)},
@@ -357,46 +364,47 @@ func TestCriticalApprovalShowsMatchingSavedReviewAdherenceBeforeDelivery(t *test
 }
 
 func TestFinalizationApprovalRequestBindsExactCandidateAndReview(t *testing.T) {
-	provenance := model.Provenance{Task: dashboardPlanOne, PlanVersion: 4, Head: "reviewed-candidate", PolicyHash: "policy-current", VerificationID: "verification-current", ReviewID: "review-current"}
+	provenance := model.Provenance{Task: dashboardPlanOne, PlanVersion: 4, Head: "reviewed-candidate", PolicyHash: dashboardFixtureApprovedPolicy, VerificationID: "verification-current", ReviewID: "review-current"}
 	plan := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", Risk: "critical", PlanVersion: 4, ReviewedCommit: provenance.Head, ReviewID: provenance.ReviewID, VerificationID: provenance.VerificationID, PlanDocument: &model.PlanDocument{ApprovedHash: dashboardFixtureApprovedPlanID}}
-	view := finalizationReport{Task: plan, Review: model.Review{Provenance: &provenance, Adherence: &model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}}, Adherence: model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-001", Status: "pass"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: "policy-current", Diff: finalizationDiffPage{Content: "diff --git a/file b/file\n+approved candidate\n"}, Accepted: true}
-	request, err := finalizationApprovalRequest(plan, 17, "policy-current", view)
+	view := control.FinalizationReport{Task: plan, Review: model.Review{Provenance: &provenance, Adherence: &model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: dashboardFixturePrimaryRequirement, Status: "pass"}}}}, Adherence: model.Adherence{Score: 90, Total: 1, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: dashboardFixturePrimaryRequirement, Status: "pass"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: dashboardFixtureApprovedPolicy, Diff: control.FinalizationDiffPage{Content: "diff --git a/file b/file\n+approved candidate\n"}, Accepted: true}
+	request, err := finalizationApprovalRequest(plan, 17, dashboardFixtureApprovedPolicy, view)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if request.Operation != "finalization.approve" || request.PlanID != plan.ID || request.ExpectedVersion != 17 || request.IdempotencyKey == "" {
 		t.Fatalf("finalization action lost task CAS/receipt binding: %+v", request)
 	}
-	var approval finalizationApprovalPayload
+	var approval map[string]any
 	if err := json.Unmarshal(request.Payload, &approval); err != nil {
 		t.Fatal(err)
 	}
-	if approval.PlanVersion != plan.PlanVersion || approval.ApprovedPlanHash != dashboardFixtureApprovedPlanID || approval.ReviewedCommit != plan.ReviewedCommit || approval.ReviewID != plan.ReviewID || approval.VerificationID != plan.VerificationID || approval.PolicyHash != "policy-current" {
+	want := map[string]any{"plan_version": float64(plan.PlanVersion), "approved_plan_hash": dashboardFixtureApprovedPlanID, "reviewed_commit": provenance.Head, "review_id": provenance.ReviewID, "verification_id": provenance.VerificationID, "policy_hash": provenance.PolicyHash}
+	if !maps.Equal(approval, want) {
 		t.Fatalf("approval request did not bind the exact reviewed candidate: %+v", approval)
 	}
 	view.Task.ReviewedCommit = "newer-candidate"
-	if _, err := finalizationApprovalRequest(plan, 17, "policy-current", view); err == nil {
+	if _, err := finalizationApprovalRequest(plan, 17, dashboardFixtureApprovedPolicy, view); err == nil {
 		t.Fatal("changed candidate report was approved")
 	}
 }
 
 func TestCriticalFinalizationFormShowsExactDiffReportAndLocalOnlyAction(t *testing.T) {
-	provenance := model.Provenance{Task: dashboardPlanOne, PlanVersion: 4, Head: "reviewed-candidate", PolicyHash: "policy-current", VerificationID: "verification-current", ReviewID: "review-current"}
+	provenance := model.Provenance{Task: dashboardPlanOne, PlanVersion: 4, Head: "reviewed-candidate", PolicyHash: dashboardFixtureApprovedPolicy, VerificationID: "verification-current", ReviewID: "review-current"}
 	plan := model.ExecutionPlan{ID: dashboardPlanOne, ProjectID: dashboardProjectOne, Stage: "approval", Risk: "critical", PlanVersion: 4, ReviewedCommit: provenance.Head, ReviewID: provenance.ReviewID, VerificationID: provenance.VerificationID, PlanDocument: &model.PlanDocument{ApprovedHash: dashboardFixtureApprovedPlanID}}
-	report := finalizationReport{Task: plan, Review: model.Review{Summary: "Candidate review summary", Provenance: &provenance, Adherence: &model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}}, Adherence: model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: "WW-055", Status: "fail"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: "policy-current", Diff: finalizationDiffPage{Content: "diff --git a/file b/file\n+exact reviewed code\n"}, Accepted: true}
+	report := control.FinalizationReport{Task: plan, Review: model.Review{Summary: "Candidate review summary", Provenance: &provenance, Adherence: &model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: dashboardFixtureSecondaryRequirement, Status: "fail"}}}}, Adherence: model.Adherence{Score: 82, Total: 2, Accepted: true, Provenance: provenance, Results: []model.RequirementResult{{ID: dashboardFixtureSecondaryRequirement, Status: "fail"}}}, ApprovedPlanHash: dashboardFixtureApprovedPlanID, PolicyHash: dashboardFixtureApprovedPolicy, Diff: control.FinalizationDiffPage{Content: "diff --git a/file b/file\n+exact reviewed code\n"}, Accepted: true}
 	d := New()
 	screen := tcell.NewSimulationScreen("UTF-8")
 	d.SetScreen(screen)
 	t.Cleanup(screen.Fini)
 	screen.SetSize(140, 45)
 	d.Present(control.Snapshot{
-		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, PolicyHash: "policy-current"})},
+		"projects":        {record(dashboardProjectOne, model.Project{ID: dashboardProjectOne, PolicyHash: dashboardFixtureApprovedPolicy})},
 		"execution_plans": {record(dashboardPlanOne, plan)},
 	})
 	d.showFinalizationApproval(plan, 1, report, []int64{0})
 	d.ForceDraw()
 	text := screenText(screen)
-	for _, expected := range []string{"Approve local finalization only", "Computed adherence: 82%", "WW-055", "Exact reviewed candidate diff", "+exact reviewed code", "No pull request or branch push"} {
+	for _, expected := range []string{"Approve local finalization only", "Computed adherence: 82%", dashboardFixtureSecondaryRequirement, "Exact reviewed candidate diff", "+exact reviewed code", "No pull request or branch push"} {
 		if !strings.Contains(text, expected) {
 			t.Errorf("critical approval form omitted %q: %s", expected, text)
 		}

@@ -46,8 +46,8 @@ func TestBaseUsesLocalDefaultBranchWhenOriginIsAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	branch := submissionGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD")
-	commit := submissionGit(t, repo, "rev-parse", "HEAD")
+	branch := submissionGit(t, repo, gitRevParseCommand, "--abbrev-ref", "HEAD")
+	commit := submissionGit(t, repo, gitRevParseCommand, "HEAD")
 	if _, err := github.Run(ctx, repo, "git", "remote", "add", "upstream", filepath.Join(t.TempDir(), "missing-remote")); err != nil {
 		t.Fatal(err)
 	}
@@ -68,14 +68,14 @@ func TestPlanningWorktreeKeepsOriginalBaseAfterDefaultBranchAdvances(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	branch := submissionGit(t, repo, "rev-parse", "--abbrev-ref", "HEAD")
+	branch := submissionGit(t, repo, gitRevParseCommand, "--abbrev-ref", "HEAD")
 	project.DefaultBranch = branch
 	step := &taskStep{Engine: e, ctx: ctx, project: project, task: task}
 	path, err := step.planningWorktree()
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalBase := submissionGit(t, path, "rev-parse", "HEAD")
+	originalBase := submissionGit(t, path, gitRevParseCommand, "HEAD")
 	if err := os.WriteFile(filepath.Join(repo, "advanced-default.txt"), []byte("new default branch state\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestPlanningWorktreeKeepsOriginalBaseAfterDefaultBranchAdvances(t *testing.
 	if err != nil {
 		t.Fatalf("retry followed the advanced default branch instead of the original planning snapshot: %v", err)
 	}
-	if pathAfterRestart != path || submissionGit(t, pathAfterRestart, "rev-parse", "HEAD") != originalBase {
-		t.Fatalf("planning snapshot changed after default branch advanced: path=%s original=%s current=%s", pathAfterRestart, originalBase, submissionGit(t, pathAfterRestart, "rev-parse", "HEAD"))
+	if pathAfterRestart != path || submissionGit(t, pathAfterRestart, gitRevParseCommand, "HEAD") != originalBase {
+		t.Fatalf("planning snapshot changed after default branch advanced: path=%s original=%s current=%s", pathAfterRestart, originalBase, submissionGit(t, pathAfterRestart, gitRevParseCommand, "HEAD"))
 	}
 }

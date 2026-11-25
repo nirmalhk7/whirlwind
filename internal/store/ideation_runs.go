@@ -4,9 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 
 	"whirlwind/internal/model"
 )
+
+// OriginalIdeationOperation returns the first durable event for an operation.
+// Older queued jobs can acquire an owner before they retry, so current owner
+// alone cannot establish how they were created.
+func (s *Store) OriginalIdeationOperation(ctx context.Context, id string) (model.Operation, error) {
+	var data []byte
+	err := s.DB.QueryRowContext(ctx, "SELECT data FROM events WHERE kind='operations' AND resource_id=? ORDER BY id LIMIT 1", id).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.Operation{}, ErrNotFound
+	}
+	if err != nil {
+		return model.Operation{}, err
+	}
+	return Decode[model.Operation](model.Record{Data: data})
+}
 
 // Operations retain their existing identity; this projection supports durable
 // intake independently from the optional periodic schedule.
@@ -37,7 +53,7 @@ func syncIdeationRunTx(ctx context.Context, tx *sql.Tx, id string, data []byte) 
 	if err := requireOneRow(result); err != nil {
 		return err
 	}
-	for _, direction := range model.DirectionCategories() {
+	for _, direction := range []string{"expand", "optimize", "harden", "simplify"} {
 		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO ideation_directions(run_id,direction,status) VALUES(?,?,'queued')`, id, direction); err != nil {
 			return err
 		}

@@ -3,14 +3,12 @@ package workflow
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
-	"whirlwind/internal/provider"
-	"whirlwind/internal/store"
-	"whirlwind/prompts/agents"
 )
 
 const integrationRevParse = "rev-parse"
@@ -61,35 +59,13 @@ func (e *Engine) mergeUnit(ctx context.Context, p model.Project, t *model.Execut
 	if commits == "" {
 		return true, nil
 	}
-	return false, e.cherryPickUnit(ctx, p, t, u, commits)
-}
-func (e *Engine) cherryPickUnit(ctx context.Context, p model.Project, t *model.ExecutionPlan, u *model.Unit, commits string) error {
-	_, err := github.Run(ctx, t.Worktree, "git", append([]string{"cherry-pick", "--keep-redundant-commits"}, strings.Fields(commits)...)...)
-	if err == nil {
-		return nil
+	for _, commit := range strings.Fields(commits) {
+		pick := integrationPick{engine: e, task: t, project: p, unit: u, source: commit}
+		if err := pick.run(ctx); err != nil {
+			return false, err
+		}
 	}
-	return e.resolveIntegrationConflict(ctx, p, t, u)
-}
-
-func (e *Engine) resolveIntegrationConflict(ctx context.Context, p model.Project, t *model.ExecutionPlan, u *model.Unit) error {
-	prompt, err := agents.Render("integrate", map[string]string{"Unit": jsonText(u)})
-	if err != nil {
-		return err
-	}
-	out, runErr := e.agent(ctx, p, *t, provider.Input{UnitID: u.ID, Purpose: "integration", Role: "code", CWD: t.Worktree, Prompt: prompt})
-	if runErr != nil {
-		return runErr
-	}
-	t.LastAttemptID = out.AttemptID
-	t.ImplementationAttempts = append(t.ImplementationAttempts, out.AttemptID)
-	if _, err = github.Run(ctx, t.Worktree, "git", integrationRevParse, "--verify", "CHERRY_PICK_HEAD"); err == nil {
-		return errors.New("conflict unresolved")
-	}
-	head, headErr := github.Run(ctx, t.Worktree, "git", integrationRevParse, "HEAD")
-	if headErr != nil {
-		return headErr
-	}
-	return e.Store.Put(ctx, "checkpoints", store.ID(), map[string]any{"plan_id": t.ID, "unit": u.ID, "plan_version": t.PlanVersion, "attempt_id": out.AttemptID, "commit": head, "kind": "integration"}, 0)
+	return false, nil
 }
 
 func integrationStatus(ctx context.Context, path, commit string) (bool, bool, error) {
@@ -101,5 +77,12 @@ func integrationStatus(ctx context.Context, path, commit string) (bool, bool, er
 		return true, false, nil
 	}
 	err = exec.CommandContext(ctx, "git", "-C", path, "merge-base", "--is-ancestor", commit, "HEAD").Run()
-	return false, err == nil, nil
+	if err == nil {
+		return false, true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, false, nil
+	}
+	return false, false, fmt.Errorf("check integrated commit %s: %w", commit, err)
 }

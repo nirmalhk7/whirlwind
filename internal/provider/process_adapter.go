@@ -3,13 +3,16 @@ package provider
 import (
 	"context"
 	"errors"
-	"fmt"
+	"sync"
+	"sync/atomic"
 
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 )
 
-// Run drives a Codex, ACP, or Claude-bridge session over stdio, handling streamed output, tool permissions, user questions, and cancellation.
+type ProcessAdapter struct{ Provider model.Provider }
+
+// Run drives an ACP session over stdio, including streamed output, tool permissions, user questions, and cancellation.
 func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (result Output, err error) {
 	p, err := ResolveExecutionProvider(a.Provider)
 	if err != nil {
@@ -18,6 +21,15 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (result Outp
 	if in.NativeIntegrations {
 		p.NativeIntegrations = true
 	}
+	if !in.ReadinessOnly && !in.CatalogOnly && in.Purpose != "provider_test" {
+		if len(in.AgentHooks.Before)+len(in.AgentHooks.After) > 0 {
+			return a.runWithAgentHooks(ctx, p, in, h)
+		}
+	}
+	return a.runResolved(ctx, p, in, h)
+}
+
+func (a ProcessAdapter) runResolved(ctx context.Context, p model.Provider, in Input, h Hooks) (result Output, err error) {
 	in.ProviderID = a.Provider.ID
 	in.ACPProfile = p.ACPProfile
 	s := &providerSession{ctx: ctx, input: in, hooks: h, client: NewClient(in, h), output: Output{SessionID: in.SessionID}}
@@ -47,7 +59,7 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (result Outp
 	transferred = true
 	s.rpc = rpc
 	defer func() { err = errors.Join(err, rpc.Close()) }()
-	err = authenticationACPError(p, s.runProviderKind(p.Kind))
+	err = authenticationACPError(p, s.runACP())
 	s.mu.Lock()
 	result = s.output
 	s.mu.Unlock()
@@ -73,40 +85,25 @@ func (s *providerSession) sessionExecutionProfile(ctx context.Context, execution
 			return execution.Profile{}, err
 		}
 	}
+	if input.hookRuntimeDir != "" {
+		profile.RuntimeDir = input.hookRuntimeDir
+	}
 	profile.MCPBroker = input.MCPBroker
 	profile.MCPBrokerToken = input.MCPBrokerToken
 	return profile, nil
 }
 
 func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider, profile *execution.Profile) (func(), error) {
-	if s.input.MCPBroker != nil {
-		if s.input.NativeIntegrations {
-			return nil, errors.New("selected read-only MCP broker conflicts with raw native integration mounts")
-		}
-		if s.hasScopedTool() {
-			return nil, errors.New("selected integration broker conflicts with reviewer check broker; use separate agent attempts")
-		}
-		if p.Kind != "acp" {
-			return nil, errors.New("selected integration broker requires the configured ACP transport")
-		}
-		if err := s.prepareBrokerMCP(profile); err != nil {
-			return nil, err
-		}
+	if err := s.prepareSelectedBroker(p, profile); err != nil {
+		return nil, err
 	}
 	if p.Kind == "acp" && p.ACPProfile != "" {
 		if err := provisionACPAuth(profile, provider); err != nil {
 			return nil, err
 		}
 	}
-	if s.input.NativeIntegrations {
-		if err := ProvisionNativeIntegrations(profile, provider); err != nil {
-			return nil, err
-		}
-		if p.Kind == "acp" {
-			if err := s.prepareCursorIntegrations(p, *profile); err != nil {
-				return nil, err
-			}
-		}
+	if err := s.prepareNativeIntegrations(p, provider, profile); err != nil {
+		return nil, err
 	}
 	s.input.Execution = profile
 	s.input.CWD = profile.CWD
@@ -117,15 +114,48 @@ func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider
 	return s.prepareCheckMCP(s.ctx, profile)
 }
 
-func (s *providerSession) runProviderKind(kind string) error {
-	switch kind {
-	case "acp":
-		return s.runACP()
-	case "codex":
-		return fmt.Errorf("native Codex execution is unsupported; configure its ACP agent and set kind: acp")
-	case "claude":
-		return fmt.Errorf("Claude bridge execution is unsupported; configure its ACP agent and set kind: acp")
-	default:
-		return errors.New("unsupported provider kind")
+func (s *providerSession) prepareSelectedBroker(p model.Provider, profile *execution.Profile) error {
+	if s.input.MCPBroker == nil {
+		return nil
 	}
+
+	if s.input.NativeIntegrations {
+		return errors.New("selected read-only MCP broker conflicts with raw native integration mounts")
+	}
+	if s.hasScopedTool() {
+		return errors.New("selected integration broker conflicts with reviewer check broker; use separate agent attempts")
+	}
+	if p.Kind != "acp" {
+		return errors.New("selected integration broker requires the configured ACP transport")
+	}
+	return s.prepareBrokerMCP(profile)
+}
+
+func (s *providerSession) prepareNativeIntegrations(p, provider model.Provider, profile *execution.Profile) error {
+	if !s.input.NativeIntegrations {
+		return nil
+	}
+	if err := ProvisionNativeIntegrations(profile, provider); err != nil {
+		return err
+	}
+	if p.Kind == "acp" {
+		return s.prepareCursorIntegrations(p, *profile)
+	}
+	return nil
+}
+
+type providerSession struct {
+	checkServers   []any
+	nativeServers  []any
+	nativeCalls    map[string]nativeCall
+	nativePolicies map[string]string
+	ctx            context.Context
+	input          Input
+	hooks          Hooks
+	client         *Client
+	rpc            *RPC
+	mu             sync.Mutex
+	output         Output
+	replaying      atomic.Bool
+	messageID      string
 }

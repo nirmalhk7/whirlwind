@@ -15,7 +15,7 @@ import (
 )
 
 func (a *agentRun) reconcileOpenShellAttempts(ctx context.Context) error {
-	if err := a.Engine.reconcileRuntimeJobs(ctx, runtimeCheckOwner{TaskID: a.task.ID}); err != nil {
+	if err := a.reconcileRuntimeJobs(ctx, runtimeCheckOwner{TaskID: a.task.ID}); err != nil {
 		return err
 	}
 	if a.input.Execution == nil {

@@ -1,7 +1,5 @@
 # Whirlwind remaining-work roadmap
 
-> This is a historical backlog, not a specification of current behavior. Browser UI, Submitter/publication, and sandbox descriptions below predate the current terminal supervisor. Consult [development guidance](docs/development.md), [README](README.md), and [workflow modes](docs/workflow-modes.md); verify each backlog item against code before implementation.
-
 Whirlwind is a single-user local AI orchestration platform with a Go server,
 SQLite state, and a web control center. Optimize accepted, verified software per
 whole-task token and operator minute. Delivery order: project isolation,

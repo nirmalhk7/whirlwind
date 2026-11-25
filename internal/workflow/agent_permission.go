@@ -52,30 +52,41 @@ func (a *agentAttempt) consumeSavedPermission(ctx context.Context, perm provider
 		if !permissionDecisionMatches(saved, a, perm) {
 			continue
 		}
-		originRecord, err := a.Store.Get(ctx, "sessions", saved.AttemptID)
+		matches, err := a.ownsSavedPermission(ctx, saved.AttemptID)
 		if err != nil {
 			return false, false, err
 		}
-		origin, err := store.Decode[model.Attempt](originRecord)
-		if err != nil {
-			return false, false, err
+		if matches {
+			return a.persistSavedPermission(ctx, record, saved)
 		}
-		if origin.Task != a.task.ID || origin.Role != a.input.Role || origin.PlanVersion != a.task.PlanVersion || !origin.Finished {
-			continue
-		}
-		saved.ConsumedBy = a.id
-		action := "permission_deny"
-		if saved.Decision == "allow" {
-			action = "permission_allow"
-		}
-		audit := model.Audit{Task: a.task.ID, AttemptID: a.id, Source: "local_operator", Action: action, Target: saved.ID, Version: a.task.PlanVersion, Reason: "revalidated exact permission action for fresh attempt"}
-		changes := []store.Change{{Kind: "permissions", ID: record.ID, Value: saved, Expected: record.Version}, {Kind: "audit", ID: store.ID(), Value: audit}}
-		if err := a.Store.Write(ctx, changes, nil); err != nil {
-			return false, true, a.persistenceError(err)
-		}
-		return saved.Decision == "allow", true, nil
 	}
 	return false, false, nil
+}
+
+func (a *agentAttempt) ownsSavedPermission(ctx context.Context, attemptID string) (bool, error) {
+	record, err := a.Store.Get(ctx, "sessions", attemptID)
+	if err != nil {
+		return false, err
+	}
+	origin, err := store.Decode[model.Attempt](record)
+	if err != nil {
+		return false, err
+	}
+	return origin.Task == a.task.ID && origin.Role == a.input.Role && origin.PlanVersion == a.task.PlanVersion && origin.Finished, nil
+}
+
+func (a *agentAttempt) persistSavedPermission(ctx context.Context, record model.Record, saved pendingPermission) (bool, bool, error) {
+	saved.ConsumedBy = a.id
+	action := "permission_deny"
+	if saved.Decision == "allow" {
+		action = "permission_allow"
+	}
+	audit := model.Audit{Task: a.task.ID, AttemptID: a.id, Source: "local_operator", Action: action, Target: saved.ID, Version: a.task.PlanVersion, Reason: "revalidated exact permission action for fresh attempt"}
+	changes := []store.Change{{Kind: "permissions", ID: record.ID, Value: saved, Expected: record.Version}, {Kind: "audit", ID: store.ID(), Value: audit}}
+	if err := a.Store.Write(ctx, changes, nil); err != nil {
+		return false, true, a.persistenceError(err)
+	}
+	return saved.Decision == "allow", true, nil
 }
 
 func permissionDecisionMatches(saved pendingPermission, attempt *agentAttempt, permission provider.Permission) bool {
@@ -89,10 +100,7 @@ func remotePublicationMutation(perm provider.Permission) bool {
 			return true
 		}
 	}
-	if isRemoteMutationCommand(perm.Command, 0) {
-		return true
-	}
-	return false
+	return isRemoteMutationCommand(perm.Command, 0)
 }
 
 func isRemoteMutationCommand(command []string, depth int) bool {
@@ -113,21 +121,22 @@ func isRemoteMutationCommand(command []string, depth int) bool {
 		}
 		return isRemoteMutationCommand(args, depth+1)
 	case "sh", "bash", "zsh", "dash":
-		for index, arg := range args {
-			if arg == "-c" && index+1 < len(args) {
-				return shellHasRemoteMutation(args[index+1], depth+1)
-			}
-		}
+		return shellCommandMutates(args, depth)
 	case "git":
-		for _, arg := range args {
-			if arg == "push" || arg == "send-pack" {
-				return true
-			}
-		}
+		return containsString(args, "push") || containsString(args, "send-pack")
 	case "gh", "glab":
 		return githubCommandMutates(args)
 	case "curl", "wget":
 		return httpCommandMutates(args)
+	}
+	return false
+}
+
+func shellCommandMutates(args []string, depth int) bool {
+	for index, arg := range args {
+		if arg == "-c" && index+1 < len(args) {
+			return shellHasRemoteMutation(args[index+1], depth+1)
+		}
 	}
 	return false
 }
@@ -164,24 +173,39 @@ func githubCommandMutates(args []string) bool {
 		return false
 	}
 	if args[0] == "api" {
-		for index, arg := range args {
-			if (arg == "-X" || arg == "--method") && index+1 < len(args) {
-				return isWriteMethod(args[index+1])
-			}
-			if strings.HasPrefix(arg, "--method=") || strings.HasPrefix(arg, "-X") && len(arg) > 2 {
-				return isWriteMethod(strings.TrimPrefix(strings.TrimPrefix(arg, "--method="), "-X"))
-			}
-		}
-		return false
+		return githubAPICommandMutates(args)
 	}
 	if len(args) < 2 {
 		return false
 	}
-	group, action := args[0], args[1]
-	return (group == "pr" && containsString([]string{"create", "merge", "close", "edit", "reopen", "ready", "review", "comment"}, action)) ||
-		(group == "issue" && containsString([]string{"create", "close", "edit", "reopen", "comment"}, action)) ||
-		(group == "release" && containsString([]string{"create", "delete", "edit", "upload", "delete-asset"}, action)) ||
-		(group == "mr" && containsString([]string{"create", "merge", "close", "edit", "approve", "reopen", "note"}, action))
+	return containsString(remoteMutationActions(args[0]), args[1])
+}
+
+func remoteMutationActions(group string) []string {
+	switch group {
+	case "pr":
+		return []string{"create", "merge", "close", "edit", "reopen", "ready", "review", "comment"}
+	case "issue":
+		return []string{"create", "close", "edit", "reopen", "comment"}
+	case "release":
+		return []string{"create", "delete", "edit", "upload", "delete-asset"}
+	case "mr":
+		return []string{"create", "merge", "close", "edit", "approve", "reopen", "note"}
+	default:
+		return nil
+	}
+}
+
+func githubAPICommandMutates(args []string) bool {
+	for index, arg := range args {
+		if (arg == "-X" || arg == "--method") && index+1 < len(args) {
+			return isWriteMethod(args[index+1])
+		}
+		if strings.HasPrefix(arg, "--method=") || strings.HasPrefix(arg, "-X") && len(arg) > 2 {
+			return isWriteMethod(strings.TrimPrefix(strings.TrimPrefix(arg, "--method="), "-X"))
+		}
+	}
+	return false
 }
 
 func httpCommandMutates(args []string) bool {

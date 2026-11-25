@@ -14,14 +14,7 @@ import (
 	"whirlwind/internal/store"
 )
 
-type LocalFinalizationApproval struct {
-	PlanVersion      int    `json:"plan_version"`
-	ApprovedPlanHash string `json:"approved_plan_hash"`
-	ReviewedCommit   string `json:"reviewed_commit"`
-	ReviewID         string `json:"review_id"`
-	VerificationID   string `json:"verification_id"`
-	PolicyHash       string `json:"policy_hash"`
-}
+type LocalFinalizationApproval = model.LocalFinalizationApproval
 
 func (e *Engine) ApproveLocalFinalization(ctx context.Context, taskID string, expectedTaskVersion int, approval LocalFinalizationApproval, idempotencyKey string) (model.ExecutionPlan, error) {
 	if !validFinalizationKey(idempotencyKey) {
