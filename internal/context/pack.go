@@ -116,7 +116,8 @@ func packEntries(index Index, request PackRequest) []Entry {
 	for _, entry := range entries {
 		dirs[filepath.Dir(entry.Path)] = true
 	}
-	keys := slices.Sorted(maps.Keys(index.Files))
+	keys := slices.AppendSeq(make([]string, 0, len(index.Files)), maps.Keys(index.Files))
+	slices.Sort(keys)
 	for _, key := range keys {
 		entry := index.Files[key]
 		if (dirs[filepath.Dir(key)] && len(entry.Tests) > 0) || slices.Contains([]string{"go.mod", "package.json"}, key) {
