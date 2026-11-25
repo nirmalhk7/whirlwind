@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -38,6 +39,20 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	e, _, repository := testEngine(t)
 	installSetupRunner(t)
 	qualityRoot := filepath.Join(t.TempDir(), "external-qlty")
+	prepareNativeSetupRepository(t, repository, python, qualityRoot)
+	ctx := context.Background()
+	project, setupID := registerNativeSetupProject(t, ctx, e, repository)
+	finalID := runNativeOnboardingPhases(t, ctx, e, project.ID, setupID)
+	finalEvidence := nativeSetupIdentityEvidence(t, ctx, e, finalID)
+	assertNativeSetupScannerStreams(t, finalEvidence)
+	identity := finalEvidence.Report.QualityIdentity
+	assertNativeSetupReadiness(t, ctx, e, project, repository, identity)
+	assertNativeSetupOperationCounts(t, ctx, e, project.ID)
+	t.Logf("native Qlty build %s; tools %v; effective catalog hash %s", identity.QltyVersion, identity.Tools, identity.PluginCatalogHash)
+}
+
+func prepareNativeSetupRepository(t *testing.T, repository, python, qualityRoot string) {
+	t.Helper()
 	if err := os.WriteFile(filepath.Join(repository, "app.py"), []byte("def inspect(value):\n    return eval(value)\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +84,10 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 			t.Fatalf("commit native onboarding fixture: %v %s", err, output)
 		}
 	}
-	ctx := context.Background()
+}
+
+func registerNativeSetupProject(t *testing.T, ctx context.Context, e *Engine, repository string) (model.Project, string) {
+	t.Helper()
 	project, err := e.Project(ctx, "p")
 	requireWorkflowSuccess(t, err)
 	project.Policy, project.PolicyHash, err = policy.Load(repository)
@@ -91,37 +109,54 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 		t.Fatal("registration did not create a durable setup operation")
 	}
 	requireWorkflowSuccess(t, e.Store.Write(ctx, changes, nil))
+	return project, setupID
+}
+
+func runNativeOnboardingPhases(t *testing.T, ctx context.Context, e *Engine, projectID, setupID string) string {
+	t.Helper()
 	currentID := setupID
-	for phase := 0; phase < 3; phase++ {
-		if err := e.runProjectSetup(ctx, currentID); err != nil {
-			t.Fatalf("native setup phase %d: %v", phase+1, err)
-		}
-		record, err := e.Store.Get(ctx, "operations", currentID)
-		requireWorkflowSuccess(t, err)
-		operation, err := store.Decode[model.Operation](record)
-		requireWorkflowSuccess(t, err)
-		if operation.Stage != "complete" {
-			evidence := setupEvidenceFromInput(operation.Input)
-			t.Fatalf("native setup phase %d failed: %s results=%+v", phase+1, operation.Error, evidence.Report.Results)
-		}
-		if phase < 2 {
-			operations, err := e.Store.List(ctx, "operations")
-			requireWorkflowSuccess(t, err)
-			currentID = ""
-			for _, nextRecord := range operations {
-				next, decodeErr := store.Decode[model.Operation](nextRecord)
-				requireWorkflowSuccess(t, decodeErr)
-				if nextRecord.ID != currentID && nextRecord.ID != setupID && next.Kind == "project_setup" && next.Subject == project.ID && next.Stage == "queued" {
-					currentID = nextRecord.ID
-					break
-				}
-			}
-			if currentID == "" {
-				t.Fatalf("native setup phase %d did not queue its durable child operation", phase+1)
-			}
+	for phase := 1; phase <= 3; phase++ {
+		requireCompletedNativeSetupPhase(t, ctx, e, currentID, phase)
+		if phase < 3 {
+			currentID = queuedNativeSetupChild(t, ctx, e, projectID, setupID, phase)
 		}
 	}
-	finalRecord, err := e.Store.Get(ctx, "operations", currentID)
+	return currentID
+}
+
+func requireCompletedNativeSetupPhase(t *testing.T, ctx context.Context, e *Engine, operationID string, phase int) {
+	t.Helper()
+	if err := e.runProjectSetup(ctx, operationID); err != nil {
+		t.Fatalf("native setup phase %d: %v", phase, err)
+	}
+	record, err := e.Store.Get(ctx, "operations", operationID)
+	requireWorkflowSuccess(t, err)
+	operation, err := store.Decode[model.Operation](record)
+	requireWorkflowSuccess(t, err)
+	if operation.Stage != "complete" {
+		evidence := setupEvidenceFromInput(operation.Input)
+		t.Fatalf("native setup phase %d failed: %s results=%+v", phase, operation.Error, evidence.Report.Results)
+	}
+}
+
+func queuedNativeSetupChild(t *testing.T, ctx context.Context, e *Engine, projectID, setupID string, phase int) string {
+	t.Helper()
+	operations, err := e.Store.List(ctx, "operations")
+	requireWorkflowSuccess(t, err)
+	for _, record := range operations {
+		next, err := store.Decode[model.Operation](record)
+		requireWorkflowSuccess(t, err)
+		if record.ID != "" && record.ID != setupID && next.Kind == "project_setup" && next.Subject == projectID && next.Stage == "queued" {
+			return record.ID
+		}
+	}
+	t.Fatalf("native setup phase %d did not queue its durable child operation", phase)
+	return ""
+}
+
+func nativeSetupIdentityEvidence(t *testing.T, ctx context.Context, e *Engine, operationID string) projectSetupEvidence {
+	t.Helper()
+	finalRecord, err := e.Store.Get(ctx, "operations", operationID)
 	requireWorkflowSuccess(t, err)
 	finalOperation, err := store.Decode[model.Operation](finalRecord)
 	requireWorkflowSuccess(t, err)
@@ -130,17 +165,16 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if identity == nil || identity.Validate() != nil {
 		t.Fatalf("native setup did not bind verified Qlty identity: %+v", identity)
 	}
-	for _, name := range []string{"gitleaks"} {
-		found := false
-		for _, tool := range identity.Tools {
-			if tool.Name == name {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("selected scanner %s has no installed runtime identity: %+v", name, identity.Tools)
-		}
+	if !slices.ContainsFunc(identity.Tools, func(tool model.QualityToolIdentity) bool {
+		return tool.Name == "gitleaks"
+	}) {
+		t.Fatalf("selected scanner gitleaks has no installed runtime identity: %+v", identity.Tools)
 	}
+	return finalEvidence
+}
+
+func assertNativeSetupScannerStreams(t *testing.T, finalEvidence projectSetupEvidence) {
+	t.Helper()
 	qltyIndex := -1
 	for index, command := range finalEvidence.Manifest.Commands {
 		if command.Name == "qlty-qualification" {
@@ -167,6 +201,10 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if !strings.Contains(output, "gitleaks:") || !strings.Contains(output, nativeSetupFixtureSensitiveFile) {
 		t.Fatalf("native Gitleaks scanner did not report the harmless known canary: %s", output)
 	}
+}
+
+func assertNativeSetupReadiness(t *testing.T, ctx context.Context, e *Engine, project model.Project, repository string, identity *model.QualityIdentity) {
+	t.Helper()
 	savedProject, err := e.Project(ctx, project.ID)
 	requireWorkflowSuccess(t, err)
 	if savedProject.Status != "approved" || savedProject.QualityIdentity == nil || !model.SameQualityIdentity(savedProject.QualityIdentity, identity) {
@@ -178,13 +216,17 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if changes, err := exec.Command("git", "-C", repository, "status", "--porcelain").Output(); err != nil || len(changes) != 0 {
 		t.Fatalf("native onboarding changed source tree: %q (%v)", changes, err)
 	}
+}
+
+func assertNativeSetupOperationCounts(t *testing.T, ctx context.Context, e *Engine, projectID string) {
+	t.Helper()
 	operations, err := e.Store.List(ctx, "operations")
 	requireWorkflowSuccess(t, err)
 	setupCount, ideationCount := 0, 0
 	for _, item := range operations {
 		operation, decodeErr := store.Decode[model.Operation](item)
 		requireWorkflowSuccess(t, decodeErr)
-		if operation.Subject != project.ID {
+		if operation.Subject != projectID {
 			continue
 		}
 		if operation.Kind == "project_setup" {
@@ -197,5 +239,5 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if setupCount != 3 || ideationCount != 1 {
 		t.Fatalf("native onboarding duplicated or lost work: setup=%d ideation=%d", setupCount, ideationCount)
 	}
-	t.Logf("native Qlty build %s; tools %v; effective catalog hash %s", identity.QltyVersion, identity.Tools, identity.PluginCatalogHash)
+
 }
