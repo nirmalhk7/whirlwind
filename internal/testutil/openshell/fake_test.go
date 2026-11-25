@@ -219,12 +219,7 @@ func TestFixtureRecordsOnlyEnvironmentSeedKeyNames(t *testing.T) {
 }
 
 func TestFixtureRecordsPerExecutionGuestHomeScopeWithoutValues(t *testing.T) {
-	for _, testCase := range []struct {
-		name      string
-		env       string
-		want      bool
-		forbidden string
-	}{
+	for _, testCase := range []guestHomeScopeCase{
 		{
 			name:      "per-execution runtime home",
 			env:       "export HOME='/tmp/ww-attempt-123/home'\nexport CODEX_HOME='/tmp/ww-attempt-123/home/codex'\nexport CLAUDE_CONFIG_DIR='/tmp/ww-attempt-123/home/claude'\nexport TMPDIR='/tmp/ww-attempt-123/tmp'\n",
@@ -239,30 +234,42 @@ func TestFixtureRecordsPerExecutionGuestHomeScopeWithoutValues(t *testing.T) {
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			fixture := Install(t)
-			args := []string{"sandbox", "exec"}
-			args = append(args, pinnedAuthority()...)
-			args = append(args, "--", fixtureShell, "-c", "umask 077; cat > /tmp/ww-attempt.env")
-			if _, err := fixture.RunCLIWithInput(t, strings.NewReader(testCase.env), args...); err != nil {
-				t.Fatal(err)
-			}
-			state, err := os.ReadFile(fixture.statePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var recorded struct {
-				HomeScoped bool `json:"runtime_home_scoped"`
-			}
-			if err := json.Unmarshal(state, &recorded); err != nil {
-				t.Fatal(err)
-			}
-			if recorded.HomeScoped != testCase.want {
-				t.Fatalf("guest runtime home scope=%t, want %t", recorded.HomeScoped, testCase.want)
-			}
-			if strings.Contains(string(state), testCase.forbidden) {
-				t.Fatal("fake CLI persisted a workload environment value")
-			}
+			assertRecordedGuestHomeScope(t, testCase)
 		})
+	}
+}
+
+type guestHomeScopeCase struct {
+	name      string
+	env       string
+	want      bool
+	forbidden string
+}
+
+func assertRecordedGuestHomeScope(t *testing.T, testCase guestHomeScopeCase) {
+	t.Helper()
+	fixture := Install(t)
+	args := []string{"sandbox", "exec"}
+	args = append(args, pinnedAuthority()...)
+	args = append(args, "--", fixtureShell, "-c", "umask 077; cat > /tmp/ww-attempt.env")
+	if _, err := fixture.RunCLIWithInput(t, strings.NewReader(testCase.env), args...); err != nil {
+		t.Fatal(err)
+	}
+	state, err := os.ReadFile(fixture.statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded struct {
+		HomeScoped bool `json:"runtime_home_scoped"`
+	}
+	if err := json.Unmarshal(state, &recorded); err != nil {
+		t.Fatal(err)
+	}
+	if recorded.HomeScoped != testCase.want {
+		t.Fatalf("guest runtime home scope=%t, want %t", recorded.HomeScoped, testCase.want)
+	}
+	if strings.Contains(string(state), testCase.forbidden) {
+		t.Fatal("fake CLI persisted a workload environment value")
 	}
 }
 

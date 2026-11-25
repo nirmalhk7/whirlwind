@@ -67,16 +67,9 @@ func TestOriginChangesKeepSameConfiguredCheckoutAndHistory(t *testing.T) {
 		if err := source.Refresh(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		records, err := source.store.List(t.Context(), "projects")
-		if err != nil || len(records) != 1 || records[0].ID != project.ID {
-			t.Fatalf("origin changed checkout identity: %+v, %v", records, err)
-		}
-		got, err := store.Decode[model.Project](records[0])
 		want := project
 		want.Repo, want.RemoteURL = repo, remote
-		if err != nil || !reflect.DeepEqual(got, want) || records[0].Version != expectedVersion {
-			t.Fatalf("unexpected metadata or lost human state: got %+v (v%d), want %+v (v%d): %v", got, records[0].Version, want, expectedVersion, err)
-		}
+		assertRefreshedProjectIdentity(t, source, want, expectedVersion)
 		assertOriginRefreshBindings(t, source, repository, project.ID)
 		after, err := source.store.List(t.Context(), "operations")
 		if err != nil || !reflect.DeepEqual(after, operations) {
@@ -88,6 +81,18 @@ func TestOriginChangesKeepSameConfiguredCheckoutAndHistory(t *testing.T) {
 	assertRefresh(fixtureOrigin, fixtureOrigin, previous.Version+2)
 	projectOriginGit(t, repository, "remote", "remove", "origin")
 	assertRefresh(repository, "", previous.Version+3)
+}
+
+func assertRefreshedProjectIdentity(t *testing.T, source *Source, want model.Project, expectedVersion int) {
+	t.Helper()
+	records, err := source.store.List(t.Context(), "projects")
+	if err != nil || len(records) != 1 || records[0].ID != want.ID {
+		t.Fatalf("origin changed checkout identity: %+v, %v", records, err)
+	}
+	got, err := store.Decode[model.Project](records[0])
+	if err != nil || !reflect.DeepEqual(got, want) || records[0].Version != expectedVersion {
+		t.Fatalf("unexpected metadata or lost human state: got %+v (v%d), want %+v (v%d): %v", got, records[0].Version, want, expectedVersion, err)
+	}
 }
 
 func assertOriginRefreshBindings(t *testing.T, source *Source, repository, projectID string) {
