@@ -41,41 +41,51 @@ func Listen(path string, dispatcher Dispatcher) (*LocalServer, error) {
 	if dispatcher == nil {
 		return nil, errors.New("local supervisor dispatcher is required")
 	}
-	absolute, err := filepath.Abs(path)
+	listener, absolute, info, err := listenPrivateSocket(path)
 	if err != nil {
-		return nil, err
-	}
-	if err = os.MkdirAll(filepath.Dir(absolute), 0700); err != nil {
-		return nil, fmt.Errorf("create private control directory: %w", err)
-	}
-	dir, err := os.Lstat(filepath.Dir(absolute))
-	if err != nil {
-		return nil, err
-	}
-	if dir.Mode()&os.ModeSymlink != 0 || !dir.IsDir() || dir.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(dir) {
-		return nil, fmt.Errorf("control directory %s must be an owned private directory (mode 0700)", filepath.Dir(absolute))
-	}
-	if err = removeStaleSocket(absolute); err != nil {
-		return nil, err
-	}
-	listener, err := net.Listen("unix", absolute)
-	if err != nil {
-		return nil, fmt.Errorf("listen on local control socket: %w", err)
-	}
-	if err = os.Chmod(absolute, 0600); err != nil {
-		_ = listener.Close()
-		_ = os.Remove(absolute)
-		return nil, fmt.Errorf("secure local control socket: %w", err)
-	}
-	info, err := os.Lstat(absolute)
-	if err != nil {
-		_ = listener.Close()
-		_ = os.Remove(absolute)
 		return nil, err
 	}
 	server := &LocalServer{listener: listener, path: absolute, info: info, conns: make(map[net.Conn]struct{})}
 	go server.serve(dispatcher)
 	return server, nil
+}
+
+func listenPrivateSocket(path string) (*net.UnixListener, string, os.FileInfo, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if err = os.MkdirAll(filepath.Dir(absolute), 0700); err != nil {
+		return nil, "", nil, fmt.Errorf("create private control directory: %w", err)
+	}
+	dir, err := os.Lstat(filepath.Dir(absolute))
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if dir.Mode()&os.ModeSymlink != 0 || !dir.IsDir() || dir.Mode().Perm()&0077 != 0 || !ownedByCurrentUser(dir) {
+		return nil, "", nil, fmt.Errorf("control directory %s must be an owned private directory (mode 0700)", filepath.Dir(absolute))
+	}
+	if err = removeStaleSocket(absolute); err != nil {
+		return nil, "", nil, err
+	}
+	address := &net.UnixAddr{Name: absolute, Net: "unix"}
+	listener, err := net.ListenUnix("unix", address)
+	if err != nil {
+		return nil, "", nil, fmt.Errorf("listen on local control socket: %w", err)
+	}
+	listener.SetUnlinkOnClose(false)
+	if err = os.Chmod(absolute, 0600); err != nil {
+		_ = listener.Close()
+		_ = os.Remove(absolute)
+		return nil, "", nil, fmt.Errorf("secure local control socket: %w", err)
+	}
+	info, err := os.Lstat(absolute)
+	if err != nil {
+		_ = listener.Close()
+		_ = os.Remove(absolute)
+		return nil, "", nil, err
+	}
+	return listener, absolute, info, nil
 }
 
 func ownedByCurrentUser(info os.FileInfo) bool {
@@ -91,7 +101,7 @@ func removeStaleSocket(path string) error {
 	if err != nil {
 		return err
 	}
-	if info.Mode()&os.ModeSocket == 0 {
+	if info.Mode()&os.ModeSocket == 0 || !ownedByCurrentUser(info) || info.Mode().Perm()&0077 != 0 {
 		return fmt.Errorf("refusing to replace non-socket control path %s", path)
 	}
 	conn, dialErr := net.DialTimeout("unix", path, 250*time.Millisecond)
@@ -99,7 +109,10 @@ func removeStaleSocket(path string) error {
 		_ = conn.Close()
 		return fmt.Errorf("local supervisor already owns control socket %s", path)
 	}
-	if err := os.Remove(path); err != nil {
+	if !errors.Is(dialErr, syscall.ECONNREFUSED) {
+		return fmt.Errorf("cannot verify stale control socket: %w", dialErr)
+	}
+	if err := removeOwnedSocket(path, info); err != nil {
 		return fmt.Errorf("remove stale control socket: %w", err)
 	}
 	return nil
@@ -186,10 +199,16 @@ func (s *LocalServer) Close() error {
 	}
 	s.mu.Unlock()
 	err := s.listener.Close()
-	if current, statErr := os.Lstat(s.path); statErr == nil && os.SameFile(current, s.info) {
-		if removeErr := os.Remove(s.path); err == nil {
-			err = removeErr
-		}
+	if removeErr := removeOwnedSocket(s.path, s.info); err == nil {
+		err = removeErr
 	}
 	return err
+}
+
+func removeOwnedSocket(path string, expected os.FileInfo) error {
+	current, err := os.Lstat(path)
+	if err == nil && os.SameFile(current, expected) {
+		return os.Remove(path)
+	}
+	return nil
 }

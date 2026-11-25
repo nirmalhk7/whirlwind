@@ -77,3 +77,29 @@ project's entry, or a plan waiting for approval is rejected.
 Finalizer admission requires the current plan approval, accepted review and
 verification for the exact candidate. Requests cannot set gates or supply
 work payloads. Queue contents are recovered from SQLite at startup.
+
+### Dedicated queue socket
+
+The supervisor also starts an HTTP admission socket alongside the existing
+command socket. Its filename replaces the command socket's `.sock` suffix
+with `-queues.sock`. The socket is mode `0600` in the same owned mode `0700`
+directory. It has no TCP listener.
+
+Send a single JSON object to `POST /api/v1/queues/{queue}/push` or
+`POST /api/v1/queues/{queue}/pop` with the host `localhost`. An empty push
+wakes dispatch, and an empty pop requests the oldest eligible revision for
+that role. Use `plan_id` and `version` to request an exact revision. The
+admission response reports `queued`, `scheduled`, or `waiting`.
+
+The plan transaction is the durable queue record. Dispatch rotates roles and
+projects and orders revisions by their persisted queue entry time. The
+supervisor holds the expiring, fenced execution lease and revalidates the
+current plan, approvals, and required evidence before work starts. Admission
+responses carry no authority to settle work. The paired Coding and Reviewer
+preparation retain their existing separate role reservations and shared
+approved base.
+
+For an elapsed schedule, set `workers.ideation.interval_minutes` to 1–10080
+and omit `cron`. Set `interval_timezone` for the display day, which defaults
+to America/Denver. UTC-anchored slots stay distinct across repeated clocks.
+The existing scheduler catches up only the latest due slot after a restart.

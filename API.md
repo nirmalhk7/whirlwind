@@ -158,3 +158,9 @@ Generated directions include `rank`, `expected_benefit`, `effort_estimate`, `unc
 `GET /provider-status` reports optional `quota_pool` and `quota_snapshot` separately from protocol connectivity. Quota snapshots retain the complete native response in `raw_metadata`; `applicability` remains `unknown`, including historical snapshots, because provider model/account applicability is not inferred. Routing remains conservative across reported windows. Its `quota_fresh` is boolean or null; null means native quota freshness is unknown. No token-to-subscription-percentage conversion is performed.
 
 Usage reports preserve missing historical runtime in `unknown_runtime_attempts`; admission blocks instead of treating it as zero. Entry `kind` distinguishes model attempts from synthetic `legacy` unknowns, deterministic `verification` checks, and `preflight` with no model turn. Reconciliation of legacy session IDs also requires confirmed termination; supplying usage requires attempt scope and observed `active_runtime_ms`.
+
+## Private role queue admission
+
+The [dedicated queue socket](docs/local-supervisor.md#dedicated-queue-socket)
+provides same-user HTTP push and pop for authorized plan revisions on a
+private Unix socket. The supervisor retains lease ownership and completion.
