@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "source_sequence": 3035,
-  "baseline_revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+  "baseline_revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
   "platform": "Linux inspection, portable tests and opt-in offline verification. Native supervision and scanning require supported macOS and nono 0.81.0.",
   "release_status": "not_accepted",
   "evidence": {
     "baseline_schema": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Core SQLite column sets, UTC creation timestamps, five-state domain and obsolete-layout rebuild",
       "tests": [
         "TestWhirlwindPlanExactCoreColumns",
@@ -19,7 +19,7 @@
     },
     "baseline_idea_history": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Repeated content may persist; reasoned reconsideration preserves the predecessor and is consumed once",
       "tests": [
         "TestWhirlwindPlanAllowsRepeatedIdeaContentWithDifferentTitle",
@@ -32,7 +32,7 @@
     },
     "baseline_approval": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Active approved plans reject changed saves until finish/pause and preserve frozen bytes and version conflicts",
       "tests": [
         "TestParityActiveApprovedPlanWaitsBeforeSavingChanges",
@@ -44,7 +44,7 @@
     },
     "baseline_planner": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "A missing Planner document requires explicit retry",
       "tests": [
         "TestParityPlannerMissingOutputRequiresExplicitRetry"
@@ -53,7 +53,7 @@
     },
     "baseline_overlap": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Two coding/reviewer pairs overlap, and approved plans for one repository use independent worktrees",
       "tests": [
         "TestParityTwoCodingReviewerPairsOverlap",
@@ -63,7 +63,7 @@
     },
     "baseline_review": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Strict unrounded adherence threshold, mandatory checks and exact approval/candidate provenance",
       "tests": [
         "TestLoadAcceptedReviewReportRequiresCompleteEvidence",
@@ -75,7 +75,7 @@
     },
     "baseline_delivery": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Accepted report promotes the exact local commit without remote publication",
       "tests": [
         "TestAcceptedCandidateCompletesAsExactLocalDelivery"
@@ -84,7 +84,7 @@
     },
     "baseline_recovery": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Pending human decisions and deadline survive durable recovery; transport restart matrix covers all roles",
       "tests": [
         "TestRecoveryPreservesPendingHumanDecisionsAndInvalidatesAttempt",
@@ -95,7 +95,7 @@
     },
     "baseline_qlty": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "External default preparation, frozen configuration, stable report contracts, and no grandfathering of findings in the approved diff",
       "tests": [
         "TestProjectSetupDefaultsPreserveExistingHumanConfiguration",
@@ -109,7 +109,7 @@
     },
     "baseline_acp": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Bundled ACP profile contracts and refusal/remediation for native inference transport",
       "tests": [
         "TestBundledACPProfilesDefineLaunchAuthAndDynamicSelection",
@@ -120,7 +120,7 @@
     },
     "baseline_terminal": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "Go dashboard navigation, current-review inspection and shipped CLI invocation without the retired browser target",
       "tests": [
         "TestDashboardOpensProjectAndPlanNavigation",
@@ -133,7 +133,7 @@
     },
     "baseline_linux": {
       "kind": "main_fixture_pass",
-      "revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+      "revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a",
       "summary": "The launcher rejects native execution on Linux before invoking nono",
       "tests": [],
       "commands": [
