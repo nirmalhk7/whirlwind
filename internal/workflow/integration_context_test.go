@@ -32,7 +32,11 @@ func (a *integrationContextAdapter) Run(ctx context.Context, in provider.Input, 
 		return provider.Output{}, errors.New("selected broker missing")
 	}
 	client := integrationContextBrokerClient(in.MCPBroker.SocketPath)
-	tools := integrationContextBrokerRequest(ctx, client, in.MCPBroker.Host, in.MCPBroker.Path, in.MCPBrokerToken, "tools/list", nil)
+	defer client.CloseIdleConnections()
+	tools, err := integrationContextBrokerRequest(ctx, client, in, "tools/list", nil)
+	if err != nil {
+		return provider.Output{}, err
+	}
 	var catalog struct {
 		Result struct {
 			Tools []struct {
@@ -44,7 +48,10 @@ func (a *integrationContextAdapter) Run(ctx context.Context, in provider.Input, 
 		return provider.Output{}, errors.New("selected broker tool list was unavailable")
 	}
 	for _, tool := range catalog.Result.Tools {
-		_ = integrationContextBrokerRequest(ctx, client, in.MCPBroker.Host, in.MCPBroker.Path, in.MCPBrokerToken, "tools/call", map[string]any{"name": tool.Name, "arguments": map[string]any{"repo": "o/r"}})
+		params := map[string]any{"name": tool.Name, "arguments": map[string]any{"repo": "o/r"}}
+		if _, err := integrationContextBrokerRequest(ctx, client, in, "tools/call", params); err != nil {
+			return provider.Output{}, err
+		}
 	}
 	text, _ := json.Marshal(map[string]any{"scanned_integrations": []string{integrationContextRef}, "sources": []map[string]string{{"connection": integrationContextRef, "id": "build-7", "url": "https://ci.example/build/7", "revision": a.revision, "summary": "Build failure", "content": a.content}}})
 	return provider.Output{Text: string(text)}, nil
@@ -72,18 +79,24 @@ func integrationContextBrokerClient(socket string) *http.Client {
 	}}}
 }
 
-func integrationContextBrokerRequest(ctx context.Context, client *http.Client, host, path, token, method string, params any) []byte {
-	body, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
-	request, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+host+path, strings.NewReader(string(body)))
+func integrationContextBrokerRequest(ctx context.Context, client *http.Client, input provider.Input, method string, params any) ([]byte, error) {
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+	if err != nil {
+		return nil, err
+	}
+	broker := input.MCPBroker
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+broker.Host+broker.Path, strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-Whirlwind-MCP-Token", token)
+	request.Header.Set("X-Whirlwind-MCP-Token", input.MCPBrokerToken)
 	response, err := client.Do(request)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	defer response.Body.Close()
-	data, _ := io.ReadAll(response.Body)
-	return data
+	data, readErr := io.ReadAll(response.Body)
+	return data, errors.Join(readErr, response.Body.Close())
 }
 
 func integrationDiscoveryFixture(t *testing.T) (*Engine, model.Project, *integrationContextAdapter) {
