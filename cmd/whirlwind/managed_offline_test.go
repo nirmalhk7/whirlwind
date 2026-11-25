@@ -17,6 +17,12 @@ import (
 	"whirlwind/internal/workflow"
 )
 
+const (
+	managedFixtureNoSigning  = "--no-gpg-sign"
+	managedFixtureResultFile = "result.txt"
+	managedFixtureRevParse   = "rev-parse"
+)
+
 // The launcher and verifier subprocess are real. The plan and candidate commits
 // stand in for role output, and no provider credential is configured.
 func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
@@ -45,25 +51,7 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 			"admission": model.AdmissionSettings{Pools: map[string]model.QuotaReserve{"seeded": {MinRemainingPercent: 10, MaxAgeSeconds: 900}}}}})
 	mustSeedTerminal(t, err)
 	mustSeedTerminal(t, os.WriteFile(settings, raw, 0600))
-	launcher := func(args ...string) string {
-		t.Helper()
-		c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(c, filepath.Join(repoRoot, "bin", "whirlwind"), args...)
-		cmd.Dir = repoRoot
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "WHIRLWIND_ROOT=" + repoRoot, "WHIRLWIND_DATA_DIR=" + data, "WHIRLWIND_SETTINGS_FILE=" + settings}
-		for _, key := range []string{"GOCACHE", "GOMODCACHE", "GOFLAGS"} {
-			if value := os.Getenv(key); value != "" {
-				cmd.Env = append(cmd.Env, key+"="+value)
-			}
-		}
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			logs, _ := os.ReadFile(filepath.Join(data, "whirlwind-supervisor.log"))
-			t.Fatalf("launcher %v: %v: %s\n%s", args, err, out, logs)
-		}
-		return string(out)
-	}
+	launcher := newManagedOfflineLauncher(t, repoRoot, home, data, settings)
 	t.Cleanup(func() { launcher("stop") })
 
 	git := func(repo string, args ...string) string {
@@ -79,11 +67,11 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	write := func(path, body string) { t.Helper(); mustSeedTerminal(t, os.WriteFile(path, []byte(body), 0600)) }
 	git(source, "init", "--template=", "-b", "fixture-source")
 	write(filepath.Join(source, "go.mod"), "module example.test/managed-offline\ngo 1.23.0\n")
-	write(filepath.Join(source, "result.txt"), "ready\n")
+	write(filepath.Join(source, managedFixtureResultFile), "ready\n")
 	write(filepath.Join(source, "smoke_test.go"), "package result\nimport (\"os\"; \"testing\")\nfunc TestDataPresent(t *testing.T) { if _, err := os.ReadFile(\"result.txt\"); err != nil { t.Fatal(err) } }\n")
 	git(source, "add", "--all")
-	git(source, "commit", "--no-gpg-sign", "-m", "Fixture baseline")
-	base := git(source, "rev-parse", "HEAD")
+	git(source, "commit", managedFixtureNoSigning, "-m", "Fixture baseline")
+	base := git(source, managedFixtureRevParse, "HEAD")
 	signature := func() string {
 		t.Helper()
 		index, err := os.ReadFile(filepath.Join(source, ".git", "index"))
@@ -99,51 +87,14 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	launcher("start")
 	db := openSeededTerminalStore(t, data)
 	engine := workflow.New(db, nil, data)
-	var project model.Project
-	waitOfflineFixture(t, data, "project registration", func() bool {
-		records, err := db.List(ctx, "projects")
-		if err != nil || len(records) != 1 {
-			return false
-		}
-		project, err = store.Decode[model.Project](records[0])
-		return err == nil
-	})
-	policyPath := filepath.Join(root, "reviewed-policy.yaml")
-	write(policyPath, "offline_docker_image: "+image+"\nallowed_paths: [result.txt, regression_test.go]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks:\n  - name: regression\n    command: [go, test, -mod=readonly, -count=1, -json, './...']\n    report_format: go-test-json\n    timeout_seconds: 90\n")
-	preview := launcher("policy", "preview", project.ID, policyPath)
-	fields := regexp.MustCompile(`Version (\d+)\nSHA256 ([a-f0-9]{64})`).FindStringSubmatch(preview)
-	if len(fields) != 3 {
-		t.Fatalf("read policy preview: %s", preview)
-	}
-	launcher("policy", "approve", project.ID, policyPath, fields[1], fields[2])
-	waitOfflineFixture(t, data, "managed offline setup", func() bool {
-		current, err := engine.Project(ctx, project.ID)
-		if err != nil {
-			return false
-		}
-		project = current
-		if project.Status == "error" && project.ManagedPolicy {
-			rows, _ := db.List(ctx, "operations")
-			for _, row := range rows {
-				op, _ := store.Decode[model.Operation](row)
-				if op.Kind == "project_setup" && op.Error != "" && op.ConfigurationHash == project.PolicyHash {
-					t.Fatalf("managed setup failed: %s", op.Error)
-				}
-			}
-		}
-		return project.Status == "approved" && project.OfflineQualification != nil
-	})
-	if project.PolicyHash != fields[2] || project.OfflineQualification.PolicyHash != fields[2] {
-		t.Fatalf("setup qualification differs from the approved policy: %+v", project.OfflineQualification)
-	}
-	t.Logf("qualified project=%s policy=%s setup=%s image=%s", project.ID, project.PolicyHash, project.OfflineQualification.JobID, project.OfflineQualification.ImageID)
+	project := approveManagedOfflineFixture(t, root, data, image, launcher, db, engine)
 
 	launcher("stop")
 	write(filepath.Join(candidate, "regression_test.go"), "package result\nimport (\"os\"; \"strings\"; \"testing\")\nfunc TestResultReady(t *testing.T) { data, err := os.ReadFile(\"result.txt\"); if err != nil || !strings.HasPrefix(string(data), \"ready\\n\") { t.Fatal(\"result is not ready\") } }\n")
-	write(filepath.Join(candidate, "result.txt"), "broken\n")
+	write(filepath.Join(candidate, managedFixtureResultFile), "broken\n")
 	git(candidate, "add", "--all")
-	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed red candidate")
-	red := git(candidate, "rev-parse", "HEAD")
+	git(candidate, "commit", managedFixtureNoSigning, "-m", "Seed red candidate")
+	red := git(candidate, managedFixtureRevParse, "HEAD")
 	task := seedOfflineCandidatePlan(t, engine, db, project, candidate, base)
 	launcher("start")
 	redEvidence := awaitManagedOfflineResult(t, db, data, task.ID, red, "failed", project)
@@ -159,10 +110,10 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 
 	// A disposable, manually prepared repair replaces the agent output while
 	// the supervisor is stopped. Production dispatch owns the next verification.
-	write(filepath.Join(candidate, "result.txt"), "ready\nrepaired\n")
-	git(candidate, "add", "result.txt")
-	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed repair")
-	green := git(candidate, "rev-parse", "HEAD")
+	write(filepath.Join(candidate, managedFixtureResultFile), "ready\nrepaired\n")
+	git(candidate, "add", managedFixtureResultFile)
+	git(candidate, "commit", managedFixtureNoSigning, "-m", "Seed repair")
+	green := git(candidate, managedFixtureRevParse, "HEAD")
 	record, err := db.Get(ctx, "execution_plans", task.ID)
 	mustSeedTerminal(t, err)
 	current, err := store.Decode[model.ExecutionPlan](record)
@@ -181,12 +132,86 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	})
 	launcher("stop")
 	if nono := os.Getenv("WHIRLWIND_TEST_SEEDED_NONO"); nono != "" {
-		exerciseSeededOfflineHandoffs(t, db, data, project, task.ID, candidate, green, nono, git)
+		exerciseSeededOfflineHandoffs(t, db, seededOfflineHandoff{
+			data: data, project: project, planID: task.ID, candidate: candidate, green: green, nono: nono, git: git,
+		})
 	}
-	if signature() != initial || git(source, "rev-parse", "HEAD") != base {
+	if signature() != initial || git(source, managedFixtureRevParse, "HEAD") != base {
 		t.Fatal("supervisor changed the original checkout")
 	}
 	t.Logf("seeded red=%s repair=%s qualified as green=%s; shipped supervisor reached the Reviewer preparation gate", red, green, green)
+}
+
+func newManagedOfflineLauncher(t *testing.T, repoRoot, home, data, settings string) func(...string) string {
+	t.Helper()
+	return func(args ...string) string {
+		t.Helper()
+		c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(c, filepath.Join(repoRoot, "bin", "whirlwind"), args...)
+		cmd.Dir = repoRoot
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "WHIRLWIND_ROOT=" + repoRoot, "WHIRLWIND_DATA_DIR=" + data, "WHIRLWIND_SETTINGS_FILE=" + settings}
+		for _, key := range []string{"GOCACHE", "GOMODCACHE", "GOFLAGS"} {
+			if value := os.Getenv(key); value != "" {
+				cmd.Env = append(cmd.Env, key+"="+value)
+			}
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			logs, _ := os.ReadFile(filepath.Join(data, "whirlwind-supervisor.log"))
+			t.Fatalf("launcher %v: %v: %s\n%s", args, err, out, logs)
+		}
+		return string(out)
+	}
+}
+
+func approveManagedOfflineFixture(t *testing.T, root, data, image string, launcher func(...string) string, db *store.Store, engine *workflow.Engine) model.Project {
+	t.Helper()
+	ctx := t.Context()
+	var project model.Project
+	waitOfflineFixture(t, data, "project registration", func() bool {
+		records, err := db.List(ctx, "projects")
+		if err != nil || len(records) != 1 {
+			return false
+		}
+		project, err = store.Decode[model.Project](records[0])
+		return err == nil
+	})
+	policyPath := filepath.Join(root, "reviewed-policy.yaml")
+	mustSeedTerminal(t, os.WriteFile(policyPath, []byte("offline_docker_image: "+image+"\nallowed_paths: [result.txt, regression_test.go]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks:\n  - name: regression\n    command: [go, test, -mod=readonly, -count=1, -json, './...']\n    report_format: go-test-json\n    timeout_seconds: 90\n"), 0600))
+	preview := launcher("policy", "preview", project.ID, policyPath)
+	fields := regexp.MustCompile(`Version (\d+)\nSHA256 ([a-f0-9]{64})`).FindStringSubmatch(preview)
+	if len(fields) != 3 {
+		t.Fatalf("read policy preview: %s", preview)
+	}
+	launcher("policy", "approve", project.ID, policyPath, fields[1], fields[2])
+	waitOfflineFixture(t, data, "managed offline setup", func() bool {
+		current, err := engine.Project(ctx, project.ID)
+		if err != nil {
+			return false
+		}
+		project = current
+		assertNoManagedOfflineSetupFailure(t, ctx, db, project)
+		return project.Status == "approved" && project.OfflineQualification != nil
+	})
+	if project.PolicyHash != fields[2] || project.OfflineQualification.PolicyHash != fields[2] {
+		t.Fatalf("setup qualification differs from the approved policy: %+v", project.OfflineQualification)
+	}
+	t.Logf("qualified project=%s policy=%s setup=%s image=%s", project.ID, project.PolicyHash, project.OfflineQualification.JobID, project.OfflineQualification.ImageID)
+	return project
+}
+
+func assertNoManagedOfflineSetupFailure(t *testing.T, ctx context.Context, db *store.Store, project model.Project) {
+	t.Helper()
+	if project.Status == "error" && project.ManagedPolicy {
+		rows, _ := db.List(ctx, "operations")
+		for _, row := range rows {
+			op, _ := store.Decode[model.Operation](row)
+			if op.Kind == "project_setup" && op.Error != "" && op.ConfigurationHash == project.PolicyHash {
+				t.Fatalf("managed setup failed: %s", op.Error)
+			}
+		}
+	}
 }
 
 func seedOfflineCandidatePlan(t *testing.T, e *workflow.Engine, db *store.Store, project model.Project, candidate, base string) model.ExecutionPlan {
@@ -201,12 +226,12 @@ func seedOfflineCandidatePlan(t *testing.T, e *workflow.Engine, db *store.Store,
 	const ideaID, ideationID = "fixture-idea", "fixture-ideation"
 	task := model.ExecutionPlan{ID: model.PlanID("idea:" + ideaID), IdeaID: ideaID, IdeationRunID: ideationID, ProjectID: project.ID, Mode: model.AgenticMode, PlanVersion: 1, Base: base, Worktree: candidate,
 		Issue: model.Issue{Title: "Repair the result"}, Selection: &model.SelectionAuthorization{CandidateID: ideaID, SelectedAt: time.Now().UTC().Format(time.RFC3339Nano), PolicyHash: project.PolicyHash}, Plan: seededTerminalSpecification()}
-	task.Plan.Where = []string{"result.txt", "regression_test.go"}
+	task.Plan.Where = []string{managedFixtureResultFile, "regression_test.go"}
 	task.Plan.Units[0].AllowedPaths = task.Plan.Where
 	task.Plan.Checks = []model.Check{{Name: "regression", Command: project.Policy.Checks[0].Command}}
 	seed("ideation operation", db.Put(ctx, "operations", ideationID, model.Operation{Kind: "ideation", Subject: project.ID, Stage: "complete", StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}, 0))
 	idea := model.Idea{ID: ideaID, ProjectID: project.ID, RunID: ideationID, Title: "Repair the result", Direction: "harden", What: "Correct the result", Why: "The result can be wrong",
-		Where: "result.txt", HowItHelps: "Returns a useful value", NoveltyMethod: "not_checked", NoveltyOutcome: "deferred", DecisionStatus: "draft"}
+		Where: managedFixtureResultFile, HowItHelps: "Returns a useful value", NoveltyMethod: "not_checked", NoveltyOutcome: "deferred", DecisionStatus: "draft"}
 	seed("idea draft", db.Put(ctx, "ideas", ideaID, idea, 0))
 	idea.DecisionStatus = "approved"
 	seed("approved idea", db.Put(ctx, "ideas", ideaID, idea, 1))

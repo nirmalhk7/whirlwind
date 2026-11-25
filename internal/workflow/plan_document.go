@@ -11,6 +11,11 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	planBuildCommandsSection = "repository build commands"
+	planTestCommandsSection  = "repository test commands"
+)
+
 var planDocumentList = regexp.MustCompile(`^(?:[-*+] |[0-9]+[.)] )(.+)$`)
 
 // RenderPlanDocument produces an editable specification whose prose, criteria,
@@ -78,7 +83,7 @@ func ParsePlanDocument(text string) (model.PlanSpecification, error) {
 	if err != nil {
 		return model.PlanSpecification{}, err
 	}
-	for _, heading := range []string{"what", "why", "benefit", "where", "acceptance criteria", "implementation", "requirements", "checks", "repository test commands", "repository build commands"} {
+	for _, heading := range []string{"what", "why", "benefit", "where", "acceptance criteria", "implementation", "requirements", "checks", planTestCommandsSection, planBuildCommandsSection} {
 		if strings.TrimSpace(sections[heading]) == "" && !optionalPlanSection(heading) {
 			return model.PlanSpecification{}, fmt.Errorf("plan requires nonempty %s section", heading)
 		}
@@ -110,10 +115,10 @@ func ParsePlanDocument(text string) (model.PlanSpecification, error) {
 		plan.Checks, err = parseDocumentJSONList[model.Check](sections["checks"])
 	}
 	if err == nil {
-		plan.RepositoryTestCommands, err = parsePlanCommands(sections["repository test commands"])
+		plan.RepositoryTestCommands, err = parsePlanCommands(sections[planTestCommandsSection])
 	}
 	if err == nil {
-		plan.RepositoryBuildCommands, err = parsePlanCommands(sections["repository build commands"])
+		plan.RepositoryBuildCommands, err = parsePlanCommands(sections[planBuildCommandsSection])
 	}
 	return plan, err
 }
@@ -217,7 +222,7 @@ func parsePlanCommands(text string) ([][]string, error) {
 }
 
 func optionalPlanSection(heading string) bool {
-	return heading == "requirements" || heading == "checks" || heading == "repository test commands" || heading == "repository build commands"
+	return heading == "requirements" || heading == "checks" || heading == planTestCommandsSection || heading == planBuildCommandsSection
 }
 
 func documentWhere(text string) ([]string, error) {

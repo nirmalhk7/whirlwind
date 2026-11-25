@@ -61,7 +61,7 @@ func TestReviewCorrectionSurvivesReopenedSQLite(t *testing.T) {
 	requireWorkflowSuccess(t, engine.Store.Close())
 	resumedStore, err := store.Open(filepath.Join(engine.Root, "state.db"))
 	requireWorkflowSuccess(t, err)
-	defer resumedStore.Close()
+	defer func() { requireWorkflowSuccess(t, resumedStore.Close()) }()
 	replacement := New(resumedStore, engine.GitHub, engine.Root)
 	requireWorkflowSuccess(t, resumedStore.RecoverInterrupted(ctx, replacement.owner))
 	resumed, currentVersion := localStoredTask(t, replacement, task.ID)

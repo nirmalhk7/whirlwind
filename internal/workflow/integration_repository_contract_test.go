@@ -128,34 +128,6 @@ func TestPublicationPreflightChecksNativeCapabilitiesAndReadEvidence(t *testing.
 	}
 }
 
-func nativePreflightResponse(p model.Project, defect string) provider.Output {
-	tools := nativeFixtureCatalog()[0].Tools
-	switch defect {
-	case "lookup":
-		tools = append(tools[:1], tools[2:]...)
-	case "create":
-		tools = tools[:2]
-	case "lookup-write":
-		tools[1].ReadOnly = false
-	case "create-read":
-		tools[2].ReadOnly = true
-	}
-	metadata := map[string]string{"repository": p.RemoteURL, "default_branch": "main", "lookup_pr_tool": "find_pr", "create_pr_tool": "open_pr"}
-	if defect == "names" {
-		delete(metadata, "create_pr_tool")
-	}
-	if defect == "repository" {
-		metadata["repository"] = "https://forge.example/team/other"
-	}
-	text, _ := json.Marshal(metadata)
-	catalog := []model.Integration{{Provider: "fake", Ref: agenticFixtureConnection, Enabled: defect != "disabled", Callable: defect != "disconnected", Tools: tools}}
-	tool := "repo_info"
-	if defect == "write-evidence" {
-		tool = "open_pr"
-	}
-	return provider.Output{Text: string(text), Integrations: catalog, ToolCalls: []provider.ToolEvidence{{Ref: agenticFixtureConnection, Tool: tool, Success: true}}}
-}
-
 func TestPublicationLookupRequiresExplicitFoundBeforeCreate(t *testing.T) {
 	for _, lookup := range []string{`{}`, `null`, `{"found":null}`, `{"repository":"https://forge.example/team/repo"}`} {
 		t.Run(lookup, func(t *testing.T) {

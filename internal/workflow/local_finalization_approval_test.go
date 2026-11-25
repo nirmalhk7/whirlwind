@@ -13,12 +13,14 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	criticalApprovalFixtureReceipt = "approve-critical-1"
+)
+
 func TestApproveLocalFinalizationBindsExactReviewAndCommitsReceipt(t *testing.T) {
 	e, task, version, approval := criticalApprovalFixture(t)
-	approved, err := e.ApproveLocalFinalization(context.Background(), task.ID, version, approval, "approve-critical-1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	approved, err := e.ApproveLocalFinalization(context.Background(), task.ID, version, approval, criticalApprovalFixtureReceipt)
+	requireWorkflowSuccess(t, err)
 	if approved.Stage != "submitting" || !approved.Approved || approved.Approval == nil {
 		t.Fatalf("approval did not authorize local finalization: %+v", approved)
 	}
@@ -34,7 +36,7 @@ func TestApproveLocalFinalizationBindsExactReviewAndCommitsReceipt(t *testing.T)
 	if err != nil || !hasApprovalAudit(audits, task.ID, approval.ReviewID) {
 		t.Fatalf("approval audit missing: audits=%+v err=%v", audits, err)
 	}
-	status, body, err := e.Store.Idempotent(context.Background(), "approve-critical-1", localFinalizationFingerprint(task.ID, version, approval))
+	status, body, err := e.Store.Idempotent(context.Background(), criticalApprovalFixtureReceipt, localFinalizationFingerprint(task.ID, version, approval))
 	if err != nil || status != 200 {
 		t.Fatalf("approval receipt missing: status=%d err=%v", status, err)
 	}
@@ -42,13 +44,13 @@ func TestApproveLocalFinalizationBindsExactReviewAndCommitsReceipt(t *testing.T)
 	if err := json.Unmarshal(body, &receipted); err != nil || receipted.Stage != "submitting" {
 		t.Fatalf("approval receipt has wrong result: task=%+v err=%v", receipted, err)
 	}
-	replayed, err := e.ApproveLocalFinalization(context.Background(), task.ID, version, approval, "approve-critical-1")
+	replayed, err := e.ApproveLocalFinalization(context.Background(), task.ID, version, approval, criticalApprovalFixtureReceipt)
 	if err != nil || replayed.Stage != "submitting" {
 		t.Fatalf("idempotent retry did not replay after transition: task=%+v err=%v", replayed, err)
 	}
 	changed := approval
 	changed.ReviewID += "-other"
-	if _, err := e.ApproveLocalFinalization(context.Background(), task.ID, version, changed, "approve-critical-1"); !errors.Is(err, store.ErrConflict) {
+	if _, err := e.ApproveLocalFinalization(context.Background(), task.ID, version, changed, criticalApprovalFixtureReceipt); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("reused key with changed approval tuple was not rejected: %v", err)
 	}
 }

@@ -20,6 +20,11 @@ import (
 	"whirlwind/internal/process"
 )
 
+const (
+	dockerFormatOption  = "--format"
+	offlineCheckoutPath = "/checkout"
+)
+
 const OfflineDockerKind = "docker-offline"
 
 const offlineDockerSocket = "/var/run/docker.sock"
@@ -66,7 +71,7 @@ func OpenOfflineDocker(ctx context.Context, config, image string) (*OfflineDocke
 	probe, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	var security []string
-	if err := d.inspect(probe, &security, "info", "--format", "{{json .SecurityOptions}}"); err != nil {
+	if err := d.inspect(probe, &security, "info", dockerFormatOption, "{{json .SecurityOptions}}"); err != nil {
 		return nil, err
 	}
 	if !slices.Contains(security, "name=rootless") || !slices.Contains(security, "name=seccomp,profile=builtin") {
@@ -116,7 +121,7 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 		// Compilers can execute their test binaries in private, nonpersistent scratch.
 		"--tmpfs", "/tmp:" + offlineDockerScratch,
 		"--mount", "type=bind,src=" + source + ",dst=/checkout,readonly,bind-propagation=rprivate,bind-recursive=disabled",
-		"--workdir", "/checkout", "--entrypoint", argv[0], d.imageID}
+		"--workdir", offlineCheckoutPath, "--entrypoint", argv[0], d.imageID}
 	// Cancellation of the CLI does not cancel an in-flight daemon create.
 	// Wait for its response separately before starting the workload clock.
 	creation, cancelCreation := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -127,7 +132,7 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 	}
 	id = strings.TrimSpace(string(created))
 	if !dockerID.MatchString(id) {
-		return "", nil, false, errors.New("Docker create returned no full container identity")
+		return "", nil, false, errors.New("container creation returned no full Docker identity")
 	}
 	createConfirmed = true
 	inspection, cancelInspection := context.WithTimeout(ctx, 15*time.Second)
@@ -147,25 +152,32 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 	if workloadErr != nil {
 		return id, nil, false, workloadErr
 	}
-	var state struct {
-		Status    string
-		ExitCode  int
-		Error     string
-		OOMKilled bool
-	}
+	var state offlineContainerState
 	outcome, cancelOutcome := context.WithTimeout(ctx, 15*time.Second)
 	defer cancelOutcome()
-	if err := d.inspect(outcome, &state, "container", "inspect", "--format", "{{json .State}}", id); err != nil {
+	if err := d.inspect(outcome, &state, "container", "inspect", dockerFormatOption, "{{json .State}}", id); err != nil {
 		return id, nil, false, err
 	}
+	exit, err = confirmedOfflineExit(state, startErr)
+	return id, exit, false, err
+}
+
+type offlineContainerState struct {
+	Status    string
+	ExitCode  int
+	Error     string
+	OOMKilled bool
+}
+
+func confirmedOfflineExit(state offlineContainerState, startErr error) (*int, error) {
 	if state.Status != "exited" || state.Error != "" || state.OOMKilled || state.ExitCode < 0 || state.ExitCode > 255 {
-		return id, nil, false, errors.New("offline check has no completed container process outcome")
+		return nil, errors.New("offline check has no completed container process outcome")
 	}
 	var exited *exec.ExitError
 	if (state.ExitCode == 0 && startErr != nil) || (state.ExitCode != 0 && (!errors.As(startErr, &exited) || exited.ExitCode() != state.ExitCode)) {
-		return id, nil, false, errors.New("Docker attach outcome disagrees with the container exit status")
+		return nil, errors.New("container exit status disagrees with the Docker attach outcome")
 	}
-	return id, &state.ExitCode, false, nil
+	return &state.ExitCode, nil
 }
 
 func (d *OfflineDocker) verifyContainer(ctx context.Context, id, key, source string, argv []string) error {
@@ -204,13 +216,13 @@ func (d *OfflineDocker) verifyContainer(ctx context.Context, id, key, source str
 	v := values[0]
 	host := v.HostConfig
 	if v.Name != "/"+key || v.Image != d.imageID || v.Config.Labels[offlineDockerLabel] != key || v.Config.User != fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()) ||
-		v.Config.WorkingDir != "/checkout" || !slices.Equal(v.Config.Entrypoint, argv[:1]) || !slices.Equal(v.Config.Cmd, argv[1:]) ||
+		v.Config.WorkingDir != offlineCheckoutPath || !slices.Equal(v.Config.Entrypoint, argv[:1]) || !slices.Equal(v.Config.Cmd, argv[1:]) ||
 		host.Runtime != "runc" || host.NetworkMode != "none" || host.IpcMode != "none" || host.Privileged || !host.ReadonlyRootfs ||
 		!slices.Contains(host.CapDrop, "ALL") || !slices.Contains(host.SecurityOpt, "no-new-privileges") || !slices.Contains(host.SecurityOpt, "seccomp=builtin") ||
 		len(host.Tmpfs) != 1 || host.Tmpfs["/tmp"] != offlineDockerScratch {
-		return errors.New("Docker did not retain the requested offline verifier restrictions")
+		return errors.New("container did not retain the requested Docker offline verifier restrictions")
 	}
-	if len(host.Mounts) != 1 || host.Mounts[0].Source != source || host.Mounts[0].Target != "/checkout" || !host.Mounts[0].ReadOnly ||
+	if len(host.Mounts) != 1 || host.Mounts[0].Source != source || host.Mounts[0].Target != offlineCheckoutPath || !host.Mounts[0].ReadOnly ||
 		!host.Mounts[0].BindOptions.NonRecursive || host.Mounts[0].BindOptions.Propagation != "rprivate" {
 		return errors.New("offline verifier requires a private, nonrecursive read-only bind")
 	}
@@ -219,7 +231,7 @@ func (d *OfflineDocker) verifyContainer(ctx context.Context, id, key, source str
 		if mount.Type == "tmpfs" && mount.Destination == "/tmp" {
 			continue
 		}
-		if bound || mount.Type != "bind" || mount.Source != source || mount.Destination != "/checkout" || mount.RW {
+		if bound || mount.Type != "bind" || mount.Source != source || mount.Destination != offlineCheckoutPath || mount.RW {
 			return errors.New("offline verifier container has an unexpected host mount")
 		}
 		bound = true
@@ -239,7 +251,7 @@ func (d *OfflineDocker) Recover(ctx context.Context, key string) error {
 	}
 	var owner string
 	label := fmt.Sprintf("{{json (index .Config.Labels %s)}}", strconv.Quote(offlineDockerLabel))
-	if err := d.inspect(ctx, &owner, "container", "inspect", "--format", label, id); err != nil {
+	if err := d.inspect(ctx, &owner, "container", "inspect", dockerFormatOption, label, id); err != nil {
 		return err
 	}
 	if owner != key {
@@ -291,7 +303,7 @@ func (d *OfflineDocker) read(ctx context.Context, args ...string) ([]byte, error
 	var out, diagnostics boundedDockerOutput
 	cmd.Stdout, cmd.Stderr = &out, &diagnostics
 	if err := process.Run(cmd); err != nil {
-		return nil, fmt.Errorf("Docker %s command failed: %w: %s", args[0], err, strings.TrimSpace(diagnostics.String()[:min(2048, diagnostics.Len())]))
+		return nil, fmt.Errorf("docker %s command failed: %w: %s", args[0], err, strings.TrimSpace(diagnostics.String()[:min(2048, diagnostics.Len())]))
 	}
 	return out.Bytes(), nil
 }
@@ -300,7 +312,7 @@ type boundedDockerOutput struct{ bytes.Buffer }
 
 func (out *boundedDockerOutput) Write(p []byte) (int, error) {
 	if out.Len()+len(p) > 1<<20 {
-		return 0, errors.New("Docker metadata exceeds 1 MiB")
+		return 0, errors.New("container metadata exceeds 1 MiB")
 	}
 	return out.Buffer.Write(p)
 }

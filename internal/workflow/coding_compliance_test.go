@@ -157,11 +157,11 @@ func TestCodingRepairCannotWriteOutsideApprovedUnits(t *testing.T) {
 			return provider.Output{Text: "Repaired"}, err
 		})
 	}
-	before := submissionGit(t, plan.Worktree, "rev-parse", "HEAD")
+	before := submissionGit(t, plan.Worktree, gitRevParseCommand, "HEAD")
 	if err := e.Step(ctx, plan.ID); err == nil || !strings.Contains(err.Error(), "out-of-scope file: outside-plan.txt") {
 		t.Fatalf("supervisor did not reject an out-of-scope repair: %v", err)
 	}
-	if head := submissionGit(t, plan.Worktree, "rev-parse", "HEAD"); head != before {
+	if head := submissionGit(t, plan.Worktree, gitRevParseCommand, "HEAD"); head != before {
 		t.Fatalf("out-of-scope repair advanced HEAD from %s to %s", before, head)
 	}
 }
@@ -192,26 +192,7 @@ func TestCodingConflictResumesAndSupervisorCommitsScopedResolution(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var launches int
-	e.Adapter = func(model.Provider) provider.Adapter {
-		return connectionAdapterFunc(func(_ context.Context, input provider.Input, _ provider.Hooks) (provider.Output, error) {
-			launches++
-			if input.Execution == nil {
-				return provider.Output{}, errors.New("conflict has no execution profile")
-			}
-			if !slices.Equal(input.Execution.AllowedPaths, []string{resultFile}) {
-				t.Errorf("conflict profile must grant only the conflicted file: %v", input.Execution.AllowedPaths)
-			}
-			if !strings.Contains(input.Prompt, resultFile) || strings.Contains(input.Prompt, "git cherry-pick --continue") {
-				t.Errorf("conflict prompt did not leave Git continuation to the supervisor: %q", input.Prompt)
-			}
-			if launches == 1 {
-				cancel()
-				return provider.Output{}, context.Canceled
-			}
-			err := os.WriteFile(filepath.Join(input.CWD, resultFile), []byte("keep both changes\n"), 0600)
-			return provider.Output{Text: "Resolved in the worktree"}, err
-		})
-	}
+	e.Adapter = conflictRecoveryAdapter(t, cancel, &launches)
 	if _, err := e.mergeUnit(ctx, project, &task, &unit); !errors.Is(err, context.Canceled) {
 		t.Fatalf("interruption did not stop conflict resolution: %v", err)
 	}
@@ -223,7 +204,7 @@ func TestCodingConflictResumesAndSupervisorCommitsScopedResolution(t *testing.T)
 	restarted.Adapter = e.Adapter
 	_, err := restarted.mergeUnit(ctx, project, &task, &unit)
 	requireWorkflowSuccess(t, err)
-	resolved := submissionGit(t, task.Worktree, "rev-parse", "HEAD")
+	resolved := submissionGit(t, task.Worktree, gitRevParseCommand, "HEAD")
 	if result := submissionGit(t, task.Worktree, "show", "HEAD:"+resultFile); result != "keep both changes" {
 		t.Fatalf("supervisor did not commit the resolution: %q", result)
 	}
@@ -240,15 +221,39 @@ func TestCodingConflictResumesAndSupervisorCommitsScopedResolution(t *testing.T)
 	requireWorkflowSuccess(t, e.Store.Put(ctx, "checkpoints", key, checkpoint, row.Version))
 	_, err = restarted.mergeUnit(ctx, project, &task, &unit)
 	requireWorkflowSuccess(t, err)
-	if launches != 2 || submissionGit(t, task.Worktree, "rev-parse", "HEAD") != resolved {
+	if launches != 2 || submissionGit(t, task.Worktree, gitRevParseCommand, "HEAD") != resolved {
 		t.Fatal("resumed integration replayed a completed resolution")
 	}
 	row, err = e.Store.Get(ctx, "checkpoints", key)
 	requireWorkflowSuccess(t, err)
 	checkpoint, err = store.Decode[integrationCheckpoint](row)
 	requireWorkflowSuccess(t, err)
-	if checkpoint.Commit != resolved || checkpoint.Tree != submissionGit(t, task.Worktree, "rev-parse", "HEAD^{tree}") {
+	if checkpoint.Commit != resolved || checkpoint.Tree != submissionGit(t, task.Worktree, gitRevParseCommand, "HEAD^{tree}") {
 		t.Fatalf("resolved candidate %s was not recovered with exact tree evidence", resolved)
+	}
+}
+
+func conflictRecoveryAdapter(t *testing.T, cancel context.CancelFunc, launches *int) func(model.Provider) provider.Adapter {
+	t.Helper()
+	return func(model.Provider) provider.Adapter {
+		return connectionAdapterFunc(func(_ context.Context, input provider.Input, _ provider.Hooks) (provider.Output, error) {
+			*launches++
+			if input.Execution == nil {
+				return provider.Output{}, errors.New("conflict has no execution profile")
+			}
+			if !slices.Equal(input.Execution.AllowedPaths, []string{resultFile}) {
+				t.Errorf("conflict profile must grant only the conflicted file: %v", input.Execution.AllowedPaths)
+			}
+			if !strings.Contains(input.Prompt, resultFile) || strings.Contains(input.Prompt, "git cherry-pick --continue") {
+				t.Errorf("conflict prompt did not leave Git continuation to the supervisor: %q", input.Prompt)
+			}
+			if *launches == 1 {
+				cancel()
+				return provider.Output{}, context.Canceled
+			}
+			err := os.WriteFile(filepath.Join(input.CWD, resultFile), []byte("keep both changes\n"), 0600)
+			return provider.Output{Text: "Resolved in the worktree"}, err
+		})
 	}
 }
 
@@ -289,6 +294,6 @@ func codingConflictFixtureFor(t *testing.T, name string) (*Engine, model.Executi
 		submissionGit(t, item.root, "--literal-pathspecs", "add", "--", name)
 		submissionGit(t, item.root, "commit", "-m", fmt.Sprintf("Result in %s", filepath.Base(item.root)))
 	}
-	unit.Commit = submissionGit(t, unit.Worktree, "rev-parse", "HEAD")
+	unit.Commit = submissionGit(t, unit.Worktree, gitRevParseCommand, "HEAD")
 	return e, task, project, unit
 }

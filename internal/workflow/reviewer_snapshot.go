@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"archive/tar"
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -10,27 +9,7 @@ import (
 	"strings"
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
-	"whirlwind/internal/verification"
 )
-
-func runSnapshotCheck(ctx context.Context, scratch, snapshot string, check model.Check, current model.Project) (verification.Result, execution.Profile, error) {
-	profile, err := reviewerSnapshotProfile(scratch, snapshot, current)
-	if err != nil {
-		return verification.Result{}, execution.Profile{}, err
-	}
-	effective, err := reviewerCheckExecution(profile, check)
-	if err != nil {
-		return verification.Result{}, execution.Profile{}, err
-	}
-	report, err := verification.RunObservedWithProfile(ctx, snapshot, []model.Check{check}, profile, nil)
-	if err != nil {
-		return verification.Result{}, execution.Profile{}, err
-	}
-	if len(report.Results) != 1 {
-		return verification.Result{}, execution.Profile{}, errors.New("check runner returned no result")
-	}
-	return report.Results[0], effective, nil
-}
 
 func reviewerSnapshotProfile(scratch, snapshot string, current model.Project) (execution.Profile, error) {
 	profile, err := execution.ForPolicy(snapshot, true, current.PolicyHash, current.Policy.Sandbox)
