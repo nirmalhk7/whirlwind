@@ -14,10 +14,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - pr: 82
-            sha: 9169eba8fff4d2d4ae5a12577825d38a952e8c2a
-            tree: 6dbc894c48734984cdcd25d7cb3593f9aa5137f3
-            tests: TestSeededHumanWorkflowThroughPTY
+          - pr: 18
+            sha: 456c80dd2f43ea598f9f2867ed444bbed14e6df5
+            tree: 8101a5a842e080f2c2d1148eca084a1368c2972b
+            tests: TestRoleQueueHTTPThroughLauncher|TestSeededHumanWorkflowThroughPTY
     env:
       GOTOOLCHAIN: local
       WHIRLWIND_TEST_SEEDED_PTY: '1'
