@@ -12,6 +12,12 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	ledgerComponentA       = "src/a.go"
+	ledgerIndexedComponent = "internal/context/index.go"
+	ledgerAuthComponent    = "internal/auth"
+)
+
 func openProposalLedgerFixture(t *testing.T) *Store {
 	t.Helper()
 	database, err := Open(filepath.Join(t.TempDir(), "proposal-ledger.db"))
@@ -63,10 +69,10 @@ func TestProposalComponentCountsIncludeEveryOutcomeAndOnlyOneProject(t *testing.
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
 	for _, direction := range []model.Direction{
-		{ID: "shown-a", ProjectID: "p", Day: "2026-11-01", Category: "expand", Title: "Shown A", Problem: "a1", Mechanism: "m1", Components: []string{"src/a.go"}},
-		{ID: "implemented-a", ProjectID: "p", Day: "2026-11-02", Category: "optimize", Title: "Implemented A", Problem: "a2", Mechanism: "m2", Components: []string{"src/a.go"}},
+		{ID: "shown-a", ProjectID: "p", Day: "2026-11-01", Category: "expand", Title: "Shown A", Problem: "a1", Mechanism: "m1", Components: []string{ledgerComponentA}},
+		{ID: "implemented-a", ProjectID: "p", Day: "2026-11-02", Category: "optimize", Title: "Implemented A", Problem: "a2", Mechanism: "m2", Components: []string{ledgerComponentA}},
 		{ID: "rejected-b", ProjectID: "p", Day: "2026-11-03", Category: "harden", Title: "Rejected B", Problem: "b1", Mechanism: "m3", Components: []string{"src/b.go"}},
-		{ID: "other-a", ProjectID: "other", Day: "2026-11-04", Category: "simplify", Title: "Other A", Problem: "o1", Mechanism: "m4", Components: []string{"src/a.go"}},
+		{ID: "other-a", ProjectID: "other", Day: "2026-11-04", Category: "simplify", Title: "Other A", Problem: "o1", Mechanism: "m4", Components: []string{ledgerComponentA}},
 	} {
 		if err := database.SaveDirections(ctx, direction.ProjectID, direction.Day, []model.Direction{direction}); err != nil {
 			t.Fatal(err)
@@ -82,7 +88,7 @@ func TestProposalComponentCountsIncludeEveryOutcomeAndOnlyOneProject(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if counts["src/a.go"] != 2 || counts["src/b.go"] != 1 || len(counts) != 2 {
+	if counts[ledgerComponentA] != 2 || counts["src/b.go"] != 1 || len(counts) != 2 {
 		t.Fatalf("historical exploration counts: %#v", counts)
 	}
 }
@@ -90,7 +96,7 @@ func TestProposalComponentCountsIncludeEveryOutcomeAndOnlyOneProject(t *testing.
 func TestImplementedProposalCannotReenterUnderANewTitle(t *testing.T) {
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
-	implemented := model.Direction{ID: "implemented", ProjectID: "p", Day: "2026-11-01", Category: "optimize", Title: "Cache project index", Problem: "Repository scans repeatedly reread unchanged files", Mechanism: "Reuse content fingerprints for unchanged files", Components: []string{"internal/context/index.go"}, RepositoryRevision: "rev1"}
+	implemented := model.Direction{ID: "implemented", ProjectID: "p", Day: "2026-11-01", Category: "optimize", Title: "Cache project index", Problem: "Repository scans repeatedly reread unchanged files", Mechanism: "Reuse content fingerprints for unchanged files", Components: []string{ledgerIndexedComponent}, RepositoryRevision: "rev1"}
 	if err := database.SaveDirections(ctx, "p", implemented.Day, []model.Direction{implemented}); err != nil {
 		t.Fatal(err)
 	}
@@ -107,8 +113,8 @@ func TestImplementedProposalCannotReenterUnderANewTitle(t *testing.T) {
 func TestRejectedDuplicateFingerprintPersistsReasonAndStaysBlocked(t *testing.T) {
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
-	fingerprint := model.ProposalFingerprint("p", "Expired auth retries fail", "Persist scoped credential refresh", []string{"internal/auth"})
-	original := model.Direction{ID: "original", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Auth recovery", Description: "Restore expired auth safely", Problem: "Expired auth retries fail", Mechanism: "Persist scoped credential refresh", Components: []string{"internal/auth"}, Fingerprint: fingerprint, RepositoryRevision: "rev1"}
+	fingerprint := model.ProposalFingerprint("p", "Expired auth retries fail", "Persist scoped credential refresh", []string{ledgerAuthComponent})
+	original := model.Direction{ID: "original", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Auth recovery", Description: "Restore expired auth safely", Problem: "Expired auth retries fail", Mechanism: "Persist scoped credential refresh", Components: []string{ledgerAuthComponent}, Fingerprint: fingerprint, RepositoryRevision: "rev1"}
 	if err := database.SaveDirections(ctx, "p", original.Day, []model.Direction{original}); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +147,7 @@ func TestRevisitAdvancesFingerprintOwnerAndPreventsDuplicateRevisit(t *testing.T
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
 	fingerprint := model.ProposalFingerprint("p", "Old evidence shows stale data", "Refresh the indexed project map", []string{"internal/context"})
-	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "optimize", Title: "Refresh project map", Description: "Update stale entries", Problem: "Old evidence shows stale data", Mechanism: "Refresh the indexed project map", Components: []string{"internal/context"}, Fingerprint: fingerprint, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/context/index.go", Revision: "rev1"}}}
+	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "optimize", Title: "Refresh project map", Description: "Update stale entries", Problem: "Old evidence shows stale data", Mechanism: "Refresh the indexed project map", Components: []string{"internal/context"}, Fingerprint: fingerprint, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: ledgerIndexedComponent, Revision: "rev1"}}}
 	if err := database.SaveDirections(ctx, "p", old.Day, []model.Direction{old}); err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +159,7 @@ func TestRevisitAdvancesFingerprintOwnerAndPreventsDuplicateRevisit(t *testing.T
 		next.ID = id
 		next.Title = "Map freshness follow-up"
 		next.RepositoryRevision = "rev2"
-		next.Evidence = []model.EvidenceRef{{Kind: "code", Ref: "internal/context/index.go", Revision: "rev2"}}
+		next.Evidence = []model.EvidenceRef{{Kind: "code", Ref: ledgerIndexedComponent, Revision: "rev2"}}
 		next.PredecessorID = old.ID
 		next.RevisitReason = "New failing test demonstrates stale index after update"
 		return next
@@ -171,7 +177,7 @@ func TestRevisitAdvancesFingerprintOwnerAndPreventsDuplicateRevisit(t *testing.T
 func TestHumanReconsiderationAllowsOneSameEvidenceRevisit(t *testing.T) {
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
-	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Recover expired sessions", Problem: "Expired sessions lose unsaved work", Mechanism: "Refresh the authorized session before retrying", Components: []string{"internal/auth"}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}}
+	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Recover expired sessions", Problem: "Expired sessions lose unsaved work", Mechanism: "Refresh the authorized session before retrying", Components: []string{ledgerAuthComponent}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}}
 	if err := database.SaveDirections(ctx, "p", old.Day, []model.Direction{old}); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +245,7 @@ func TestHumanReconsiderationAllowsOneSameEvidenceRevisit(t *testing.T) {
 func TestGeneratedDirectionStatusCannotAuthorizeReconsideration(t *testing.T) {
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
-	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Recover expired sessions", Problem: "Expired sessions lose unsaved work", Mechanism: "Refresh the authorized session before retrying", Components: []string{"internal/auth"}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}}
+	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Recover expired sessions", Problem: "Expired sessions lose unsaved work", Mechanism: "Refresh the authorized session before retrying", Components: []string{ledgerAuthComponent}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}}
 	if err := database.SaveDirections(ctx, "p", old.Day, []model.Direction{old}); err != nil {
 		t.Fatal(err)
 	}
