@@ -57,16 +57,8 @@ func TestParityPlanSavePublishesMarkdownWithoutApproval(t *testing.T) {
 func TestParityActiveApprovedPlanWaitsBeforeSavingChanges(t *testing.T) {
 	for _, stage := range []string{"coding", "review", "repair", "publishing", "submitting", "waiting_quota", "questions", "approval"} {
 		t.Run(stage, func(t *testing.T) {
-			e, task := localPlanFixture(t)
 			ctx := context.Background()
-			view, err := e.ReadLocalPlan(ctx, task.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, version := localStoredTask(t, e, task.ID)
-			if err := e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, ""); err != nil {
-				t.Fatal(err)
-			}
+			e, task, view := approvePlanEditFixture(t, ctx)
 			approved, version := localStoredTask(t, e, task.ID)
 			approved.Stage = stage
 			if err := e.Store.Put(ctx, "execution_plans", task.ID, approved, version); err != nil {
@@ -96,14 +88,7 @@ func TestParityActiveApprovedPlanWaitsBeforeSavingChanges(t *testing.T) {
 			if err != nil || string(content) != view.Content {
 				t.Fatalf("active document changed: %v", err)
 			}
-			snapshot, err := e.Store.Get(ctx, "plan_versions", task.ID+":1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			frozen, err := store.Decode[model.PlanSpecification](snapshot)
-			if err != nil || frozen.Specification != view.Content || frozen.Approval == nil || frozen.Approval.DocumentHash != view.Hash {
-				t.Fatalf("active immutable approval changed: %+v %v", frozen, err)
-			}
+			assertFrozenPlanEditSnapshot(t, ctx, e, task.ID, view, "active immutable approval changed")
 		})
 	}
 }
@@ -111,27 +96,10 @@ func TestParityActiveApprovedPlanWaitsBeforeSavingChanges(t *testing.T) {
 func TestParityPausedAndFinishedApprovedPlansCanBeEdited(t *testing.T) {
 	for _, stage := range []string{"paused", "complete", "pr_created"} {
 		t.Run(stage, func(t *testing.T) {
-			e, task := localPlanFixture(t)
 			ctx := context.Background()
-			view, err := e.ReadLocalPlan(ctx, task.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, version := localStoredTask(t, e, task.ID)
-			if err := e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, ""); err != nil {
-				t.Fatal(err)
-			}
+			e, task, view := approvePlanEditFixture(t, ctx)
 			approved, version := localStoredTask(t, e, task.ID)
-			if stage == "paused" {
-				if err := e.SetPlanPaused(ctx, task.ID, version, true); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				approved.Stage = stage
-				if err := e.Store.Put(ctx, "execution_plans", task.ID, approved, version); err != nil {
-					t.Fatal(err)
-				}
-			}
+			setInactivePlanEditStage(t, ctx, e, approved, version, stage)
 			version++
 			edited := strings.Replace(view.Content, planEditFixtureTitle, planEditFixtureMonthlyTitle, 1)
 			if err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited); err != nil {
@@ -144,32 +112,61 @@ func TestParityPausedAndFinishedApprovedPlansCanBeEdited(t *testing.T) {
 			if err := e.ValidateLocalPlan(ctx, current); err == nil {
 				t.Fatal("unapproved revision authorized execution")
 			}
-			revised, err := e.ReadLocalPlan(ctx, task.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := e.ReviewLocalPlan(ctx, task.ID, currentVersion, "approve", view.Hash, ""); !errors.Is(err, store.ErrConflict) {
-				t.Fatalf("old document approved revision: %v", err)
-			}
-			if err := e.ReviewLocalPlan(ctx, task.ID, currentVersion, "approve", revised.Hash, ""); err != nil {
-				t.Fatal(err)
-			}
-			reapproved, _ := localStoredTask(t, e, task.ID)
-			if err := e.ValidateLocalPlan(ctx, reapproved); err != nil {
-				t.Fatalf("new approval cannot execute: %v", err)
-			}
-			if reapproved.Plan.Specification != edited || reapproved.PlanDocument.ApprovedHash != revised.Hash {
-				t.Fatal("new approval lost revised bytes")
-			}
-			snapshot, err := e.Store.Get(ctx, "plan_versions", task.ID+":1")
-			if err != nil {
-				t.Fatal(err)
-			}
-			frozen, err := store.Decode[model.PlanSpecification](snapshot)
-			if err != nil || frozen.Specification != view.Content || frozen.Approval == nil || frozen.Approval.DocumentHash != view.Hash {
-				t.Fatalf("prior approved snapshot changed: %+v %v", frozen, err)
-			}
+			assertRevisedPlanEditApproval(t, e, current.ID, currentVersion, view.Hash, edited)
+			assertFrozenPlanEditSnapshot(t, ctx, e, task.ID, view, "prior approved snapshot changed")
 		})
+	}
+}
+
+func approvePlanEditFixture(t *testing.T, ctx context.Context) (*Engine, model.ExecutionPlan, PlanDocumentView) {
+	t.Helper()
+	e, task := localPlanFixture(t)
+	view, err := e.ReadLocalPlan(ctx, task.ID)
+	requireWorkflowSuccess(t, err)
+	_, version := localStoredTask(t, e, task.ID)
+	requireWorkflowSuccess(t, e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, ""))
+	return e, task, view
+}
+
+func setInactivePlanEditStage(t *testing.T, ctx context.Context, e *Engine, approved model.ExecutionPlan, version int, stage string) {
+	t.Helper()
+	if stage == "paused" {
+		requireWorkflowSuccess(t, e.SetPlanPaused(ctx, approved.ID, version, true))
+		return
+	}
+	approved.Stage = stage
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", approved.ID, approved, version))
+}
+
+func assertRevisedPlanEditApproval(t *testing.T, e *Engine, taskID string, currentVersion int, oldHash, edited string) {
+	t.Helper()
+	ctx := context.Background()
+	revised, err := e.ReadLocalPlan(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ReviewLocalPlan(ctx, taskID, currentVersion, "approve", oldHash, ""); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("old document approved revision: %v", err)
+	}
+	if err := e.ReviewLocalPlan(ctx, taskID, currentVersion, "approve", revised.Hash, ""); err != nil {
+		t.Fatal(err)
+	}
+	reapproved, _ := localStoredTask(t, e, taskID)
+	if err := e.ValidateLocalPlan(ctx, reapproved); err != nil {
+		t.Fatalf("new approval cannot execute: %v", err)
+	}
+	if reapproved.Plan.Specification != edited || reapproved.PlanDocument.ApprovedHash != revised.Hash {
+		t.Fatal("new approval lost revised bytes")
+	}
+}
+
+func assertFrozenPlanEditSnapshot(t *testing.T, ctx context.Context, e *Engine, id string, view PlanDocumentView, message string) {
+	t.Helper()
+	snapshot, err := e.Store.Get(ctx, "plan_versions", id+":1")
+	requireWorkflowSuccess(t, err)
+	frozen, err := store.Decode[model.PlanSpecification](snapshot)
+	if err != nil || frozen.Specification != view.Content || frozen.Approval == nil || frozen.Approval.DocumentHash != view.Hash {
+		t.Fatalf("%s: %+v %v", message, frozen, err)
 	}
 }
 
