@@ -109,7 +109,7 @@ func (f *acceptedReviewFixture) completeReport(t *testing.T) verification.Report
 	zero := 0
 	report := verification.Report{Passed: true, Results: make([]verification.Result, 0, len(checks))}
 	for index, check := range checks {
-		identity := acceptedCheckRuntime(fmt.Sprintf("check-run-%d", index))
+		identity := acceptedCheckRuntime(fmt.Sprintf("%s-check-run-%d", f.task.VerificationID, index))
 		result := verification.Result{Name: check.Name, Command: append([]string(nil), check.Command...), Passed: true, ExitCode: &zero, Runtime: identity}
 		if isQltyVerification(&result) {
 			result.Output = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty"}},"invocations":[{"executionSuccessful":true}],"results":[]}]}`
