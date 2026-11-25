@@ -65,7 +65,7 @@ func (r *unitRun) prepareWorktree() error {
 	base := r.unit.Base
 	if base == "" {
 		var err error
-		base, err = github.Run(r.ctx, r.task.Worktree, "git", "rev-parse", "HEAD")
+		base, err = github.Run(r.ctx, r.task.Worktree, "git", gitRevParseCommand, "HEAD")
 		if err != nil {
 			return err
 		}
@@ -153,7 +153,7 @@ func (r *unitRun) validateCheckpointCommit(previous model.Unit) error {
 	if err := validateExistingWorktree(r.ctx, r.project.Path, previous.Worktree, previous.Branch, previous.Base); err != nil {
 		return fmt.Errorf("validate durable unit worktree: %w", err)
 	}
-	head, err := github.Run(r.ctx, previous.Worktree, "git", "rev-parse", "HEAD")
+	head, err := github.Run(r.ctx, previous.Worktree, "git", gitRevParseCommand, "HEAD")
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func (r *unitRun) implement(p model.Project) error {
 	if err = r.commit(r.ctx, p, r.unit.Worktree, r.unit.Objective); err != nil {
 		return err
 	}
-	r.unit.Commit, err = github.Run(r.ctx, r.unit.Worktree, "git", "rev-parse", "HEAD")
+	r.unit.Commit, err = github.Run(r.ctx, r.unit.Worktree, "git", gitRevParseCommand, "HEAD")
 	if err != nil {
 		return err
 	}

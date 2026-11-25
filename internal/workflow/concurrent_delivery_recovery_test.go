@@ -36,7 +36,7 @@ func TestConcurrentAcceptedDeliveriesIsolatePausedPlanAndReconcileAfterRestart(t
 	if paused.Stage != "paused" || paused.ResumeStage != "submitting" || paused.Delivery != nil {
 		t.Fatalf("unexpected checkpoint before restart: %+v", paused)
 	}
-	mainBefore := submissionGit(t, project.Path, "rev-parse", "refs/heads/main")
+	mainBefore := submissionGit(t, project.Path, gitRevParseCommand, "refs/heads/main")
 	requireWorkflowSuccess(t, engine.Step(ctx, second.ID))
 	prepared, _ := localStoredTask(t, engine, second.ID)
 	if prepared.Delivery == nil || prepared.Delivery.Stage != "prepared" {
@@ -75,7 +75,7 @@ func TestConcurrentAcceptedDeliveriesIsolatePausedPlanAndReconcileAfterRestart(t
 			t.Fatalf("plan %d delivered peer content: got %q want %q", i+1, content, want)
 		}
 	}
-	if got := submissionGit(t, project.Path, "rev-parse", "refs/heads/main"); got != mainBefore {
+	if got := submissionGit(t, project.Path, gitRevParseCommand, "refs/heads/main"); got != mainBefore {
 		t.Fatalf("local delivery modified the source branch: %s != %s", got, mainBefore)
 	}
 	refs := strings.Fields(submissionGit(t, project.Path, "for-each-ref", "--format=%(refname)", "refs/heads/codex/delivery/"))
@@ -105,7 +105,7 @@ func secondAcceptedDeliveryCandidate(t *testing.T, ctx context.Context, engine *
 	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(second.Worktree, concurrentDeliveryFixtureCandidateFile), []byte(secondCandidateBody), 0600))
 	submissionGit(t, second.Worktree, "add", concurrentDeliveryFixtureCandidateFile)
 	submissionGit(t, second.Worktree, "commit", "-m", "independent reviewed candidate")
-	second.ReviewedCommit = submissionGit(t, second.Worktree, "rev-parse", "HEAD")
+	second.ReviewedCommit = submissionGit(t, second.Worktree, gitRevParseCommand, "HEAD")
 	second.Stage, second.ChecksPassed = "submitting", true
 	second.VerificationID, second.ReviewID = "verification-second-concurrent", second.ID+":1:1"
 	requireWorkflowSuccess(t, engine.Store.Put(ctx, "execution_plans", second.ID, second, version))
@@ -177,10 +177,10 @@ func assertCompletedPortableDelivery(t *testing.T, ctx context.Context, engine *
 		delivery.ReviewedCommit != want.ReviewedCommit || delivery.Base != want.Base {
 		t.Fatalf("delivery %s has wrong provenance: %+v", want.ID, delivery)
 	}
-	if got := submissionGit(t, delivery.Worktree, "rev-parse", "HEAD", "refs/heads/"+delivery.Branch); got != want.ReviewedCommit+"\n"+want.ReviewedCommit {
+	if got := submissionGit(t, delivery.Worktree, gitRevParseCommand, "HEAD", "refs/heads/"+delivery.Branch); got != want.ReviewedCommit+"\n"+want.ReviewedCommit {
 		t.Fatalf("delivery branch or worktree diverged: %q", got)
 	}
-	if got := submissionGit(t, delivery.Worktree, "rev-parse", "HEAD^{tree}"); got != delivery.Tree {
+	if got := submissionGit(t, delivery.Worktree, gitRevParseCommand, "HEAD^{tree}"); got != delivery.Tree {
 		t.Fatalf("delivery tree diverged: %q != %q", got, delivery.Tree)
 	}
 	requireWorkflowSuccess(t, engine.Step(ctx, want.ID))

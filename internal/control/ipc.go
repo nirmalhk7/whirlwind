@@ -19,6 +19,10 @@ import (
 )
 
 const (
+	finalizationInspectOperation = "finalization.inspect"
+)
+
+const (
 	maxIPCMessage = 1 << 20
 	maxDiffCursor = 64 << 20
 	ipcTimeout    = 15 * time.Second
@@ -76,7 +80,7 @@ var allowedOperations = map[string]bool{
 	"direction.reconsider": true, "direction.delete": true,
 	"question.answer": true, "permission.decide": true,
 	"plan.pause": true, "plan.resume": true,
-	"finalization.inspect": true, "finalization.approve": true,
+	finalizationInspectOperation: true, "finalization.approve": true,
 }
 
 // Listen creates a private local control socket. It refuses to repair a
@@ -228,10 +232,10 @@ func validateRequest(request Request) error {
 		}
 		return nil
 	}
-	if request.Operation == "finalization.inspect" && (request.DiffOffset < 0 || request.DiffOffset > maxDiffCursor) {
+	if request.Operation == finalizationInspectOperation && (request.DiffOffset < 0 || request.DiffOffset > maxDiffCursor) {
 		return errors.New("finalization diff cursor is outside the supported range")
 	}
-	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" || request.Operation == "finalization.inspect" || request.Operation == "provider.status" || request.Operation == "project.policy.preview" {
+	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" || request.Operation == finalizationInspectOperation || request.Operation == "provider.status" || request.Operation == "project.policy.preview" {
 		return nil
 	}
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {

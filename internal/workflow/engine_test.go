@@ -163,7 +163,7 @@ func putFixtureAgent(t *testing.T, s *store.Store, role string, value any) {
 func TestIssueToPRUsesWorktreeAndVerification(t *testing.T) {
 	ctx := context.Background()
 	e, task, project, record := acceptedDeliveryFixture(t)
-	sourceHead := submissionGit(t, project.Path, "rev-parse", "HEAD")
+	sourceHead := submissionGit(t, project.Path, gitRevParseCommand, "HEAD")
 	sourceStatus := submissionGit(t, project.Path, "status", "--porcelain")
 	done := completeAcceptedLocalDeliveryFixture(t, e, task, project, record)
 	if done.Stage != "complete" || done.Delivery == nil || done.Delivery.Stage != "complete" || !done.ChecksPassed || done.PR != "" {
@@ -172,7 +172,7 @@ func TestIssueToPRUsesWorktreeAndVerification(t *testing.T) {
 	if done.Delivery.Worktree == project.Path || done.Delivery.ReviewedCommit != task.ReviewedCommit {
 		t.Fatalf("local delivery is not an isolated copy of the accepted candidate: %+v", done.Delivery)
 	}
-	if sourceHeadAfter := submissionGit(t, project.Path, "rev-parse", "HEAD"); sourceHeadAfter != sourceHead {
+	if sourceHeadAfter := submissionGit(t, project.Path, gitRevParseCommand, "HEAD"); sourceHeadAfter != sourceHead {
 		t.Fatalf("local delivery changed source checkout HEAD: before=%s after=%s", sourceHead, sourceHeadAfter)
 	}
 	if sourceStatusAfter := submissionGit(t, project.Path, "status", "--porcelain"); sourceStatusAfter != sourceStatus {
@@ -263,7 +263,7 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 	if err != nil || job.Stage != "complete" || !job.CleanupVerified || job.TaskID != blocked.ID || job.VerificationID != blocked.VerificationID || job.Role != "verify" || job.CheckID != "failing" {
 		t.Fatalf("failed check runtime owner proof mismatch: job=%+v err=%v", job, err)
 	}
-	if candidateHead := submissionGit(fixture.t, blocked.Worktree, "rev-parse", "HEAD"); candidateHead == "" {
+	if candidateHead := submissionGit(fixture.t, blocked.Worktree, gitRevParseCommand, "HEAD"); candidateHead == "" {
 		t.Fatal("candidate worktree was not preserved")
 	}
 	fixture.verifyTDD(blocked)

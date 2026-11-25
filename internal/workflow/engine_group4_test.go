@@ -105,7 +105,7 @@ func TestInterruptedIntegrationUsesDurableUnitCheckpoints(t *testing.T) {
 	if body, err := os.ReadFile(resumedFile); err != nil || string(body) != "continued after restart" {
 		t.Fatalf("resumed integration lost the unfinished unit file: body=%q err=%v", body, err)
 	}
-	headBeforeResume := submissionGit(t, resumed.Worktree, "rev-parse", "HEAD")
+	headBeforeResume := submissionGit(t, resumed.Worktree, gitRevParseCommand, "HEAD")
 	countBeforeResume := submissionGit(t, resumed.Worktree, "rev-list", "--count", resumed.Base+"..HEAD")
 	validateIntegratedUnitCommits(t, resumed)
 
@@ -115,7 +115,7 @@ func TestInterruptedIntegrationUsesDurableUnitCheckpoints(t *testing.T) {
 	if err := restarted.integrateUnits(ctx, project, &resumed, nil, completed); err != nil {
 		t.Fatalf("replay integration with completed unit checkpoints: %v", err)
 	}
-	if got := submissionGit(t, resumed.Worktree, "rev-parse", "HEAD"); got != headBeforeResume {
+	if got := submissionGit(t, resumed.Worktree, gitRevParseCommand, "HEAD"); got != headBeforeResume {
 		t.Fatalf("checkpoint replay duplicated or changed commits: before=%s after=%s", headBeforeResume, got)
 	}
 	if got := submissionGit(t, resumed.Worktree, "rev-list", "--count", resumed.Base+"..HEAD"); got != countBeforeResume {
@@ -165,7 +165,7 @@ func TestInterruptedIntegrationUsesDurableUnitCheckpoints(t *testing.T) {
 	if err := run.prepareWorktree(); err != nil {
 		t.Fatalf("prepare initial unit from the task candidate head: %v", err)
 	}
-	if got, want := newUnit.Base, submissionGit(t, newTask.Worktree, "rev-parse", "HEAD"); got != want {
+	if got, want := newUnit.Base, submissionGit(t, newTask.Worktree, gitRevParseCommand, "HEAD"); got != want {
 		t.Fatalf("new unit trusted planner base: got=%s want candidate head=%s", got, want)
 	}
 }

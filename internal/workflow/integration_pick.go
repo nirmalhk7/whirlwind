@@ -58,11 +58,11 @@ func (p *integrationPick) save(ctx context.Context) error {
 }
 
 func (p *integrationPick) run(ctx context.Context) error {
-	head, err := p.git(ctx, "rev-parse", "HEAD")
+	head, err := p.git(ctx, gitRevParseCommand, "HEAD")
 	if err != nil {
 		return err
 	}
-	pending, err := p.git(ctx, "rev-parse", "--revs-only", "CHERRY_PICK_HEAD")
+	pending, err := p.git(ctx, gitRevParseCommand, "--revs-only", "CHERRY_PICK_HEAD")
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func (p *integrationPick) finish(ctx context.Context, head, pending string) erro
 			return err
 		}
 		var err error
-		head, err = p.git(ctx, "rev-parse", "HEAD")
+		head, err = p.git(ctx, gitRevParseCommand, "HEAD")
 		if err != nil {
 			return err
 		}
@@ -142,7 +142,7 @@ func (p *integrationPick) start(ctx context.Context) error {
 	if err == nil {
 		return nil
 	}
-	pending, inspectErr := p.git(ctx, "rev-parse", "--revs-only", "CHERRY_PICK_HEAD")
+	pending, inspectErr := p.git(ctx, gitRevParseCommand, "--revs-only", "CHERRY_PICK_HEAD")
 	if inspectErr != nil || pending != p.source {
 		return errors.Join(err, inspectErr)
 	}
@@ -155,7 +155,7 @@ func (p *integrationPick) validateResult(ctx context.Context, head string) error
 		return errors.Join(err, errors.New("integration result does not descend directly from the recorded parent"))
 	}
 	if p.state.Tree != "" {
-		tree, err := p.git(ctx, "rev-parse", head+"^{tree}")
+		tree, err := p.git(ctx, gitRevParseCommand, head+"^{tree}")
 		if err != nil || tree != p.state.Tree {
 			return errors.Join(err, errors.New("integration result differs from the staged resolution"))
 		}
@@ -291,7 +291,7 @@ func (p *integrationPick) outsideIndex(ctx context.Context) (string, error) {
 }
 
 func (p *integrationPick) checkResolution(ctx context.Context) error {
-	head, err := p.git(ctx, "rev-parse", "HEAD", "CHERRY_PICK_HEAD")
+	head, err := p.git(ctx, gitRevParseCommand, "HEAD", "CHERRY_PICK_HEAD")
 	if err != nil || head != p.state.Parent+"\n"+p.source {
 		return errors.Join(err, errors.New("cherry-pick state changed during conflict resolution"))
 	}

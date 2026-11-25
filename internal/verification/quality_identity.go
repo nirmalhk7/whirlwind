@@ -21,6 +21,10 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	qualityInstallationDebugSuffix = "-installation-debug-files"
+)
+
 const qualityRuntimeByteLimit = int64(512 << 20)
 const qualityRuntimeFileLimit = 100000
 
@@ -263,7 +267,7 @@ func installedQualityTools(root string) ([]model.QualityToolIdentity, error) {
 	}
 	tools := []model.QualityToolIdentity{}
 	for _, toolEntry := range entries {
-		if !toolEntry.IsDir() || strings.HasSuffix(toolEntry.Name(), "-installation-debug-files") {
+		if !toolEntry.IsDir() || strings.HasSuffix(toolEntry.Name(), qualityInstallationDebugSuffix) {
 			continue
 		}
 		toolName := toolEntry.Name()
@@ -275,7 +279,7 @@ func installedQualityTools(root string) ([]model.QualityToolIdentity, error) {
 			return nil, err
 		}
 		for _, pkg := range packages {
-			if !pkg.IsDir() || strings.HasSuffix(pkg.Name(), "-installation-debug-files") {
+			if !pkg.IsDir() || strings.HasSuffix(pkg.Name(), qualityInstallationDebugSuffix) {
 				continue
 			}
 			match := qualityPackageDirectory.FindStringSubmatch(pkg.Name())
@@ -357,7 +361,7 @@ func (tree *qualityTreeHasher) recordEntry(path string, entry os.DirEntry, walkE
 	if err != nil {
 		return err
 	}
-	if entry.IsDir() && strings.HasSuffix(entry.Name(), "-installation-debug-files") {
+	if entry.IsDir() && strings.HasSuffix(entry.Name(), qualityInstallationDebugSuffix) {
 		return filepath.SkipDir
 	}
 	tree.count++
