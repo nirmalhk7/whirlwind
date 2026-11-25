@@ -87,30 +87,7 @@ func (e *Engine) runProjectSetup(ctx context.Context, id string) error {
 			return err
 		}
 		record.Version++
-		binary, err := localVerifierBinary()
-		failure = err
-		if failure == nil {
-			evidence.Report, failure = verification.RunLocalJob(ctx, binary, manifest, func(event verification.JobEvent) error {
-				if event.Index < 0 || event.Index >= len(manifest.Commands) {
-					return errors.New("project setup progress command index is invalid")
-				}
-				name := manifest.Commands[event.Index].Name
-				switch event.Type {
-				case "started":
-					evidence.Progress.Current = name
-				case "result":
-					if event.Result == nil || event.Result.Name != name {
-						return errors.New("project setup progress result is incomplete")
-					}
-					evidence.Progress.Current = ""
-					evidence.Progress.Completed = append(evidence.Progress.Completed, projectSetupCheck{Name: name, Status: event.Result.Status, Error: event.Result.Error})
-				}
-				return e.persistProjectSetupProgress(ctx, &record, op, evidence)
-			})
-			if failure == nil && !evidence.Report.Passed && !(evidence.Onboarding && evidence.Phase == "qualify" && projectSetupAllowsExistingQltyFindings(manifest, evidence.Report)) {
-				failure = errors.New("required project verification command failed; inspect retained setup report")
-			}
-		}
+		failure = e.runProjectSetupVerifier(ctx, &record, op, &evidence)
 	}
 	if failure == nil && evidence.Onboarding && evidence.Phase != "qualify" {
 		if evidence.Phase == "catalog" {
@@ -119,6 +96,46 @@ func (e *Engine) runProjectSetup(ctx context.Context, id string) error {
 		return e.finishProjectSetupPreparation(ctx, record, op, projectRecord, project, evidence)
 	}
 	return e.finishProjectSetup(ctx, record, op, projectRecord, project, evidence, failure)
+}
+
+func (e *Engine) runProjectSetupVerifier(ctx context.Context, record *model.Record, op model.Operation, evidence *projectSetupEvidence) error {
+	binary, err := localVerifierBinary()
+	if err != nil {
+		return err
+	}
+	manifest := evidence.Manifest
+	evidence.Report, err = verification.RunLocalJob(ctx, binary, manifest, func(event verification.JobEvent) error {
+		if err := evidence.applyProgress(event); err != nil {
+			return err
+		}
+		return e.persistProjectSetupProgress(ctx, record, op, *evidence)
+	})
+	if err != nil || evidence.Report.Passed {
+		return err
+	}
+	if evidence.Onboarding && evidence.Phase == "qualify" && projectSetupAllowsExistingQltyFindings(manifest, evidence.Report) {
+		return nil
+	}
+	return errors.New("required project verification command failed; inspect retained setup report")
+}
+
+func (evidence *projectSetupEvidence) applyProgress(event verification.JobEvent) error {
+	commands := evidence.Manifest.Commands
+	if event.Index < 0 || event.Index >= len(commands) {
+		return errors.New("project setup progress command index is invalid")
+	}
+	name := commands[event.Index].Name
+	switch event.Type {
+	case "started":
+		evidence.Progress.Current = name
+	case "result":
+		if event.Result == nil || event.Result.Name != name {
+			return errors.New("project setup progress result is incomplete")
+		}
+		evidence.Progress.Current = ""
+		evidence.Progress.Completed = append(evidence.Progress.Completed, projectSetupCheck{Name: name, Status: event.Result.Status, Error: event.Result.Error})
+	}
+	return nil
 }
 
 func projectSetupAllowsExistingQltyFindings(manifest verification.JobManifest, report verification.JobReport) bool {
@@ -130,11 +147,7 @@ func projectSetupAllowsExistingQltyFindings(manifest verification.JobManifest, r
 		result := report.Results[index]
 		isQltyCheck := len(command.Command) > 1 && filepath.Base(command.Command[0]) == "qlty" && command.Command[1] == "check"
 		if isQltyCheck {
-			if command.ReportFormat != "sarif" || result.Status != "fail" || result.ExitCode == nil || *result.ExitCode != 1 || result.Error != "" && result.Error != "exit status 1" || !result.Runtime.CleanupVerified || result.QualityIdentity == nil || result.QualityIdentity.Validate() != nil {
-				return false
-			}
-			output, _, err := verification.ReadJobStreams(manifest.Root, index)
-			if err != nil || verification.ValidateJobSARIF([]byte(output)) != nil {
+			if !validProjectSetupQltyFinding(manifest.Root, index, command, result) {
 				return false
 			}
 			foundQltyFindings = true
@@ -145,6 +158,14 @@ func projectSetupAllowsExistingQltyFindings(manifest verification.JobManifest, r
 		}
 	}
 	return foundQltyFindings && report.QualityIdentity != nil && report.QualityIdentity.Validate() == nil
+}
+
+func validProjectSetupQltyFinding(root string, index int, command verification.JobCommand, result verification.JobResult) bool {
+	if command.ReportFormat != "sarif" || result.Status != "fail" || result.ExitCode == nil || *result.ExitCode != 1 || result.Error != "" && result.Error != "exit status 1" || !result.Runtime.CleanupVerified || result.QualityIdentity == nil || result.QualityIdentity.Validate() != nil {
+		return false
+	}
+	output, _, err := verification.ReadJobStreams(root, index)
+	return err == nil && verification.ValidateJobSARIF([]byte(output)) == nil
 }
 
 func (e *Engine) dispatchProjectSetup(ctx context.Context) {
@@ -164,26 +185,29 @@ func (e *Engine) dispatchProjectSetup(ctx context.Context) {
 		if err != nil || project.Paused || project.Status == "complete" {
 			continue
 		}
-		runID := "project_setup:" + record.ID
-		e.mu.Lock()
-		if _, active := e.running[runID]; active || e.closing {
-			e.mu.Unlock()
-			continue
-		}
-		runCtx, cancel := context.WithCancel(ctx)
-		e.running[runID] = cancel
-		e.background.Go(func() {
-			defer func() {
-				e.mu.Lock()
-				delete(e.running, runID)
-				e.mu.Unlock()
-			}()
-			if err := e.runProjectSetup(runCtx, record.ID); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, store.ErrLeased) {
-				log.Printf("project setup %s: %v", record.ID, err)
-			}
-		})
-		e.mu.Unlock()
+		e.launchProjectSetup(ctx, record.ID)
 	}
+}
+
+func (e *Engine) launchProjectSetup(ctx context.Context, operationID string) {
+	runID := "project_setup:" + operationID
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, active := e.running[runID]; active || e.closing {
+		return
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	e.running[runID] = cancel
+	e.background.Go(func() {
+		defer func() {
+			e.mu.Lock()
+			delete(e.running, runID)
+			e.mu.Unlock()
+		}()
+		if err := e.runProjectSetup(runCtx, operationID); err != nil && !errors.Is(err, store.ErrConflict) && !errors.Is(err, store.ErrLeased) {
+			log.Printf("project setup %s: %v", operationID, err)
+		}
+	})
 }
 
 func (e *Engine) persistProjectSetupProgress(ctx context.Context, record *model.Record, op model.Operation, evidence projectSetupEvidence) error {
