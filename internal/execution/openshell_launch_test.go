@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -51,6 +52,12 @@ func TestOpenShellLaunchUsesPinnedDetachedSandboxAndSeparateExec(t *testing.T) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("OpenShell launcher failed: %v: %s", err, output)
 	}
+	assertDetachedOpenShellIdentity(t, fixture, profile)
+	assertOpenShellBootstrapEnvironment(t, fixture, xdgConfig, xdgState)
+}
+
+func assertDetachedOpenShellIdentity(t *testing.T, fixture *openshell.Fixture, profile Profile) {
+	t.Helper()
 	if !fixture.HasInertInit(t) {
 		t.Fatal("persistent sandbox was not created with the required inert init process")
 	}
@@ -72,15 +79,15 @@ func TestOpenShellLaunchUsesPinnedDetachedSandboxAndSeparateExec(t *testing.T) {
 			t.Fatalf("OpenShell lifecycle call escaped pinned authority: %v", call)
 		}
 	}
+}
+
+func assertOpenShellBootstrapEnvironment(t *testing.T, fixture *openshell.Fixture, xdgConfig, xdgState string) {
+	t.Helper()
 	environmentCalls := fixture.EnvironmentCalls(t)
 	for _, operation := range []string{"create", "exec"} {
-		found := false
-		for _, call := range environmentCalls {
-			if call.Operation == operation && call.XDGPresent && call.XDGConfigHome == xdgConfig && call.XDGStatePresent && call.XDGStateHome == xdgState {
-				found = true
-				break
-			}
-		}
+		found := slices.ContainsFunc(environmentCalls, func(call openshell.EnvironmentCall) bool {
+			return call.Operation == operation && call.XDGPresent && call.XDGConfigHome == xdgConfig && call.XDGStatePresent && call.XDGStateHome == xdgState
+		})
 		if !found {
 			t.Fatalf("host XDG gateway configuration was not preserved for sandbox %s: %+v", operation, environmentCalls)
 		}

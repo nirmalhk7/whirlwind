@@ -33,6 +33,14 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 	}
 	worktree, err := filepath.EvalSymlinks(worktree)
 	requireExecutionSuccess(t, err)
+	assertLiveOpenShellCheckoutAccess(t, worktree)
+	assertLiveOpenShellNetwork(t, worktree)
+	assertLiveOpenShellCredential(t, root, worktree)
+	assertLiveOpenShellDeadline(t, worktree)
+}
+
+func assertLiveOpenShellCheckoutAccess(t *testing.T, worktree string) {
+	t.Helper()
 	writable := liveProfile(t, worktree, false, 2*time.Minute)
 	runLiveCommand(t, writable, []string{liveIsolationFixtureShell, "-c", "touch accepted.txt; test -f accepted.txt; printf writable-ok"})
 	if _, err := os.Stat(filepath.Join(worktree, "accepted.txt")); err != nil {
@@ -59,7 +67,10 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 	if _, err := os.Stat(outsideFile); !os.IsNotExist(err) {
 		t.Fatalf("outside path was unexpectedly created on the host: %v", err)
 	}
+}
 
+func assertLiveOpenShellNetwork(t *testing.T, worktree string) {
+	t.Helper()
 	network := liveProfile(t, worktree, true, 2*time.Minute)
 	networkCommand := []string{liveIsolationFixtureShell, "-c", strings.Join([]string{
 		"test -n \"$HTTP_PROXY\" && test -n \"$HTTPS_PROXY\" && test -n \"$http_proxy\" && test -n \"$https_proxy\" && printf proxy-env-present",
@@ -73,7 +84,10 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 	if output, err := runLiveCommandResult(t, network, networkCommand); err != nil {
 		t.Fatalf("web egress/DNS or denied-port policy failed: %v: %s", err, output)
 	}
+}
 
+func assertLiveOpenShellCredential(t *testing.T, root, worktree string) {
+	t.Helper()
 	auth := filepath.Join(root, "synthetic-auth.json")
 	requireExecutionSuccess(t, os.WriteFile(auth, []byte(`{"synthetic":true}`), 0600))
 	credentialProfile := liveProfile(t, worktree, true, 2*time.Minute)
@@ -99,7 +113,10 @@ printf runtime-home-and-selected-auth-ok`, "probe", homeRoot, stagingRoot, workt
 	if output, err := runLiveCommandResult(t, credentialProfile, credentialCommand); err != nil || !strings.Contains(output, "runtime-home-and-selected-auth-ok") || !strings.Contains(output, "repository-remains-readonly") {
 		t.Fatalf("synthetic selected credential was not isolated from unrelated home files: %v: %s", err, output)
 	}
+}
 
+func assertLiveOpenShellDeadline(t *testing.T, worktree string) {
+	t.Helper()
 	timeoutProfile := liveProfile(t, worktree, true, 30*time.Second)
 	if output, err := runLiveCommandResult(t, timeoutProfile, []string{liveIsolationFixtureShell, "-c", "printf child-started; sleep 60"}); err == nil || !strings.Contains(output, "child-started") {
 		t.Fatalf("long child did not start and then honor its persisted attempt deadline: %v: %s", err, output)

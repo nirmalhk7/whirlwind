@@ -293,6 +293,11 @@ func TestOpenShellProxyTokenIsRegisteredForTraceRedaction(t *testing.T) {
 	if !slices.Contains(cmd.Env, "WHIRLWIND_MCP_BROKER_TOKEN="+brokerToken) {
 		t.Fatal("MCP broker capability was not passed to trusted host bridge")
 	}
+	assertExecutionCredentialRedaction(t, cmd, token, brokerToken)
+}
+
+func assertExecutionCredentialRedaction(t *testing.T, cmd *exec.Cmd, token, brokerToken string) {
+	t.Helper()
 	if got := store.RedactText("trace=" + brokerToken); got != "trace=[redacted]" {
 		t.Fatalf("MCP broker capability was not registered for trace redaction: %q", got)
 	}
