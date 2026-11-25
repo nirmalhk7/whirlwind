@@ -3,7 +3,8 @@ package workflow
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"whirlwind/internal/model"
@@ -62,11 +63,7 @@ func latestVerifications(records []model.Record, owned map[string]bool) (map[str
 }
 
 func diagnosticsForLatest(latest map[string]latestVerification) (map[string]string, []model.EvidenceRef, error) {
-	ids := make([]string, 0, len(latest))
-	for id := range latest {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
+	ids := slices.Sorted(maps.Keys(latest))
 	diagnostics := map[string]string{}
 	refs := []model.EvidenceRef{}
 	for _, id := range ids[:min(len(ids), 20)] {

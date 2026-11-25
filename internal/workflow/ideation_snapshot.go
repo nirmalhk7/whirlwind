@@ -1,7 +1,8 @@
 package workflow
 
 import (
-	"sort"
+	"maps"
+	"slices"
 
 	ctxengine "whirlwind/internal/context"
 )
@@ -15,10 +16,7 @@ func frozenRepositorySourceText(index ctxengine.Index) map[string]string {
 }
 
 func sortedSnapshotPaths(files map[string]string) []string {
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	paths := slices.AppendSeq(make([]string, 0, len(files)), maps.Keys(files))
+	slices.Sort(paths)
 	return paths
 }

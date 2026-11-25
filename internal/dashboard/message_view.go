@@ -3,9 +3,10 @@ package dashboard
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/rivo/tview"
@@ -16,11 +17,7 @@ func messageText(message any) string {
 	encoded, _ := json.Marshal(message)
 	var fields map[string]json.RawMessage
 	_ = json.Unmarshal(encoded, &fields)
-	keys := make([]string, 0, len(fields))
-	for key := range fields {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(fields))
 	var text strings.Builder
 	for _, key := range keys {
 		var value string

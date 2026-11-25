@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"math"
-	"sort"
+	"slices"
 	"time"
 
 	"whirlwind/internal/model"
@@ -46,11 +47,7 @@ func ParseQuotaSnapshot(data any, pool, source string, observed time.Time) (*mod
 }
 
 func appendQuotaWindows(result *model.QuotaSnapshot, limits map[string]quotaLimitData) error {
-	keys := make([]string, 0, len(limits))
-	for id := range limits {
-		keys = append(keys, id)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(limits))
 	for _, id := range keys {
 		lim := limits[id]
 		for _, item := range []struct {

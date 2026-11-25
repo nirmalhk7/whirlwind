@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -35,11 +36,7 @@ func (m JobManifest) PrepareQualityDefaults(catalog []byte) (model.QualitySnapsh
 		return snapshot, err
 	}
 	defer func() { _ = root.Close() }()
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	paths := slices.Sorted(maps.Keys(files))
 	for _, path := range paths {
 		if err := checkQualityTarget(root, "config/"+path, false); err != nil {
 			return snapshot, err

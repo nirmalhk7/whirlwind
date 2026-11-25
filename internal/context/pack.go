@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -115,10 +116,7 @@ func packEntries(index Index, request PackRequest) []Entry {
 	for _, entry := range entries {
 		dirs[filepath.Dir(entry.Path)] = true
 	}
-	keys := make([]string, 0, len(index.Files))
-	for key := range index.Files {
-		keys = append(keys, key)
-	}
+	keys := slices.AppendSeq(make([]string, 0, len(index.Files)), maps.Keys(index.Files))
 	slices.Sort(keys)
 	for _, key := range keys {
 		entry := index.Files[key]
