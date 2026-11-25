@@ -12,8 +12,12 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	inspectionFixtureDatabaseFile = "state.db"
+)
+
 func TestInspectionPagesAreBoundedProjectScopedAndCursorStable(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	db, err := store.Open(filepath.Join(t.TempDir(), inspectionFixtureDatabaseFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +70,7 @@ func TestLocalDispatcherRejectsRawResourceKindsAndBoundsEvents(t *testing.T) {
 }
 
 func TestOfflineSnapshotPaginatesAllRowsAndEvents(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	db, err := store.Open(filepath.Join(t.TempDir(), inspectionFixtureDatabaseFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +97,7 @@ func TestOfflineSnapshotPaginatesAllRowsAndEvents(t *testing.T) {
 }
 
 func TestInspectionPagesRespectByteBudgetAndRetainLargeRows(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	db, err := store.Open(filepath.Join(t.TempDir(), inspectionFixtureDatabaseFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +134,7 @@ func TestInspectionPagesRespectByteBudgetAndRetainLargeRows(t *testing.T) {
 }
 
 func TestEventPagesKeepArrayContractAndSplitLargeHistoryByBytes(t *testing.T) {
-	db, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	db, err := store.Open(filepath.Join(t.TempDir(), inspectionFixtureDatabaseFile))
 	if err != nil {
 		t.Fatal(err)
 	}

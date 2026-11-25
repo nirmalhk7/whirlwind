@@ -10,6 +10,10 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	runsFixtureReviewModel = "review-model"
+)
+
 func runList(d *Dashboard) *tview.List {
 	d.focus = 2
 	return d.focusedPanel().(*tview.List)
@@ -27,7 +31,7 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 		"sessions": {
 			record("old", model.Attempt{AttemptID: "old", ProjectID: "p", Role: "code", Provider: "codex", Model: "old-model", Status: "complete", Finished: true, StartedAt: "2026-11-08T09:00:00Z"}),
 			record("latest", model.Attempt{AttemptID: "latest", ProjectID: "p", Role: "ideate", Provider: "cursor", ResolvedModel: "live-model", EffectiveThinking: &model.ThinkingChoice{Value: "high"}, Status: "running", StartedAt: "2026-11-08T12:00:00+02:00"}),
-			record("failed", model.Attempt{AttemptID: "failed", Task: "t", Role: "review", Provider: "claude", Model: "review-model", Thinking: &model.ThinkingChoice{Value: "low"}, Status: "failed", StartedAt: "2026-11-08T09:30:00Z", Error: "provider disconnected"}),
+			record("failed", model.Attempt{AttemptID: "failed", Task: "t", Role: "review", Provider: "claude", Model: runsFixtureReviewModel, Thinking: &model.ThinkingChoice{Value: "low"}, Status: "failed", StartedAt: "2026-11-08T09:30:00Z", Error: "provider disconnected"}),
 			record("other", model.Attempt{AttemptID: "other", ProjectID: "other", Role: "plan", Provider: "hidden", Status: "running", StartedAt: "2026-11-09T10:00:00Z"}),
 		},
 	})
@@ -45,7 +49,7 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 		if !strings.Contains(primary, want) {
 			t.Errorf("row %d: %q", i, primary)
 		}
-		for _, field := range []string{[]string{"live-model", "review-model", "old-model"}[i], "2026-11-08"} {
+		for _, field := range []string{[]string{"live-model", runsFixtureReviewModel, "old-model"}[i], "2026-11-08"} {
 			if !strings.Contains(secondary, field) {
 				t.Errorf("run row missing %q: %s", field, secondary)
 			}
@@ -56,7 +60,7 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 		t.Fatalf("missing effective run state: %s %s", first, second)
 	}
 	list.SetCurrentItem(1)
-	for _, want := range []string{"review-model", "low", "failed", "provider disconnected", "2026-11-08T09:30:00Z"} {
+	for _, want := range []string{runsFixtureReviewModel, "low", "failed", "provider disconnected", "2026-11-08T09:30:00Z"} {
 		if !strings.Contains(d.detail.GetText(false), want) {
 			t.Errorf("selected run detail missing %q", want)
 		}
