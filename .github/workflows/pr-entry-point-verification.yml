@@ -7,13 +7,17 @@ permissions:
   contents: read
 jobs:
   entry-point:
-    name: "PR #${{ matrix.pr }}"
+    name: "Candidate ${{ matrix.pr }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
+          - pr: main
+            sha: 7346190f9dae0ce649c56cb23d37da3d1a44636c
+            tree: eacc5626e54db801a431fd826f79330e4be878e0
+            test: TestSeededHumanWorkflowThroughPTY
           - pr: 81
             sha: d19f58f6365e08c9d2ad552fd32c4db912af7b88
             tree: 913ae6b49f34d4e7d75515f37c60953c0da50ab9
@@ -48,4 +52,7 @@ jobs:
           FIXTURE_NAME: ${{ matrix.test }}
         run: |
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          export GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
+          go mod download
+          go build -mod=readonly ./cmd/whirlwind ./cmd/whirlwind-dashboard ./cmd/whirlwind-verify
           go test -mod=readonly -race -v -count=1 -timeout=8m ./cmd/whirlwind -run "^${FIXTURE_NAME}$"
