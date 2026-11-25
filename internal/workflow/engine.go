@@ -31,6 +31,7 @@ type Engine struct {
 	runnerWait               sync.WaitGroup
 	closing                  bool
 	wake                     chan struct{}
+	rolePops                 chan rolePop
 	providerStatuses         providerStatusCache
 	retryWait                func(context.Context, time.Duration) error
 	attemptTimeout           time.Duration
@@ -40,7 +41,7 @@ type Engine struct {
 
 // New constructs the workflow engine with default process adapters, a unique lease owner, and execution tracking.
 func New(s *store.Store, g github.Client, root string) *Engine {
-	return &Engine{Store: s, GitHub: g, Root: root, Adapter: func(p model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: p} }, owner: store.ID(), running: map[string]context.CancelFunc{}, active: map[string]int{}, wake: make(chan struct{}, 1)}
+	return &Engine{Store: s, GitHub: g, Root: root, Adapter: func(p model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: p} }, owner: store.ID(), running: map[string]context.CancelFunc{}, active: map[string]int{}, wake: make(chan struct{}, 1), rolePops: make(chan rolePop)}
 }
 
 // Wake is a coalesced hint. Durable state remains the source of dispatch eligibility.
@@ -80,6 +81,8 @@ func (e *Engine) Run(ctx context.Context) {
 			lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
 		case <-e.wake:
 			lastSettingsError, nextReconcile = e.runCycle(ctx, lastSettingsError, nextReconcile)
+		case pop := <-e.rolePops:
+			pop.result <- e.popRoleWork(ctx, pop)
 		}
 	}
 }
