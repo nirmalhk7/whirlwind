@@ -205,19 +205,8 @@ func (p *integrationPick) stageResolution(ctx context.Context) error {
 	if unmerged == "" && p.state.AttemptID == "" {
 		return errors.New("pending cherry-pick has no recorded conflict resolution")
 	}
-	paths := strings.Split(strings.TrimSuffix(unmerged, "\x00"), "\x00")
-	if unmerged != "" && p.state.Paths == nil {
-		p.state.Paths = paths
-		p.state.Index, err = p.outsideIndex(ctx)
-		if err != nil {
-			return err
-		}
-		if err := p.save(ctx); err != nil {
-			return err
-		}
-	}
-	if unmerged != "" && !slices.Equal(paths, p.state.Paths) {
-		return errors.New("pending conflict paths changed during integration")
+	if err := p.retainConflictPaths(ctx, unmerged); err != nil {
+		return err
 	}
 	scoped, err := p.conflictProject()
 	if err != nil {
@@ -237,6 +226,28 @@ func (p *integrationPick) stageResolution(ctx context.Context) error {
 	args := append([]string{"add", "--all", "--"}, p.state.Paths...)
 	_, err = p.git(ctx, args...)
 	return err
+}
+
+func (p *integrationPick) retainConflictPaths(ctx context.Context, unmerged string) error {
+	if unmerged == "" {
+		return nil
+	}
+	paths := strings.Split(strings.TrimSuffix(unmerged, "\x00"), "\x00")
+	if p.state.Paths == nil {
+		p.state.Paths = paths
+		index, err := p.outsideIndex(ctx)
+		p.state.Index = index
+		if err != nil {
+			return err
+		}
+		if err := p.save(ctx); err != nil {
+			return err
+		}
+	}
+	if !slices.Equal(paths, p.state.Paths) {
+		return errors.New("pending conflict paths changed during integration")
+	}
+	return nil
 }
 
 func (p *integrationPick) conflictProject() (model.Project, error) {

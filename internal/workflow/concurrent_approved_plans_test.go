@@ -80,6 +80,15 @@ func TestApprovedPlansForSameRepositoryExecuteConcurrentlyInIndependentWorktrees
 		}
 	}
 
+	starts := runConcurrentApprovedPlans(t, ctx, cancel, e, project, tasks)
+	assertConcurrentUnitCheckpoints(t, ctx, e, tasks, starts)
+	if tasks[0].ProjectID != tasks[1].ProjectID || tasks[0].ProjectID != project.ID {
+		t.Fatalf("test did not exercise two plans for one repository: %+v", tasks)
+	}
+}
+
+func runConcurrentApprovedPlans(t *testing.T, ctx context.Context, cancel context.CancelFunc, e *Engine, project model.Project, tasks []model.ExecutionPlan) []concurrentPlanCodeStart {
+	t.Helper()
 	adapter := &concurrentPlanCodeAdapter{started: make(chan concurrentPlanCodeStart, len(tasks)), release: make(chan struct{})}
 	e.Adapter = func(model.Provider) provider.Adapter { return adapter }
 	for index := range tasks {
@@ -123,6 +132,11 @@ func TestApprovedPlansForSameRepositoryExecuteConcurrentlyInIndependentWorktrees
 		requireWorkflowSuccess(t, err)
 	}
 
+	return starts
+}
+
+func assertConcurrentUnitCheckpoints(t *testing.T, ctx context.Context, e *Engine, tasks []model.ExecutionPlan, starts []concurrentPlanCodeStart) {
+	t.Helper()
 	seenUnits := map[string]concurrentPlanCodeStart{}
 	for _, start := range starts {
 		seenUnits[start.unit] = start
@@ -140,39 +154,46 @@ func TestApprovedPlansForSameRepositoryExecuteConcurrentlyInIndependentWorktrees
 		if start.cwd == starts[0].cwd && start.cwd == starts[1].cwd {
 			t.Fatalf("plan %s coder reused a worktree", task.ID)
 		}
-		if got := submissionGit(t, start.cwd, "branch", "--show-current"); got != unit.Branch {
-			t.Fatalf("plan %s unit branch=%q, recorded=%q", task.ID, got, unit.Branch)
-		}
-		if got := submissionGit(t, start.cwd, "rev-parse", "HEAD"); got != unit.Commit {
-			t.Fatalf("plan %s checkpoint commit=%q, worktree HEAD=%q", task.ID, unit.Commit, got)
-		}
-		file, content := concurrentPlanFile(unit.ID)
-		actual, err := os.ReadFile(filepath.Join(start.cwd, file))
-		if err != nil || string(actual) != content {
-			t.Fatalf("plan %s lost its independent change: content=%q err=%v", task.ID, actual, err)
-		}
-		other, _ := concurrentPlanFile(tasks[1-index].Plan.Units[0].ID)
-		if _, err := os.Stat(filepath.Join(start.cwd, other)); !os.IsNotExist(err) {
-			t.Fatalf("plan %s worktree contains other plan's change %s: %v", task.ID, other, err)
-		}
-		changed := strings.Fields(submissionGit(t, start.cwd, "diff", "--name-only", unit.Base+".."+unit.Commit))
-		sort.Strings(changed)
-		want := []string{file, resultFile}
-		sort.Strings(want)
-		if !slices.Equal(changed, want) {
-			t.Fatalf("plan %s commit contains unexpected or cross-plan files: got=%v want=%v", task.ID, changed, want)
-		}
-		persisted, err := e.Store.Get(ctx, "units", unitKey(task.ID, task.PlanVersion, unit.ID))
-		if err != nil {
-			t.Fatalf("plan %s completed unit checkpoint missing: %v", task.ID, err)
-		}
-		checkpoint, err := store.Decode[model.Unit](persisted)
-		if err != nil || checkpoint.Stage != "complete" || checkpoint.Commit != unit.Commit || checkpoint.Branch != unit.Branch {
-			t.Fatalf("plan %s checkpoint does not bind its branch and commit: %+v err=%v", task.ID, checkpoint, err)
-		}
+		assertConcurrentUnitFiles(t, task, unit, start, tasks[1-index].Plan.Units[0].ID)
+		assertConcurrentUnitPersisted(t, ctx, e, task, unit)
 	}
-	if tasks[0].ProjectID != tasks[1].ProjectID || tasks[0].ProjectID != project.ID {
-		t.Fatalf("test did not exercise two plans for one repository: %+v", tasks)
+}
+
+func assertConcurrentUnitFiles(t *testing.T, task model.ExecutionPlan, unit model.Unit, start concurrentPlanCodeStart, otherUnit string) {
+	t.Helper()
+	if got := submissionGit(t, start.cwd, "branch", "--show-current"); got != unit.Branch {
+		t.Fatalf("plan %s unit branch=%q, recorded=%q", task.ID, got, unit.Branch)
+	}
+	if got := submissionGit(t, start.cwd, "rev-parse", "HEAD"); got != unit.Commit {
+		t.Fatalf("plan %s checkpoint commit=%q, worktree HEAD=%q", task.ID, unit.Commit, got)
+	}
+	file, content := concurrentPlanFile(unit.ID)
+	actual, err := os.ReadFile(filepath.Join(start.cwd, file))
+	if err != nil || string(actual) != content {
+		t.Fatalf("plan %s lost its independent change: content=%q err=%v", task.ID, actual, err)
+	}
+	other, _ := concurrentPlanFile(otherUnit)
+	if _, err := os.Stat(filepath.Join(start.cwd, other)); !os.IsNotExist(err) {
+		t.Fatalf("plan %s worktree contains other plan's change %s: %v", task.ID, other, err)
+	}
+	changed := strings.Fields(submissionGit(t, start.cwd, "diff", "--name-only", unit.Base+".."+unit.Commit))
+	sort.Strings(changed)
+	want := []string{file, resultFile}
+	sort.Strings(want)
+	if !slices.Equal(changed, want) {
+		t.Fatalf("plan %s commit contains unexpected or cross-plan files: got=%v want=%v", task.ID, changed, want)
+	}
+}
+
+func assertConcurrentUnitPersisted(t *testing.T, ctx context.Context, e *Engine, task model.ExecutionPlan, unit model.Unit) {
+	t.Helper()
+	persisted, err := e.Store.Get(ctx, "units", unitKey(task.ID, task.PlanVersion, unit.ID))
+	if err != nil {
+		t.Fatalf("plan %s completed unit checkpoint missing: %v", task.ID, err)
+	}
+	checkpoint, err := store.Decode[model.Unit](persisted)
+	if err != nil || checkpoint.Stage != "complete" || checkpoint.Commit != unit.Commit || checkpoint.Branch != unit.Branch {
+		t.Fatalf("plan %s checkpoint does not bind its branch and commit: %+v err=%v", task.ID, checkpoint, err)
 	}
 }
 
