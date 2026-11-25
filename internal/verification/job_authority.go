@@ -12,7 +12,7 @@ func (m JobManifest) validateAuthority() error {
 	}
 	switch m.Purpose {
 	case "":
-		if m.PlanID == "" || m.PlanVersion < 1 || m.PlanHash == "" || m.ProjectID != "" || m.OperationID != "" {
+		if m.PlanID == "" || m.PlanVersion < 1 || m.PlanHash == "" || (m.ProjectID != "" && m.OfflineDockerImage == "") || m.OperationID != "" {
 			return errors.New("verification manifest requires approved plan and configuration identity")
 		}
 	case ProjectSetupPurpose:

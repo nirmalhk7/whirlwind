@@ -106,13 +106,17 @@ func notifyResourceChange(ctx context.Context, tx *sql.Tx, kind, id string, valu
 }
 
 func putRemoval(ctx context.Context, tx *sql.Tx, kind, id string, value any, expected int) (bool, error) {
-	switch value.(type) {
+	switch change := value.(type) {
 	case resourceVersionAssertion:
 		return true, assertResourceVersionTx(ctx, tx, kind, id, expected)
 	case directionRemoval:
 		return true, removeDirection(ctx, tx, id, expected)
 	case ConfigurationRemoval:
 		return true, removeConfiguration(ctx, tx, kind, id, expected)
+	case checkoutRegistrationPrecondition:
+		return true, assertCheckoutUnregistered(ctx, tx, change.path)
+	case duplicateProjectArchive:
+		return true, archiveDuplicateProject(ctx, tx, id, expected)
 	case projectRemoval:
 		return true, removeProject(ctx, tx, id, expected)
 	default:

@@ -36,7 +36,7 @@ func (e *Engine) SaveLocalPlan(ctx context.Context, id string, expected int, has
 	if err != nil {
 		return err
 	}
-	project, err := e.localPlanApprovalProject(ctx, task.ProjectID, plan)
+	project, _, err := e.localPlanApprovalProject(ctx, task.ProjectID, plan)
 	if err != nil {
 		return err
 	}

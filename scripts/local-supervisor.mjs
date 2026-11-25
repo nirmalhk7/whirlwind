@@ -47,10 +47,10 @@ async function socketIsActive(path) {
   }
 }
 
-async function request(config, operation) {
+export async function request(config, operation, fields = {}) {
   const socket = await connect(config.socket, 1500);
   try {
-    const request = { request_id: randomBytes(12).toString("hex"), operation, event_cursor: 0, limit: 1 };
+    const request = { event_cursor: 0, limit: 1, ...fields, request_id: randomBytes(12).toString("hex"), operation };
     if (!operation.startsWith("inspect.")) request.idempotency_key = randomBytes(24).toString("hex");
     const message = JSON.stringify(request);
     return await new Promise((resolve, reject) => {
