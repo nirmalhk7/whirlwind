@@ -110,7 +110,7 @@ func TestFinalizationVerificationQualificationIsRequiredWithoutRunningAHostComma
 		Root: filepath.Join(quality.Root, "jobs", jobID), Repository: project.Path, Launcher: "/fixture/launcher", Quality: quality,
 		Commands: []verification.JobCommand{{Name: scanner.Name, Command: scanner.Command, Mode: scanner.Mode, TimeoutSeconds: scanner.TimeoutSeconds, ReportFormat: scanner.ReportFormat}}}
 	err = (verification.JobReport{}).Validate(manifest)
-	if err == nil || !strings.Contains(err.Error(), "Qlty verification requires an approved runtime identity") {
+	if err == nil || !strings.Contains(err.Error(), "verification with Qlty requires an approved runtime identity") {
 		t.Fatalf("could not isolate the missing native fixture prerequisite: %v", err)
 	}
 }

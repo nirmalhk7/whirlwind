@@ -154,11 +154,11 @@ func HashQltyPluginCatalog(output []byte) (string, error) {
 	}
 	var document yaml.Node
 	if err := yaml.Unmarshal(output, &document); err != nil || len(document.Content) != 1 {
-		return "", errors.New("Qlty plugin catalog is not valid YAML")
+		return "", errors.New("invalid YAML in Qlty plugin catalog")
 	}
 	root := document.Content[0]
 	if root.Kind != yaml.MappingNode {
-		return "", errors.New("Qlty plugin catalog has no mapping root")
+		return "", errors.New("missing mapping root in Qlty plugin catalog")
 	}
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value == "plugins" {
@@ -166,13 +166,13 @@ func HashQltyPluginCatalog(output []byte) (string, error) {
 			canonicalizeQltyCatalogNode(plugins)
 			canonical, err := yaml.Marshal(plugins)
 			if err != nil || len(canonical) == 0 {
-				return "", errors.New("Qlty plugin catalog is empty or invalid")
+				return "", errors.New("empty or invalid Qlty plugin catalog")
 			}
 			hash := sha256.Sum256(canonical)
 			return hex.EncodeToString(hash[:]), nil
 		}
 	}
-	return "", errors.New("Qlty config output lacks effective plugins catalog")
+	return "", errors.New("missing effective plugins catalog in Qlty config output")
 }
 
 func canonicalizeQltyCatalogNode(node *yaml.Node) {
@@ -222,16 +222,16 @@ func qltyReportVersion(output string) (string, error) {
 		} `json:"runs"`
 	}
 	if err := json.Unmarshal([]byte(output), &report); err != nil || report.Version != "2.1.0" || len(report.Runs) == 0 {
-		return "", errors.New("Qlty SARIF lacks complete runtime version evidence")
+		return "", errors.New("missing complete runtime version evidence in Qlty SARIF")
 	}
 	version := ""
 	for _, run := range report.Runs {
 		driver := run.Tool.Driver
 		if driver.Name != "qlty" || strings.TrimSpace(driver.Version) == "" || strings.TrimSpace(driver.SemanticVersion) == "" || strings.ContainsAny(driver.Version+driver.SemanticVersion, "\x00\r\n") {
-			return "", errors.New("Qlty SARIF lacks Qlty driver version")
+			return "", errors.New("missing driver version in Qlty SARIF")
 		}
 		if version != "" && version != driver.Version {
-			return "", errors.New("Qlty SARIF contains incompatible driver versions")
+			return "", errors.New("incompatible driver versions in Qlty SARIF")
 		}
 		version = driver.Version
 	}
@@ -280,7 +280,7 @@ func installedQualityTools(root string) ([]model.QualityToolIdentity, error) {
 		return tools[i].Name+"@"+tools[i].Version < tools[j].Name+"@"+tools[j].Version
 	})
 	if len(tools) == 0 {
-		return nil, errors.New("Qlty installed no scanner runtime packages")
+		return nil, errors.New("no scanner runtime packages were installed by Qlty")
 	}
 	return tools, nil
 }
@@ -318,11 +318,11 @@ func installedQualityPackage(toolRoot, toolName, name string) (model.QualityTool
 	}
 	info, err := os.Lstat(filepath.Join(toolRoot, name+".done"))
 	if err != nil || !info.Mode().IsRegular() {
-		return identity, fmt.Errorf("Qlty tool package %s/%s lacks completed-install marker", toolName, name)
+		return identity, fmt.Errorf("missing completed-install marker for Qlty tool package %s/%s", toolName, name)
 	}
 	hasAssets, err := qualityPackageHasAssets(filepath.Join(toolRoot, name))
 	if err != nil || !hasAssets {
-		return identity, fmt.Errorf("Qlty tool package %s/%s contains no runtime assets", toolName, name)
+		return identity, fmt.Errorf("no runtime assets in Qlty tool package %s/%s", toolName, name)
 	}
 	return model.QualityToolIdentity{Name: toolName, Version: match[1], Fingerprint: match[2]}, nil
 }
@@ -351,7 +351,7 @@ func qualityPackageHasAssets(root string) (bool, error) {
 func hashQualityTree(root string) (string, error) {
 	info, err := os.Lstat(root)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return "", errors.New("Qlty scanner runtime directory is missing or unsafe")
+		return "", errors.New("missing or unsafe Qlty scanner runtime directory")
 	}
 	rooted, err := os.OpenRoot(root)
 	if err != nil {
@@ -386,7 +386,7 @@ func (tree *qualityTreeHasher) recordEntry(path string, entry os.DirEntry, walkE
 	}
 	tree.count++
 	if tree.count > qualityRuntimeFileLimit {
-		return errors.New("Qlty scanner runtime exceeds file-count limit")
+		return errors.New("file-count limit exceeded by Qlty scanner runtime")
 	}
 	return tree.recordPath(relative)
 }
@@ -410,7 +410,7 @@ func (tree *qualityTreeHasher) recordPath(relative string) error {
 	case info.Mode().IsRegular():
 		return tree.recordFile(path)
 	default:
-		return errors.New("Qlty scanner runtime contains a special file")
+		return errors.New("special file in Qlty scanner runtime")
 	}
 }
 
@@ -422,7 +422,7 @@ func (tree *qualityTreeHasher) recordLink(relative string) error {
 	}
 	canonicalTarget, err := rootedQualityLinkTarget(tree.root, relative, target)
 	if err != nil {
-		return fmt.Errorf("Qlty scanner runtime symlink %s -> %q is unsafe: %w", path, target, err)
+		return fmt.Errorf("unsafe symlink %s -> %q in Qlty scanner runtime: %w", path, target, err)
 	}
 	writeQualityRecordField(tree.digest, []byte("symlink"))
 	writeQualityRecordField(tree.digest, []byte(filepath.ToSlash(canonicalTarget)))
@@ -440,7 +440,7 @@ func (tree *qualityTreeHasher) recordFile(path string) error {
 	closeErr := file.Close()
 	tree.bytes += written
 	if tree.bytes > qualityRuntimeByteLimit {
-		return errors.New("Qlty scanner runtime exceeds byte limit")
+		return errors.New("byte limit exceeded by Qlty scanner runtime")
 	}
 	if err := errors.Join(copyErr, closeErr); err != nil {
 		return err
@@ -593,7 +593,7 @@ func (copier *qualityTreeCopier) copyPath(ctx context.Context, relative string) 
 	case info.Mode().IsRegular():
 		return copier.copyFile(ctx, relative, target, info.Mode().Perm())
 	default:
-		return errors.New("Qlty scanner runtime contains a special file")
+		return errors.New("special file in Qlty scanner runtime")
 	}
 }
 

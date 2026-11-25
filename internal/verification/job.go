@@ -143,7 +143,7 @@ func (m JobManifest) validateDefinition() error {
 		return m.validateOfflineDocker()
 	}
 	if hasQltyCheck(m.Commands) && m.Quality == nil {
-		return errors.New("Qlty verification requires frozen external quality configuration")
+		return errors.New("verification with Qlty requires frozen external quality configuration")
 	}
 	return nil
 }
@@ -166,7 +166,7 @@ func (m JobManifest) validateFrozenQuality() error {
 		return err
 	}
 	if m.Purpose != ProjectSetupPurpose && m.Quality.Identity == nil && hasQltyCheck(m.Commands) {
-		return errors.New("Qlty verification requires an approved runtime identity; rerun project setup")
+		return errors.New("verification with Qlty requires an approved runtime identity; rerun project setup")
 	}
 	if filepath.Clean(m.Root) != filepath.Join(m.Quality.Root, "jobs", m.JobID) {
 		return errors.New("quality staging must stay under approved external quality root")

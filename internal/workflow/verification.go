@@ -59,7 +59,7 @@ func (e *Engine) verify(ctx context.Context, p model.Project, t *model.Execution
 		return errors.Join(err, run.save())
 	}
 	if verification.ChangesQltyConfiguration(strings.Split(files, "\n")) {
-		message := "Qlty configuration or ignore files changed; baseline comparison is invalid until quality policy is unchanged"
+		message := "changes to Qlty configuration or ignore files invalidate baseline comparison until quality policy is unchanged"
 		blocked := verification.Report{Passed: false, Results: []verification.Result{{Name: "qlty-config-comparability", Passed: false, Error: message}}}
 		return run.finish(blocked, blocked, errors.New(message))
 	}

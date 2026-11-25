@@ -151,7 +151,7 @@ func (r *jobRunner) executeCommand(ctx context.Context, stage string, index int,
 	var quality jobQltyEvidence
 	if isQltyCheckCommand(command.Command) {
 		if r.manifest.Quality == nil {
-			return result, errors.New("Qlty verification requires frozen external quality configuration")
+			return result, errors.New("verification with Qlty requires frozen external quality configuration")
 		}
 		if err == nil {
 			quality, err = r.preflightQlty(run, stage, command, profile)
@@ -277,7 +277,7 @@ func (r *jobRunner) qualifyQltyCatalog(ctx context.Context, stage string, comman
 	}
 	var output, diagnostics capped
 	if _, err := executeJobProcess(ctx, stage, probe, profile, &output, &diagnostics); err != nil {
-		return "", fmt.Errorf("Qlty plugin catalog preflight failed: %w", err)
+		return "", fmt.Errorf("preflight check for the Qlty plugin catalog failed: %w", err)
 	}
 	const mismatch = "effective Qlty plugin catalog differs from approved identity; rerun project setup and approval"
 	observed, err := HashQltyPluginCatalog(output.data)

@@ -476,7 +476,7 @@ func (e *Engine) finishProjectSetup(ctx context.Context, record model.Record, op
 	defer cancel()
 	if failure == nil && (externalQualityConfigured(project) || evidence.Onboarding) {
 		if evidence.Report.QualityIdentity == nil || evidence.Report.QualityIdentity.Validate() != nil {
-			failure = errors.New("Qlty setup completed without a valid frozen scanner runtime identity; retry project setup")
+			failure = errors.New("setup completed without a valid frozen Qlty scanner runtime identity; retry project setup")
 		} else {
 			project.QualityIdentity = evidence.Report.QualityIdentity
 		}

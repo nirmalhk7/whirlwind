@@ -73,7 +73,7 @@ func RunLocalJob(ctx context.Context, binary string, manifest JobManifest, obser
 	return readJobReport(manifest)
 }
 
-const jobQualityIdentityConflict = "Qlty checks produced incompatible runtime identities"
+const jobQualityIdentityConflict = "incompatible runtime identities from Qlty checks"
 
 func (report JobReport) Validate(m JobManifest) error {
 	if err := m.validateDefinition(); err != nil {
@@ -127,12 +127,12 @@ func (report JobReport) validateCommandResults(m JobManifest) (bool, *model.Qual
 func validateJobQltyIdentity(quality *model.QualitySnapshot, result JobResult) error {
 	if result.QualityIdentity == nil || result.QualityIdentity.Validate() != nil {
 		if result.Error != "" {
-			return fmt.Errorf("Qlty report lacks complete actual runtime identity: %s", result.Error)
+			return fmt.Errorf("missing complete actual runtime identity in Qlty report: %s", result.Error)
 		}
-		return errors.New("Qlty report lacks complete actual runtime identity")
+		return errors.New("missing complete actual runtime identity in Qlty report")
 	}
 	if quality != nil && quality.Identity != nil && !model.SameQualityIdentity(quality.Identity, result.QualityIdentity) {
-		return errors.New("Qlty runtime identity does not match approved setup")
+		return errors.New("runtime identity from Qlty does not match approved setup")
 	}
 	return nil
 }
