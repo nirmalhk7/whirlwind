@@ -238,7 +238,7 @@ func (e *Engine) persistProjectSetupProgress(ctx context.Context, record *model.
 }
 
 func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project, id string, evidence projectSetupEvidence) (verification.JobManifest, error) {
-	if evidence.Onboarding && evidence.Phase != "" && evidence.Phase != "catalog" && evidence.Phase != "qualify" {
+	if evidence.Onboarding && !validOnboardingPhase(evidence.Phase) {
 		return verification.JobManifest{}, errors.New("unknown durable project setup phase; explicitly retry setup")
 	}
 	rules, err := e.projectPolicy(ctx, project)
@@ -248,25 +248,52 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 	if project.ManagedPolicy {
 		project.Policy = rules
 	}
-	hash := project.PolicyHash
-	head, err := github.Run(ctx, project.Path, "git", "rev-parse", "HEAD")
+	manifest, err := e.frozenProjectSetupManifest(ctx, project, id)
 	if err != nil {
 		return verification.JobManifest{}, err
 	}
-	tree, err := github.Run(ctx, project.Path, "git", "rev-parse", head+"^{tree}")
-	if err != nil {
-		return verification.JobManifest{}, err
-	}
-	manifest := verification.JobManifest{Version: 1, Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: id, JobID: id, ConfigurationHash: hash, CandidateCommit: head, CandidateTree: tree, BaseCommit: head, Repository: project.Path, Root: filepath.Join(e.Root, "project_setup", id)}
 	if rules.OfflineDockerImage != "" {
-		if !project.ManagedPolicy {
-			return verification.JobManifest{}, errors.New("offline setup requires approved external policy")
-		}
-		manifest.OfflineDockerImage, manifest.PolicyHash = rules.OfflineDockerImage, hash
-		manifest.Commands = verificationJobCommands(rules.Checks)
-		return manifest, manifest.Validate()
+		return offlineProjectSetupManifest(manifest, project, rules)
 	}
-	profile, err := execution.ForPolicy(project.Path, true, hash, rules.Sandbox)
+	return e.nativeProjectSetupManifest(ctx, manifest, project, rules, evidence)
+}
+
+func validOnboardingPhase(phase string) bool {
+	switch phase {
+	case "", "catalog", "qualify":
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *Engine) frozenProjectSetupManifest(ctx context.Context, project model.Project, id string) (verification.JobManifest, error) {
+	head, err := github.Run(ctx, project.Path, "git", gitRevParseCommand, "HEAD")
+	if err != nil {
+		return verification.JobManifest{}, err
+	}
+	tree, err := github.Run(ctx, project.Path, "git", gitRevParseCommand, head+"^{tree}")
+	if err != nil {
+		return verification.JobManifest{}, err
+	}
+	return verification.JobManifest{
+		Version: 1, Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: id, JobID: id,
+		ConfigurationHash: project.PolicyHash, CandidateCommit: head, CandidateTree: tree, BaseCommit: head,
+		Repository: project.Path, Root: filepath.Join(e.Root, "project_setup", id),
+	}, nil
+}
+
+func offlineProjectSetupManifest(manifest verification.JobManifest, project model.Project, rules model.Policy) (verification.JobManifest, error) {
+	if !project.ManagedPolicy {
+		return verification.JobManifest{}, errors.New("offline setup requires approved external policy")
+	}
+	manifest.OfflineDockerImage, manifest.PolicyHash = rules.OfflineDockerImage, project.PolicyHash
+	manifest.Commands = verificationJobCommands(rules.Checks)
+	return manifest, manifest.Validate()
+}
+
+func (e *Engine) nativeProjectSetupManifest(ctx context.Context, manifest verification.JobManifest, project model.Project, rules model.Policy, evidence projectSetupEvidence) (verification.JobManifest, error) {
+	profile, err := execution.ForPolicy(project.Path, true, project.PolicyHash, rules.Sandbox)
 	if err != nil {
 		return verification.JobManifest{}, err
 	}
@@ -274,88 +301,105 @@ func (e *Engine) projectSetupManifest(ctx context.Context, project model.Project
 		return verification.JobManifest{}, errors.New("project setup requires native nono")
 	}
 	manifest.Launcher, manifest.Sandbox = profile.Launcher, rules.Sandbox
-	if evidence.Onboarding && evidence.Phase == "" {
-		qualityPolicy := project.Policy.Quality
-		if qualityPolicy == nil {
-			qualityPolicy = &model.QualityPolicy{}
-		}
-		qualityRoot, err := externalQualityRootLocation(project, qualityPolicy)
-		if err != nil {
-			return verification.JobManifest{}, err
-		}
-		manifest.Quality = &model.QualitySnapshot{Root: qualityRoot, Files: map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n[[source]]\nname = \"default\"\ndefault = true\n"}}
-		manifest.Root = filepath.Join(qualityRoot, "jobs", id)
-		manifest.Commands = []verification.JobCommand{
-			{Name: "qlty-catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30},
-		}
-		manifest.ConfigurationHash = evidenceDigest(manifest.Quality)
-		return manifest, manifest.Validate()
+	if evidence.Onboarding {
+		return e.onboardingSetupManifest(ctx, manifest, project, rules.Checks, evidence)
 	}
-	if evidence.Onboarding && evidence.Phase == "catalog" {
+	if externalQualityConfigured(project) {
 		snapshot, err := externalQualitySnapshot(project)
 		if err != nil {
 			return verification.JobManifest{}, err
 		}
-		if snapshot.Root != evidence.QualityRoot || evidenceDigest(snapshot) != evidence.SnapshotHash {
+		applySetupQualitySnapshot(&manifest, snapshot)
+	}
+	manifest.Commands = verificationJobCommands(rules.Checks)
+	return manifest, manifest.Validate()
+}
+
+func (e *Engine) onboardingSetupManifest(ctx context.Context, manifest verification.JobManifest, project model.Project, checks []model.Check, evidence projectSetupEvidence) (verification.JobManifest, error) {
+	if evidence.Phase == "" {
+		return planSetupCatalogProbe(manifest, project)
+	}
+	snapshot, err := externalQualitySnapshot(project)
+	if err != nil {
+		return verification.JobManifest{}, err
+	}
+	if evidence.Phase == "catalog" {
+		if !setupSnapshotMatches(snapshot, evidence) {
 			return verification.JobManifest{}, errors.New("prepared external Qlty configuration changed before catalog probe; retry project setup")
 		}
-		manifest.Quality = &snapshot
-		manifest.Root = filepath.Join(snapshot.Root, "jobs", id)
-		manifest.ConfigurationHash = evidenceDigest(snapshot)
-		manifest.Commands = []verification.JobCommand{{Name: "qlty-effective-catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
-		return manifest, manifest.Validate()
+		return setupCatalogProbe(manifest, snapshot, "qlty-effective-catalog")
 	}
-	if evidence.Onboarding && evidence.Phase == "qualify" {
-		snapshot, err := externalQualitySnapshot(project)
-		if err != nil {
-			return verification.JobManifest{}, err
-		}
-		if snapshot.Root != evidence.QualityRoot || evidenceDigest(snapshot) != evidence.SnapshotHash {
-			return verification.JobManifest{}, errors.New("prepared external Qlty configuration changed before qualification; retry project setup")
-		}
-		priorRecord, err := e.Store.Get(ctx, "operations", evidence.PreviousOperationID)
-		if err != nil {
-			return verification.JobManifest{}, fmt.Errorf("load retained Qlty setup catalog: %w", err)
-		}
-		priorOperation, err := store.Decode[model.Operation](priorRecord)
-		if err != nil {
-			return verification.JobManifest{}, err
-		}
-		if priorOperation.Kind != "project_setup" || priorOperation.Subject != project.ID || priorOperation.Stage != "complete" {
-			return verification.JobManifest{}, errors.New("effective Qlty catalog checkpoint is not complete for this project; retry project setup")
-		}
-		priorEvidence := setupEvidenceFromInput(priorOperation.Input)
-		if !priorEvidence.Onboarding || priorEvidence.Phase != "catalog" || priorEvidence.Manifest.OperationID != priorRecord.ID {
-			return verification.JobManifest{}, errors.New("effective Qlty catalog checkpoint has invalid setup authority; retry project setup")
-		}
-		catalog, _, err := verification.ReadJobStreams(priorEvidence.Manifest.Root, 0)
-		if err != nil {
-			return verification.JobManifest{}, fmt.Errorf("read retained Qlty plugin catalog: %w", err)
-		}
-		catalogHash, err := verification.HashQltyPluginCatalog([]byte(catalog))
-		if err != nil || catalogHash != evidence.PluginCatalogHash {
-			return verification.JobManifest{}, errors.New("retained Qlty plugin catalog is invalid or changed; retry project setup")
-		}
-		snapshot.PluginCatalog = []byte(catalog)
-		snapshot.Identity = nil
-		manifest.Quality = &snapshot
-		manifest.Root = filepath.Join(snapshot.Root, "jobs", id)
-		manifest.ConfigurationHash = evidenceDigest(snapshot)
-	} else if externalQualityConfigured(project) {
-		snapshot, err := externalQualitySnapshot(project)
-		if err != nil {
-			return verification.JobManifest{}, err
-		}
-		manifest.Quality = &snapshot
-		manifest.Root = filepath.Join(snapshot.Root, "jobs", id)
-		manifest.ConfigurationHash = evidenceDigest(snapshot)
+	if !setupSnapshotMatches(snapshot, evidence) {
+		return verification.JobManifest{}, errors.New("prepared external Qlty configuration changed before qualification; retry project setup")
 	}
-	checks := rules.Checks
-	if evidence.Onboarding && evidence.Phase == "qualify" {
-		checks = append(append([]model.Check(nil), checks...), model.Check{Name: "qlty-qualification", Mode: "autofix", Command: []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}, TimeoutSeconds: 600, ReportFormat: "sarif"})
+	catalog, err := e.retainedSetupCatalog(ctx, project.ID, evidence)
+	if err != nil {
+		return verification.JobManifest{}, err
 	}
+	snapshot.PluginCatalog, snapshot.Identity = catalog, nil
+	applySetupQualitySnapshot(&manifest, snapshot)
+	checks = append(append([]model.Check(nil), checks...), model.Check{Name: "qlty-qualification", Mode: "autofix", Command: []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}, TimeoutSeconds: 600, ReportFormat: "sarif"})
 	manifest.Commands = verificationJobCommands(checks)
 	return manifest, manifest.Validate()
+}
+
+func planSetupCatalogProbe(manifest verification.JobManifest, project model.Project) (verification.JobManifest, error) {
+	qualityPolicy := project.Policy.Quality
+	if qualityPolicy == nil {
+		qualityPolicy = &model.QualityPolicy{}
+	}
+	root, err := externalQualityRootLocation(project, qualityPolicy)
+	if err != nil {
+		return verification.JobManifest{}, err
+	}
+	snapshot := model.QualitySnapshot{Root: root, Files: map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n[[source]]\nname = \"default\"\ndefault = true\n"}}
+	return setupCatalogProbe(manifest, snapshot, "qlty-catalog")
+}
+
+func setupCatalogProbe(manifest verification.JobManifest, snapshot model.QualitySnapshot, name string) (verification.JobManifest, error) {
+	applySetupQualitySnapshot(&manifest, snapshot)
+	manifest.Commands = []verification.JobCommand{
+		{Name: name, Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30},
+	}
+	return manifest, manifest.Validate()
+}
+
+func applySetupQualitySnapshot(manifest *verification.JobManifest, snapshot model.QualitySnapshot) {
+	manifest.Quality = &snapshot
+	manifest.Root = filepath.Join(snapshot.Root, "jobs", manifest.JobID)
+	manifest.ConfigurationHash = evidenceDigest(snapshot)
+}
+
+func setupSnapshotMatches(snapshot model.QualitySnapshot, evidence projectSetupEvidence) bool {
+	return snapshot.Root == evidence.QualityRoot && evidenceDigest(snapshot) == evidence.SnapshotHash
+}
+
+func (e *Engine) retainedSetupCatalog(ctx context.Context, projectID string, evidence projectSetupEvidence) ([]byte, error) {
+	priorRecord, err := e.Store.Get(ctx, "operations", evidence.PreviousOperationID)
+	if err != nil {
+		return nil, fmt.Errorf("load retained Qlty setup catalog: %w", err)
+	}
+	priorOperation, err := store.Decode[model.Operation](priorRecord)
+	if err != nil {
+		return nil, err
+	}
+	if priorOperation.Kind != "project_setup" || priorOperation.Subject != projectID || priorOperation.Stage != "complete" {
+		return nil, errors.New("effective Qlty catalog checkpoint is not complete for this project; retry project setup")
+	}
+	priorEvidence := setupEvidenceFromInput(priorOperation.Input)
+	if !priorEvidence.Onboarding || priorEvidence.Phase != "catalog" || priorEvidence.Manifest.OperationID != priorRecord.ID {
+		return nil, errors.New("effective Qlty catalog checkpoint has invalid setup authority; retry project setup")
+	}
+	catalog, _, err := verification.ReadJobStreams(priorEvidence.Manifest.Root, 0)
+	if err != nil {
+		return nil, fmt.Errorf("read retained Qlty plugin catalog: %w", err)
+	}
+	data := []byte(catalog)
+	catalogHash, err := verification.HashQltyPluginCatalog(data)
+	if err != nil || catalogHash != evidence.PluginCatalogHash {
+		return nil, errors.New("retained Qlty plugin catalog is invalid or changed; retry project setup")
+	}
+	return data, nil
 }
 
 func setupEvidenceFromInput(value any) projectSetupEvidence {
