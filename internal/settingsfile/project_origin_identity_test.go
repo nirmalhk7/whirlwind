@@ -77,15 +77,7 @@ func TestOriginChangesKeepSameConfiguredCheckoutAndHistory(t *testing.T) {
 		if err != nil || !reflect.DeepEqual(got, want) || records[0].Version != expectedVersion {
 			t.Fatalf("unexpected metadata or lost human state: got %+v (v%d), want %+v (v%d): %v", got, records[0].Version, want, expectedVersion, err)
 		}
-		bindings := savedHealthBindings(t, source)
-		if len(bindings) != 2 {
-			t.Fatal("configured path aliases were lost")
-		}
-		for _, binding := range bindings {
-			if binding.ProjectID != project.ID || binding.CanonicalPath != repository || binding.Status != "OK" {
-				t.Fatalf("configured alias no longer selects the same project: %+v", binding)
-			}
-		}
+		assertOriginRefreshBindings(t, source, repository, project.ID)
 		after, err := source.store.List(t.Context(), "operations")
 		if err != nil || !reflect.DeepEqual(after, operations) {
 			t.Fatalf("origin update duplicated work or lost history: %+v, %v", after, err)
@@ -96,6 +88,19 @@ func TestOriginChangesKeepSameConfiguredCheckoutAndHistory(t *testing.T) {
 	assertRefresh(fixtureOrigin, fixtureOrigin, previous.Version+2)
 	projectOriginGit(t, repository, "remote", "remove", "origin")
 	assertRefresh(repository, "", previous.Version+3)
+}
+
+func assertOriginRefreshBindings(t *testing.T, source *Source, repository, projectID string) {
+	t.Helper()
+	bindings := savedHealthBindings(t, source)
+	if len(bindings) != 2 {
+		t.Fatal("configured path aliases were lost")
+	}
+	for _, binding := range bindings {
+		if binding.ProjectID != projectID || binding.CanonicalPath != repository || binding.Status != "OK" {
+			t.Fatalf("configured alias no longer selects the same project: %+v", binding)
+		}
+	}
 }
 
 func TestRetargetedAliasDoesNotReuseProjectFromDifferentCheckout(t *testing.T) {
@@ -209,6 +214,29 @@ func TestHostedRepositoryKeyRemainsStableAcrossEquivalentOriginMetadata(t *testi
 }
 
 func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *testing.T) {
+	fixture := prepareLegacyCheckout(t)
+	history := seedLegacyCheckoutHistory(t, fixture)
+	issues := seedLegacyCheckoutIssues(t, fixture)
+	restarted := reopenLegacyCheckout(t, fixture)
+	hosted := fixture.hosted
+	hosted.CheckoutAliases = []string{fixture.old.ID}
+	assertLegacyCheckout(t, restarted, hosted, history)
+	assertLegacyIssueOwner(t, fixture, issues)
+
+	hosted = assertReplacementOriginIsolation(t, restarted, fixture, hosted, history, issues)
+	assertRestoredOriginHistory(t, restarted, fixture, hosted, history, issues)
+	assertLegacyCheckoutReferences(t, fixture.source)
+}
+
+type legacyCheckoutFixture struct {
+	source *Source
+	repo   string
+	old    model.Record
+	hosted model.Project
+}
+
+func prepareLegacyCheckout(t *testing.T) legacyCheckoutFixture {
+	t.Helper()
 	source := editorSource(t)
 	ctx := t.Context()
 	repo := healthRepository(t)
@@ -246,6 +274,12 @@ func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *tes
 	if err := source.store.Put(ctx, "project_status", status.ID, bindings, status.Version); err != nil {
 		t.Fatal(err)
 	}
+	return legacyCheckoutFixture{source: source, repo: repo, old: old, hosted: hosted}
+}
+
+func seedLegacyCheckoutHistory(t *testing.T, fixture legacyCheckoutFixture) []model.Record {
+	t.Helper()
+	ctx, source, old, hosted := t.Context(), fixture.source, fixture.old, fixture.hosted
 	for _, id := range []string{old.ID, hosted.ID} {
 		for _, kind := range []string{"project_setup", "ideation"} {
 			if err := source.store.Put(ctx, "operations", id+"-"+kind, model.Operation{Subject: id, Kind: kind, Stage: "complete"}, 0); err != nil {
@@ -265,6 +299,18 @@ func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	return history
+}
+
+type legacyCheckoutIssues struct {
+	oldIssue, priorIssue     model.Issue
+	oldOwnerPlan, plan       model.ExecutionPlan
+	ownerSnapshot, priorPlan model.Record
+}
+
+func seedLegacyCheckoutIssues(t *testing.T, fixture legacyCheckoutFixture) legacyCheckoutIssues {
+	t.Helper()
+	ctx, source, old, hosted := t.Context(), fixture.source, fixture.old, fixture.hosted
 	oldIssue := model.Issue{Number: 19, Title: "Issue owned by the other identity", State: "OPEN", Labels: []string{"whirlwind:ready"}}
 	owner := model.Project{ID: old.ID, Repo: hosted.Repo}
 	oldOwnerPlan, err := source.store.IngestIssue(ctx, owner, oldIssue)
@@ -284,6 +330,12 @@ func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	return legacyCheckoutIssues{oldIssue: oldIssue, priorIssue: priorIssue, oldOwnerPlan: oldOwnerPlan, plan: plan, ownerSnapshot: ownerSnapshot, priorPlan: priorPlan}
+}
+
+func reopenLegacyCheckout(t *testing.T, fixture legacyCheckoutFixture) *Source {
+	t.Helper()
+	ctx, source, repo, old := t.Context(), fixture.source, fixture.repo, fixture.old
 	// A checkout with a managed policy must ignore edits to its local policy file.
 	writeBrokenProjectPolicy(t, repo)
 
@@ -295,29 +347,36 @@ func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *tes
 	if err != nil || !reflect.DeepEqual(archived.Data, old.Data) || archived.Version != old.Version {
 		t.Fatalf("archive did not preserve the original registration: %+v, %v", archived, err)
 	}
-	hosted.CheckoutAliases = []string{first.ProjectID}
-	assertCheckout := func(want model.Project) model.Project {
-		t.Helper()
-		rows, err := source.store.List(ctx, "projects")
-		if err != nil || len(rows) != 1 || rows[0].ID != want.ID {
-			t.Fatalf("expected one active registration: %v, %v", rows, err)
-		}
-		got, err := store.Decode[model.Project](rows[0])
-		if err != nil || !reflect.DeepEqual(got, want) {
-			t.Fatalf("wrong active registration: %+v, want %+v: %v", got, want, err)
-		}
-		for _, binding := range savedHealthBindings(t, restarted) {
-			if binding.ProjectID != want.ID || binding.Status != "OK" {
-				t.Fatalf("configured alias lost its binding: %+v", binding)
-			}
-		}
-		after, err := source.store.List(ctx, "operations")
-		if err != nil || !reflect.DeepEqual(after, history) {
-			t.Fatalf("setup or run history changed: %v, %v", after, err)
-		}
-		return got
+	return restarted
+}
+
+func assertLegacyCheckout(t *testing.T, restarted *Source, want model.Project, history []model.Record) model.Project {
+	ctx := t.Context()
+	t.Helper()
+	rows, err := restarted.store.List(ctx, "projects")
+	if err != nil || len(rows) != 1 || rows[0].ID != want.ID {
+		t.Fatalf("expected one active registration: %v, %v", rows, err)
 	}
-	assertCheckout(hosted)
+	got, err := store.Decode[model.Project](rows[0])
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("wrong active registration: %+v, want %+v: %v", got, want, err)
+	}
+	for _, binding := range savedHealthBindings(t, restarted) {
+		if binding.ProjectID != want.ID || binding.Status != "OK" {
+			t.Fatalf("configured alias lost its binding: %+v", binding)
+		}
+	}
+	after, err := restarted.store.List(ctx, "operations")
+	if err != nil || !reflect.DeepEqual(after, history) {
+		t.Fatalf("setup or run history changed: %v, %v", after, err)
+	}
+	return got
+}
+
+func assertLegacyIssueOwner(t *testing.T, fixture legacyCheckoutFixture, issues legacyCheckoutIssues) {
+	t.Helper()
+	ctx, source, old, hosted := t.Context(), fixture.source, fixture.old, fixture.hosted
+	oldIssue, oldOwnerPlan, ownerSnapshot := issues.oldIssue, issues.oldOwnerPlan, issues.ownerSnapshot
 	oldIssue.Title = "Changed upstream issue"
 	held, err := source.store.IngestIssue(ctx, hosted, oldIssue)
 	if err != nil || held.ID != oldOwnerPlan.ID || held.ProjectID != old.ID {
@@ -327,13 +386,19 @@ func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *tes
 	if err != nil || !reflect.DeepEqual(ownerAfter, ownerSnapshot) {
 		t.Fatalf("the old registration's issue history changed: %+v, %v", ownerAfter, err)
 	}
+}
+
+func assertReplacementOriginIsolation(t *testing.T, restarted *Source, fixture legacyCheckoutFixture, hosted model.Project, history []model.Record, issues legacyCheckoutIssues) model.Project {
+	t.Helper()
+	ctx, source, repo := t.Context(), fixture.source, fixture.repo
+	priorIssue, plan := issues.priorIssue, issues.plan
 	const replacement = "https://github.com/example/replacement"
 	projectOriginGit(t, repo, "remote", "set-url", "origin", replacement+".git")
 	if err := restarted.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
 	hosted.Repo, hosted.RemoteURL = replacement, replacement
-	current := assertCheckout(hosted)
+	current := assertLegacyCheckout(t, restarted, hosted, history)
 	matches, err := source.store.IssueBoundToPlan(ctx, current.Repo, priorIssue.Number, plan.ID)
 	if err != nil || matches {
 		t.Fatalf("replacement origin inherited the old issue binding: %t, %v", matches, err)
@@ -344,12 +409,19 @@ func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *tes
 	if err != nil || second.ID == plan.ID || second.ProjectID != hosted.ID {
 		t.Fatalf("replacement issue did not receive its own binding: %+v, %v", second, err)
 	}
+	return hosted
+}
+
+func assertRestoredOriginHistory(t *testing.T, restarted *Source, fixture legacyCheckoutFixture, hosted model.Project, history []model.Record, issues legacyCheckoutIssues) {
+	t.Helper()
+	ctx, source, repo := t.Context(), fixture.source, fixture.repo
+	priorIssue, plan, priorPlan := issues.priorIssue, issues.plan, issues.priorPlan
 	projectOriginGit(t, repo, "remote", "set-url", "origin", "git@github.com:Example/Fixture-Repository.git")
 	if err := restarted.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
 	hosted.Repo, hosted.RemoteURL = "https://github.com/Example/Fixture-Repository", "https://github.com/Example/Fixture-Repository"
-	current = assertCheckout(hosted)
+	current := assertLegacyCheckout(t, restarted, hosted, history)
 	returned, err := source.store.IngestIssue(ctx, current, priorIssue)
 	if err != nil || returned.ID != plan.ID {
 		t.Fatalf("returning to the original GitHub repository lost its legacy issue binding: %+v, %v", returned, err)
@@ -358,6 +430,11 @@ func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *tes
 	if err != nil || !reflect.DeepEqual(oldPlan, priorPlan) {
 		t.Fatalf("prior issue history changed while origin was replaced: %+v, %v", oldPlan, err)
 	}
+}
+
+func assertLegacyCheckoutReferences(t *testing.T, source *Source) {
+	t.Helper()
+	ctx := t.Context()
 	integrity, err := source.store.DB.QueryContext(ctx, "PRAGMA foreign_key_check")
 	if err != nil {
 		t.Fatal(err)
