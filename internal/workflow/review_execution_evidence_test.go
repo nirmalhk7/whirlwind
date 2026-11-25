@@ -154,7 +154,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		t.Fatalf("packed review prompt exceeds default: %d > %d", pack.EstimatedTokens, ctxengine.DefaultInputAllowance)
 	}
 	for _, required := range []string{
-		"REQ-RESULT", reviewEvidenceScannerName, `"command":["qlty","check","--all",reviewEvidenceSARIFArg]`,
+		"REQ-RESULT", reviewEvidenceScannerName, `"command":["qlty","check","--all","--sarif"]`,
 		`"exit_code":0`, `"passed":true`, `"output_artifact":"qlty-output-artifact"`,
 		`"execution_id":"execution-qlty-check"`, `"cleanup_verified":true`,
 		`"phase":"red"`, `"phase":"green"`, redArtifact.ID, greenArtifact.ID,
