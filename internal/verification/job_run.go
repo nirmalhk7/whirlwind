@@ -19,62 +19,82 @@ import (
 func (r *jobRunner) run(ctx context.Context, observe func(JobEvent) error) (JobReport, error) {
 	m := r.manifest
 	report := JobReport{Purpose: m.Purpose, ProjectID: m.ProjectID, OperationID: m.OperationID, ManifestHash: m.Digest(), PlanID: m.PlanID, PlanVersion: m.PlanVersion, PlanHash: m.PlanHash, ConfigurationHash: m.ConfigurationHash, CandidateCommit: m.CandidateCommit, CandidateTree: m.CandidateTree, Passed: true, Results: []JobResult{}}
-	var stage string
+	pending := jobCommandRun{byName: map[string]JobResult{}, observe: observe}
 	if m.OfflineDockerImage != "" {
-		var err error
-		stage, err = r.prepareJobInput(ctx)
+		stage, err := r.prepareJobInput(ctx)
 		if err != nil {
 			return report, err
 		}
-		defer func() { _ = os.RemoveAll(stage) }()
+		pending.stage = stage
+		defer func() { _ = os.RemoveAll(pending.stage) }()
 	}
-	byName := map[string]JobResult{}
 	for index, command := range m.Commands {
-		result, exists := r.results[index]
-		if !exists {
-			var err error
-			if stage == "" {
-				stage, err = r.prepareCheckout(ctx)
-				if err != nil {
-					return report, err
-				}
-			}
-			reason := r.blockedCommandReason(index, command, byName)
-			result, err = r.command(ctx, stage, index, command, reason, observe)
-			if err != nil {
-				return report, err
-			}
-			event := JobEvent{Type: "result", ManifestHash: m.Digest(), Index: index, Result: &result}
-			if err := r.record(event, observe); err != nil {
-				return report, err
-			}
-			r.results[index] = result
+		result, err := r.obtainJobResult(ctx, index, command, &pending)
+		if err != nil {
+			return report, err
 		}
-		byName[command.Name] = result
-		report.Results = append(report.Results, result)
-		if result.QualityIdentity != nil {
-			if report.QualityIdentity == nil {
-				report.QualityIdentity = result.QualityIdentity
-			} else if !model.SameQualityIdentity(report.QualityIdentity, result.QualityIdentity) {
-				return report, errors.New("Qlty checks produced incompatible runtime identities")
-			}
-		}
-		if requiredJobCommandFailed(command, result) {
-			report.Passed = false
+		pending.byName[command.Name] = result
+		if err := report.appendCommandResult(command, result); err != nil {
+			return report, err
 		}
 	}
-	if err := report.Validate(m); err != nil {
-		return report, err
+	return report, r.completeJobReport(report)
+}
+
+type jobCommandRun struct {
+	stage   string
+	byName  map[string]JobResult
+	observe func(JobEvent) error
+}
+
+func (r *jobRunner) obtainJobResult(ctx context.Context, index int, command JobCommand, pending *jobCommandRun) (JobResult, error) {
+	if result, exists := r.results[index]; exists {
+		return result, nil
+	}
+	if pending.stage == "" {
+		stage, err := r.prepareCheckout(ctx)
+		if err != nil {
+			return JobResult{}, err
+		}
+		pending.stage = stage
+	}
+	reason := r.blockedCommandReason(index, command, pending.byName)
+	result, err := r.command(ctx, pending.stage, index, command, reason, pending.observe)
+	if err != nil {
+		return result, err
+	}
+	event := JobEvent{Type: "result", ManifestHash: r.manifest.Digest(), Index: index, Result: &result}
+	if err := r.record(event, pending.observe); err != nil {
+		return result, err
+	}
+	r.results[index] = result
+	return result, nil
+}
+
+func (report *JobReport) appendCommandResult(command JobCommand, result JobResult) error {
+	report.Results = append(report.Results, result)
+	if !mergeJobQualityIdentity(&report.QualityIdentity, result.QualityIdentity) {
+		return errors.New(jobQualityIdentityConflict)
+	}
+	if requiredJobCommandFailed(command, result) {
+		report.Passed = false
+	}
+	return nil
+}
+
+func (r *jobRunner) completeJobReport(report JobReport) error {
+	if err := report.Validate(r.manifest); err != nil {
+		return err
 	}
 	if err := writeJobJSON(r.root, "report.json", report); err != nil {
-		return report, err
+		return err
 	}
 	if err := r.releaseCompletedStaging(report); err != nil {
 		// Evidence is already valid and durable. A transient filesystem error
 		// cannot change the result; reopening this journal retries cleanup.
-		log.Printf("release verification staging for job %s: %v", m.JobID, err)
+		log.Printf("release verification staging for job %s: %v", r.manifest.JobID, err)
 	}
-	return report, nil
+	return nil
 }
 
 func (r *jobRunner) command(ctx context.Context, stage string, index int, command JobCommand, blocked string, observe func(JobEvent) error) (JobResult, error) {

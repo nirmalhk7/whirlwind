@@ -73,39 +73,18 @@ func RunLocalJob(ctx context.Context, binary string, manifest JobManifest, obser
 	return readJobReport(manifest)
 }
 
+const jobQualityIdentityConflict = "Qlty checks produced incompatible runtime identities"
+
 func (report JobReport) Validate(m JobManifest) error {
 	if err := m.validateDefinition(); err != nil {
 		return err
 	}
-	if report.Purpose != m.Purpose || report.ProjectID != m.ProjectID || report.OperationID != m.OperationID || report.ManifestHash != m.Digest() || report.PlanID != m.PlanID || report.PlanVersion != m.PlanVersion || report.PlanHash != m.PlanHash || report.ConfigurationHash != m.ConfigurationHash || report.CandidateCommit != m.CandidateCommit || report.CandidateTree != m.CandidateTree || len(report.Results) != len(m.Commands) {
-		return errors.New("verification report identity or command coverage mismatch")
+	if err := report.validateManifestIdentity(m); err != nil {
+		return err
 	}
-	passed := true
-	var observedIdentity *model.QualityIdentity
-	for index, result := range report.Results {
-		command := m.Commands[index]
-		if err := validateJobResult(m, index, result); err != nil {
-			return err
-		}
-		if baselineQlty(result.Result) {
-			if result.QualityIdentity == nil || result.QualityIdentity.Validate() != nil {
-				if result.Error != "" {
-					return fmt.Errorf("Qlty report lacks complete actual runtime identity: %s", result.Error)
-				}
-				return errors.New("Qlty report lacks complete actual runtime identity")
-			}
-			if m.Quality != nil && m.Quality.Identity != nil && !model.SameQualityIdentity(m.Quality.Identity, result.QualityIdentity) {
-				return errors.New("Qlty runtime identity does not match approved setup")
-			}
-			if observedIdentity == nil {
-				observedIdentity = result.QualityIdentity
-			} else if !model.SameQualityIdentity(observedIdentity, result.QualityIdentity) {
-				return errors.New("Qlty checks produced incompatible runtime identities")
-			}
-		}
-		if requiredJobCommandFailed(command, result) {
-			passed = false
-		}
+	passed, observedIdentity, err := report.validateCommandResults(m)
+	if err != nil {
+		return err
 	}
 	if (observedIdentity == nil) != (report.QualityIdentity == nil) || observedIdentity != nil && !model.SameQualityIdentity(observedIdentity, report.QualityIdentity) {
 		return errors.New("verification report quality identity mismatch")
@@ -114,6 +93,59 @@ func (report JobReport) Validate(m JobManifest) error {
 		return errors.New("verification aggregate contradicts required command results")
 	}
 	return nil
+}
+
+func (report JobReport) validateManifestIdentity(m JobManifest) error {
+	if report.Purpose != m.Purpose || report.ProjectID != m.ProjectID || report.OperationID != m.OperationID || report.ManifestHash != m.Digest() || report.PlanID != m.PlanID || report.PlanVersion != m.PlanVersion || report.PlanHash != m.PlanHash || report.ConfigurationHash != m.ConfigurationHash || report.CandidateCommit != m.CandidateCommit || report.CandidateTree != m.CandidateTree || len(report.Results) != len(m.Commands) {
+		return errors.New("verification report identity or command coverage mismatch")
+	}
+	return nil
+}
+
+func (report JobReport) validateCommandResults(m JobManifest) (bool, *model.QualityIdentity, error) {
+	passed := true
+	var observed *model.QualityIdentity
+	for index, result := range report.Results {
+		if err := validateJobResult(m, index, result); err != nil {
+			return false, nil, err
+		}
+		if baselineQlty(result.Result) {
+			if err := validateJobQltyIdentity(m.Quality, result); err != nil {
+				return false, nil, err
+			}
+			if !mergeJobQualityIdentity(&observed, result.QualityIdentity) {
+				return false, nil, errors.New(jobQualityIdentityConflict)
+			}
+		}
+		if requiredJobCommandFailed(m.Commands[index], result) {
+			passed = false
+		}
+	}
+	return passed, observed, nil
+}
+
+func validateJobQltyIdentity(quality *model.QualitySnapshot, result JobResult) error {
+	if result.QualityIdentity == nil || result.QualityIdentity.Validate() != nil {
+		if result.Error != "" {
+			return fmt.Errorf("Qlty report lacks complete actual runtime identity: %s", result.Error)
+		}
+		return errors.New("Qlty report lacks complete actual runtime identity")
+	}
+	if quality != nil && quality.Identity != nil && !model.SameQualityIdentity(quality.Identity, result.QualityIdentity) {
+		return errors.New("Qlty runtime identity does not match approved setup")
+	}
+	return nil
+}
+
+func mergeJobQualityIdentity(first **model.QualityIdentity, current *model.QualityIdentity) bool {
+	if current == nil {
+		return true
+	}
+	if *first == nil {
+		*first = current
+		return true
+	}
+	return model.SameQualityIdentity(*first, current)
 }
 
 // ReadJobStreams restores bounded complete evidence for parsers/artifact capture;

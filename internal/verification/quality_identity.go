@@ -270,33 +270,11 @@ func installedQualityTools(root string) ([]model.QualityToolIdentity, error) {
 		if !toolEntry.IsDir() || strings.HasSuffix(toolEntry.Name(), qualityInstallationDebugSuffix) {
 			continue
 		}
-		toolName := toolEntry.Name()
-		if !regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`).MatchString(toolName) {
-			return nil, fmt.Errorf("invalid installed Qlty tool name %q", toolName)
-		}
-		packages, err := os.ReadDir(filepath.Join(root, toolName))
+		packages, err := installedQualityPackages(root, toolEntry.Name())
 		if err != nil {
 			return nil, err
 		}
-		for _, pkg := range packages {
-			if !pkg.IsDir() || strings.HasSuffix(pkg.Name(), qualityInstallationDebugSuffix) {
-				continue
-			}
-			match := qualityPackageDirectory.FindStringSubmatch(pkg.Name())
-			if match == nil || strings.TrimSpace(match[1]) == "" {
-				return nil, fmt.Errorf("unrecognized installed Qlty tool package %s/%s", toolName, pkg.Name())
-			}
-			marker := filepath.Join(root, toolName, pkg.Name()+".done")
-			info, err := os.Lstat(marker)
-			if err != nil || !info.Mode().IsRegular() {
-				return nil, fmt.Errorf("Qlty tool package %s/%s lacks completed-install marker", toolName, pkg.Name())
-			}
-			hasAssets, err := qualityPackageHasAssets(filepath.Join(root, toolName, pkg.Name()))
-			if err != nil || !hasAssets {
-				return nil, fmt.Errorf("Qlty tool package %s/%s contains no runtime assets", toolName, pkg.Name())
-			}
-			tools = append(tools, model.QualityToolIdentity{Name: toolName, Version: match[1], Fingerprint: match[2]})
-		}
+		tools = append(tools, packages...)
 	}
 	sort.Slice(tools, func(i, j int) bool {
 		return tools[i].Name+"@"+tools[i].Version < tools[j].Name+"@"+tools[j].Version
@@ -305,6 +283,48 @@ func installedQualityTools(root string) ([]model.QualityToolIdentity, error) {
 		return nil, errors.New("Qlty installed no scanner runtime packages")
 	}
 	return tools, nil
+}
+
+var qualityToolName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
+
+func installedQualityPackages(root, toolName string) ([]model.QualityToolIdentity, error) {
+	if !qualityToolName.MatchString(toolName) {
+		return nil, fmt.Errorf("invalid installed Qlty tool name %q", toolName)
+	}
+	toolRoot := filepath.Join(root, toolName)
+	packages, err := os.ReadDir(toolRoot)
+	if err != nil {
+		return nil, err
+	}
+	var tools []model.QualityToolIdentity
+	for _, pkg := range packages {
+		if !pkg.IsDir() || strings.HasSuffix(pkg.Name(), qualityInstallationDebugSuffix) {
+			continue
+		}
+		identity, err := installedQualityPackage(toolRoot, toolName, pkg.Name())
+		if err != nil {
+			return nil, err
+		}
+		tools = append(tools, identity)
+	}
+	return tools, nil
+}
+
+func installedQualityPackage(toolRoot, toolName, name string) (model.QualityToolIdentity, error) {
+	var identity model.QualityToolIdentity
+	match := qualityPackageDirectory.FindStringSubmatch(name)
+	if match == nil || strings.TrimSpace(match[1]) == "" {
+		return identity, fmt.Errorf("unrecognized installed Qlty tool package %s/%s", toolName, name)
+	}
+	info, err := os.Lstat(filepath.Join(toolRoot, name+".done"))
+	if err != nil || !info.Mode().IsRegular() {
+		return identity, fmt.Errorf("Qlty tool package %s/%s lacks completed-install marker", toolName, name)
+	}
+	hasAssets, err := qualityPackageHasAssets(filepath.Join(toolRoot, name))
+	if err != nil || !hasAssets {
+		return identity, fmt.Errorf("Qlty tool package %s/%s contains no runtime assets", toolName, name)
+	}
+	return model.QualityToolIdentity{Name: toolName, Version: match[1], Fingerprint: match[2]}, nil
 }
 
 func qualityPackageHasAssets(root string) (bool, error) {
