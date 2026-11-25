@@ -48,6 +48,8 @@ Coding and review repeat without a fixed correction limit. Evidence binds the ex
 
 Questions and permission requests pause only the affected plan and remain saved outside the terminal session. Answer the current request in the dashboard. Ordinary answers resume its originating role and retain history and retry counters. A specification-changing answer returns through planning and human approval before execution. Permission replies remain scoped to the current exact request and policy.
 
+Task and run details separate the worker heartbeat/lease from the last recorded ACP update. A quiet adapter can have a valid worker lease, and a recent update does not prove the lease is valid. Check the saved error and run logs before treating an exit, deadline, or transport warning as the same failure.
+
 Each active agent attempt has a fixed 300-second deadline. Progress, tools, and heartbeats do not extend it. Human waiting ends the active attempt; a normal supervisor restart preserves the original deadline of work still active.
 
 Recoverable process, transport, and sandbox failures allow three restarts after the initial launch of the same configured choice, with default backoff of 1, 2, and 4 seconds. Persisted counters survive restart. Exhaustion advances through the same role's queue; an unavailable model or expired deadline may advance directly. Exhausting the queue saves state and pauses for human retry or configuration repair.
