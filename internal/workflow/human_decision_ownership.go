@@ -17,27 +17,45 @@ func (e *Engine) pendingDecisionOwner(ctx context.Context, taskID, attemptID str
 	if err != nil {
 		return taskRecord, task, model.Attempt{}, "", err
 	}
-	if task.Stage != "paused" || task.Wait == nil || task.Wait.Kind != "human_decision" || task.PlanVersion != planVersion || task.Wait.PlanVersion != planVersion || task.ResumeStage == "" || task.Wait.ResumeStage != task.ResumeStage {
+	if !isPendingHumanDecision(task, planVersion) {
 		return taskRecord, task, model.Attempt{}, "", store.ErrConflict
 	}
 	if err := e.validatePendingDecisionAttempt(ctx, task, planVersion, attemptID); err != nil {
 		return taskRecord, task, model.Attempt{}, "", err
 	}
-	attemptRecord, err := e.Store.Get(ctx, "sessions", attemptID)
-	if err != nil {
-		return taskRecord, task, model.Attempt{}, "", err
-	}
-	attempt, err := store.Decode[model.Attempt](attemptRecord)
+	attempt, err := e.loadPendingDecisionAttempt(ctx, task, attemptID, planVersion)
 	if err != nil {
 		return taskRecord, task, attempt, "", err
 	}
+	return taskRecord, task, attempt, task.ResumeStage, nil
+}
+
+func isPendingHumanDecision(task model.ExecutionPlan, planVersion int) bool {
+	if task.Stage != "paused" || task.Wait == nil || task.Wait.Kind != "human_decision" {
+		return false
+	}
+	if task.PlanVersion != planVersion || task.Wait.PlanVersion != planVersion {
+		return false
+	}
+	return task.ResumeStage != "" && task.Wait.ResumeStage == task.ResumeStage
+}
+
+func (e *Engine) loadPendingDecisionAttempt(ctx context.Context, task model.ExecutionPlan, attemptID string, planVersion int) (model.Attempt, error) {
+	attemptRecord, err := e.Store.Get(ctx, "sessions", attemptID)
+	if err != nil {
+		return model.Attempt{}, err
+	}
+	attempt, err := store.Decode[model.Attempt](attemptRecord)
+	if err != nil {
+		return attempt, err
+	}
 	if attempt.AttemptID != attemptID || attempt.Task != task.ID || attempt.PlanVersion != planVersion || !attempt.Finished {
-		return taskRecord, task, attempt, "", store.ErrConflict
+		return attempt, store.ErrConflict
 	}
 	if !roleMayResumeStage(attempt.Role, task.ResumeStage) {
-		return taskRecord, task, attempt, "", store.ErrConflict
+		return attempt, store.ErrConflict
 	}
-	return taskRecord, task, attempt, task.ResumeStage, nil
+	return attempt, nil
 }
 
 func uniquePendingDecisionAttempt(ctx context.Context, database *store.Store, taskID string, planVersion int, attemptID string) (bool, error) {

@@ -53,11 +53,20 @@ func validateMutation(request Request) error {
 	if request.Operation != "project.register" && request.Operation != "supervisor.stop" && request.Operation != "runners.toggle" && request.ExpectedVersion < 1 {
 		return errors.New("expected_version must be positive for this supervisor command")
 	}
-	if (request.Operation == "plan.review" || request.Operation == "plan.document.save" || request.Operation == "plan.approve" || request.Operation == "plan.request_changes" || request.Operation == "plan.reject") && request.ContentHash == "" {
+	if requiresPlanContentHash(request.Operation) && request.ContentHash == "" {
 		return errors.New("content_hash is required for plan review")
 	}
 	if len(request.Payload) > 0 && !json.Valid(request.Payload) {
 		return errors.New("payload must be valid JSON")
 	}
 	return nil
+}
+
+func requiresPlanContentHash(operation string) bool {
+	switch operation {
+	case "plan.review", "plan.document.save", "plan.approve", "plan.request_changes", "plan.reject":
+		return true
+	default:
+		return false
+	}
 }
