@@ -51,25 +51,7 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 			"admission": model.AdmissionSettings{Pools: map[string]model.QuotaReserve{"seeded": {MinRemainingPercent: 10, MaxAgeSeconds: 900}}}}})
 	mustSeedTerminal(t, err)
 	mustSeedTerminal(t, os.WriteFile(settings, raw, 0600))
-	launcher := func(args ...string) string {
-		t.Helper()
-		c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(c, filepath.Join(repoRoot, "bin", "whirlwind"), args...)
-		cmd.Dir = repoRoot
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "WHIRLWIND_ROOT=" + repoRoot, "WHIRLWIND_DATA_DIR=" + data, "WHIRLWIND_SETTINGS_FILE=" + settings}
-		for _, key := range []string{"GOCACHE", "GOMODCACHE", "GOFLAGS"} {
-			if value := os.Getenv(key); value != "" {
-				cmd.Env = append(cmd.Env, key+"="+value)
-			}
-		}
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			logs, _ := os.ReadFile(filepath.Join(data, "whirlwind-supervisor.log"))
-			t.Fatalf("launcher %v: %v: %s\n%s", args, err, out, logs)
-		}
-		return string(out)
-	}
+	launcher := newManagedOfflineLauncher(t, repoRoot, home, data, settings)
 	t.Cleanup(func() { launcher("stop") })
 
 	git := func(repo string, args ...string) string {
@@ -158,6 +140,29 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	t.Logf("seeded red=%s repair=%s qualified as green=%s; shipped supervisor reached the Reviewer preparation gate", red, green, green)
 }
 
+func newManagedOfflineLauncher(t *testing.T, repoRoot, home, data, settings string) func(...string) string {
+	t.Helper()
+	return func(args ...string) string {
+		t.Helper()
+		c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(c, filepath.Join(repoRoot, "bin", "whirlwind"), args...)
+		cmd.Dir = repoRoot
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "WHIRLWIND_ROOT=" + repoRoot, "WHIRLWIND_DATA_DIR=" + data, "WHIRLWIND_SETTINGS_FILE=" + settings}
+		for _, key := range []string{"GOCACHE", "GOMODCACHE", "GOFLAGS"} {
+			if value := os.Getenv(key); value != "" {
+				cmd.Env = append(cmd.Env, key+"="+value)
+			}
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			logs, _ := os.ReadFile(filepath.Join(data, "whirlwind-supervisor.log"))
+			t.Fatalf("launcher %v: %v: %s\n%s", args, err, out, logs)
+		}
+		return string(out)
+	}
+}
+
 func approveManagedOfflineFixture(t *testing.T, root, data, image string, launcher func(...string) string, db *store.Store, engine *workflow.Engine) model.Project {
 	t.Helper()
 	ctx := t.Context()
@@ -184,15 +189,7 @@ func approveManagedOfflineFixture(t *testing.T, root, data, image string, launch
 			return false
 		}
 		project = current
-		if project.Status == "error" && project.ManagedPolicy {
-			rows, _ := db.List(ctx, "operations")
-			for _, row := range rows {
-				op, _ := store.Decode[model.Operation](row)
-				if op.Kind == "project_setup" && op.Error != "" && op.ConfigurationHash == project.PolicyHash {
-					t.Fatalf("managed setup failed: %s", op.Error)
-				}
-			}
-		}
+		assertNoManagedOfflineSetupFailure(t, ctx, db, project)
 		return project.Status == "approved" && project.OfflineQualification != nil
 	})
 	if project.PolicyHash != fields[2] || project.OfflineQualification.PolicyHash != fields[2] {
@@ -200,6 +197,19 @@ func approveManagedOfflineFixture(t *testing.T, root, data, image string, launch
 	}
 	t.Logf("qualified project=%s policy=%s setup=%s image=%s", project.ID, project.PolicyHash, project.OfflineQualification.JobID, project.OfflineQualification.ImageID)
 	return project
+}
+
+func assertNoManagedOfflineSetupFailure(t *testing.T, ctx context.Context, db *store.Store, project model.Project) {
+	t.Helper()
+	if project.Status == "error" && project.ManagedPolicy {
+		rows, _ := db.List(ctx, "operations")
+		for _, row := range rows {
+			op, _ := store.Decode[model.Operation](row)
+			if op.Kind == "project_setup" && op.Error != "" && op.ConfigurationHash == project.PolicyHash {
+				t.Fatalf("managed setup failed: %s", op.Error)
+			}
+		}
+	}
 }
 
 func seedOfflineCandidatePlan(t *testing.T, e *workflow.Engine, db *store.Store, project model.Project, candidate, base string) model.ExecutionPlan {
