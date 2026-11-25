@@ -154,17 +154,7 @@ func TestRPCDrainsTrailingStderrBeforeReleasingCredentialRedaction(t *testing.T)
 	if err := cmd.Process.Signal(syscall.Signal(0)); !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("provider process remained alive after runtime cleanup: %v", err)
 	}
-	registration := filepath.Join(registry, processToken+".json")
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, statErr := os.Stat(registration); os.IsNotExist(statErr) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("process group cleanup did not finish while stderr capture was held")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForRPCProcessRegistrationRemoval(t, filepath.Join(registry, processToken+".json"))
 	select {
 	case <-released:
 		t.Fatal("credential was released before trailing stderr reader drained")
@@ -218,5 +208,19 @@ func TestRPCCleanupFailureRetainsCredentialRedaction(t *testing.T) {
 	}
 	if got := store.RedactText(secret); got != fixtureRedactedValue {
 		t.Fatalf("runtime cleanup failure released credential redaction: %q", got)
+	}
+}
+
+func waitForRPCProcessRegistrationRemoval(t *testing.T, registration string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, statErr := os.Stat(registration); os.IsNotExist(statErr) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("process group cleanup did not finish while stderr capture was held")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
