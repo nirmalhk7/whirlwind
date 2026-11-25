@@ -19,6 +19,8 @@ import (
 
 const (
 	finalizationInspectOperation = "finalization.inspect"
+	RoleQueuePushOperation       = "queue.push"
+	RoleQueuePopOperation        = "queue.pop"
 )
 
 const (
@@ -81,6 +83,7 @@ var allowedOperations = map[string]bool{
 	"inspect.memory": true, "memory.remember": true, "memory.clear": true,
 	"plan.pause": true, "plan.resume": true,
 	finalizationInspectOperation: true, "finalization.approve": true,
+	RoleQueuePushOperation: true, RoleQueuePopOperation: true,
 }
 
 // Listen creates a private local control socket. It refuses to repair a
