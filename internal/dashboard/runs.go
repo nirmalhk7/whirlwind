@@ -33,7 +33,7 @@ func (d *Dashboard) refreshRuns() {
 			d.detail.SetText("Cannot read ideation history: " + err.Error())
 			continue
 		}
-		if (operation.Kind != "ideation" && operation.Kind != "project_setup") || (d.projectID != "" && operation.Subject != d.projectID) {
+		if (operation.Kind != "ideation" && operation.Kind != "project_setup") || (d.projectID != "" && d.checkoutProjectID(operation.Subject) != d.projectID) {
 			continue
 		}
 		started, err := time.Parse(time.RFC3339Nano, operation.StartedAt)
@@ -60,7 +60,7 @@ func (d *Dashboard) refreshRuns() {
 				projectID = task.ProjectID
 			}
 		}
-		if d.projectID != "" && projectID != d.projectID {
+		if d.projectID != "" && d.checkoutProjectID(projectID) != d.projectID {
 			continue
 		}
 		started, err := time.Parse(time.RFC3339Nano, attempt.StartedAt)
