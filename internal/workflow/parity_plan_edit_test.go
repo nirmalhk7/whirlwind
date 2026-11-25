@@ -228,7 +228,7 @@ func assertLocalPlanEditApprovalRace(t *testing.T, first string) {
 	if first == "save" {
 		err = e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, "")
 	} else {
-		err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
+		err = e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
 	}
 	requireWorkflowSuccess(t, err)
 	winner, winnerVersion := localStoredTask(t, e, task.ID)

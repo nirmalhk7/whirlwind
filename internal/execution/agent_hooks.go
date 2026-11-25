@@ -38,9 +38,7 @@ func RunAgentHooks[T any](
 	round func(context.Context, string) (T, func(context.Context) error, error),
 	observe func(event string, err error),
 ) (result T, err error) {
-	run := func(event string, checks []model.Check) error {
-		return runObservedAgentHook(ctx, profile, projectPolicy, event, checks, observe)
-	}
+	hookExecution := agentHookExecution{profile: profile, policy: projectPolicy, observe: observe}
 	if !IsNonoLauncher(profile.Launcher) {
 		return result, fmt.Errorf("%w: agent lifecycle hooks require native nono", ErrSandbox)
 	}
@@ -49,14 +47,14 @@ func RunAgentHooks[T any](
 		if ctx.Err() != nil {
 			return result, ctx.Err()
 		}
-		if err = run("before", hooks.Before); err != nil {
+		if err = hookExecution.run(ctx, "before", hooks.Before); err != nil {
 			return result, errors.Join(ErrAgentHookBlocked, err)
 		}
 		var commit func(context.Context) error
 		if result, commit, err = round(ctx, feedback); err != nil {
 			return result, hookRoundFailure(repair, err)
 		}
-		if err = run("after", hooks.After); err == nil {
+		if err = hookExecution.run(ctx, "after", hooks.After); err == nil {
 			return result, commitHookRound(ctx, commit)
 		}
 		var failure *hookFailure
@@ -68,13 +66,19 @@ func RunAgentHooks[T any](
 	return result, errors.Join(ErrAgentHookBlocked, err)
 }
 
-func runObservedAgentHook(ctx context.Context, profile Profile, policy model.Policy, event string, checks []model.Check, observe func(string, error)) error {
+type agentHookExecution struct {
+	profile Profile
+	policy  model.Policy
+	observe func(string, error)
+}
+
+func (execution agentHookExecution) run(ctx context.Context, event string, checks []model.Check) error {
 	if len(checks) == 0 {
 		return nil
 	}
-	err := runAgentHook(ctx, profile, policy, event, checks)
-	if observe != nil {
-		observe(event, err)
+	err := runAgentHook(ctx, execution.profile, execution.policy, event, checks)
+	if execution.observe != nil {
+		execution.observe(event, err)
 	}
 	return err
 }

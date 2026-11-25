@@ -102,48 +102,77 @@ func captureQualityIdentityWithCatalogPath(output, runtimeDir, executable string
 	if err := validateFrozenRuleSources(snapshot.Files); err != nil {
 		return nil, err
 	}
-	version, err := qltyReportVersion(output)
+	version, qltyHash, err := observedQltyBinary(output, executable, pathValue, expectedBinarySHA256)
 	if err != nil {
 		return nil, err
+	}
+	configurationHash, catalogHash, err := observedQltyConfiguration(snapshot, observedCatalogHash)
+	if err != nil {
+		return nil, err
+	}
+	installation, err := observeQltyInstallation(runtimeDir, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	identity := &model.QualityIdentity{Version: 1, QltyVersion: version, QltyBinarySHA256: qltyHash, ConfigurationHash: configurationHash, ToolRuntimeHash: installation.hash, PluginCatalogHash: catalogHash, ToolRuntimePath: installation.path, Tools: installation.tools}
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	return identity, nil
+}
+
+func observedQltyBinary(output, executable, pathValue, expectedBinarySHA256 string) (string, string, error) {
+	version, err := qltyReportVersion(output)
+	if err != nil {
+		return "", "", err
 	}
 	qltyHash, err := hashQltyExecutableInPath(executable, pathValue)
 	if err != nil {
-		return nil, fmt.Errorf("hash Qlty binary: %w", err)
+		return "", "", fmt.Errorf("hash Qlty binary: %w", err)
 	}
 	if expectedBinarySHA256 != "" && qltyHash != expectedBinarySHA256 {
-		return nil, errors.New("executed Qlty binary changed during scan")
+		return "", "", errors.New("executed Qlty binary changed during scan")
 	}
+	return version, qltyHash, nil
+}
+
+func observedQltyConfiguration(snapshot *model.QualitySnapshot, observedCatalogHash string) (string, string, error) {
 	configurationHash, err := qualityConfigurationHash(snapshot.Files)
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 	catalogHash := observedCatalogHash
 	if snapshot.Identity != nil {
 		catalogHash = snapshot.Identity.PluginCatalogHash
 	} else if !qualityCatalogHashPattern.MatchString(catalogHash) {
-		return nil, errors.New("effective Qlty plugin catalog was not verified")
+		return "", "", errors.New("effective Qlty plugin catalog was not verified")
 	}
+	return configurationHash, catalogHash, nil
+}
+
+type qltyInstallationEvidence struct {
+	hash, path string
+	tools      []model.QualityToolIdentity
+}
+
+func observeQltyInstallation(runtimeDir string, snapshot *model.QualitySnapshot) (qltyInstallationEvidence, error) {
 	toolRoot := filepath.Join(runtimeDir, "home", ".qlty", "cache", "tools")
 	tools, err := installedQualityTools(toolRoot)
 	if err != nil {
-		return nil, err
+		return qltyInstallationEvidence{}, err
 	}
 	runtimeHash, err := hashQualityTree(toolRoot)
 	if err != nil {
-		return nil, fmt.Errorf("hash installed Qlty scanner runtime: %w", err)
+		return qltyInstallationEvidence{}, fmt.Errorf("hash installed Qlty scanner runtime: %w", err)
 	}
 	runtimeIdentityPath, err := filepath.EvalSymlinks(toolRoot)
 	if err != nil {
-		return nil, fmt.Errorf("resolve installed Qlty scanner runtime path: %w", err)
+		return qltyInstallationEvidence{}, fmt.Errorf("resolve installed Qlty scanner runtime path: %w", err)
 	}
 	if snapshot.Identity != nil {
 		runtimeIdentityPath = snapshot.Identity.ToolRuntimePath
 	}
-	identity := &model.QualityIdentity{Version: 1, QltyVersion: version, QltyBinarySHA256: qltyHash, ConfigurationHash: configurationHash, ToolRuntimeHash: runtimeHash, PluginCatalogHash: catalogHash, ToolRuntimePath: runtimeIdentityPath, Tools: tools}
-	if err := identity.Validate(); err != nil {
-		return nil, err
-	}
-	return identity, nil
+	return qltyInstallationEvidence{hash: runtimeHash, path: runtimeIdentityPath, tools: tools}, nil
 }
 
 // HashQltyPluginCatalog returns a stable digest of the effective plugin
@@ -583,11 +612,7 @@ func (copier *qualityTreeCopier) copyPath(ctx context.Context, relative string) 
 	target := filepath.Join(copier.destination, relative)
 	switch {
 	case info.IsDir():
-		if err := os.Mkdir(target, 0700); err != nil {
-			return err
-		}
-		copier.directories = append(copier.directories, qualityCopyDirectory{path: target, mode: info.Mode().Perm()})
-		return nil
+		return copier.createDirectory(target, info.Mode().Perm())
 	case info.Mode()&os.ModeSymlink != 0:
 		return copier.copyLink(relative, target)
 	case info.Mode().IsRegular():
@@ -595,6 +620,14 @@ func (copier *qualityTreeCopier) copyPath(ctx context.Context, relative string) 
 	default:
 		return errors.New("special file in Qlty scanner runtime")
 	}
+}
+
+func (copier *qualityTreeCopier) createDirectory(target string, mode os.FileMode) error {
+	if err := os.Mkdir(target, 0700); err != nil {
+		return err
+	}
+	copier.directories = append(copier.directories, qualityCopyDirectory{path: target, mode: mode})
+	return nil
 }
 
 func (copier *qualityTreeCopier) copyLink(relative, destination string) error {

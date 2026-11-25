@@ -177,18 +177,21 @@ func githubCommandMutates(args []string) bool {
 	if len(args) < 2 {
 		return false
 	}
-	group, action := args[0], args[1]
+	return containsString(remoteMutationActions(args[0]), args[1])
+}
+
+func remoteMutationActions(group string) []string {
 	switch group {
 	case "pr":
-		return containsString([]string{"create", "merge", "close", "edit", "reopen", "ready", "review", "comment"}, action)
+		return []string{"create", "merge", "close", "edit", "reopen", "ready", "review", "comment"}
 	case "issue":
-		return containsString([]string{"create", "close", "edit", "reopen", "comment"}, action)
+		return []string{"create", "close", "edit", "reopen", "comment"}
 	case "release":
-		return containsString([]string{"create", "delete", "edit", "upload", "delete-asset"}, action)
+		return []string{"create", "delete", "edit", "upload", "delete-asset"}
 	case "mr":
-		return containsString([]string{"create", "merge", "close", "edit", "approve", "reopen", "note"}, action)
+		return []string{"create", "merge", "close", "edit", "approve", "reopen", "note"}
 	default:
-		return false
+		return nil
 	}
 }
 

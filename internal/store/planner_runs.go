@@ -29,11 +29,7 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 	if attempt.Role != "plan" || attempt.AttemptID != id {
 		return ErrConflict
 	}
-	idea, version, err := plannerAttemptIdeaTx(ctx, tx, attempt)
-	if err != nil {
-		return err
-	}
-	if err := ensurePlannerAttemptRun(ctx, tx, attempt, idea, version, len(before) == 0); err != nil {
+	if err := ensurePlannerAttemptRun(ctx, tx, attempt, len(before) == 0); err != nil {
 		return err
 	}
 	if !attempt.Finished || attempt.Status == "complete" || attempt.Status == model.AttemptAwaitingPlanPublication {
@@ -42,7 +38,11 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 	return finishFailedPlannerAttempt(ctx, tx, attempt, previous)
 }
 
-func ensurePlannerAttemptRun(ctx context.Context, tx *sql.Tx, attempt model.Attempt, idea model.Idea, version int, newAttempt bool) error {
+func ensurePlannerAttemptRun(ctx context.Context, tx *sql.Tx, attempt model.Attempt, newAttempt bool) error {
+	idea, version, err := plannerAttemptIdeaTx(ctx, tx, attempt)
+	if err != nil {
+		return err
+	}
 	if !newAttempt {
 		return validateExistingPlannerRunTx(ctx, tx, attempt.AttemptID, idea.ID)
 	}

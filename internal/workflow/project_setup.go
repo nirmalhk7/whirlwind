@@ -319,18 +319,12 @@ func (e *Engine) onboardingSetupManifest(ctx context.Context, manifest verificat
 	if evidence.Phase == "" {
 		return planSetupCatalogProbe(manifest, project)
 	}
-	snapshot, err := externalQualitySnapshot(project)
+	snapshot, err := loadPreparedSetupSnapshot(project, evidence)
 	if err != nil {
 		return verification.JobManifest{}, err
 	}
 	if evidence.Phase == "catalog" {
-		if !setupSnapshotMatches(snapshot, evidence) {
-			return verification.JobManifest{}, errors.New("prepared external Qlty configuration changed before catalog probe; retry project setup")
-		}
 		return setupCatalogProbe(manifest, snapshot, "qlty-effective-catalog")
-	}
-	if !setupSnapshotMatches(snapshot, evidence) {
-		return verification.JobManifest{}, errors.New("prepared external Qlty configuration changed before qualification; retry project setup")
 	}
 	catalog, err := e.retainedSetupCatalog(ctx, project.ID, evidence)
 	if err != nil {
@@ -341,6 +335,20 @@ func (e *Engine) onboardingSetupManifest(ctx context.Context, manifest verificat
 	checks = append(append([]model.Check(nil), checks...), model.Check{Name: "qlty-qualification", Mode: "autofix", Command: []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}, TimeoutSeconds: 600, ReportFormat: "sarif"})
 	manifest.Commands = verificationJobCommands(checks)
 	return manifest, manifest.Validate()
+}
+
+func loadPreparedSetupSnapshot(project model.Project, evidence projectSetupEvidence) (model.QualitySnapshot, error) {
+	snapshot, err := externalQualitySnapshot(project)
+	if err != nil {
+		return model.QualitySnapshot{}, err
+	}
+	if setupSnapshotMatches(snapshot, evidence) {
+		return snapshot, nil
+	}
+	if evidence.Phase == "catalog" {
+		return model.QualitySnapshot{}, errors.New("prepared external Qlty configuration changed before catalog probe; retry project setup")
+	}
+	return model.QualitySnapshot{}, errors.New("prepared external Qlty configuration changed before qualification; retry project setup")
 }
 
 func planSetupCatalogProbe(manifest verification.JobManifest, project model.Project) (verification.JobManifest, error) {
@@ -390,13 +398,17 @@ func (e *Engine) retainedSetupCatalog(ctx context.Context, projectID string, evi
 	if !priorEvidence.Onboarding || priorEvidence.Phase != "catalog" || priorEvidence.Manifest.OperationID != priorRecord.ID {
 		return nil, errors.New("effective Qlty catalog checkpoint has invalid setup authority; retry project setup")
 	}
-	catalog, _, err := verification.ReadJobStreams(priorEvidence.Manifest.Root, 0)
+	return readSetupCatalog(priorEvidence.Manifest.Root, evidence.PluginCatalogHash)
+}
+
+func readSetupCatalog(root, expectedHash string) ([]byte, error) {
+	catalog, _, err := verification.ReadJobStreams(root, 0)
 	if err != nil {
 		return nil, fmt.Errorf("read retained Qlty plugin catalog: %w", err)
 	}
 	data := []byte(catalog)
 	catalogHash, err := verification.HashQltyPluginCatalog(data)
-	if err != nil || catalogHash != evidence.PluginCatalogHash {
+	if err != nil || catalogHash != expectedHash {
 		return nil, errors.New("retained Qlty plugin catalog is invalid or changed; retry project setup")
 	}
 	return data, nil

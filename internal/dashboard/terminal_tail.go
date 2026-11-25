@@ -127,15 +127,9 @@ func tailPollTimeout(escapeUntil time.Time) (time.Duration, bool) {
 }
 
 func readTailKeys(terminal int, poll []unix.PollFd, timeout time.Duration, buffer []byte) ([]byte, error) {
-	ready, err := unix.Poll(poll, int((timeout+time.Millisecond-1)/time.Millisecond))
-	if errors.Is(err, unix.EINTR) {
-		return nil, nil
-	}
-	if err != nil || ready == 0 {
+	ready, err := waitForTailInput(poll, timeout)
+	if err != nil || !ready {
 		return nil, err
-	}
-	if poll[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
-		return nil, io.ErrClosedPipe
 	}
 	count, err := unix.Read(terminal, buffer)
 	if errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) {
@@ -145,6 +139,20 @@ func readTailKeys(terminal int, poll []unix.PollFd, timeout time.Duration, buffe
 		return nil, err
 	}
 	return buffer[:count], nil
+}
+
+func waitForTailInput(poll []unix.PollFd, timeout time.Duration) (bool, error) {
+	ready, err := unix.Poll(poll, int((timeout+time.Millisecond-1)/time.Millisecond))
+	if errors.Is(err, unix.EINTR) {
+		return false, nil
+	}
+	if err != nil || ready == 0 {
+		return false, err
+	}
+	if poll[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+		return false, io.ErrClosedPipe
+	}
+	return true, nil
 }
 
 func consumeTailKeys(keys []byte, escapeUntil *time.Time) bool {

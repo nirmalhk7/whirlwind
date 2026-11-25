@@ -42,7 +42,11 @@ func reconcileStandaloneRuntime(ctx context.Context, root string, locator execut
 	if err := execution.ReconcileRuntime(ctx, profile); err != nil {
 		return fmt.Errorf("reconcile standalone runtime %s before replacement: %w", locator.ExecutionID, err)
 	}
-	locator, err = reconciledStandaloneLocator(root, locator)
+	return finishStandaloneRecovery(root, locator)
+}
+
+func finishStandaloneRecovery(root string, locator execution.StandaloneRuntimeLocator) error {
+	locator, err := reconciledStandaloneLocator(root, locator)
 	if err != nil {
 		return err
 	}

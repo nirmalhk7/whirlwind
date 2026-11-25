@@ -39,15 +39,7 @@ func (s *Server) approveLocalProjectPolicy(ctx context.Context, command LocalCom
 	if command.ExpectedVersion != preview.Version || command.ContentHash != preview.Hash {
 		return localPolicyPreview{}, store.ErrConflict
 	}
-	version, err := s.managedPolicyVersion(ctx, project.ID)
-	if err != nil {
-		return localPolicyPreview{}, err
-	}
-	if err := s.Store.Put(ctx, policy.ManagedPolicyResource, project.ID, document, version); err != nil {
-		return localPolicyPreview{}, err
-	}
-	project.ManagedPolicy = true
-	if err := s.Engine.ConfirmProjectPolicy(ctx, project, preview.Version, project.Policy, preview.Hash); err != nil {
+	if err := s.savePolicyApproval(ctx, preview, project, document); err != nil {
 		return localPolicyPreview{}, err
 	}
 	audit := model.Audit{Source: "local_operator", Action: command.Operation, Target: project.ID, Version: preview.Version, Reason: preview.Hash}
@@ -56,6 +48,18 @@ func (s *Server) approveLocalProjectPolicy(ctx context.Context, command LocalCom
 	}
 	preview.Version++
 	return preview, nil
+}
+
+func (s *Server) savePolicyApproval(ctx context.Context, preview localPolicyPreview, project model.Project, document model.ProjectPolicyDocument) error {
+	version, err := s.managedPolicyVersion(ctx, project.ID)
+	if err != nil {
+		return err
+	}
+	if err := s.Store.Put(ctx, policy.ManagedPolicyResource, project.ID, document, version); err != nil {
+		return err
+	}
+	project.ManagedPolicy = true
+	return s.Engine.ConfirmProjectPolicy(ctx, project, preview.Version, project.Policy, preview.Hash)
 }
 
 func (s *Server) readPolicyApproval(ctx context.Context, command LocalCommand) (localPolicyPreview, model.Project, model.ProjectPolicyDocument, error) {
@@ -118,6 +122,10 @@ func (s *Server) projectForPolicyCheckout(ctx context.Context, ref string) (mode
 	if err != nil {
 		return model.Project{}, 0, err
 	}
+	return findPolicyCheckout(records, canonical)
+}
+
+func findPolicyCheckout(records []model.Record, canonical string) (model.Project, int, error) {
 	var project model.Project
 	var version int
 	for _, record := range records {
