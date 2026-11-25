@@ -24,15 +24,16 @@ type PackRequest struct {
 }
 
 type ContextPack struct {
-	ID              string   `json:"id"`
-	Commit          string   `json:"commit"`
-	Role            string   `json:"role"`
-	PolicyHash      string   `json:"policy_hash"`
-	Prompt          string   `json:"-"`
-	EstimatedTokens int      `json:"estimated_tokens"`
-	CountMethod     string   `json:"count_method"`
-	Included        []string `json:"included"`
-	Omitted         []string `json:"omitted"`
+	ID               string   `json:"id"`
+	Commit           string   `json:"commit"`
+	Role             string   `json:"role"`
+	PolicyHash       string   `json:"policy_hash"`
+	Prompt           string   `json:"-"`
+	AdvisoryIncluded bool     `json:"-"`
+	EstimatedTokens  int      `json:"estimated_tokens"`
+	CountMethod      string   `json:"count_method"`
+	Included         []string `json:"included"`
+	Omitted          []string `json:"omitted"`
 }
 
 type packPayload struct {
@@ -63,6 +64,7 @@ func (i Index) Pack(request PackRequest) (ContextPack, error) {
 	}
 	if len(request.Advisory) <= limit-requiredBytes {
 		advisory = request.Advisory
+		pack.AdvisoryIncluded = advisory != ""
 	}
 	entries := packEntries(i, request)
 	seen := map[string]bool{}

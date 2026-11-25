@@ -63,19 +63,26 @@ func (a *agentRun) buildContextPack() error {
 	if err != nil {
 		return err
 	}
-	pack, err := a.index.Pack(ctxengine.PackRequest{Required: a.input.Prompt, Advisory: advisory, Query: a.task.Issue.Title + " " + a.task.Issue.Body, Role: a.input.Role, PolicyHash: a.project.PolicyHash, MaxInputTokens: a.project.Policy.ContextInputTokens, Additional: extra})
+	pack, err := a.index.Pack(ctxengine.PackRequest{Required: a.input.Prompt, Advisory: advisory.Prompt, Query: a.task.Issue.Title + " " + a.task.Issue.Body, Role: a.input.Role, PolicyHash: a.project.PolicyHash, MaxInputTokens: a.project.Policy.ContextInputTokens, Additional: extra})
 	if err != nil {
 		return err
 	}
 	a.input.Prompt = pack.Prompt
 	key := a.task.ID + ":" + a.input.OperationID + ":" + pack.ID
-	return a.saveContextPack(key, pack)
+	advisory.recordContextBudget(pack.AdvisoryIncluded)
+	return a.saveContextPack(key, pack, advisory.Decisions)
 }
 
-func (a *agentRun) saveContextPack(key string, pack ctxengine.ContextPack) error {
+func (a *agentRun) saveContextPack(key string, pack ctxengine.ContextPack, recall []memoryRecallDecision) error {
+	data := map[string]any{"plan_id": a.task.ID, "operation_id": a.input.OperationID, "pack": pack}
+	if len(recall) > 0 {
+		data["memory_recall"] = recall
+		// The prompt can stay the same when only omitted lessons change.
+		key += ":" + model.Fingerprint([]byte(jsonText(recall)))
+	}
 	_, err := a.Store.Get(a.ctx, "context_packs", key)
 	if errors.Is(err, store.ErrNotFound) {
-		err = a.Store.Put(a.ctx, "context_packs", key, map[string]any{"plan_id": a.task.ID, "operation_id": a.input.OperationID, "pack": pack}, 0)
+		err = a.Store.Put(a.ctx, "context_packs", key, data, 0)
 		if errors.Is(err, store.ErrConflict) {
 			return nil
 		}

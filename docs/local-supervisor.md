@@ -40,6 +40,8 @@ within a total 2 KiB advisory budget, using local word matching and recency.
 A task without matching notes receives no memory advisory. The configured
 role provider receives any notes included in its input. Choose notes suitable
 for that provider and keep credentials out of them.
+The saved context pack records source attempt IDs and reasons for including
+or omitting notes. This evidence contains no note text.
 
 Recall requires the exact approved opt-in policy. A new approval starts
 fresh recall. Use `memory clear` to remove a role's saved notes even when

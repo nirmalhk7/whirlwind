@@ -65,18 +65,62 @@ const (
 
 func TestRenderProjectMemoryOmitsUnmatchedNotes(t *testing.T) {
 	const unmatchedNote = "Use small typography samples"
-	notes := []model.RoleLesson{{Note: unmatchedNote}}
-	prompt, err := renderProjectMemory(notes, memoryTestIssue)
+	notes := []model.RoleLesson{{AttemptID: "unmatched-attempt", Note: unmatchedNote}}
+	recall, err := renderProjectMemory(notes, memoryTestIssue)
 	requireWorkflowSuccess(t, err)
-	if prompt != "" {
-		t.Fatalf("unmatched lesson appeared in advisory input: %s", prompt)
+	if recall.Prompt != "" {
+		t.Fatalf("unmatched lesson appeared in advisory input: %s", recall.Prompt)
+	}
+	if len(recall.Decisions) != 1 || recall.Decisions[0].Reason != recallUnmatched {
+		t.Fatalf("missing reason for unmatched note: %+v", recall.Decisions)
 	}
 
-	notes = append(notes, model.RoleLesson{Note: "Use the indexing fixture"})
-	prompt, err = renderProjectMemory(notes, memoryTestIssue)
+	notes = append(notes, model.RoleLesson{AttemptID: "matching-attempt", Note: "Use the indexing fixture"})
+	recall, err = renderProjectMemory(notes, memoryTestIssue)
 	requireWorkflowSuccess(t, err)
-	if !strings.Contains(prompt, "Use the indexing fixture") || strings.Contains(prompt, unmatchedNote) {
-		t.Fatalf("mixed recall did not isolate the relevant lesson: %s", prompt)
+	if !strings.Contains(recall.Prompt, "Use the indexing fixture") || strings.Contains(recall.Prompt, unmatchedNote) {
+		t.Fatalf("mixed recall did not isolate the relevant lesson: %s", recall.Prompt)
+	}
+	if len(recall.Decisions) != 2 || recall.Decisions[0] != (memoryRecallDecision{AttemptID: "matching-attempt", Reason: recallIncluded}) {
+		t.Fatalf("missing reason for included note: %+v", recall.Decisions)
+	}
+	recall.recordContextBudget(false)
+	if recall.Decisions[0].Reason != recallContextBudget {
+		t.Fatalf("note rejected by the context budget reported as included: %+v", recall.Decisions)
+	}
+}
+
+func TestMemoryRecallEvidenceDistinguishesOmissionsForTheSamePrompt(t *testing.T) {
+	engine, task, _ := testEngine(t)
+	run := &agentRun{Engine: engine, ctx: t.Context(), task: task}
+	const (
+		key          = "same-prompt"
+		kind         = "context_packs"
+		firstSource  = "source-one"
+		secondSource = "source-two"
+	)
+	pack := ctxengine.ContextPack{ID: key, Prompt: "private advisory text"}
+	for _, source := range []string{firstSource, secondSource, firstSource} {
+		requireWorkflowSuccess(t, run.saveContextPack(key, pack, []memoryRecallDecision{{AttemptID: source, Reason: recallUnmatched}}))
+	}
+	records, err := engine.Store.List(run.ctx, kind)
+	requireWorkflowSuccess(t, err)
+	if len(records) != 2 {
+		t.Fatalf("same prompt did not preserve distinct recall evidence: %d records", len(records))
+	}
+	seen := map[string]bool{}
+	for _, record := range records {
+		evidence, err := store.Decode[struct {
+			Recall []memoryRecallDecision `json:"memory_recall"`
+		}](record)
+		requireWorkflowSuccess(t, err)
+		if len(evidence.Recall) != 1 || evidence.Recall[0].Reason != recallUnmatched || strings.Contains(string(record.Data), pack.Prompt) {
+			t.Fatal("recall evidence omitted reasons or persisted prompt prose")
+		}
+		seen[evidence.Recall[0].AttemptID] = true
+	}
+	if !seen[firstSource] || !seen[secondSource] {
+		t.Fatalf("recall omitted source identities: %+v", seen)
 	}
 }
 
@@ -132,7 +176,7 @@ func requireMemoryPromptScope(t *testing.T, engine *Engine, project model.Projec
 	mandatory := memoryTestPrompt
 	pack, err := (ctxengine.Index{}).Pack(ctxengine.PackRequest{Required: mandatory, MaxInputTokens: 256, Advisory: strings.Repeat("x", 512)})
 	requireWorkflowSuccess(t, err)
-	if !strings.HasPrefix(pack.Prompt, mandatory) || strings.Contains(pack.Prompt, "xxxxx") {
+	if !strings.HasPrefix(pack.Prompt, mandatory) || strings.Contains(pack.Prompt, "xxxxx") || pack.AdvisoryIncluded {
 		t.Fatal("advisory took priority over required prompt")
 	}
 
@@ -149,8 +193,8 @@ func requireMemoryOptOut(t *testing.T, run *agentRun, source string, version int
 		t.Fatal("memory contents copied into generic events")
 	}
 	setTestMemoryPolicy(t, engine, project, false)
-	if prompt, err := run.projectMemoryPrompt(); prompt != "" || err != nil {
-		t.Fatalf("stale enabled project retained recall: %q %v", prompt, err)
+	if recall, err := run.projectMemoryPrompt(); recall.Prompt != "" || len(recall.Decisions) != 0 || err != nil {
+		t.Fatalf("stale enabled project retained recall: %+v %v", recall, err)
 	}
 	if _, err := engine.RememberProjectLesson(ctx, project.ID, "code", source, "replay prior policy", project.PolicyHash, version); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("write survived opt-out: %v", err)
