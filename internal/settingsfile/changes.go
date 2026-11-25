@@ -10,9 +10,11 @@ import (
 )
 
 type configurationChanges struct {
-	source *Source
-	ctx    context.Context
-	values []store.Change
+	source               *Source
+	ctx                  context.Context
+	values               []store.Change
+	checkoutIDs          map[string]string
+	registeredByCheckout map[string][]checkoutRegistration
 }
 
 func (s *Source) configurationChanges(ctx context.Context, doc Document) ([]store.Change, error) {

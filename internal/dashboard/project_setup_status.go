@@ -30,7 +30,7 @@ func (d *Dashboard) addProjectSetupNotice() {
 	}
 	runIndex := -1
 	for i, row := range d.runRows {
-		if row.operation == nil || row.operation.Kind != "project_setup" || row.operation.Stage != "failed" {
+		if row.operation == nil || row.operation.Subject != d.projectID || row.operation.Kind != "project_setup" || row.operation.Stage != "failed" {
 			continue
 		}
 		runIndex = i

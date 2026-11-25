@@ -50,6 +50,7 @@ type Dashboard struct {
 	directionRows                []model.Direction
 	planRows                     []model.ExecutionPlan
 	projectID                    string
+	projectAliases               map[string]string
 	directionID                  string
 	planID                       string
 	updating                     bool

@@ -67,6 +67,10 @@ func (e *Engine) reconcileTask(ctx context.Context, p model.Project, t model.Exe
 		return
 	}
 	if t.Issue.Number > 0 && !seen[t.Issue.Number] {
+		matches, err := e.Store.IssueBoundToPlan(ctx, p.Repo, t.Issue.Number, t.ID)
+		if err != nil || !matches {
+			return
+		}
 		issue, err := e.GitHub.Issue(ctx, p.Repo, t.Issue.Number)
 		if err == nil && t.Stage != "pr_created" && t.Stage != "complete" {
 			_, _ = e.Ingest(ctx, p, issue)
@@ -85,7 +89,13 @@ func (e *Engine) Ingest(ctx context.Context, p model.Project, i model.Issue) (mo
 	for _, record := range records {
 		task, _ := store.Decode[model.ExecutionPlan](record)
 		if affectedByIssue(task, p, i) {
-			e.Stop(task.ID)
+			matches, err := e.Store.IssueBoundToPlan(ctx, p.Repo, i.Number, task.ID)
+			if err != nil {
+				return model.ExecutionPlan{}, err
+			}
+			if matches {
+				e.Stop(task.ID)
+			}
 		}
 	}
 	return e.Store.IngestIssue(ctx, p, i)

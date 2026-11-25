@@ -192,6 +192,9 @@ func (s *Source) Persist(ctx context.Context, changes []store.Change, commit fun
 	if err := s.refresh(ctx); err != nil {
 		return err
 	}
+	if len(changes) == 0 {
+		return commit()
+	}
 	encoded, _ := json.Marshal(s.doc)
 	var doc Document
 	_ = json.Unmarshal(encoded, &doc)

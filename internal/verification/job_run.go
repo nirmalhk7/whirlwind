@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,17 +19,26 @@ import (
 func (r *jobRunner) run(ctx context.Context, observe func(JobEvent) error) (JobReport, error) {
 	m := r.manifest
 	report := JobReport{Purpose: m.Purpose, ProjectID: m.ProjectID, OperationID: m.OperationID, ManifestHash: m.Digest(), PlanID: m.PlanID, PlanVersion: m.PlanVersion, PlanHash: m.PlanHash, ConfigurationHash: m.ConfigurationHash, CandidateCommit: m.CandidateCommit, CandidateTree: m.CandidateTree, Passed: true, Results: []JobResult{}}
-	stage, err := r.prepareJobInput(ctx)
-	if err != nil {
-		return report, err
-	}
-	if r.offline != nil {
+	var stage string
+	if m.OfflineDockerImage != "" {
+		var err error
+		stage, err = r.prepareJobInput(ctx)
+		if err != nil {
+			return report, err
+		}
 		defer func() { _ = os.RemoveAll(stage) }()
 	}
 	byName := map[string]JobResult{}
 	for index, command := range m.Commands {
 		result, exists := r.results[index]
 		if !exists {
+			var err error
+			if stage == "" {
+				stage, err = r.prepareCheckout(ctx)
+				if err != nil {
+					return report, err
+				}
+			}
 			reason := r.blockedCommandReason(index, command, byName)
 			result, err = r.command(ctx, stage, index, command, reason, observe)
 			if err != nil {
@@ -58,6 +68,11 @@ func (r *jobRunner) run(ctx context.Context, observe func(JobEvent) error) (JobR
 	}
 	if err := writeJobJSON(r.root, "report.json", report); err != nil {
 		return report, err
+	}
+	if err := r.releaseCompletedStaging(report); err != nil {
+		// Evidence is already valid and durable. A transient filesystem error
+		// cannot change the result; reopening this journal retries cleanup.
+		log.Printf("release verification staging for job %s: %v", m.JobID, err)
 	}
 	return report, nil
 }

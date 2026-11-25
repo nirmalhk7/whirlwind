@@ -13,8 +13,8 @@ The [requirement ledger](whirlwind-plan-acceptance.json) is separate from this d
 ## Delivery contract
 
 - Fresh application state, no migration or resumption of old workflows. Initialize the new state once and preserve subsequent restarts.
-- macOS/nono execution only; Linux may inspect state but must fail closed for execution.
-- Local verification subprocess only; no remote runner or SSH transport.
+- Native agents and nono-backed checks require macOS. Linux supports inspection and the opt-in offline verifier for [standalone jobs and managed setup and candidate checks](../support.md#verification-on-linux).
+- Local verification runs in a separate subprocess. Native execution uses nono, and opt-in Linux checks use rootless Docker.
 - D01: vector novelty, embeddings, sqlite-vec, vector backfill and the <0.60 gate are deferred. No runtime/model installation or vector dependency upgrade.
 - Defer all uniqueness comparison, including ACP/LLM novelty and historical fingerprint rejection. Keep content validation, draft-only edits, bounded history, durable publication and the four directions; label new comparison results as deferred.
 - Later human command decision (updated 2026-11-12 with explicit approval for structured evidence): use exactly `qlty check --upstream HEAD --fix --no-progress --sarif` in separate writable fix staging. Do not inject filename arguments or rewrite flags. Expose the approved base as staging HEAD while retaining submitted source bytes, so HEAD is local scope rather than a remote upstream requirement.
@@ -25,14 +25,16 @@ The [requirement ledger](whirlwind-plan-acceptance.json) is separate from this d
 
 ## Architecture and interfaces
 
-The Go/tview dashboard presents durable state and human intent. The private Unix control service validates commands and versions. The supervisor alone owns transitions, queues, ACP launches, leases, recovery and candidate handoffs. SQLite owns transactional claims, receipts, immutable approvals and events. A separate local verifier executes approved commands in isolated nono staging without database credentials or agent-selection authority. ACP adapters confirm effective provider/model/thinking settings; nono enforces process, filesystem, credential, network and deadline restrictions.
+The Go/tview dashboard presents durable state and human intent. The private Unix control service validates commands and versions. The supervisor alone owns transitions, queues, ACP launches, leases, recovery and candidate handoffs. SQLite owns transactional claims, receipts, immutable approvals and events. A separate local verifier executes approved commands without database credentials or agent-selection authority. ACP adapters confirm effective provider/model/thinking settings, and nono enforces the native process, filesystem, credential, network and deadline restrictions.
 
 The local runner supports `purpose: project_setup`, bound to the project and
 supervisor operation ID, without invented plan identity or approval. The
 supervisor uses it for CLI/catalog probes, preparation of external managed
 config, and qualification of the exact installed Gitleaks runtime. Recorded
-proof is bound to frozen configuration and scanner identity. This wiring does
-not establish native compatibility or complete finding coverage.
+proof is bound to frozen configuration and scanner identity. Native
+compatibility and finding coverage need separate evidence. Managed offline
+setup uses the same job purpose to qualify the approved mandatory checks and
+image; see [verification on Linux](../support.md#verification-on-linux).
 
 Remove local HTTP-route dispatch and all HTTP UI listeners. Private MCP/integration brokers remain internal, scoped mechanisms. Human-facing mutations require an idempotency key and expected version; document mutations also bind the inspected content hash. Event notifications are wake-up hints; SQLite scans remain authoritative.
 
@@ -74,7 +76,7 @@ These work packages describe the design, not a list of qualified outcomes.
 
 ### P03 — Durable ideation
 
-- P03.1: Registration atomically queues exactly one initial run even with scheduling disabled. Manual/scheduled runs have distinct identities.
+- P03.1: With registration ideation enabled, registration atomically queues exactly one initial run, even with the separate cron schedule disabled. Manual and scheduled runs have distinct identities.
 - P03.2: Process four directions independently, persisting each accepted result immediately.
 - P03.3: `ideation.max_attempts_per_direction: 5`; persist ordinal before generation, initial completed candidate counts as one, runtime recovery cannot reset allowance.
 - P03.4: Regenerate only failed direction; preserve partial successes and explicit per-direction errors.
@@ -87,7 +89,7 @@ These work packages describe the design, not a list of qualified outcomes.
 - P04.3: Full idea/context input; own read-only worktree and narrowly writable assigned output.
 - P04.4: Planner writes real parseable Markdown. Verify regular/readable/nonempty/safe file, stable requirements and configured check references; publish collision-safe repository/timestamp name.
 - P04.5: Atomically link file/plan and complete idea/run. Persist locator before publication and reconcile file-created/database-failed recovery without duplicate plans. Retain every attempt.
-- P04.6: Cancel only active planning: persist/revoke ownership, stop/fence and verify cleanup, finish idea/run error with user_cancelled, never auto-requeue. Completion-winning race returns version conflict.
+- P04.6: Cancel queued or active planning. Revoke approval, fence any active owner and verify required cleanup. Record `user_cancelled`; retry requires an explicit decision. A completion-winning race returns a version conflict.
 
 ### P05 — Plan editing and approval
 
@@ -108,7 +110,7 @@ These work packages describe the design, not a list of qualified outcomes.
 ### P07 — Generic local verifier
 
 - P07.1: `cmd/whirlwind-verify` receives frozen manifest over private IPC/stdin and emits bounded structured progress/results; no database access or agent selection.
-- P07.2: Manifest binds plan/hash/version, candidate commit/tree, base, configuration version, ordered argv/environment/dependencies/timeouts/outputs/report formats. Execute exact approved argv in isolated nono checkout outside original repository.
+- P07.2: Manifest binds plan/hash/version, candidate commit/tree, base, configuration version, ordered argv/environment/dependencies/timeouts/outputs/report formats. Execute exact approved argv in isolation outside the original repository. A managed offline job also binds the approved policy and qualified local image identity.
 - P07.3: Validate dependencies/order. Run independent checks after failures; report blocked/missing checks as errors.
 - P07.4: Record pass/fail/error/timeout, exit code, times, identities and stdout/stderr/artifacts for every command. Journal incrementally; reconstruct interrupted report without silently replaying uncertain effects.
 - P07.5: Setup failures pause actionably; ordinary failures feed correction. Preserve TDD evidence gates.
@@ -116,6 +118,7 @@ These work packages describe the design, not a list of qualified outcomes.
 
 ### P08 — Qlty, policy and autofixes
 
+- Approve project-scoped external YAML with `whirlwind policy preview` and `whirlwind policy approve`. Store the approved policy in Whirlwind state. Existing committed policies retain their confirmation path. See [project policy approval](../go-backend.md#project-policy-approval).
 - P08.1: Remove source-repository qlty init/config commits. Default external root `~/.whirlwind/projects/<project-id>/qlty/`, human configurable, contains config/runtime/cache/staging/logs/reports.
 - P08.2: Copy approved config into disposable staging, not symlinks. Human approves commands/order/environment/timeouts/analyzers/blocking policy; no Go/package-manager command inference or fixed injected command equality.
 - P08.3: Prepare only Gitleaks in managed Qlty defaults. Human-configured alternatives require actual tool qualification; required unsupported tools block until an explicitly approved alternative exists.
@@ -169,7 +172,7 @@ Each Pxx.n above is independently binding. Tests must exercise real state/side e
 | Requirements | Executable acceptance group | Required scenarios |
 |---|---|---|
 | P01 | `go test ./cmd/whirlwind ./internal/control ./internal/store -run Parity` | Fresh state/restart, preserved settings, direct commands, immutable versions |
-| P02 | `go test ./internal/store ./internal/workflow ./internal/dashboard -run ParityIdea` | Five states, draft edit, duplicate rejection, edit/approval race, archive, independent approvals, provenance |
+| P02 | `go test ./internal/store ./internal/workflow ./internal/dashboard -run 'ParityIdea|IdeationPublishesHistoricalFingerprintMatch'` | Five states, draft edit, accepted fingerprint match with novelty deferred, edit/approval race, archive, independent approvals, provenance |
 | P03 | `go test ./internal/store ./internal/workflow ./internal/httpapi -run 'Parity.*(Ideation|Onboarding|Candidate|Generation)'` | Onboarding once, five candidates, partial results, interruption, bounded history |
 | P04 | `go test ./internal/store ./internal/workflow -run ParityPlanner` | Historical backlog, claims, output validation/recovery, cancellation race/retry |
 | P05 | `go test ./internal/workflow ./internal/dashboard ./internal/httpapi -run 'ParityPlan|ParityApproval|VimExecutionPlan|InboxExecutionPlanSelection|PlanReviewVimShortcut'` | Vim saves bytes, separate approval, stale hashes, new approval, durable UI |

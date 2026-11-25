@@ -33,7 +33,7 @@ func Load(ctx context.Context, name, inputPath string) (model.Project, error) {
 	if err != nil {
 		return model.Project{}, err
 	}
-	repo, remoteURL, err := repositoryIdentity(ctx, path)
+	repo, remoteURL, err := Origin(ctx, path)
 	if err != nil {
 		return model.Project{}, err
 	}
@@ -46,19 +46,27 @@ func Load(ctx context.Context, name, inputPath string) (model.Project, error) {
 	if policyHash != "" {
 		status = "approved"
 	}
-	return model.Project{Status: status, ID: model.ProjectID(repo), Name: name, Repo: repo, RemoteURL: remoteURL, DefaultBranch: branch, Path: path, Policy: rules, PolicyHash: policyHash}, nil
+	return model.Project{Status: status, ID: model.ProjectID(path), Name: name, Repo: repo, RemoteURL: remoteURL, DefaultBranch: branch, Path: path, Policy: rules, PolicyHash: policyHash}, nil
 }
 
-func repositoryIdentity(ctx context.Context, path string) (string, string, error) {
+// Origin reads the repository key and remote for an already resolved checkout.
+func Origin(ctx context.Context, path string) (string, string, error) {
 	repo, remoteURL := path, ""
 	remoteNames, err := github.Run(ctx, path, "git", "remote")
 	if err != nil {
 		return "", "", err
 	}
 	if remotes := strings.Fields(remoteNames); len(remotes) > 0 {
-		remote, err := github.Run(ctx, path, "git", "remote", "get-url", remotes[0])
+		name := remotes[0]
+		for _, remote := range remotes {
+			if remote == "origin" {
+				name = remote
+				break
+			}
+		}
+		remote, err := github.Run(ctx, path, "git", "remote", "get-url", name)
 		if err != nil {
-			return "", "", fmt.Errorf("repository remote %s: %w", remotes[0], err)
+			return "", "", fmt.Errorf("repository remote %s: %w", name, err)
 		}
 		remoteURL, err = workflow.CanonicalRemote(remote)
 		if err != nil {
