@@ -39,7 +39,7 @@ func run() error {
 	engine := workflow.New(s, github.CLI{}, config.data)
 	api := httpapi.New(s, engine, os.Getenv("WHIRLWIND_WEBHOOK_SECRET"))
 	api.Context = ctx
-	return serveSupervisor(ctx, engine, control.SupervisorDispatcher{DB: s.DB, Commands: localCommandExecutor{api: api, shutdown: cancel}}, control.SocketPath(config.data))
+	return serveSupervisor(ctx, engine, control.SupervisorDispatcher{DB: s.DB, DispatchHealth: engine.DispatchHealth, Commands: localCommandExecutor{api: api, shutdown: cancel}}, control.SocketPath(config.data))
 }
 
 func serveSupervisor(ctx context.Context, engine *workflow.Engine, dispatcher control.Dispatcher, socket string) error {

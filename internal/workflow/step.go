@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
 	"whirlwind/internal/store"
 )
 
@@ -123,17 +122,11 @@ func (e *Engine) prepareStep(ctx context.Context, id string) (*taskStep, error) 
 }
 func (e *Engine) trustedProject(ctx context.Context, id string) (model.Project, error) {
 	p, err := e.Project(ctx, id)
-	if err != nil {
+	if err != nil || p.ManagedPolicy {
 		return p, err
 	}
-	_, hash, err := policy.Load(p.Path)
-	if err != nil {
-		return p, err
-	}
-	if hash != p.PolicyHash {
-		return p, errors.New("committed policy changed; confirm updated project policy before continuing")
-	}
-	return p, nil
+	_, err = e.projectPolicy(ctx, p)
+	return p, err
 }
 
 func (step *taskStep) pauseForHumanDecision() error {

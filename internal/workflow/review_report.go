@@ -208,6 +208,12 @@ func (e *Engine) loadVerificationEvidence(ctx context.Context, task model.Execut
 	if evidence.Stage != "complete" {
 		return verification.Report{}, model.Provenance{}, verificationPrerequisiteError(evidence.Stage, evidence.Error, evidence.Report)
 	}
+	if project.Policy.OfflineDockerImage != "" {
+		step := taskStep{Engine: e, ctx: ctx, task: task, project: project}
+		if err := step.validateReviewRunnerReport(evidence.Provenance.Head); err != nil {
+			return verification.Report{}, model.Provenance{}, err
+		}
+	}
 	if err := e.validateQltyEvidence(ctx, task, evidence.Report); err != nil {
 		return verification.Report{}, model.Provenance{}, err
 	}

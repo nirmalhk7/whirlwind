@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"whirlwind/internal/model"
 )
 
 func TestParityPlannerAttemptClaimsIdeaAtomically(t *testing.T) {
@@ -61,6 +63,12 @@ func TestParityPlannerCannotClaimArchivedIdea(t *testing.T) {
 }
 
 func TestParityPlannerPublicationLinksAllProvenance(t *testing.T) {
+	t.Run("recover_legacy_provider_completion", func(t *testing.T) { checkPlannerPublication(t, false) })
+	t.Run("finalize_pending_publication_atomically", func(t *testing.T) { checkPlannerPublication(t, true) })
+}
+
+func checkPlannerPublication(t *testing.T, pending bool) {
+	t.Helper()
 	s := openTest(t)
 	ctx := context.Background()
 	idea := parityIdea(t, s)
@@ -83,6 +91,9 @@ func TestParityPlannerPublicationLinksAllProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	attempt["status"], attempt["finished"], attempt["success"] = "complete", true, true
+	if pending {
+		attempt["status"], attempt["success"] = model.AttemptAwaitingPlanPublication, nil
+	}
 	attempt["finished_at"] = "2026-11-11T00:00:00Z"
 	if err := s.Put(ctx, "sessions", "a", attempt, 1); err != nil {
 		t.Fatal(err)
@@ -90,6 +101,22 @@ func TestParityPlannerPublicationLinksAllProvenance(t *testing.T) {
 	plan["stage"], plan["last_attempt_id"] = "plan_approval", "a"
 	plan["plan_document"] = map[string]any{"path": "/assigned/plan.md", "hash": "verified-hash"}
 	plan["plan"] = map[string]any{"requirements": []map[string]string{{"id": "R1", "outcome": "Export invoices", "evidence_method": "behavior test"}}}
+	if pending {
+		document := plan["plan_document"].(map[string]any)
+		document["path"] = "/different/plan.md"
+		if err := s.Put(ctx, "execution_plans", "plan", plan, 1); !errors.Is(err, ErrConflict) {
+			t.Fatalf("finalized a mismatched publication path: %v", err)
+		}
+		record, err := s.Get(ctx, "sessions", "a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err := Decode[model.Attempt](record)
+		if err != nil || current.Status != model.AttemptAwaitingPlanPublication || current.Success != nil {
+			t.Fatalf("failed publication did not roll back the attempt transition: %+v %v", current, err)
+		}
+		document["path"] = "/assigned/plan.md"
+	}
 	if err := s.Put(ctx, "execution_plans", "plan", plan, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -99,5 +126,13 @@ func TestParityPlannerPublicationLinksAllProvenance(t *testing.T) {
 	}
 	if err := s.DB.QueryRow("SELECT status,plan_id FROM planner_runs WHERE planner_run_id='a'").Scan(&status, &linked); err != nil || status != "completed" || linked != "plan" {
 		t.Fatalf("publication did not complete ACP run: %s %s %v", status, linked, err)
+	}
+	record, err := s.Get(ctx, "sessions", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Decode[model.Attempt](record)
+	if err != nil || current.Status != "complete" || current.Success == nil || !*current.Success {
+		t.Fatalf("publication did not complete the attempt: %+v %v", current, err)
 	}
 }

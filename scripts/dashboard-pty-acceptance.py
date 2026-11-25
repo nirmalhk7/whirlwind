@@ -65,7 +65,7 @@ def main():
         after_first = json.loads(state_path.read_text(encoding="utf-8"))
         if before != after_first:
             raise AssertionError("first dashboard exit changed supervisor identity or durable state")
-        second_output = dashboard_pty(env)
+        second_output = dashboard_pty(env, rows=24, columns=80, additional_markers=(b"? all keys | Tab/Shift-Tab panels",))
         if run_cli(env, "status").find("supervisor: running") < 0:
             raise AssertionError("supervisor did not survive reopening the dashboard")
         after_second = json.loads(state_path.read_text(encoding="utf-8"))
@@ -78,7 +78,7 @@ def main():
         start_attempted = False
         if state_path.exists() or "supervisor: stopped" not in run_cli(env, "status", expected_code=1):
             raise AssertionError("owned scratch supervisor did not stop cleanly")
-        print("PASS: exact dashboard command rendered, exited, reopened, and preserved the same scratch supervisor until owned stop.")
+        print("PASS: exact dashboard command rendered, exited, reopened at 80×24 with compact help, and preserved the same scratch supervisor until owned stop.")
     finally:
         if started or start_attempted:
             try:

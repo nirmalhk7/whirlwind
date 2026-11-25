@@ -65,14 +65,22 @@ func (run *verificationRun) localCheckManifest(policy model.Policy, checks []mod
 	if err != nil {
 		return verification.JobManifest{}, err
 	}
-	profile, err := execution.ForPolicy(task.Worktree, true, task.PlanDocument.PolicyHash, policy.Sandbox)
-	if err != nil {
-		return verification.JobManifest{}, err
+	manifest := verification.JobManifest{Version: 1, JobID: run.id, PlanID: task.ID, PlanVersion: task.PlanVersion, PlanHash: task.PlanDocument.ApprovedHash, ConfigurationHash: verificationConfigurationHash(*task), CandidateCommit: run.head, CandidateTree: tree, BaseCommit: task.Base, Repository: task.Worktree, Root: filepath.Join(run.engine.Root, "verification", run.id), Sandbox: policy.Sandbox}
+	manifest.Commands = verificationJobCommands(checks)
+	if policy.OfflineDockerImage != "" {
+		if err := run.bindOfflineManifest(&manifest, policy); err != nil {
+			return verification.JobManifest{}, err
+		}
+	} else {
+		profile, err := execution.ForPolicy(task.Worktree, true, task.PlanDocument.PolicyHash, policy.Sandbox)
+		if err != nil {
+			return verification.JobManifest{}, err
+		}
+		if !execution.IsNonoLauncher(profile.Launcher) {
+			return verification.JobManifest{}, errors.New("canonical local verification requires native nono")
+		}
+		manifest.Launcher = profile.Launcher
 	}
-	if !execution.IsNonoLauncher(profile.Launcher) {
-		return verification.JobManifest{}, errors.New("canonical local verification requires native nono")
-	}
-	manifest := verification.JobManifest{Version: 1, JobID: run.id, PlanID: task.ID, PlanVersion: task.PlanVersion, PlanHash: task.PlanDocument.ApprovedHash, ConfigurationHash: verificationConfigurationHash(*task), CandidateCommit: run.head, CandidateTree: tree, BaseCommit: task.Base, Repository: task.Worktree, Root: filepath.Join(run.engine.Root, "verification", run.id), Launcher: profile.Launcher, Sandbox: policy.Sandbox}
 	quality, err := approvedQualitySnapshot(*task)
 	if err != nil {
 		return verification.JobManifest{}, err
@@ -80,13 +88,6 @@ func (run *verificationRun) localCheckManifest(policy model.Policy, checks []mod
 	if quality != nil {
 		manifest.Quality = quality
 		manifest.Root = filepath.Join(quality.Root, "jobs", run.id)
-	}
-	for _, check := range checks {
-		timeout := check.TimeoutSeconds
-		if timeout <= 0 {
-			timeout = 600
-		}
-		manifest.Commands = append(manifest.Commands, verification.JobCommand{Name: check.Name, Mode: check.Mode, Command: append([]string{}, check.Command...), TimeoutSeconds: timeout, OutputPaths: append([]string{}, check.OutputPaths...), DependsOn: append([]string{}, check.DependsOn...), Required: check.Required, ReportFormat: check.ReportFormat, Environment: check.Environment})
 	}
 	if err := manifest.Validate(); err != nil {
 		return verification.JobManifest{}, err
