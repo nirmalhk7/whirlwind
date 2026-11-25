@@ -4,7 +4,8 @@ The [Whirlwind CI and release workflow](../.github/workflows/release.yml) runs
 launcher and bridge tests, vet, and builds on branch pushes and pull requests.
 Linux race-tests the dashboard and control packages and checks that the
 launcher refuses native execution. macOS runs the full Go race suite and the
-sandbox suites with pinned nono and the locked legacy bridge dependencies.
+sandbox suites with pinned nono and Qlty and the locked legacy bridge
+dependencies.
 The checks have read-only repository access. A manual run from another branch
 also runs checks. Publication requires a manual run from `main` in
 `nirmalhk7/whirlwind`.

@@ -89,6 +89,7 @@ jobs:
         if: runner.os == 'Linux'
         run: go test -mod=readonly -race -count=1 -timeout=25m ./cmd/whirlwind-dashboard ./internal/control ./internal/dashboard
       - name: Set up pinned macOS test runtimes
+        id: macos-tools
         if: runner.os == 'macOS'
         shell: bash
         run: |
@@ -97,17 +98,24 @@ jobs:
             https://github.com/nolabs-ai/nono/releases/download/v0.81.0/nono-v0.81.0-aarch64-apple-darwin.tar.gz \
             --output "$archive"
           echo "728b1deefbf6390c9b74fc982efbded1e1c4b37b99dcdefa2e07266dfef4d9e9  $archive" | shasum -a 256 -c
-          bin="$RUNNER_TEMP/nono-bin"
+          bin="$RUNNER_TEMP/test-tools"
           mkdir -p "$bin"
           tar -xzf "$archive" -C "$bin" nono
           "$bin/nono" --version
+          archive="$RUNNER_TEMP/qlty.tar.xz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/qltysh/qlty/releases/download/v0.668.0/qlty-aarch64-apple-darwin.tar.xz \
+            --output "$archive"
+          echo "ed936ec361a0b5ba13483cddf2252864b77005cb7cca979adc956b22b2bbad42  $archive" | shasum -a 256 -c
+          tar -xJf "$archive" -C "$bin" --strip-components 1 qlty-aarch64-apple-darwin/qlty
+          "$bin/qlty" --version
           echo "$bin" >> "$GITHUB_PATH"
           npm ci --prefix bridges/sandbox --ignore-scripts --no-audit --no-fund
       - name: Run macOS sandbox suites
         if: runner.os == 'macOS'
         run: node --test bridges/nono/*.test.mjs bridges/sandbox/launch.test.mjs bridges/sandbox/node-path.test.mjs
       - name: Run full Go race suite on macOS
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && !cancelled() && steps.macos-tools.outcome == 'success'
         run: go test -mod=readonly -race -count=1 -timeout=25m ./...
       - name: Stage verified archive for this release run
         if: steps.release.outputs.publish == 'true'
