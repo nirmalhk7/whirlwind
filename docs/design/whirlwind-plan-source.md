@@ -10,11 +10,15 @@ decisions take precedence over conflicting language in the archived text:
 | Ideas and plans | Four idea types; one plan per idea. Planner completion is not plan completion: the plan becomes `complete` only after successful local finalization. |
 | Changed approvals | A changed save waits for active approved execution to finish or be explicitly paused. Then save a new draft and approve it separately. An unchanged save does not interrupt active work. |
 | Uniqueness | All content uniqueness comparison is deferred, including the temporary ACP/LLM judge, historical fingerprint rejection, embeddings and sqlite-vec. Preserve content validation and bounded history. |
-| Runtime | macOS/nono for execution; Linux inspection only. Configure ACP profiles and ordered choices in `settings.yaml`. Qualify configured Codex using only existing authorized local login, not native app-server commands. |
+| Native runtime | Use macOS/nono for native agents and checks. Linux supports inspection. Configure ACP profiles and ordered choices in `settings.yaml`. Qualify configured Codex using its installed ACP adapter and an existing authorized local login. |
 | Onboarding analyzers | November 24 decision: Gitleaks only in managed Qlty defaults. Wiring is not current native compatibility proof. |
 
-See the [current support matrix](../support.md). The text below is the archived
-Page snapshot, not setup or release-acceptance guidance.
+Current runtime additions include [local project policy approval](../go-backend.md#project-policy-approval)
+and [opt-in Linux offline verification](../support.md#verification-on-linux).
+See the [support matrix](../support.md) for the implemented scope and remaining
+qualification. The archived repository copy below reflects the Gitleaks-only
+decision in its analyzer paragraph. The linked Page still names Semgrep
+alongside Gitleaks in that paragraph.
 
 ## Archived Page text
 
