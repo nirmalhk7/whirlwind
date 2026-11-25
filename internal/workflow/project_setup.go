@@ -110,10 +110,14 @@ func (e *Engine) runProjectSetupVerifier(ctx context.Context, record *model.Reco
 		}
 		return e.persistProjectSetupProgress(ctx, record, op, *evidence)
 	})
+	return projectSetupReportError(*evidence, err)
+}
+
+func projectSetupReportError(evidence projectSetupEvidence, err error) error {
 	if err != nil || evidence.Report.Passed {
 		return err
 	}
-	if evidence.Onboarding && evidence.Phase == "qualify" && projectSetupAllowsExistingQltyFindings(manifest, evidence.Report) {
+	if evidence.Onboarding && evidence.Phase == "qualify" && projectSetupAllowsExistingQltyFindings(evidence.Manifest, evidence.Report) {
 		return nil
 	}
 	return errors.New("required project verification command failed; inspect retained setup report")
