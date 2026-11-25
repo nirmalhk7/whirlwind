@@ -74,7 +74,7 @@ func TestParityActiveApprovedPlanWaitsBeforeSavingChanges(t *testing.T) {
 				t.Fatalf("unchanged active save changed plan or stopped runner: version=%d want=%d task=%+v stopped=%v", currentVersion, version, current, stopped)
 			}
 
-			err = e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
+			err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
 			if !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "wait until") || !strings.Contains(err.Error(), "pause") {
 				t.Fatalf("active approved plan edit lacked actionable conflict: %v", err)
 			}
@@ -228,7 +228,7 @@ func assertLocalPlanEditApprovalRace(t *testing.T, first string) {
 	if first == "save" {
 		err = e.ReviewLocalPlan(ctx, task.ID, version, "approve", view.Hash, "")
 	} else {
-		err = e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
+		err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
 	}
 	requireWorkflowSuccess(t, err)
 	winner, winnerVersion := localStoredTask(t, e, task.ID)
