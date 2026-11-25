@@ -78,13 +78,16 @@ func (c *Client) prepareTerminalCommand(run context.Context, p clientParams, cwd
 		cancel()
 		return nil, err
 	}
-	profile.CWD = cwd
+	if execution.IsNonoLauncher(profile.Launcher) {
+		profile.CommandCWD = cwd
+	} else {
+		profile.CWD = cwd
+	}
 	cmd, err := execution.Command(run, append([]string{p.Command}, p.Args...), profile)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
-	cmd.Dir = cwd
 	if err = p.applyEnvironment(cmd, c.input.Policy.Sandbox); err != nil {
 		cancel()
 		return nil, err

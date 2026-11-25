@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
 	"whirlwind/internal/model"
 )
 
@@ -135,18 +136,26 @@ func assertQltyProbeReport(t *testing.T, root string, argv []string, tracked, ne
 
 func assertQltyExternalState(t *testing.T, root string) {
 	t.Helper()
-	for _, name := range []string{"logs", "out", "plugin_cachedir", "results"} {
-		path := filepath.Join(root, "fixes", "000", "checkout", ".qlty", name)
-		target, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		canonicalRoot, err := filepath.EvalSymlinks(root)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if rel, err := filepath.Rel(canonicalRoot, target); err != nil || !filepath.IsLocal(rel) {
-			t.Fatalf("Qlty runtime state escaped approved external root: %s %v", target, err)
-		}
+	data, err := os.ReadFile(filepath.Join(root, "report.json"))
+	requireVerificationSuccess(t, err)
+	var report JobReport
+	requireVerificationSuccess(t, json.Unmarshal(data, &report))
+	if report.QualityIdentity == nil {
+		t.Fatal("completed scan did not retain its qualified runtime identity")
+	}
+	canonicalRoot, err := filepath.EvalSymlinks(root)
+	requireVerificationSuccess(t, err)
+	target, err := filepath.EvalSymlinks(report.QualityIdentity.ToolRuntimePath)
+	requireVerificationSuccess(t, err)
+	if rel, err := filepath.Rel(canonicalRoot, target); err != nil || !filepath.IsLocal(rel) {
+		t.Fatalf("Qlty runtime state escaped approved external root: %s %v", target, err)
+	}
+	hash, err := hashQualityTree(target)
+	requireVerificationSuccess(t, err)
+	if hash != report.QualityIdentity.ToolRuntimeHash {
+		t.Fatal("retained Qlty tools no longer match the verified identity")
+	}
+	if _, err := os.Lstat(filepath.Join(root, autofixCheckoutDir(0))); !os.IsNotExist(err) {
+		t.Fatalf("completed detached autofix checkout was not released: %v", err)
 	}
 }

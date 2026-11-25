@@ -3,13 +3,16 @@ package workflow
 import (
 	"context"
 	"encoding/json"
-	"github.com/google/uuid"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -139,6 +142,16 @@ func TestParityPlannerMissingOutputRequiresExplicitRetry(t *testing.T) {
 	if saved.DecisionStatus != "error" || saved.ErrorReason == "" || saved.PlanID != "" {
 		t.Fatalf("missing Markdown did not fail closed: %+v", saved)
 	}
+	var id string
+	requireWorkflowSuccess(t, e.Store.DB.QueryRow("SELECT planner_run_id FROM planner_runs WHERE idea_id=?", idea.ID).Scan(&id))
+	attempt := plannerTestAttempt(t, e, id)
+	if !attempt.Finished || attempt.Status != "failed" || attempt.Success == nil || *attempt.Success || attempt.Error != saved.ErrorReason {
+		t.Fatalf("plan missing but Runs did not report the same failure as the idea: status=%q success=%v attempt error=%q idea error=%q", attempt.Status, attempt.Success, attempt.Error, saved.ErrorReason)
+	}
+	if !strings.Contains(saved.ErrorReason, "did not write the assigned plan.md") || !strings.Contains(saved.ErrorReason, "retry") {
+		t.Fatalf("missing plan did not provide actionable recovery: %q", saved.ErrorReason)
+	}
+	assertPlannerMetric(t, e, id, false, false)
 	e.dispatch(ctx)
 	e.background.Wait()
 	if launches.Load() != 1 {
@@ -282,14 +295,35 @@ func TestParityPlannerReconcilesPublishedFileAfterInterruptedCommit(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := step.generateIdeaPlan(); err != nil {
-		t.Fatal(err)
+	content, err := step.prepareIdeaPlanPublication()
+	requireWorkflowSuccess(t, err)
+	interrupted := errors.New("publication interrupted after writing Markdown")
+	err = e.Store.CommitPlannerPublication(ctx, step.task, step.record.Version, func() error {
+		if _, err := step.writeLocalPlanFile(step.task, content); err != nil {
+			return err
+		}
+		return interrupted
+	})
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("expected interruption after writing Markdown: %v", err)
 	}
 	published := step.task.PlanDocument.Path
 	before, err := os.ReadFile(published)
 	if err != nil {
 		t.Fatal(err)
 	}
+	pending := plannerTestAttempt(t, e, step.task.LastAttemptID)
+	if !pending.Finished || pending.Status != model.AttemptAwaitingPlanPublication || pending.Success != nil {
+		t.Fatalf("provider success was reported as Planner success before the publication commit: status=%q success=%v", pending.Status, pending.Success)
+	}
+	assertPlannerMetric(t, e, step.task.LastAttemptID, true, nil)
+
+	ideaRecord, err := e.Store.Get(ctx, "ideas", idea.ID)
+	requireWorkflowSuccess(t, err)
+	if err := e.CancelPlanner(ctx, idea.ID, ideaRecord.Version); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("cancellation discarded published recovery evidence: %v", err)
+	}
+
 	// Simulate process loss between filesystem publication and the final transaction.
 	// No authoring result is committed to the ExecutionPlan resource.
 	replacement := New(e.Store, e.GitHub, e.Root)
@@ -315,4 +349,58 @@ func TestParityPlannerReconcilesPublishedFileAfterInterruptedCommit(t *testing.T
 	if saved.DecisionStatus != "complete" || string(before) != string(after) || launches.Load() != 1 {
 		t.Fatalf("publication recovery lost identity/content: %+v launches=%d", saved, launches.Load())
 	}
+	completed := plannerTestAttempt(t, e, step.task.LastAttemptID)
+	if completed.Status != "complete" || completed.Success == nil || !*completed.Success {
+		t.Fatalf("verified publication did not finish the original attempt: %+v", completed)
+	}
+	assertPlannerMetric(t, e, step.task.LastAttemptID, false, true)
+}
+
+func assertPlannerMetric(t *testing.T, e *Engine, id string, pending bool, success any) {
+	t.Helper()
+	record, err := e.Store.Get(t.Context(), "metrics", id)
+	requireWorkflowSuccess(t, err)
+	metric, err := store.Decode[map[string]any](record)
+	requireWorkflowSuccess(t, err)
+	awaiting, _ := metric["awaiting_plan_publication"].(bool)
+	if awaiting != pending || metric["success"] != success {
+		t.Fatalf("inconsistent Planner metric: awaiting=%v success=%v; want %v/%v", awaiting, metric["success"], pending, success)
+	}
+}
+
+func TestParityPlannerRejectsInvalidMarkdownWithoutRecordingSuccess(t *testing.T) {
+	e, idea := approvedIdeaPlannerFixture(t)
+	e.Adapter = func(model.Provider) provider.Adapter {
+		return connectionAdapterFunc(func(_ context.Context, in provider.Input, _ provider.Hooks) (provider.Output, error) {
+			return provider.Output{Text: "Draft written"}, os.WriteFile(filepath.Join(in.PlannerOutputDirectory, "plan.md"), []byte("Not a valid plan."), 0600)
+		})
+	}
+	e.dispatch(t.Context())
+	e.background.Wait()
+	record, err := e.Store.Get(t.Context(), "ideas", idea.ID)
+	requireWorkflowSuccess(t, err)
+	saved, err := store.Decode[model.Idea](record)
+	requireWorkflowSuccess(t, err)
+	if saved.DecisionStatus != "error" || saved.PlanID != "" || !strings.Contains(saved.ErrorReason, "assigned plan.md is not publishable") {
+		t.Fatalf("invalid document did not block publication with a specific recovery reason: %+v", saved)
+	}
+	var id, intended string
+	requireWorkflowSuccess(t, e.Store.DB.QueryRowContext(t.Context(), "SELECT planner_run_id,markdown_path FROM planner_runs WHERE idea_id=?", idea.ID).Scan(&id, &intended))
+	if _, err := os.Stat(intended); !os.IsNotExist(err) {
+		t.Fatalf("invalid plan ended up at the publication destination %q: %v", intended, err)
+	}
+	attempt := plannerTestAttempt(t, e, id)
+	if attempt.Status != "failed" || attempt.Success == nil || *attempt.Success || attempt.Error != saved.ErrorReason {
+		t.Fatalf("attempt result did not retain the invalid plan error: %+v", attempt)
+	}
+	assertPlannerMetric(t, e, id, false, false)
+}
+
+func plannerTestAttempt(t *testing.T, e *Engine, id string) model.Attempt {
+	t.Helper()
+	record, err := e.Store.Get(t.Context(), "sessions", id)
+	requireWorkflowSuccess(t, err)
+	attempt, err := store.Decode[model.Attempt](record)
+	requireWorkflowSuccess(t, err)
+	return attempt
 }

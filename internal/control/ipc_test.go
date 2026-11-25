@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+const (
+	ipcFixtureSocketFile = "control.sock"
+)
+
 type testDispatcher struct{}
 
 func (testDispatcher) Handle(_ context.Context, request Request) (Response, error) {
@@ -20,7 +24,7 @@ func TestLocalSocketIsPrivateAndCorrelatesNamedCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
-	path := filepath.Join(base, "control", "control.sock")
+	path := filepath.Join(base, "control", ipcFixtureSocketFile)
 	server, err := Listen(path, testDispatcher{})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +54,7 @@ func TestLocalSocketRejectsUnknownOperationsBeforeDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
-	path := filepath.Join(base, "control", "control.sock")
+	path := filepath.Join(base, "control", ipcFixtureSocketFile)
 	server, err := Listen(path, testDispatcher{})
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +73,7 @@ func TestLocalSocketAllowsVersionedDirectionReconsideration(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(base) })
-	path := filepath.Join(base, "control", "control.sock")
+	path := filepath.Join(base, "control", ipcFixtureSocketFile)
 	server, err := Listen(path, testDispatcher{})
 	if err != nil {
 		t.Fatal(err)

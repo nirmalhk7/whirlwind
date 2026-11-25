@@ -12,7 +12,11 @@ import (
 	"whirlwind/internal/model"
 )
 
-func TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks(t *testing.T) {
+const (
+	defaultQualityFixtureCatalogCheck = "effective-catalog"
+)
+
+func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	if _, err := exec.LookPath("qlty"); err != nil {
 		t.Fatalf("installed Qlty required for default qualification: %v", err)
 	}
@@ -36,12 +40,12 @@ func TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks(t *testing.T) 
 	}
 	catalog, _, err := ReadJobStreams(manifest.Root, 0)
 	requireVerificationSuccess(t, err)
-	snapshot, err := manifest.PrepareQualityDefaults([]byte(catalog), []byte(defaultQualityRules))
+	snapshot, err := manifest.PrepareQualityDefaults([]byte(catalog))
 	requireVerificationSuccess(t, err)
-	manifest.JobID, manifest.OperationID = "effective-catalog", "effective-catalog"
+	manifest.JobID, manifest.OperationID = defaultQualityFixtureCatalogCheck, defaultQualityFixtureCatalogCheck
 	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
 	manifest.Quality = &snapshot
-	manifest.Commands = []JobCommand{{Name: "effective-catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
+	manifest.Commands = []JobCommand{{Name: defaultQualityFixtureCatalogCheck, Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
 	report, err = RunLocalJob(context.Background(), binary, manifest, nil)
 	if err != nil || !report.Passed {
 		t.Fatalf("effective catalog discovery failed: %+v %v", report, err)
@@ -55,9 +59,9 @@ func TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks(t *testing.T) 
 	manifest.Quality = &snapshot
 	// Installed Qlty is not a preinstalled plugin runtime. This fixture grants
 	// only public distribution hosts, through the existing enforced proxy.
-	manifest.Sandbox = &model.SandboxPolicy{AllowedDomains: []string{"github.com", "api.github.com", "release-assets.githubusercontent.com", "pypi.org", "files.pythonhosted.org"}}
+	manifest.Sandbox = &model.SandboxPolicy{AllowedDomains: []string{"github.com", "api.github.com", "release-assets.githubusercontent.com"}}
 	argv := []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}
-	// Cold provisioning includes Python and plugin installation. Keep it bounded
+	// Cold provisioning includes plugin installation. Keep it bounded
 	// by the existing generic-command default, independently of ACP deadlines.
 	manifest.Commands = []JobCommand{{Name: "quality", Mode: "autofix", Command: argv, ReportFormat: "sarif", TimeoutSeconds: 600}}
 	report, err = RunLocalJob(context.Background(), binary, manifest, nil)
@@ -66,7 +70,7 @@ func TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks(t *testing.T) 
 	}
 	output, _, err := ReadJobStreams(manifest.Root, 0)
 	requireVerificationSuccess(t, err)
-	assertNativeDefaultCanaries(t, output)
+	assertNativeDefaultCanary(t, output)
 	qualifiedSnapshot := snapshot
 	qualifiedSnapshot.Identity = report.QualityIdentity
 	manifest.JobID, manifest.OperationID = "candidate", "candidate"
@@ -86,13 +90,9 @@ func TestPreparedDefaultConfigurationRunsActualSemgrepAndGitleaks(t *testing.T) 
 
 func writeNativeDefaultProbe(t *testing.T, manifest *JobManifest) {
 	t.Helper()
-	for name, content := range map[string]string{
-		"probe.py":  "print(\"whirlwind-scanner-probe\")\n",
-		"probe.txt": "token = \"" + "gh" + "p_" + strings.Repeat("aB3cD4eF5gH6", 3) + "\"\n",
-	} {
-		if err := os.WriteFile(filepath.Join(manifest.Repository, name), []byte(content), 0600); err != nil {
-			t.Fatal(err)
-		}
+	content := "token = \"" + "gh" + "p_" + strings.Repeat("aB3cD4eF5gH6", 3) + "\"\n"
+	if err := os.WriteFile(filepath.Join(manifest.Repository, "probe.txt"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
 	}
 	nativeDefaultGit(t, manifest.Repository, "add", ".")
 	nativeDefaultGit(t, manifest.Repository, "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "commit", "-m", "Harmless native scanner qualification canaries")
@@ -111,7 +111,7 @@ func nativeDefaultGit(t *testing.T, root string, args ...string) string {
 	return strings.TrimSpace(string(raw))
 }
 
-func assertNativeDefaultCanaries(t *testing.T, raw string) {
+func assertNativeDefaultCanary(t *testing.T, raw string) {
 	t.Helper()
 	var document struct {
 		Runs []struct {
@@ -130,24 +130,14 @@ func assertNativeDefaultCanaries(t *testing.T, raw string) {
 	if err := json.Unmarshal([]byte(raw), &document); err != nil {
 		t.Fatal(err)
 	}
-	found := map[string]bool{}
 	for _, run := range document.Runs {
 		for _, result := range run.Results {
 			for _, location := range result.Locations {
-				recordNativeDefaultCanary(found, result.RuleID, location.Physical.Artifact.URI)
+				if strings.HasPrefix(result.RuleID, "gitleaks:") && location.Physical.Artifact.URI == "probe.txt" {
+					return
+				}
 			}
 		}
 	}
-	if !found["semgrep"] || !found["gitleaks"] {
-		t.Fatalf("default Semgrep/local rules or Gitleaks/embedded rules did not run: found=%v output=%s", found, raw)
-	}
-}
-
-func recordNativeDefaultCanary(found map[string]bool, rule, path string) {
-	if strings.HasPrefix(rule, "semgrep:") && strings.HasSuffix(rule, "qualification-print") && path == "probe.py" {
-		found["semgrep"] = true
-	}
-	if strings.HasPrefix(rule, "gitleaks:") && path == "probe.txt" {
-		found["gitleaks"] = true
-	}
+	t.Fatalf("default Gitleaks rules did not detect the canary: %s", raw)
 }

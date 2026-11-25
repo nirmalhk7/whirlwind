@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"go.yaml.in/yaml/v3"
+
 	"whirlwind/internal/model"
 )
 
@@ -59,7 +60,7 @@ func assertDefaultScannerCatalog(t *testing.T, configuration string) {
 		} `yaml:"plugins"`
 	}
 	requireVerificationSuccess(t, yaml.Unmarshal([]byte(configuration), &catalog))
-	for _, name := range []string{"semgrep", "gitleaks"} {
+	for _, name := range []string{"gitleaks"} {
 		definition := catalog.Plugins.Definitions[name]
 		if definition.KnownGoodVersion == "" || len(definition.Drivers) == 0 {
 			t.Fatalf("default scanner %s lacks usable catalog definition", name)

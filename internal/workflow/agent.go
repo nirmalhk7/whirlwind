@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"slices"
+
 	ctxengine "whirlwind/internal/context"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
@@ -49,6 +50,9 @@ func (a *agentRun) run() (provider.Output, error) {
 		return provider.Output{}, err
 	}
 	a.input.CWD = cwd
+	if err := a.loadAgentHooks(); err != nil {
+		return provider.Output{}, err
+	}
 	parent := a.ctx
 	prepareCtx, cancel := context.WithTimeout(parent, preparationJobTimeout)
 	a.ctx = prepareCtx
@@ -60,6 +64,25 @@ func (a *agentRun) run() (provider.Output, error) {
 	}
 	return a.route()
 }
+func (a *agentRun) loadAgentHooks() error {
+	if err := a.Store.RefreshSettings(a.ctx); err != nil {
+		return fmt.Errorf("refresh agent hook settings: %w", err)
+	}
+	record, err := a.Store.Get(a.ctx, "workflow_config", "global")
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("load agent hook settings: %w", err)
+	}
+	config, err := store.Decode[model.WorkflowConfig](record)
+	if err != nil {
+		return fmt.Errorf("decode agent hook settings: %w", err)
+	}
+	a.input.AgentHooks = config.AgentHooks[a.input.Role]
+	return nil
+}
+
 func (a *agentRun) route() (provider.Output, error) {
 	record, err := a.Store.Get(a.ctx, "agents", a.input.Role)
 	if err == nil {

@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/google/uuid"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
@@ -54,27 +55,19 @@ func TestLocalDirectionApprovalReusesVersionedDomainMutation(t *testing.T) {
 func TestLocalDirectionReconsiderationRequiresExactHumanScopeAndReceipt(t *testing.T) {
 	server := setup(t)
 	ctx := context.Background()
-	if err := server.Store.Put(ctx, "projects", "p", model.Project{ID: "p"}, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, server.Store.Put(ctx, "projects", "p", model.Project{ID: "p"}, 0))
 	direction := model.Direction{ID: "dismissed", ProjectID: "p", Day: "2026-11-06", Status: "dismissed", Category: "harden", Title: "Keep offline drafts", Problem: "Expired sessions lose offline drafts", Mechanism: "Refresh the authorized session before retrying", Components: []string{"internal/auth"}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}, RejectionReason: "Original rejection is retained"}
-	if err := server.Store.Put(ctx, "directions", direction.ID, direction, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, server.Store.Put(ctx, "directions", direction.ID, direction, 0))
 	payload := json.RawMessage(`{"project_id":"p","reason":"The operator changed the goal to preserve offline drafts."}`)
 	command := LocalCommand{Operation: "direction.reconsider", ProjectID: "p", ResourceID: direction.ID, ExpectedVersion: 1, IdempotencyKey: "reconsider-1", Payload: payload}
 	first, err := server.ExecuteLocal(ctx, command)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	second, err := server.ExecuteLocal(ctx, command)
 	if err != nil || string(first) != string(second) {
 		t.Fatalf("human reconsideration retry changed its receipt: %s / %s (%v)", first, second, err)
 	}
 	savedRecord, err := server.Store.Get(ctx, "directions", direction.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	saved, err := store.Decode[model.Direction](savedRecord)
 	if err != nil || saved.Status != "reconsider_requested" || saved.Selected || saved.RejectionReason != direction.RejectionReason {
 		t.Fatalf("reconsideration changed original rejection or started work: %+v (%v)", saved, err)
@@ -84,9 +77,7 @@ func TestLocalDirectionReconsiderationRequiresExactHumanScopeAndReceipt(t *testi
 		t.Fatalf("host reconsideration receipt not persisted exactly once: %d (%v)", len(requests), err)
 	}
 	var request map[string]any
-	if err := json.Unmarshal(requests[0].Data, &request); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, json.Unmarshal(requests[0].Data, &request))
 	if request["project_id"] != "p" || request["predecessor_id"] != direction.ID || request["reason"] != "The operator changed the goal to preserve offline drafts." || request["status"] != "pending" {
 		t.Fatalf("human request was not bound to the exact project, predecessor, and reason: %#v", request)
 	}

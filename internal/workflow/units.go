@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
+
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/policy"
@@ -65,7 +66,7 @@ func (r *unitRun) prepareWorktree() error {
 	base := r.unit.Base
 	if base == "" {
 		var err error
-		base, err = github.Run(r.ctx, r.task.Worktree, "git", "rev-parse", "HEAD")
+		base, err = github.Run(r.ctx, r.task.Worktree, "git", gitRevParseCommand, "HEAD")
 		if err != nil {
 			return err
 		}
@@ -78,31 +79,36 @@ func (r *unitRun) prepareWorktree() error {
 func (r *unitRun) restoreCheckpoint() (bool, error) {
 	key := unitKey(r.task.ID, r.task.PlanVersion, r.unit.ID)
 	record, load := r.Store.Get(r.ctx, "units", key)
-	if load == nil {
-		previous, err := store.Decode[model.Unit](record)
-		if err != nil {
-			return false, fmt.Errorf("decode durable unit checkpoint: %w", err)
+	if errors.Is(load, store.ErrNotFound) {
+		r.clearRuntimeFields()
+		return false, nil
+	}
+	if load != nil {
+		return false, fmt.Errorf("load durable unit checkpoint: %w", load)
+	}
+	return r.restoreStoredCheckpoint(record)
+}
+
+func (r *unitRun) restoreStoredCheckpoint(record model.Record) (bool, error) {
+	previous, err := store.Decode[model.Unit](record)
+	if err != nil {
+		return false, fmt.Errorf("decode durable unit checkpoint: %w", err)
+	}
+	if err := r.validateCheckpointIdentity(previous); err != nil {
+		return false, err
+	}
+	r.restoreRuntimeFields(previous)
+	if previous.Commit != "" {
+		if previous.Stage != "complete" && previous.Stage != "integrated" {
+			return false, errors.New("unit checkpoint has a commit in an invalid stage")
 		}
-		if err := r.validateCheckpointIdentity(previous); err != nil {
+		if err := r.validateCheckpointCommit(previous); err != nil {
 			return false, err
 		}
-		r.restoreRuntimeFields(previous)
-		if previous.Commit != "" {
-			if previous.Stage != "complete" && previous.Stage != "integrated" {
-				return false, errors.New("unit checkpoint has a commit in an invalid stage")
-			}
-			if err := r.validateCheckpointCommit(previous); err != nil {
-				return false, err
-			}
-			return true, nil
-		}
-		if previous.Stage == "complete" || previous.Stage == "integrated" {
-			return false, errors.New("completed unit checkpoint is missing its commit")
-		}
-	} else if !errors.Is(load, store.ErrNotFound) {
-		return false, fmt.Errorf("load durable unit checkpoint: %w", load)
-	} else {
-		r.clearRuntimeFields()
+		return true, nil
+	}
+	if previous.Stage == "complete" || previous.Stage == "integrated" {
+		return false, errors.New("completed unit checkpoint is missing its commit")
 	}
 	return false, nil
 }
@@ -153,7 +159,7 @@ func (r *unitRun) validateCheckpointCommit(previous model.Unit) error {
 	if err := validateExistingWorktree(r.ctx, r.project.Path, previous.Worktree, previous.Branch, previous.Base); err != nil {
 		return fmt.Errorf("validate durable unit worktree: %w", err)
 	}
-	head, err := github.Run(r.ctx, previous.Worktree, "git", "rev-parse", "HEAD")
+	head, err := github.Run(r.ctx, previous.Worktree, "git", gitRevParseCommand, "HEAD")
 	if err != nil {
 		return err
 	}
@@ -161,7 +167,18 @@ func (r *unitRun) validateCheckpointCommit(previous model.Unit) error {
 		return errors.New("durable unit checkpoint commit does not match its worktree HEAD")
 	}
 	if previous.Stage == "integrated" {
-		if _, err = github.Run(r.ctx, r.task.Worktree, "git", "merge-base", "--is-ancestor", previous.Commit, "HEAD"); err != nil {
+		integrated := previous.Commit
+		record, err := r.Store.Get(r.ctx, "checkpoints", integrationCheckpointID(r.task, previous.ID, previous.Commit))
+		if err == nil {
+			checkpoint, decodeErr := store.Decode[integrationCheckpoint](record)
+			if decodeErr != nil || checkpoint.Commit == "" || checkpoint.Source != previous.Commit || checkpoint.Plan != r.task.ID || checkpoint.Version != r.task.PlanVersion || checkpoint.Unit != previous.ID {
+				return errors.Join(decodeErr, errors.New("invalid unit integration checkpoint"))
+			}
+			integrated = checkpoint.Commit
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if _, err = github.Run(r.ctx, r.task.Worktree, "git", "merge-base", "--is-ancestor", integrated, "HEAD"); err != nil {
 			return fmt.Errorf("integrated unit checkpoint is not in the task candidate history: %w", err)
 		}
 	}
@@ -211,7 +228,7 @@ func (r *unitRun) implement(p model.Project) error {
 	if err = r.commit(r.ctx, p, r.unit.Worktree, r.unit.Objective); err != nil {
 		return err
 	}
-	r.unit.Commit, err = github.Run(r.ctx, r.unit.Worktree, "git", "rev-parse", "HEAD")
+	r.unit.Commit, err = github.Run(r.ctx, r.unit.Worktree, "git", gitRevParseCommand, "HEAD")
 	if err != nil {
 		return err
 	}

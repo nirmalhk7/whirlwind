@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
 	"whirlwind/internal/redaction"
 )
 
@@ -123,7 +124,11 @@ func TestReapHandlesCrashBeforePIDRegistration(t *testing.T) {
 	}
 	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
 	file := filepath.Join(root, token(cmd)+".json")
-	b, _ := json.Marshal(registration{Token: token(cmd)})
+	registered, err := readRegistration(file)
+	if err != nil || registered.ParentStarted == "" {
+		t.Fatalf("missing pre-launch parent identity: %+v %v", registered, err)
+	}
+	b, _ := json.Marshal(registration{Token: registered.Token, ParentStarted: registered.ParentStarted})
 	if err := os.WriteFile(file, b, 0600); err != nil {
 		t.Fatal(err)
 	}

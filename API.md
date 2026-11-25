@@ -77,7 +77,7 @@ Separate optional listener exposes only `POST /webhooks/github`. Requires `X-Hub
 
 Generated directions include `category`: `expand`, `optimize`, `harden`, or `simplify`, with exactly one per batch. Older directions may omit it. Ideation validates each batch against all stored suggestions for that project and requires a separate semantic novelty verdict before saving. Descriptions are capped at 35 whitespace-separated words. Rejected batches retry up to three times; failed validation or unavailable history/review leaves no new directions.
 
-Empty project policies permit registration and ideation with an empty `policy_hash`. Task execution still requires a configured, committed policy confirmed through `/projects/{id}/policy`. Native providers accept optional `model_command:["executable", "argument", ...]` for ACP discovery; otherwise pinned official npm adapters are used.
+Empty project policies permit registration and ideation with an empty `policy_hash`. Task execution still requires a configured, committed policy confirmed through `/projects/{id}/policy`. Confirming a changed policy clears the prior scanner qualification, sets the project to draft, and queues fresh setup without starting another ideation run. Confirming the same committed policy preserves its qualification. Native providers accept optional `model_command:["executable", "argument", ...]` for ACP discovery; otherwise pinned official npm adapters are used.
 
 ## Thinking, Run history, and ideation schedules
 
@@ -89,7 +89,7 @@ Each primary/fallback choice can persist optional `thinking:{config_id,value}`. 
 
 `GET /sessions` includes each attempted provider separately, including ideation and novelty checks. New records add `project_id`, `provider_name`, `transport`, `thinking`, `effective_thinking`, `resolved_model`, `started_at`, `finished_at`, `elapsed_ms`, `success`, and failure `error` when available. Existing `model` remains the configured value. Runtime metadata is separate so it cannot change session identity. Historical absent fields remain unknown; `finished` alone is not proof of success. The Run page at `/runs` consumes these read-only records; connectivity tests remain operations.
 
-Settings defaults merge into legacy records without migration. `ideation` defaults to `{enabled:true,time:"10:00",timezone:"America/Denver"}`. `time` requires 24-hour HH:MM; `timezone` requires an explicit IANA zone. Automatic ideation runs once per project/latest due local date, catches up only that date after downtime, honors existing completed schedules and retry delays, and stops scheduling new runs when disabled. Already-running work continues. Manual ideation remains available and uses the same due-day calculation. Schedule changes apply on subsequent scheduler checks without restart. Missing fields in PATCH preserve existing settings.
+The default ideation schedule is `"CRON_TZ=America/Denver 0 10 * * *"`. In `settings.yaml`, set it under `workers.ideation.cron`. In the settings API, use `ideation.cron`. Use five crontab fields and optionally prefix an IANA time zone with `CRON_TZ=`. Without a prefix, the supervisor uses its local time zone. An empty string disables automatic ideation. The supervisor checks for due work on its polling loop and catches up only the latest occurrence. It tracks each scheduled minute separately and respects completed runs and retry delays. Manual ideation remains available. Existing daily settings are read as equivalent cron expressions and saved in the new format. Schedule edits apply without a restart, and omitted PATCH fields preserve existing values.
 
 Project onboarding preserves custom `.whirlwind.yml`/`.whirlwind.yaml` policies, including committed/staged policies missing from the checkout. Exact unchanged app-generated empty starters upgrade to execution policies. Automatic commits include generated `.whirlwind.yml` and missing `.qlty/qlty.toml`, preserving unrelated staged/unstaged changes. Registration is blocked if Git cannot commit; existing Git hooks and signing settings are respected. Qlty must be installed for validation; missing configuration is initialized, invalid existing configuration remains intact for repair.
 
@@ -159,33 +159,8 @@ Generated directions include `rank`, `expected_benefit`, `effort_estimate`, `unc
 
 Usage reports preserve missing historical runtime in `unknown_runtime_attempts`; admission blocks instead of treating it as zero. Entry `kind` distinguishes model attempts from synthetic `legacy` unknowns, deterministic `verification` checks, and `preflight` with no model turn. Reconciliation of legacy session IDs also requires confirmed termination; supplying usage requires attempt scope and observed `active_runtime_ms`.
 
+## Private role queue admission
 
-## Role queue HTTP endpoints
-
-These endpoints run only on the supervisor's second private Unix socket (see
-[local supervisor](docs/local-supervisor.md#native-task-queues)). Unix socket
-permissions authorize the owning account; this is not a remote worker API.
-Use `Host: localhost`, `Content-Type: application/json`, and no browser
-`Origin`. Each path is `/api/v1/queues/{role}/{action}`; `role` must be
-`planner_tasks`, `coding_tasks`, `reviewer_tasks`, or `finalizer_tasks`.
-
-| POST action | JSON request | Result |
-| --- | --- | --- |
-| `push` | `{}`, or `{"plan_id":"plan_…","version":3}` | 204 publishes already-durable eligible work. A targeted retry is idempotent; invalid phase or revision is 409. |
-| `pop` | `{}` | 200 returns `id`, `token`, `plan_id`, `version`, `stage`, and `expires_at_ms` for a two-minute lease; 204 means no claimable head. |
-| `renew` | `{"id":42,"token":"…"}` | 204 extends a current lease; stale receipts return 409. |
-| `release` | Same receipt | 204 returns current work to the head; an expired receipt cannot release a newer lease. |
-| `ack` | Same receipt | 204 if the authoritative transition already retired this revision; 409 rather than discarding unchanged work. |
-
-A manual pop leases metadata only; it neither executes an agent nor approves
-or advances a plan. The supervisor is the normal consumer. Do not store the
-receipt in public logs. An interrupted request after a successful pop may leave
-the claim active until its lease expires. There is no arbitrary task-payload or
-role-transition API.
-
-Example (set `queue_socket` to the private queue socket path):
-
-```sh
-curl --unix-socket "$queue_socket" -H 'Content-Type: application/json' \
-  -d '{}' http://localhost/api/v1/queues/planner_tasks/push
-```
+The [dedicated queue socket](docs/local-supervisor.md#dedicated-queue-socket)
+provides same-user HTTP push and pop for authorized plan revisions on a
+private Unix socket. The supervisor retains lease ownership and completion.

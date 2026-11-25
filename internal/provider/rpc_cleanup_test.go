@@ -12,10 +12,15 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
 	"whirlwind/internal/execution"
 	"whirlwind/internal/process"
 	"whirlwind/internal/redaction"
 	"whirlwind/internal/store"
+)
+
+const (
+	fixtureRedactedValue = "[redacted]"
 )
 
 func TestRPCCleanupFailureIsReportedBeforeProcessExit(t *testing.T) {
@@ -76,7 +81,7 @@ func TestRPCPipeSetupFailureReleasesOpenShellRedactionState(t *testing.T) {
 			token = strings.TrimPrefix(entry, "WHIRLWIND_OPENSHELL_PROXY_TOKEN=")
 		}
 	}
-	if token == "" || store.RedactText(token) != "[redacted]" {
+	if token == "" || store.RedactText(token) != fixtureRedactedValue {
 		t.Fatal("OpenShell capability was not registered before process launch")
 	}
 	cmd.Stdin = strings.NewReader("already assigned")
@@ -150,23 +155,13 @@ func TestRPCDrainsTrailingStderrBeforeReleasingCredentialRedaction(t *testing.T)
 	if err := cmd.Process.Signal(syscall.Signal(0)); !errors.Is(err, os.ErrProcessDone) && !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("provider process remained alive after runtime cleanup: %v", err)
 	}
-	registration := filepath.Join(registry, processToken+".json")
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, statErr := os.Stat(registration); os.IsNotExist(statErr) {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("process group cleanup did not finish while stderr capture was held")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitForRPCProcessRegistrationRemoval(t, filepath.Join(registry, processToken+".json"))
 	select {
 	case <-released:
 		t.Fatal("credential was released before trailing stderr reader drained")
 	case <-time.After(50 * time.Millisecond):
 	}
-	if got := store.RedactText(secret); got != "[redacted]" {
+	if got := store.RedactText(secret); got != fixtureRedactedValue {
 		t.Fatalf("credential redaction ended before stderr capture drained: %q", got)
 	}
 	close(continueCapture)
@@ -212,7 +207,21 @@ func TestRPCCleanupFailureRetainsCredentialRedaction(t *testing.T) {
 	if err := rpc.Close(); err == nil || !strings.Contains(err.Error(), "controlled runtime cleanup failure") {
 		t.Fatalf("runtime cleanup failure was not reported: %v", err)
 	}
-	if got := store.RedactText(secret); got != "[redacted]" {
+	if got := store.RedactText(secret); got != fixtureRedactedValue {
 		t.Fatalf("runtime cleanup failure released credential redaction: %q", got)
+	}
+}
+
+func waitForRPCProcessRegistrationRemoval(t *testing.T, registration string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if _, statErr := os.Stat(registration); os.IsNotExist(statErr) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("process group cleanup did not finish while stderr capture was held")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

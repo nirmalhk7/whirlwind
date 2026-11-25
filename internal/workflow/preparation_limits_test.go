@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -58,16 +59,12 @@ func assertPreparationWithoutBudget(t *testing.T, role string, configured bool) 
 		t.Fatalf("preparation did not run: %d", calls)
 	}
 	report, err := h.engine.Store.TaskUsage(context.Background(), h.task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if report.Attempts != 2 || report.TotalTokens != 2000 || report.Cost != 200 {
 		t.Fatalf("usage lost: %+v", report)
 	}
 	reservations, err := h.engine.Store.List(context.Background(), "budget_reservations")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if len(reservations) != 0 {
 		t.Fatal("preparation created budget reservations")
 	}

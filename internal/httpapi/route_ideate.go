@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 	"whirlwind/internal/workflow"
@@ -34,6 +35,9 @@ func (q apiRequest) ideate() error {
 }
 
 func (q apiRequest) queueIdeation(p model.Project, brief model.IdeationBrief, fresh bool) error {
+	if err := q.Engine.CheckIdeationPrerequisites(q.r.Context(), p); err != nil {
+		return &apiError{409, "github_prerequisite", err.Error()}
+	}
 	if err := persistIdeationBrief(q, p.ID, brief); err != nil {
 		return err
 	}

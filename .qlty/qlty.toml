@@ -86,14 +86,7 @@ mode = "comment"
 name = "trufflehog"
 
 [[plugin]]
-name = "semgrep"
-
-[[plugin]]
 name = "trivy"
 
 [[plugin]]
 name = "gitleaks"
-
-# Run maintained CI rules; the default local .semgrep.yaml does not exist.
-[plugins.definitions.semgrep.drivers.lint]
-script = "semgrep --metrics=off --disable-version-check --config p/ci --sarif --output=${tmpfile} ${target}"

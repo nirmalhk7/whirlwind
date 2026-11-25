@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	sqlite "modernc.org/sqlite"
+
 	"whirlwind/internal/model"
 )
 

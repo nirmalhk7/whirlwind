@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
 	"whirlwind/internal/model"
 )
 
@@ -113,7 +114,7 @@ func regressionQuality(output string, exit int) Result {
 }
 
 func regressionFixtureIdentity() *model.QualityIdentity {
-	return &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 fixture", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: "/tmp/approved-runtime/tools", Tools: []model.QualityToolIdentity{{Name: "semgrep", Version: "1.179.0", Fingerprint: "c5011bfd1d76"}}}
+	return &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 fixture", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: "/tmp/approved-runtime/tools", Tools: []model.QualityToolIdentity{{Name: "gitleaks", Version: "1.179.0", Fingerprint: "c5011bfd1d76"}}}
 }
 
 func TestCompareBaselineQltyRejectsDifferentRuntimeIdentity(t *testing.T) {
@@ -176,9 +177,31 @@ func TestCompareBaselineAcceptsUnchangedQltySmellsExitZeroAdvisory(t *testing.T)
 	}
 }
 
+func TestCompareBaselineQltySmellsRequiresMatchingRuntimeIdentity(t *testing.T) {
+	output := regressionSARIF("complexity", "warning", "stable", complexityFinding, 10, 12)
+	for _, name := range []string{"missing baseline", "missing candidate", "different runtime"} {
+		t.Run(name, func(t *testing.T) {
+			base, head := regressionQltySmells(output, 0), regressionQltySmells(output, 0)
+			switch name {
+			case "missing baseline":
+				base.QualityIdentity = nil
+			case "missing candidate":
+				head.QualityIdentity = nil
+			case "different runtime":
+				head.QualityIdentity.QltyBinarySHA256 = strings.Repeat("e", 64)
+			}
+			compared := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{head}})
+			if compared.Passed || AcceptedQltyBaselineAdvisory(compared.Results[0]) || !strings.Contains(compared.Results[0].Error, "runtime identity") {
+				t.Fatalf("unqualified smells accepted as baseline debt: %+v", compared)
+			}
+		})
+	}
+}
+
 func regressionQltySmells(output string, exit int) Result {
 	r := regressionResult("qlty-smells", output, exit)
 	r.Command = []string{"qlty", "smells", "--all", regressionSARIFArgument}
+	r.QualityIdentity = regressionFixtureIdentity()
 	r.Passed = false
 	r.Error = "qlty reported 1 code smells; repair findings before review"
 	return r

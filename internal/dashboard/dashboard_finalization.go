@@ -7,38 +7,13 @@ import (
 	"reflect"
 	"strings"
 	"time"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 
 	"github.com/rivo/tview"
 )
-
-type finalizationReport struct {
-	Task             model.ExecutionPlan  `json:"plan_id"`
-	Review           model.Review         `json:"review"`
-	Adherence        model.Adherence      `json:"adherence"`
-	ApprovedPlanHash string               `json:"approved_plan_hash"`
-	PolicyHash       string               `json:"policy_hash"`
-	Diff             finalizationDiffPage `json:"diff"`
-	Accepted         bool                 `json:"accepted"`
-}
-
-type finalizationDiffPage struct {
-	Content    string `json:"content"`
-	Offset     int64  `json:"offset"`
-	NextOffset int64  `json:"next_offset"`
-	HasMore    bool   `json:"has_more"`
-}
-
-type finalizationApprovalPayload struct {
-	PlanVersion      int    `json:"plan_version"`
-	ApprovedPlanHash string `json:"approved_plan_hash"`
-	ReviewedCommit   string `json:"reviewed_commit"`
-	ReviewID         string `json:"review_id"`
-	VerificationID   string `json:"verification_id"`
-	PolicyHash       string `json:"policy_hash"`
-}
 
 func (d *Dashboard) loadFinalizationReport(plan model.ExecutionPlan, version int, diffOffset int64, visitedOffsets []int64) {
 	d.status.SetText("Whirlwind | loading accepted review, exact candidate diff, and adherence report…")
@@ -54,7 +29,7 @@ func (d *Dashboard) loadFinalizationReport(plan model.ExecutionPlan, version int
 				d.status.SetText("Whirlwind | finalization report unavailable: " + tview.Escape(err.Error()))
 				return
 			}
-			var report finalizationReport
+			var report control.FinalizationReport
 			if json.Unmarshal(response, &report) != nil {
 				d.status.SetText("Whirlwind | finalization report invalid")
 				return
@@ -69,7 +44,7 @@ func (d *Dashboard) loadFinalizationReport(plan model.ExecutionPlan, version int
 	}()
 }
 
-func (d *Dashboard) showFinalizationApproval(plan model.ExecutionPlan, version int, report finalizationReport, visitedOffsets []int64) {
+func (d *Dashboard) showFinalizationApproval(plan model.ExecutionPlan, version int, report control.FinalizationReport, visitedOffsets []int64) {
 	policyHash, ok := d.projectPolicyHash(plan.ProjectID)
 	request, err := finalizationApprovalRequest(plan, version, policyHash, report)
 	if !ok || err != nil || !d.approvalPlanStillCurrent(plan, version, policyHash) {
@@ -102,7 +77,7 @@ func (d *Dashboard) showFinalizationApproval(plan model.ExecutionPlan, version i
 	d.showForm(form)
 }
 
-func finalizationApprovalRequest(plan model.ExecutionPlan, version int, policyHash string, report finalizationReport) (control.Request, error) {
+func finalizationApprovalRequest(plan model.ExecutionPlan, version int, policyHash string, report control.FinalizationReport) (control.Request, error) {
 	if !report.Accepted || !report.Adherence.Accepted || !reflect.DeepEqual(report.Review.Adherence, &report.Adherence) || !reviewAdherenceMatchesTask(report.Review, plan, policyHash) || !reviewAdherenceMatchesTask(report.Review, report.Task, report.PolicyHash) {
 		return control.Request{}, fmt.Errorf("current accepted review report does not match the selected candidate")
 	}
@@ -113,7 +88,7 @@ func finalizationApprovalRequest(plan model.ExecutionPlan, version int, policyHa
 	if approvedHash == "" || report.ApprovedPlanHash != approvedHash || report.PolicyHash != policyHash || report.Diff.Content == "" || report.Diff.HasMore {
 		return control.Request{}, fmt.Errorf("critical approval report is missing the approved plan, policy, or exact diff")
 	}
-	payload := finalizationApprovalPayload{PlanVersion: report.Task.PlanVersion, ApprovedPlanHash: approvedHash, ReviewedCommit: report.Task.ReviewedCommit, ReviewID: report.Task.ReviewID, VerificationID: report.Task.VerificationID, PolicyHash: report.PolicyHash}
+	payload := model.LocalFinalizationApproval{PlanVersion: report.Task.PlanVersion, ApprovedPlanHash: approvedHash, ReviewedCommit: report.Task.ReviewedCommit, ReviewID: report.Task.ReviewID, VerificationID: report.Task.VerificationID, PolicyHash: report.PolicyHash}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return control.Request{}, err
@@ -126,14 +101,7 @@ func (d *Dashboard) approvalPlanStillCurrent(plan model.ExecutionPlan, version i
 		return false
 	}
 	_, current, ok := d.planRecord(plan.ID)
-	return ok && current.Stage == "approval" && current.PlanVersion == plan.PlanVersion && current.ReviewedCommit == plan.ReviewedCommit && current.ReviewID == plan.ReviewID && current.VerificationID == plan.VerificationID && dashboardApprovedPlanHash(current) == dashboardApprovedPlanHash(plan)
-}
-
-func dashboardApprovedPlanHash(task model.ExecutionPlan) string {
-	if task.PlanDocument == nil {
-		return ""
-	}
-	return task.PlanDocument.ApprovedHash
+	return ok && current.Stage == "approval" && current.PlanVersion == plan.PlanVersion && current.ReviewedCommit == plan.ReviewedCommit && current.ReviewID == plan.ReviewID && current.VerificationID == plan.VerificationID && current.ApprovedPlanHash() == plan.ApprovedPlanHash()
 }
 
 func (d *Dashboard) projectPolicyHashOrEmpty(projectID string) string {
@@ -141,12 +109,12 @@ func (d *Dashboard) projectPolicyHashOrEmpty(projectID string) string {
 	return value
 }
 
-func finalizationReportText(report finalizationReport) string {
+func finalizationReportText(report control.FinalizationReport) string {
 	text, _ := json.MarshalIndent(struct {
-		Approval finalizationApprovalPayload `json:"approval_candidate"`
-		Review   model.Review                `json:"review"`
-		Report   model.Adherence             `json:"computed_adherence"`
-	}{Approval: finalizationApprovalPayload{PlanVersion: report.Task.PlanVersion, ApprovedPlanHash: report.ApprovedPlanHash, ReviewedCommit: report.Task.ReviewedCommit, ReviewID: report.Task.ReviewID, VerificationID: report.Task.VerificationID, PolicyHash: report.PolicyHash}, Review: report.Review, Report: report.Adherence}, "", "  ")
+		Approval model.LocalFinalizationApproval `json:"approval_candidate"`
+		Review   model.Review                    `json:"review"`
+		Report   model.Adherence                 `json:"computed_adherence"`
+	}{Approval: model.LocalFinalizationApproval{PlanVersion: report.Task.PlanVersion, ApprovedPlanHash: report.ApprovedPlanHash, ReviewedCommit: report.Task.ReviewedCommit, ReviewID: report.Task.ReviewID, VerificationID: report.Task.VerificationID, PolicyHash: report.PolicyHash}, Review: report.Review, Report: report.Adherence}, "", "  ")
 	var view strings.Builder
 	fmt.Fprintf(&view, "Approve local finalization only. No pull request or branch push.\nComputed adherence: %g%%\nUnmet requirement IDs:\n", report.Adherence.Score)
 	unmet := 0

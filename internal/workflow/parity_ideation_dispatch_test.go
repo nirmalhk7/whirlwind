@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"testing"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -11,7 +12,7 @@ func TestParityInitialIdeationDispatchIgnoresPeriodicDisable(t *testing.T) {
 	e, _, _ := testEngine(t)
 	ctx := context.Background()
 	settings := DefaultSettings()
-	settings.Ideation.Enabled = false
+	settings.Ideation.Cron = ""
 	record, _ := e.Store.Get(ctx, "settings", "global")
 	if err := e.Store.Put(ctx, "settings", "global", settings, record.Version); err != nil {
 		t.Fatal(err)

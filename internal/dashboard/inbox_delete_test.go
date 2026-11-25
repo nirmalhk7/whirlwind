@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/gdamore/tcell/v2"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
-	"whirlwind/internal/workflow"
 )
 
 func TestDeleteKeyTargetsHighlightedInboxProposal(t *testing.T) {
@@ -59,7 +59,7 @@ func TestDeleteKeyDoesNotDeleteTaskNotice(t *testing.T) {
 
 func TestAgentPausedLabelExplainsGlobalRunnerStop(t *testing.T) {
 	d := New()
-	d.Present(control.Snapshot{"providers": {record("codex", model.Provider{ID: "codex", Name: "Codex"})}, "provider_status": {record("codex", workflow.ProviderStatus{ID: "codex", Status: "paused", Detail: "Command installed. Connection checks paused while runners are stopped."})}})
+	d.Present(control.Snapshot{"providers": {record("codex", model.Provider{ID: "codex", Name: "Codex"})}, "provider_status": {record("codex", model.ProviderStatus{ID: "codex", Status: "paused", Detail: "Command installed. Connection checks paused while runners are stopped."})}})
 	if !strings.Contains(d.agents.GetText(false), "runners stopped") {
 		t.Fatalf("paused reason hidden: %s", d.agents.GetText(false))
 	}

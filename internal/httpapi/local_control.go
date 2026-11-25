@@ -10,28 +10,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+
+	"whirlwind/internal/control"
 )
 
-const (
-	localRunnerToggleOperation = "runners.toggle"
-)
-
-type LocalCommand struct {
-	Operation       string
-	ProjectID       string
-	PlanID          string
-	ResourceID      string
-	ExpectedVersion int
-	DiffOffset      int64
-	ContentHash     string
-	IdempotencyKey  string
-	Payload         json.RawMessage
-}
-
-const (
-	localTaskRoutePrefix     = "/api/v1/execution_plans/"
-	projectRegisterOperation = "project.register"
-)
+// LocalCommand is the command received from the supervisor's local protocol.
+type LocalCommand = control.Request
 
 func localPayload(payload json.RawMessage) json.RawMessage {
 	if len(payload) == 0 {
@@ -44,8 +28,8 @@ func localPayload(payload json.RawMessage) json.RawMessage {
 // versioned and idempotent domain handlers. It starts no HTTP listener.
 func (s *Server) ExecuteLocal(ctx context.Context, command LocalCommand) (json.RawMessage, error) {
 	switch command.Operation {
-	case localRunnerToggleOperation:
-		return s.executeRunnerActivity(ctx, command)
+	case control.RoleQueuePushOperation, control.RoleQueuePopOperation, "runners.toggle":
+		return s.executeRunnerControl(ctx, command)
 	case "ideation.start":
 		return s.executeIdeationStart(ctx, command)
 	case "plan.pause", "plan.resume":
@@ -60,10 +44,12 @@ func (s *Server) ExecuteLocal(ctx context.Context, command LocalCommand) (json.R
 		return s.executeIdeaDecision(ctx, command)
 	case "inspect.plan", "plan.document.read", "plan.document.save", "plan.approve", "plan.request_changes", "plan.reject", "plan.review":
 		return s.executePlanCommand(ctx, command)
-	case projectRegisterOperation:
+	case "project.register":
 		return s.registerLocalProject(ctx, command)
 	case "project.setup.retry":
 		return s.retryLocalProjectSetup(ctx, command)
+	case "project.policy.preview", "project.policy.approve", "inspect.memory", "memory.remember", "memory.clear":
+		return s.executeLocalProjectData(ctx, command)
 	case "finalization.inspect":
 		return s.inspectFinalization(ctx, command)
 	case "finalization.approve":
@@ -73,12 +59,12 @@ func (s *Server) ExecuteLocal(ctx context.Context, command LocalCommand) (json.R
 	case "question.answer", "permission.decide":
 		return s.executeHumanDecision(ctx, command)
 	default:
-		return s.executeNamedDomainRoute(ctx, command)
+		return s.executeLegacyDirectionRoute(ctx, command)
 	}
 }
 
-func (s *Server) executeNamedDomainRoute(ctx context.Context, command LocalCommand) (json.RawMessage, error) {
-	method, path, payload, err := localRoute(command)
+func (s *Server) executeLegacyDirectionRoute(ctx context.Context, command LocalCommand) (json.RawMessage, error) {
+	method, path, payload, err := legacyDirectionRoute(command)
 	if err != nil {
 		return nil, err
 	}
@@ -103,16 +89,9 @@ func (s *Server) executeNamedDomainRoute(ctx context.Context, command LocalComma
 	return append(json.RawMessage(nil), body...), nil
 }
 
-func localRoute(command LocalCommand) (string, string, []byte, error) {
+func legacyDirectionRoute(command LocalCommand) (string, string, []byte, error) {
 	payload := localPayload(command.Payload)
 	switch command.Operation {
-	case "inspect.plan":
-		return localTaskRoute(command.PlanID, "plan-document", http.MethodGet, nil)
-	case projectRegisterOperation, localRunnerToggleOperation:
-		paths := map[string]string{projectRegisterOperation: "/api/v1/projects", localRunnerToggleOperation: "/api/v1/runners/toggle"}
-		return http.MethodPost, paths[command.Operation], payload, nil
-	case "ideation.start":
-		return localProjectRoute(command.ProjectID, "ideation", payload)
 	case "direction.select", "direction.approve":
 		return localDirectionRoute(command.ResourceID, "select", payload)
 	case "direction.delete":
@@ -135,10 +114,6 @@ func localRoute(command LocalCommand) (string, string, []byte, error) {
 			return "", "", nil, errors.New("direction reconsideration project does not match local command")
 		}
 		return localDirectionRoute(command.ResourceID, "reconsider", payload)
-	case "plan.review":
-		return localPlanReviewRoute(command, payload)
-	case "plan.pause", "plan.resume":
-		return localTaskActionRoute(command, payload)
 	default:
 		return "", "", nil, fmt.Errorf("unsupported local operator command %q", command.Operation)
 	}
@@ -151,49 +126,12 @@ func localID(value string) (string, error) {
 	return url.PathEscape(value), nil
 }
 
-func localTaskRoute(id, action, method string, payload []byte) (string, string, []byte, error) {
-	escaped, err := localID(id)
-	if err != nil {
-		return "", "", nil, err
-	}
-	return method, localTaskRoutePrefix + escaped + "/" + action, payload, nil
-}
-
-func localProjectRoute(id, action string, payload []byte) (string, string, []byte, error) {
-	project, err := localID(id)
-	if err != nil {
-		return "", "", nil, err
-	}
-	return http.MethodPost, "/api/v1/projects/" + project + "/" + action, payload, nil
-}
-
 func localDirectionRoute(id, action string, payload []byte) (string, string, []byte, error) {
 	direction, err := localID(id)
 	if err != nil {
 		return "", "", nil, err
 	}
 	return http.MethodPost, "/api/v1/directions/" + direction + "/" + action, payload, nil
-}
-
-func localPlanReviewRoute(command LocalCommand, payload []byte) (string, string, []byte, error) {
-	if _, err := localID(command.PlanID); err != nil {
-		return "", "", nil, err
-	}
-	var input struct {
-		Hash string `json:"hash"`
-	}
-	if err := json.Unmarshal(payload, &input); err != nil {
-		return "", "", nil, err
-	}
-	if command.ContentHash != "" && input.Hash != command.ContentHash {
-		return "", "", nil, errors.New("plan review hash does not match inspected content")
-	}
-	return localTaskRoute(command.PlanID, "plan-review", http.MethodPost, payload)
-}
-
-func localTaskActionRoute(command LocalCommand, payload []byte) (string, string, []byte, error) {
-	action := strings.TrimPrefix(command.Operation, "plan.")
-	return localTaskRoute(command.PlanID, action, http.MethodPost, payload)
 }
 
 func localResponseError(response *httptest.ResponseRecorder) error {

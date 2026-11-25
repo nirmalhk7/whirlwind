@@ -4,10 +4,9 @@ import (
 	"context"
 	"errors"
 	"time"
+
 	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
 	"whirlwind/internal/store"
-	"whirlwind/internal/taskqueue"
 )
 
 type taskStep struct {
@@ -26,24 +25,25 @@ func (e *Engine) Step(ctx context.Context, id string) error {
 }
 
 func (e *Engine) runStep(ctx context.Context, id string, onFailure func(*taskStep, error)) error {
-	return e.runDeliveredStep(ctx, id, onFailure, "", nil)
+	return e.runStepAtVersion(ctx, id, 0, onFailure)
 }
 
-func (e *Engine) runDeliveredStep(ctx context.Context, id string, onFailure func(*taskStep, error), role taskqueue.Role, delivery *taskqueue.Delivery) error {
-	if e.taskQueues != nil && delivery == nil {
-		return errors.New("this supervisor requires a role queue delivery to run a plan step")
-	}
+func (e *Engine) runStepAtVersion(ctx context.Context, id string, expected int, onFailure func(*taskStep, error)) error {
 	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
 		return err
 	}
-	task, ready, err := e.validateDeliveredStepInput(ctx, id, delivery)
+	task, ready, err := e.validateStepInputAtVersion(ctx, id, expected)
 	if err != nil {
 		return err
 	}
 	if !ready {
 		return nil
 	}
-	ctx, release, lease, err := e.acquireStepLease(ctx, id, task.ProjectID)
+	return e.runLeasedStep(ctx, id, task.ProjectID, expected, onFailure)
+}
+
+func (e *Engine) runLeasedStep(ctx context.Context, id, projectID string, expected int, onFailure func(*taskStep, error)) error {
+	ctx, release, lease, err := e.acquireStepLease(ctx, id, projectID)
 	if err != nil {
 		return err
 	}
@@ -51,20 +51,15 @@ func (e *Engine) runDeliveredStep(ctx context.Context, id string, onFailure func
 	defer func() { _ = e.Store.Release(context.Background(), "task:"+id, e.owner, lease.Fence) }()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	step, err := e.prepareDeliveredStep(ctx, id, delivery)
+	step, err := e.prepareStep(ctx, id)
+	if expected > 0 && step != nil && step.record.Version != expected {
+		return store.ErrConflict
+	}
 	if err != nil {
 		if step != nil {
 			return step.finishStep(err, onFailure)
 		}
 		return err
-	}
-	if delivery != nil {
-		if taskqueue.ForPlan(step.task, step.project.PolicyHash) != role {
-			return store.ErrConflict
-		}
-		if err := validateStepPlan(ctx, e, step.task); err != nil {
-			return step.finishStep(err, onFailure)
-		}
 	}
 	e.renewStepLease(ctx, cancel, id, lease.Fence, step.record.Version)
 	return step.finishStep(step.run(), onFailure)
@@ -91,15 +86,15 @@ func (e *Engine) renewStepLease(ctx context.Context, cancel context.CancelFunc, 
 }
 
 func (e *Engine) validateStepInput(ctx context.Context, id string) (model.ExecutionPlan, bool, error) {
-	return e.validateDeliveredStepInput(ctx, id, nil)
+	return e.validateStepInputAtVersion(ctx, id, 0)
 }
 
-func (e *Engine) validateDeliveredStepInput(ctx context.Context, id string, delivery *taskqueue.Delivery) (model.ExecutionPlan, bool, error) {
+func (e *Engine) validateStepInputAtVersion(ctx context.Context, id string, expected int) (model.ExecutionPlan, bool, error) {
 	task, record, err := loadStepInput(ctx, e.Store, id)
 	if err != nil {
 		return model.ExecutionPlan{}, false, err
 	}
-	if delivery != nil && !deliveryMatches(record, task, *delivery) {
+	if expected > 0 && record.Version != expected {
 		return task, false, store.ErrConflict
 	}
 	if !runnableStage(task.Stage) {
@@ -108,9 +103,6 @@ func (e *Engine) validateDeliveredStepInput(ctx context.Context, id string, deli
 	selected, err := e.requireSelection(ctx, task, record)
 	if !selected || err != nil {
 		return task, selected, err
-	}
-	if delivery != nil {
-		return task, true, nil // validate artifacts within the exact revision's lease
 	}
 	return task, true, validateStepPlan(ctx, e, task)
 }
@@ -132,10 +124,6 @@ func validateStepPlan(ctx context.Context, engine *Engine, task model.ExecutionP
 }
 
 func (e *Engine) prepareStep(ctx context.Context, id string) (*taskStep, error) {
-	return e.prepareDeliveredStep(ctx, id, nil)
-}
-
-func (e *Engine) prepareDeliveredStep(ctx context.Context, id string, delivery *taskqueue.Delivery) (*taskStep, error) {
 	r, err := e.Store.Get(ctx, "execution_plans", id)
 	if err != nil {
 		return nil, err
@@ -144,7 +132,7 @@ func (e *Engine) prepareDeliveredStep(ctx context.Context, id string, delivery *
 	if err != nil {
 		return nil, err
 	}
-	if !runnableStage(t.Stage) || (delivery != nil && !deliveryMatches(r, t, *delivery)) {
+	if !runnableStage(t.Stage) {
 		return nil, store.ErrConflict
 	}
 	step := &taskStep{Engine: e, ctx: ctx, task: t, record: r}
@@ -153,17 +141,11 @@ func (e *Engine) prepareDeliveredStep(ctx context.Context, id string, delivery *
 }
 func (e *Engine) trustedProject(ctx context.Context, id string) (model.Project, error) {
 	p, err := e.Project(ctx, id)
-	if err != nil {
+	if err != nil || p.ManagedPolicy {
 		return p, err
 	}
-	_, hash, err := policy.Load(p.Path)
-	if err != nil {
-		return p, err
-	}
-	if hash != p.PolicyHash {
-		return p, errors.New("committed policy changed; confirm updated project policy before continuing")
-	}
-	return p, nil
+	_, err = e.projectPolicy(ctx, p)
+	return p, err
 }
 
 func (step *taskStep) pauseForHumanDecision() error {

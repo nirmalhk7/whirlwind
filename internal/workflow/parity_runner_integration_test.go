@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"go.yaml.in/yaml/v3"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +11,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
+
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/policy"

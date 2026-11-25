@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -29,6 +30,9 @@ func (e *Engine) Ideate(ctx context.Context, p model.Project, day string) (resul
 	ctx = withIdeationHistoryBudget(ctx, e.settings(ctx).Ideation)
 	// Recheck after acquiring the lease: a scheduled project may have been unregistered.
 	if _, err := e.Project(ctx, p.ID); err != nil {
+		return err
+	}
+	if err := e.CheckIdeationPrerequisites(ctx, p); err != nil {
 		return err
 	}
 	ctx, finish, err := e.ensureIdeationOperation(ctx, p, day)

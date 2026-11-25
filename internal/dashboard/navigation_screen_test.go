@@ -1,9 +1,11 @@
 package dashboard
 
 import (
-	"github.com/gdamore/tcell/v2"
 	"strings"
 	"testing"
+
+	"github.com/gdamore/tcell/v2"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 )
@@ -36,5 +38,16 @@ func TestRefreshPreservesSelectedProjectAndPlan(t *testing.T) {
 	plan, _ := d.plans.GetItemText(d.plans.GetCurrentItem())
 	if project != "Second" || !strings.Contains(plan, "Two") {
 		t.Fatalf("refresh lost selection: %q / %q", project, plan)
+	}
+}
+
+func TestClosingModalRestoresPreviouslyFocusedPanel(t *testing.T) {
+	d := New()
+	dashboardScreen(t, d)
+	d.SetFocus(d.inbox)
+	d.showKeyboardHelp()
+	d.closeModal()
+	if d.GetFocus() != d.inbox {
+		t.Fatalf("closing modal moved keyboard focus away from Inbox: %T", d.GetFocus())
 	}
 }

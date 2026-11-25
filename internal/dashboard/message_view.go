@@ -3,11 +3,12 @@ package dashboard
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/rivo/tview"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/rivo/tview"
 )
 
 // Preserve full multiline strings and literal terminal markup in the editor.
@@ -32,6 +33,9 @@ func messageText(message any) string {
 }
 
 func (d *Dashboard) viewMessage(index int) {
+	if d.openProjectSetupNotice(index) {
+		return
+	}
 	if index >= 0 && index < len(d.directionRows) {
 		d.directions.SetCurrentItem(index)
 		if idea, version, ok := d.ideaRecord(d.directionRows[index].ID); ok {
@@ -64,7 +68,7 @@ func (d *Dashboard) viewSavedMessage(index int) {
 		d.status.SetText("Whirlwind | cannot open message: " + err.Error())
 		return
 	}
-	defer os.Remove(file.Name())
+	defer d.removeEditorFile(file.Name())
 	_, err = file.WriteString(d.inboxMessages[index])
 	closeErr := file.Close()
 	if err == nil {
@@ -87,7 +91,7 @@ func (d *Dashboard) viewSavedMessage(index int) {
 }
 
 func (d *Dashboard) showKeyboardHelp() {
-	view := tview.NewTextView().SetScrollable(true).SetText(strings.ReplaceAll(keyboardShortcuts, " | ", "\n") + "\n\nVim: :wq submits; unchanged cancels.\nRun logs: Ctrl-C returns to dashboard.")
+	view := tview.NewTextView().SetScrollable(true).SetText(strings.ReplaceAll(keyboardShortcuts, " | ", "\n") + "\n\nVim: :wq submits; unchanged cancels.\nRun logs: Esc or Ctrl-C returns to dashboard.")
 	view.SetBorder(true).SetTitle(" Keyboard instructions · Esc to close ")
 	d.modal = view
 	d.SetRoot(view, true).SetFocus(view)

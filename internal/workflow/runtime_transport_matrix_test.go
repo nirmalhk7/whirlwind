@@ -169,6 +169,24 @@ func runTransportDisconnectRecovery(t *testing.T, role string, expireBackoff boo
 	restoredRun := &agentRun{Engine: restarted, ctx: context.Background(), project: project, task: currentTask, input: provider.Input{Role: role}}
 	assertRestoredTransportRetry(t, restoredRun, firstChoice, retryValue)
 	if expireBackoff {
+		// The fixture provider has no shared quota pool. Its cooldown is saved
+		// separately from the recovery episode and can expire slightly later.
+		// Both persisted deadlines must elapse before asserting no wait remains.
+		cooldownRecord, err := reopened.Get(context.Background(), "provider_cooldowns", firstChoice.Provider)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cooldown, err := store.Decode[model.ProviderCooldown](cooldownRecord)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cooldownAt, err := time.Parse(time.RFC3339Nano, cooldown.Until)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cooldownAt.After(retryAt) {
+			retryAt = cooldownAt
+		}
 		waitForTransportDeadline(retryAt)
 	}
 	output, err := restarted.agent(context.Background(), project, currentTask, provider.Input{Role: role, CWD: cwd, Prompt: "recover transport disconnect"})
@@ -178,7 +196,9 @@ func runTransportDisconnectRecovery(t *testing.T, role string, expireBackoff boo
 	}
 	assertTransportMatrixBackoff(t, resumedBackoff, retryAt, adapter.startedAt[1], expireBackoff)
 	assertTransportMatrixChoices(t, adapter, role, firstChoice, fallbackChoice)
-	assertRuntimeMatrixAttempts(t, reopened, role, firstChoice, fallbackChoice, priorOwner, restarted.Owner())
+	assertRuntimeMatrixAttempts(t, reopened, role, runtimeAttemptExpectations{
+		first: firstChoice, fallback: fallbackChoice, priorOwner: priorOwner, currentOwner: restarted.Owner(),
+	})
 	_ = transportMatrixRetryState(t, &agentRun{Engine: restarted, ctx: context.Background(), project: project, task: currentTask, input: provider.Input{Role: role}}, firstChoice, 4)
 }
 

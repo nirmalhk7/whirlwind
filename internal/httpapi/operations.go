@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -15,31 +16,42 @@ func (q apiRequest) operation(kind, subject string, input any) model.Operation {
 func (q apiRequest) finishOperation(id string, value any) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	record, err := q.Store.Get(ctx, "operations", id)
-	if err == nil {
-		var current, result map[string]json.RawMessage
-		var encoded []byte
-		encoded, err = json.Marshal(value)
-		if err == nil {
-			err = json.Unmarshal(encoded, &result)
-		}
-		if err == nil {
-			err = json.Unmarshal(record.Data, &current)
-		}
-		if err == nil {
-			if string(current["stage"]) != `"running"` || string(current["owner"]) != string(result["owner"]) || string(current["kind"]) != string(result["kind"]) || string(current["subject"]) != string(result["subject"]) {
-				err = store.ErrConflict
-			} else {
-				for _, key := range []string{"repository_revision", "configuration_hash"} {
-					if pinned, ok := current[key]; ok {
-						result[key] = pinned
-					}
-				}
-				err = q.Store.Put(ctx, "operations", id, result, record.Version)
-			}
-		}
-	}
-	if err != nil {
+	if err := q.persistOperationCompletion(ctx, id, value); err != nil {
 		log.Printf("persist operation %s completion: %v", id, err)
 	}
+}
+
+func (q apiRequest) persistOperationCompletion(ctx context.Context, id string, value any) error {
+	record, err := q.Store.Get(ctx, "operations", id)
+	if err != nil {
+		return err
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	result, err := mergeOperationCompletion(record.Data, encoded)
+	if err != nil {
+		return err
+	}
+	return q.Store.Put(ctx, "operations", id, result, record.Version)
+}
+
+func mergeOperationCompletion(currentData, resultData []byte) (map[string]json.RawMessage, error) {
+	var current, result map[string]json.RawMessage
+	if err := json.Unmarshal(resultData, &result); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(currentData, &current); err != nil {
+		return nil, err
+	}
+	if string(current["stage"]) != `"running"` || string(current["owner"]) != string(result["owner"]) || string(current["kind"]) != string(result["kind"]) || string(current["subject"]) != string(result["subject"]) {
+		return nil, store.ErrConflict
+	}
+	for _, key := range []string{"repository_revision", "configuration_hash"} {
+		if pinned, ok := current[key]; ok {
+			result[key] = pinned
+		}
+	}
+	return result, nil
 }

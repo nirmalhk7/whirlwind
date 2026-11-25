@@ -1,8 +1,10 @@
 package dashboard
 
 import (
-	"github.com/rivo/tview"
 	"strings"
+
+	"github.com/rivo/tview"
+
 	"whirlwind/internal/model"
 )
 
@@ -18,6 +20,7 @@ func (d *Dashboard) refreshInbox() {
 	d.inbox.Clear()
 	d.inboxTaskIDs = nil
 	d.inboxMessages = nil
+	d.setupNotice = nil
 	for i := range d.directionRows {
 		label, _ := d.directions.GetItemText(i)
 		kind := "directions"
@@ -28,6 +31,7 @@ func (d *Dashboard) refreshInbox() {
 		d.inboxTaskIDs = append(d.inboxTaskIDs, "")
 		d.inboxMessages = append(d.inboxMessages, messageText(d.directionRows[i]))
 	}
+	d.addProjectSetupNotice()
 	notices, err := decodeRecords[model.Notification](d.snapshot["inbox"])
 	if err != nil {
 		d.inbox.AddItem("Cannot read inbox: "+tview.Escape(err.Error()), "", 0, nil)
@@ -130,6 +134,9 @@ func (d *Dashboard) addLegacyNotice(notice model.Notification, questions []model
 }
 
 func (d *Dashboard) openInboxSelection(index int) {
+	if d.openProjectSetupNotice(index) {
+		return
+	}
 	if index < 0 || index >= len(d.inboxTaskIDs) {
 		return
 	}

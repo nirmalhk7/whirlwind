@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 )
@@ -29,14 +30,17 @@ func (d *Dashboard) configuredProjects(projects []model.Project, snapshot contro
 
 func (d *Dashboard) projectLabel(project model.Project) string {
 	label := tview.Escape(project.Name)
+	if project.Status == "error" {
+		return "[red]Setup ERR[-] " + label
+	}
 	status, ok := d.projectHealth[project.ID]
 	if !ok {
 		return label
 	}
 	if status.Status == "OK" {
-		return label + " [green]OK[-]"
+		return label + " [green]Git OK[-]"
 	}
-	return label + " [red]ERR[-]"
+	return label + " [red]Git ERR[-]"
 }
 
 func (d *Dashboard) showProjectHealth() {
@@ -50,4 +54,12 @@ func (d *Dashboard) showProjectHealth() {
 		}
 		d.detail.SetText(text + "\n\nNo runs for this project.")
 	}
+}
+
+// checkoutProjectID resolves historical project IDs for dashboard inspection.
+func (d *Dashboard) checkoutProjectID(id string) string {
+	if canonical := d.projectAliases[id]; canonical != "" {
+		return canonical
+	}
+	return id
 }

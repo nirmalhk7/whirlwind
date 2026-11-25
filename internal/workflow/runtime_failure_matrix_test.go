@@ -17,7 +17,10 @@ import (
 	"whirlwind/internal/store"
 )
 
-const runtimeMatrixCrashModel = "crashing-acp"
+const (
+	runtimeMatrixCrashModel      = "crashing-acp"
+	runtimeMatrixFallbackSession = "fallback-session"
+)
 
 type runtimeMatrixObservation struct {
 	role, model, profile string
@@ -47,7 +50,7 @@ func (a *runtimeMatrixAdapter) Run(ctx context.Context, input provider.Input, _ 
 	if input.SessionID != "" {
 		return provider.Output{}, fmt.Errorf("session crossed model fallback: %q", input.SessionID)
 	}
-	return provider.Output{Text: runtimeMatrixSuccessfulOutput(input.Role), SessionID: "fallback-session"}, nil
+	return provider.Output{Text: runtimeMatrixSuccessfulOutput(input.Role), SessionID: runtimeMatrixFallbackSession}, nil
 }
 
 func crashACPChild(ctx context.Context, cwd string) error {
@@ -84,107 +87,133 @@ func runtimeMatrixSuccessfulOutput(role string) string {
 }
 
 func TestProcessCrashRecoveryMatrixAcrossCanonicalRoles(t *testing.T) {
-	roles := model.AgentRoles()
-	for _, role := range roles {
+	for _, role := range model.AgentRoles() {
 		t.Run(role, func(t *testing.T) {
-			engine, task, cwd := testEngine(t)
-			var err error
-			cwd, err = filepath.EvalSymlinks(cwd)
-			if err != nil {
-				t.Fatal(err)
-			}
-			project, err := engine.Project(context.Background(), task.ProjectID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			firstChoice := model.AgentChoice{Provider: "fake", Model: runtimeMatrixCrashModel, Thinking: &model.ThinkingChoice{ConfigID: "effort", Value: "high"}}
-			fallbackChoice := model.AgentChoice{Provider: "fake", Model: "fallback-model", Thinking: &model.ThinkingChoice{ConfigID: "reasoning", Value: "low"}}
-			putFixtureAgent(t, engine.Store, role, model.AgentConfig{Role: role, Chain: []model.AgentChoice{firstChoice, fallbackChoice}})
-			adapter := &runtimeMatrixAdapter{}
-			engine.Adapter = func(model.Provider) provider.Adapter { return adapter }
-
-			ctx, cancel := context.WithCancel(context.Background())
-			var firstBackoff []time.Duration
-			engine.retryWait = func(waitCtx context.Context, delay time.Duration) error {
-				firstBackoff = append(firstBackoff, delay)
-				cancel()
-				return waitCtx.Err()
-			}
-			_, firstErr := engine.agent(ctx, project, task, provider.Input{Role: role, CWD: cwd, Prompt: "recover this role"})
-			cancel()
-			if !errors.Is(firstErr, context.Canceled) || adapter.crashes != 1 || !reflect.DeepEqual(firstBackoff, []time.Duration{time.Second}) {
-				t.Fatalf("first child crash did not persist before supervisor interruption: crashes=%d child_error=%q backoff=%v persisted=%s err=%v", adapter.crashes, adapter.lastCrashError, firstBackoff, runtimeMatrixPersistedState(t, engine, project, task, role, firstChoice), firstErr)
-			}
-
-			firstRun := &agentRun{Engine: engine, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: role}}
-			if restarts, _, err := firstRun.persistedRestartState(firstChoice); err != nil || restarts != 1 {
-				t.Fatalf("persisted restart count after first child crash=%d, %v; want 1", restarts, err)
-			}
-			storePath := filepath.Join(engine.Root, "state.db")
+			fixture, engine := newRuntimeMatrixFixture(t, role)
+			fixture.interruptFirstAttempt(t, engine)
 			priorOwner := engine.Owner()
-			if err := engine.Store.Close(); err != nil {
-				t.Fatal(err)
-			}
-			reopened, err := store.Open(storePath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = reopened.Close() })
-			restarted := New(reopened, engine.GitHub, engine.Root)
+			restarted := restartRuntimeMatrixSupervisor(t, engine, fixture.adapter)
 			if restarted.Owner() == priorOwner {
 				t.Fatal("recreated supervisor reused the prior runtime owner identity")
 			}
-			restarted.Adapter = func(model.Provider) provider.Adapter { return adapter }
-			var resumedBackoff []time.Duration
-			restarted.retryWait = func(_ context.Context, delay time.Duration) error {
-				resumedBackoff = append(resumedBackoff, delay)
-				if len(resumedBackoff) == 1 {
-					// The first wait is the persisted remainder from the interrupted
-					// 1s cooldown. Let that deadline elapse before checking admission.
-					time.Sleep(delay)
-				}
-				return nil
-			}
-			taskRecord, err := reopened.Get(context.Background(), "execution_plans", task.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			currentTask, err := store.Decode[model.ExecutionPlan](taskRecord)
-			if err != nil {
-				t.Fatal(err)
-			}
-			output, err := restarted.agent(context.Background(), project, currentTask, provider.Input{Role: role, CWD: cwd, Prompt: "recover this role"})
-			if err != nil || output.SessionID != "fallback-session" || adapter.crashes != 4 {
-				state := runtimeMatrixPersistedState(t, restarted, project, currentTask, role, firstChoice)
-				t.Fatalf("recreated supervisor did not exhaust initial plus three restarts before fallback: crashes=%d output=%+v err=%v persisted=%s", adapter.crashes, output, err, state)
-			}
-			if len(resumedBackoff) != 3 || resumedBackoff[0] <= 0 || resumedBackoff[0] > time.Second || resumedBackoff[1] != 2*time.Second || resumedBackoff[2] != 4*time.Second {
-				t.Fatalf("resumed backoff=%v, want persisted 1s remainder then 2s and 4s steps", resumedBackoff)
-			}
-			if len(adapter.observations) != 5 {
-				t.Fatalf("adapter executions=%d, want four crash attempts and one fallback", len(adapter.observations))
-			}
-			for _, observation := range adapter.observations {
-				if observation.role != role || observation.profile == "" || observation.profile != adapter.observations[0].profile {
-					t.Fatalf("role or sandbox profile changed across recovery: %+v", adapter.observations)
-				}
-			}
-			for i := 0; i < 4; i++ {
-				observation := adapter.observations[i]
-				if observation.model != runtimeMatrixCrashModel || observation.thinking == nil || *observation.thinking != *firstChoice.Thinking {
-					t.Fatalf("crash choice lost role-specific model/thinking on attempt %d: %+v", i, observation)
-				}
-			}
-			fallbackObservation := adapter.observations[4]
-			if fallbackObservation.model != fallbackChoice.Model || fallbackObservation.thinking == nil || *fallbackObservation.thinking != *fallbackChoice.Thinking {
-				t.Fatalf("role queue fallback lost exact model/thinking: %+v", fallbackObservation)
-			}
-			assertRuntimeMatrixAttempts(t, reopened, role, firstChoice, fallbackChoice, priorOwner, restarted.Owner())
-			restartedRun := &agentRun{Engine: restarted, ctx: context.Background(), project: project, task: currentTask, input: provider.Input{Role: role}}
-			if restarts, _, err := restartedRun.persistedRestartState(firstChoice); err != nil || restarts != 4 {
-				t.Fatalf("restart budget after four child exits=%d, %v; want persisted exhausted count 4", restarts, err)
-			}
+			fixture.resumeUntilFallback(t, restarted)
+			fixture.assertAdapterObservations(t)
+			assertRuntimeMatrixAttempts(t, restarted.Store, role, runtimeAttemptExpectations{
+				first: fixture.first, fallback: fixture.fallback, priorOwner: priorOwner, currentOwner: restarted.Owner(),
+			})
+			fixture.assertRestartCount(t, restarted, 4)
 		})
+	}
+}
+
+type runtimeMatrixFixture struct {
+	task            model.ExecutionPlan
+	project         model.Project
+	input           provider.Input
+	first, fallback model.AgentChoice
+	adapter         *runtimeMatrixAdapter
+}
+
+func newRuntimeMatrixFixture(t *testing.T, role string) (runtimeMatrixFixture, *Engine) {
+	t.Helper()
+	engine, task, cwd := testEngine(t)
+	canonical, err := filepath.EvalSymlinks(cwd)
+	requireWorkflowSuccess(t, err)
+	project, err := engine.Project(context.Background(), task.ProjectID)
+	requireWorkflowSuccess(t, err)
+	first := model.AgentChoice{Provider: "fake", Model: runtimeMatrixCrashModel, Thinking: &model.ThinkingChoice{ConfigID: "effort", Value: "high"}}
+	fallback := model.AgentChoice{Provider: "fake", Model: "fallback-model", Thinking: &model.ThinkingChoice{ConfigID: "reasoning", Value: "low"}}
+	putFixtureAgent(t, engine.Store, role, model.AgentConfig{Role: role, Chain: []model.AgentChoice{first, fallback}})
+	adapter := &runtimeMatrixAdapter{}
+	engine.Adapter = func(model.Provider) provider.Adapter { return adapter }
+	input := provider.Input{Role: role, CWD: canonical, Prompt: "recover this role"}
+	return runtimeMatrixFixture{task: task, project: project, input: input, first: first, fallback: fallback, adapter: adapter}, engine
+}
+
+func (fixture runtimeMatrixFixture) interruptFirstAttempt(t *testing.T, engine *Engine) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	var backoff []time.Duration
+	engine.retryWait = func(waitCtx context.Context, delay time.Duration) error {
+		backoff = append(backoff, delay)
+		cancel()
+		return waitCtx.Err()
+	}
+	_, err := engine.agent(ctx, fixture.project, fixture.task, fixture.input)
+	cancel()
+	adapter := fixture.adapter
+	if !errors.Is(err, context.Canceled) || adapter.crashes != 1 || !reflect.DeepEqual(backoff, []time.Duration{time.Second}) {
+		state := runtimeMatrixPersistedState(t, engine, fixture.project, fixture.task, fixture.input.Role, fixture.first)
+		t.Fatalf("first child crash did not persist before supervisor interruption: crashes=%d child_error=%q backoff=%v persisted=%s err=%v", adapter.crashes, adapter.lastCrashError, backoff, state, err)
+	}
+	fixture.assertRestartCount(t, engine, 1)
+}
+
+func restartRuntimeMatrixSupervisor(t *testing.T, engine *Engine, adapter *runtimeMatrixAdapter) *Engine {
+	t.Helper()
+	storePath := filepath.Join(engine.Root, "state.db")
+	requireWorkflowSuccess(t, engine.Store.Close())
+	reopened, err := store.Open(storePath)
+	requireWorkflowSuccess(t, err)
+	t.Cleanup(func() { _ = reopened.Close() })
+	restarted := New(reopened, engine.GitHub, engine.Root)
+	restarted.Adapter = func(model.Provider) provider.Adapter { return adapter }
+	return restarted
+}
+
+func (fixture *runtimeMatrixFixture) resumeUntilFallback(t *testing.T, restarted *Engine) {
+	t.Helper()
+	var backoff []time.Duration
+	restarted.retryWait = func(_ context.Context, delay time.Duration) error {
+		backoff = append(backoff, delay)
+		if len(backoff) == 1 {
+			// Let the persisted remainder of the first cooldown elapse before checking admission.
+			time.Sleep(delay)
+		}
+		return nil
+	}
+	taskRecord, err := restarted.Store.Get(context.Background(), "execution_plans", fixture.task.ID)
+	requireWorkflowSuccess(t, err)
+	task, err := store.Decode[model.ExecutionPlan](taskRecord)
+	requireWorkflowSuccess(t, err)
+	fixture.task = task
+	output, err := restarted.agent(context.Background(), fixture.project, task, fixture.input)
+	if err != nil || output.SessionID != runtimeMatrixFallbackSession || fixture.adapter.crashes != 4 {
+		state := runtimeMatrixPersistedState(t, restarted, fixture.project, task, fixture.input.Role, fixture.first)
+		t.Fatalf("recreated supervisor did not exhaust initial plus three restarts before fallback: crashes=%d output=%+v err=%v persisted=%s", fixture.adapter.crashes, output, err, state)
+	}
+	if len(backoff) != 3 || backoff[0] <= 0 || backoff[0] > time.Second || backoff[1] != 2*time.Second || backoff[2] != 4*time.Second {
+		t.Fatalf("resumed backoff=%v, want persisted 1s remainder then 2s and 4s steps", backoff)
+	}
+}
+
+func (fixture runtimeMatrixFixture) assertRestartCount(t *testing.T, engine *Engine, want int) {
+	t.Helper()
+	run := &agentRun{Engine: engine, ctx: context.Background(), project: fixture.project, task: fixture.task, input: provider.Input{Role: fixture.input.Role}}
+	if restarts, _, err := run.persistedRestartState(fixture.first); err != nil || restarts != want {
+		t.Fatalf("persisted restart count=%d, %v; want %d", restarts, err, want)
+	}
+}
+
+func (fixture runtimeMatrixFixture) assertAdapterObservations(t *testing.T) {
+	t.Helper()
+	observations := fixture.adapter.observations
+	if len(observations) != 5 {
+		t.Fatalf("adapter executions=%d, want four crash attempts and one fallback", len(observations))
+	}
+	for _, observation := range observations {
+		if observation.role != fixture.input.Role || observation.profile == "" || observation.profile != observations[0].profile {
+			t.Fatalf("role or sandbox profile changed across recovery: %+v", observations)
+		}
+	}
+	for i, observation := range observations[:4] {
+		if observation.model != runtimeMatrixCrashModel || observation.thinking == nil || *observation.thinking != *fixture.first.Thinking {
+			t.Fatalf("crash choice lost role-specific model/thinking on attempt %d: %+v", i, observation)
+		}
+	}
+	last := observations[4]
+	if last.model != fixture.fallback.Model || last.thinking == nil || *last.thinking != *fixture.fallback.Thinking {
+		t.Fatalf("role queue fallback lost exact model/thinking: %+v", last)
 	}
 }
 
@@ -218,7 +247,56 @@ func runtimeMatrixPersistedState(t *testing.T, engine *Engine, project model.Pro
 	return strings.Join(summaries, "; ")
 }
 
-func assertRuntimeMatrixAttempts(t *testing.T, database *store.Store, role string, first, fallback model.AgentChoice, priorOwner, restartedOwner string) {
+type runtimeAttemptExpectations struct {
+	first, fallback          model.AgentChoice
+	priorOwner, currentOwner string
+}
+
+func assertRuntimeMatrixAttempts(t *testing.T, database *store.Store, role string, expected runtimeAttemptExpectations) {
+	t.Helper()
+	attempts := storedRuntimeMatrixAttempts(t, database, role)
+	if len(attempts) != 5 {
+		t.Fatalf("persisted role attempts=%d, want five: %+v", len(attempts), attempts)
+	}
+	for index, attempt := range attempts[:4] {
+		assertRuntimeCrashAttempt(t, attempt, index, expected)
+	}
+	assertRuntimeFallbackAttempt(t, attempts[0], attempts[4], expected)
+}
+
+func assertRuntimeCrashAttempt(t *testing.T, attempt model.Attempt, index int, expected runtimeAttemptExpectations) {
+	t.Helper()
+	if attempt.Provider != expected.first.Provider || attempt.Model != expected.first.Model || attempt.RestartCount != index || attempt.Status != "failed" || attempt.ExecutionProfile == "" {
+		t.Fatalf("persisted crash attempt %d lost choice or restart count: %+v", index, attempt)
+	}
+	if attempt.Thinking == nil || *attempt.Thinking != *expected.first.Thinking {
+		t.Fatalf("persisted crash attempt %d lost thinking: %+v", index, attempt.Thinking)
+	}
+	wantOwner := expected.currentOwner
+	if index == 0 {
+		wantOwner = expected.priorOwner
+	}
+	if attempt.Owner != wantOwner {
+		t.Fatalf("crash attempt %d owner=%q, want supervisor owner %q", index, attempt.Owner, wantOwner)
+	}
+	assertQueueEntry(t, attempt, 1, 2)
+}
+
+func assertRuntimeFallbackAttempt(t *testing.T, first, last model.Attempt, expected runtimeAttemptExpectations) {
+	t.Helper()
+	if last.Provider != expected.fallback.Provider || last.Model != expected.fallback.Model || last.RestartCount != 0 || last.Status != "complete" || last.Success == nil || !*last.Success {
+		t.Fatalf("persisted role fallback attempt lost queue authority: %+v", last)
+	}
+	if last.Thinking == nil || *last.Thinking != *expected.fallback.Thinking || last.ExecutionProfile != first.ExecutionProfile {
+		t.Fatalf("fallback thinking or sandbox profile changed: first=%+v fallback=%+v", first, last)
+	}
+	if last.Owner != expected.currentOwner {
+		t.Fatalf("fallback owner=%q, want recreated supervisor owner %q", last.Owner, expected.currentOwner)
+	}
+	assertQueueEntry(t, last, 2, 2)
+}
+
+func storedRuntimeMatrixAttempts(t *testing.T, database *store.Store, role string) []model.Attempt {
 	t.Helper()
 	records, err := database.List(context.Background(), "sessions")
 	if err != nil {
@@ -235,37 +313,7 @@ func assertRuntimeMatrixAttempts(t *testing.T, database *store.Store, role strin
 		}
 	}
 	sort.Slice(attempts, func(i, j int) bool { return attempts[i].StartedAt < attempts[j].StartedAt })
-	if len(attempts) != 5 {
-		t.Fatalf("persisted role attempts=%d, want five: %+v", len(attempts), attempts)
-	}
-	for index := 0; index < 4; index++ {
-		attempt := attempts[index]
-		if attempt.Provider != first.Provider || attempt.Model != first.Model || attempt.RestartCount != index || attempt.Status != "failed" || attempt.ExecutionProfile == "" {
-			t.Fatalf("persisted crash attempt %d lost choice or restart count: %+v", index, attempt)
-		}
-		if attempt.Thinking == nil || *attempt.Thinking != *first.Thinking {
-			t.Fatalf("persisted crash attempt %d lost thinking: %+v", index, attempt.Thinking)
-		}
-		wantOwner := restartedOwner
-		if index == 0 {
-			wantOwner = priorOwner
-		}
-		if attempt.Owner != wantOwner {
-			t.Fatalf("crash attempt %d owner=%q, want supervisor owner %q", index, attempt.Owner, wantOwner)
-		}
-		assertQueueEntry(t, attempt, 1, 2)
-	}
-	last := attempts[4]
-	if last.Provider != fallback.Provider || last.Model != fallback.Model || last.RestartCount != 0 || last.Status != "complete" || last.Success == nil || !*last.Success {
-		t.Fatalf("persisted role fallback attempt lost queue authority: %+v", last)
-	}
-	if last.Thinking == nil || *last.Thinking != *fallback.Thinking || last.ExecutionProfile != attempts[0].ExecutionProfile {
-		t.Fatalf("fallback thinking or sandbox profile changed: first=%+v fallback=%+v", attempts[0], last)
-	}
-	if last.Owner != restartedOwner {
-		t.Fatalf("fallback owner=%q, want recreated supervisor owner %q", last.Owner, restartedOwner)
-	}
-	assertQueueEntry(t, last, 2, 2)
+	return attempts
 }
 
 func assertQueueEntry(t *testing.T, attempt model.Attempt, position, length int) {

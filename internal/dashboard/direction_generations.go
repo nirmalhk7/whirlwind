@@ -7,7 +7,7 @@ import (
 	"whirlwind/internal/store"
 )
 
-var ideationDirectionCategories = []string{"expand", "optimize", "harden", "simplify"}
+var ideationDirectionCategories = model.DirectionCategories()
 
 type directionEntry struct {
 	direction    model.Direction

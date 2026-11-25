@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
 
@@ -100,4 +102,61 @@ func TestSaveFileRejectsStaleAndInvalidEditsAndRollsBackFailedCommit(t *testing.
 	}); err != nil {
 		t.Fatalf("could not repair invalid disk file: %v", err)
 	}
+}
+
+func TestSettingsVersionPreconditionsAreReadOnlyAndFenceApproval(t *testing.T) {
+	s := editorSource(t)
+	ctx := context.Background()
+	const configuration = "version: 1\nworkers: {global_slots: 4}\nproviders: [{id: fixture, name: Fixture, kind: unavailable}]\nagents: {}\n"
+	if err := os.WriteFile(s.path, []byte(configuration), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	provider, err := s.store.Get(ctx, "providers", "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged, batch := stageProviderApprovalFixture(t, s, ctx, provider, "current")
+	if err := batch.Commit(staged, s.store, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.store.Get(ctx, "approval_fixture", "current"); err != nil {
+		t.Fatal(err)
+	}
+	if actual, err := os.ReadFile(s.path); err != nil || string(actual) != configuration {
+		t.Fatalf("approval rewrote settings: %q %v", actual, err)
+	}
+	staged, batch = stageProviderApprovalFixture(t, s, ctx, provider, "stale")
+	const updated = "version: 1\nworkers: {global_slots: 4}\nproviders: [{id: fixture, name: Renamed, kind: unavailable}]\nagents: {}\n"
+	if err := os.WriteFile(s.path, []byte(updated), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := batch.Commit(staged, s.store, nil); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("approval did not reject a changed provider: %v", err)
+	}
+	if _, err := s.store.Get(ctx, "approval_fixture", "stale"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("stale approval was recorded: %v", err)
+	}
+	if actual, err := os.ReadFile(s.path); err != nil || string(actual) != updated {
+		t.Fatalf("stale approval changed settings: %q %v", actual, err)
+	}
+}
+
+func stageProviderApprovalFixture(t *testing.T, s *Source, ctx context.Context, provider model.Record, id string) (context.Context, *store.Batch) {
+	t.Helper()
+	staged, batch := store.Stage(ctx)
+	if err := s.store.Write(staged, []store.Change{
+		store.VersionPrecondition("providers", provider.ID, provider.Version),
+		store.VersionPrecondition("providers", provider.ID, provider.Version),
+		{Kind: "approval_fixture", ID: id, Value: true},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	current, err := s.store.Get(staged, "providers", provider.ID)
+	if err != nil || current.Version != provider.Version || string(current.Data) != string(provider.Data) {
+		t.Fatalf("precondition changed the staged provider: %+v %v", current, err)
+	}
+	return staged, batch
 }

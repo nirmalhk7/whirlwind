@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -24,10 +25,10 @@ func (s *Server) executePlannerCancel(ctx context.Context, command LocalCommand)
 		if err := s.Engine.CancelPlanner(ctx, idea.ID, command.ExpectedVersion); err != nil {
 			return nil, err
 		}
-		if err := s.Store.Audit(ctx, model.Audit{Source: "local_operator", Action: command.Operation, Target: idea.ID, Version: record.Version, Reason: "user_cancelled"}); err != nil {
+		if err := s.Store.Audit(ctx, model.Audit{Source: "local_operator", Action: command.Operation, Target: idea.ID, Version: record.Version, Reason: model.PlannerCancellationReason}); err != nil {
 			return nil, err
 		}
-		return map[string]any{"idea_id": idea.ID, "version": record.Version + 1, "reason": "user_cancelled"}, nil
+		return map[string]any{"idea_id": idea.ID, "version": record.Version + 1, "reason": model.PlannerCancellationReason}, nil
 	})
 	if err != nil {
 		return nil, err

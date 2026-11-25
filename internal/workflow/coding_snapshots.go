@@ -2,15 +2,18 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
+
 	"whirlwind/internal/github"
-	"whirlwind/internal/model"
 )
 
 func codingSnapshot(ctx context.Context, cwd string) (string, string, string, error) {
@@ -19,6 +22,11 @@ func codingSnapshot(ctx context.Context, cwd string) (string, string, string, er
 }
 
 func codingSnapshotManifest(ctx context.Context, cwd string) (string, string, string, map[string]string, error) {
+	root, err := os.OpenRoot(cwd)
+	if err != nil {
+		return "", "", "", nil, err
+	}
+	defer func() { _ = root.Close() }()
 	files, err := github.Run(ctx, cwd, "git", "ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return "", "", "", nil, err
@@ -31,7 +39,7 @@ func codingSnapshotManifest(ctx context.Context, cwd string) (string, string, st
 		if file == "" || strings.HasPrefix(file, ".git/") {
 			continue
 		}
-		fingerprint, err := codingFileFingerprint(cwd, file)
+		fingerprint, err := codingFileFingerprint(root, file)
 		if err != nil {
 			return "", "", "", nil, err
 		}
@@ -49,30 +57,52 @@ func codingSnapshotManifest(ctx context.Context, cwd string) (string, string, st
 	return evidenceDigest([]any{production, tests}), evidenceDigest(production), evidenceDigest(tests), manifest, nil
 }
 
-func codingFileFingerprint(cwd, file string) (string, error) {
-	path := filepath.Join(cwd, file)
-	info, err := os.Lstat(path)
+func openCodingSnapshotFile(root *os.Root, path string) (*os.File, os.FileInfo, error) {
+	info, err := root.Lstat(path)
 	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
-		return "deleted", nil
+		return nil, nil, nil
 	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if info.IsDir() {
+		return nil, nil, nil
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("TDD snapshot requires regular file: %s", path)
+	}
+	// Open relative to the pinned worktree. Nonblocking open and the descriptor
+	// check also cover a file replaced between the metadata check and open.
+	file, err := root.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	actual, err := file.Stat()
+	if err != nil || !actual.Mode().IsRegular() || !os.SameFile(info, actual) {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("TDD snapshot file changed while opening: %s", path)
+	}
+	return file, actual, nil
+}
+
+func codingFileFingerprint(root *os.Root, path string) (string, error) {
+	file, info, err := openCodingSnapshotFile(root, path)
 	if err != nil {
 		return "", err
 	}
-	if info.IsDir() {
+	if file == nil {
 		return "deleted", nil
 	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("TDD snapshot requires regular file: %s", file)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
+	hash := sha256.New()
+	_, readErr := io.Copy(hash, file)
+	if err := errors.Join(readErr, file.Close()); err != nil {
 		return "", err
 	}
 	mode := "100644"
 	if info.Mode()&0111 != 0 {
 		mode = "100755"
 	}
-	return mode + ":" + model.Fingerprint(raw), nil
+	return mode + ":" + hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func testPath(path string) bool {

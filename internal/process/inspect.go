@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -28,8 +29,9 @@ type Identity struct {
 
 type inspectedProcess struct {
 	Identity
-	Token    string
-	Registry string
+	Token        string
+	Registry     string
+	OwnershipErr error
 }
 
 type Report struct {
@@ -88,6 +90,28 @@ func processSnapshot() ([]inspectedProcess, error) {
 	}
 }
 
+// Linux start times are kernel ticks in the same boot. A process that was
+// already alive before launch cannot be an orphan from that launch. Keep an
+// equal tick, unknown identity or missing legacy bound ambiguous.
+func ambiguousProcess(record registration, processes []inspectedProcess) error {
+	bound := record.Started
+	if bound == "" {
+		bound = record.ParentStarted
+	}
+	earliest, boundErr := strconv.ParseUint(bound, 10, 64)
+	for _, process := range processes {
+		if process.OwnershipErr == nil || process.Zombie || process.PID <= 1 || process.PID == os.Getpid() {
+			continue
+		}
+		started, startErr := strconv.ParseUint(process.Started, 10, 64)
+		if boundErr == nil && startErr == nil && started < earliest {
+			continue
+		}
+		return process.OwnershipErr
+	}
+	return nil
+}
+
 func liveProcesses(record registration, processes []inspectedProcess) []Identity {
 	selected := selectOwnedProcesses(record, processes)
 	includeDescendants(selected, processes)
@@ -105,10 +129,10 @@ func selectOwnedProcesses(record registration, processes []inspectedProcess) map
 	rootReused := reusedProcessRoot(record, processes)
 	selected := map[int]bool{}
 	for _, process := range processes {
-		owned := process.Token == record.Token
+		owned := record.Token != "" && process.Token == record.Token
 		// A live group retains its original leader's numeric identity. Never use
 		// a reused PID as authority to kill a different process group.
-		group := record.Started != "" && !rootReused && process.Group == record.PID
+		group := record.PID > 1 && record.Started != "" && !rootReused && process.Group == record.PID
 		if owned || group {
 			selected[process.PID] = true
 		}

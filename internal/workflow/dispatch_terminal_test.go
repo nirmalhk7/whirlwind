@@ -22,7 +22,7 @@ func TestStaleDispatchCannotReopenCompletedLocalDelivery(t *testing.T) {
 	requireWorkflowSuccess(t, os.Remove(filepath.Join(project.Path, ".whirlwind.yaml")))
 	stale := done
 	stale.Stage = "coding"
-	e.dispatchTask(ctx, stale, map[string]int{})
+	_, _ = e.dispatchTask(ctx, stale, map[string]int{}, 0)
 	e.background.Wait()
 	after, err := e.Store.Get(ctx, "execution_plans", done.ID)
 	requireWorkflowSuccess(t, err)

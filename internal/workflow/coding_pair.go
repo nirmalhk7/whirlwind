@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -209,10 +210,6 @@ func (step *taskStep) preparePairWorkspace() (string, error) {
 	if err := step.prepareWorkspace(step.ctx, step.project, &step.task); err != nil {
 		return "", err
 	}
-	return step.prepareReviewerWorkspace()
-}
-
-func (step *taskStep) prepareReviewerWorkspace() (string, error) {
 	sourcePath, err := submissionPath(step.task.Worktree)
 	if err != nil {
 		return "", err
@@ -291,34 +288,12 @@ func (step *taskStep) runCodingPair(key, prepPath string, pair *pairSlots) error
 	if err := json.Unmarshal(data, &frozen); err != nil {
 		return err
 	}
-	prompt := reviewerChecklistPrompt(step.task.Plan)
+	prompt := "Prepare a requirement checklist against this approved specification and base repository snapshot. Do not evaluate an implementation or wait for Coding. Return JSON {\"checklist\":[{\"requirement_id\":\"REQ-ID\",\"inspection\":\"concrete inspection and evidence to check\"}]}, exactly one entry for every approved requirement. Finish immediately after preparation.\n" + jsonText(step.task.Plan)
 	group.Go(func() error { return step.code(ctx, step.project, &step.task) })
 	group.Go(func() error {
 		return step.prepareReviewerChecklist(ctx, key, prepPath, frozen, prompt)
 	})
 	return group.Wait()
-}
-
-func reviewerChecklistPrompt(plan *model.PlanSpecification) string {
-	return `Prepare a requirement checklist against this approved specification and base repository snapshot. Do not evaluate an implementation or wait for Coding. Return JSON {"checklist":[{"requirement_id":"REQ-ID","inspection":"concrete inspection and evidence to check"}]}, exactly one entry for every approved requirement. Finish immediately after preparation.` + "\n" + jsonText(plan)
-}
-
-// With native role queues, the checklist belongs to the reviewer delivery. Code workers
-// never start reviewer sessions; this uses the same read-only approved base.
-func (step *taskStep) prepareQueuedReview() error {
-	key := fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion)
-	if err := step.recoverReviewerPreparation(key); err != nil {
-		return err
-	}
-	ready, err := step.reusableReviewerPreparation(key)
-	if ready || err != nil {
-		return err
-	}
-	path, err := step.prepareReviewerWorkspace()
-	if err != nil {
-		return err
-	}
-	return step.prepareReviewerChecklist(step.ctx, key, path, step.task, reviewerChecklistPrompt(step.task.Plan))
 }
 
 func (step *taskStep) prepareReviewerChecklist(ctx context.Context, key, prepPath string, frozen model.ExecutionPlan, prompt string) error {

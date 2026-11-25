@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"whirlwind/internal/execution"
-	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
 
@@ -71,13 +70,4 @@ func retainStandaloneProfile(profile execution.Profile, cleanupErr error) error 
 		return cleanupErr
 	}
 	return errors.Join(cleanupErr, execution.MarkStandaloneCleanupPending(profile))
-}
-
-func pinStandaloneForProvider(ctx context.Context, cwd string, readOnly bool, policy model.Policy, command []string, supervisorDir string) (execution.Profile, error) {
-	profile, err := execution.ForProvider(cwd, readOnly, "", policy.Sandbox, command)
-	if err != nil {
-		return execution.Profile{}, err
-	}
-	profile.AllowedPaths = append([]string{}, policy.AllowedPaths...)
-	return pinStandaloneProfile(ctx, profile, supervisorDir)
 }

@@ -9,6 +9,11 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	onboardingFixtureCompletedSetup = "completed-setup"
+	onboardingFixtureFailedSetup    = "failed-setup"
+)
+
 func TestParityOnboardingQueuesExactlyOneDurableIdeation(t *testing.T) {
 	s := setup(t)
 	repo := t.TempDir()
@@ -16,9 +21,7 @@ func TestParityOnboardingQueuesExactlyOneDurableIdeation(t *testing.T) {
 	payload, _ := json.Marshal(map[string]string{"name": "Fresh project", "path": repo})
 	command := LocalCommand{Operation: "project.register", IdempotencyKey: "onboarding", Payload: payload}
 	first, err := s.ExecuteLocal(context.Background(), command)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	second, err := s.ExecuteLocal(context.Background(), command)
 	if err != nil || string(first) != string(second) {
 		t.Fatalf("registration receipt changed: %v", err)
@@ -28,15 +31,11 @@ func TestParityOnboardingQueuesExactlyOneDurableIdeation(t *testing.T) {
 		t.Fatalf("initial queued run count=%d: %v", count, err)
 	}
 	operations, err := s.Store.List(context.Background(), "operations")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	var ideationID string
 	for _, record := range operations {
 		op, decodeErr := store.Decode[model.Operation](record)
-		if decodeErr != nil {
-			t.Fatal(decodeErr)
-		}
+		requireAPISuccess(t, decodeErr)
 		if op.Kind == "ideation" {
 			if ideationID != "" {
 				t.Fatal("duplicate initial ideation operation")
@@ -92,30 +91,20 @@ func TestProjectSetupRetryCreatesNewDurableOperation(t *testing.T) {
 	server := setup(t)
 	ctx := context.Background()
 	project := model.Project{ID: "retry-project", Name: "Retry", Path: t.TempDir(), Status: "error"}
-	if err := server.Store.Put(ctx, "projects", project.ID, project, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, server.Store.Put(ctx, "projects", project.ID, project, 0))
 	failed := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "failed", Error: "required scanner was unavailable", Input: map[string]any{"onboarding": true, "checkpoint": "preserve"}}
-	if err := server.Store.Put(ctx, "operations", "failed-setup", failed, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := server.Store.Put(ctx, "operations", "initial-ideation", model.Operation{Kind: "ideation", Subject: project.ID, Stage: "queued"}, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, server.Store.Put(ctx, "operations", onboardingFixtureFailedSetup, failed, 0))
+	requireAPISuccess(t, server.Store.Put(ctx, "operations", "initial-ideation", model.Operation{Kind: "ideation", Subject: project.ID, Stage: "queued"}, 0))
 	command := LocalCommand{Operation: "project.setup.retry", ProjectID: project.ID, ExpectedVersion: 1, IdempotencyKey: "retry-once"}
 	first, err := server.ExecuteLocal(ctx, command)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	second, err := server.ExecuteLocal(ctx, command)
 	if err != nil || string(first) != string(second) {
 		t.Fatalf("retry receipt changed: %s / %s (%v)", first, second, err)
 	}
 	var receipt model.Record
-	if err := json.Unmarshal(first, &receipt); err != nil {
-		t.Fatal(err)
-	}
-	if receipt.ID == "failed-setup" || receipt.Version != 1 {
+	requireAPISuccess(t, json.Unmarshal(first, &receipt))
+	if receipt.ID == onboardingFixtureFailedSetup || receipt.Version != 1 {
 		t.Fatalf("retry reused old setup journal identity: %+v", receipt)
 	}
 	newOperation, err := store.Decode[model.Operation](receipt)
@@ -130,32 +119,35 @@ func TestProjectSetupRetryCreatesNewDurableOperation(t *testing.T) {
 		t.Fatalf("retry dropped automatic onboarding mode: %+v (%v)", newOperation.Input, err)
 	}
 	savedProject, err := server.Store.Get(ctx, "projects", project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	project, err = store.Decode[model.Project](savedProject)
 	if err != nil || project.Status != "draft" {
 		t.Fatalf("retry exposed project as ready or error instead of pending: %+v (%v)", project, err)
 	}
-	oldRecord, err := server.Store.Get(ctx, "operations", "failed-setup")
-	if err != nil {
-		t.Fatal(err)
-	}
+	oldRecord, err := server.Store.Get(ctx, "operations", onboardingFixtureFailedSetup)
+	requireAPISuccess(t, err)
 	oldOperation, err := store.Decode[model.Operation](oldRecord)
 	if err != nil || oldOperation.Stage != "failed" || oldOperation.Error == "" {
 		t.Fatalf("retry erased prior failure evidence: %+v (%v)", oldOperation, err)
 	}
-	operations, err := server.Store.List(ctx, "operations")
-	if err != nil {
-		t.Fatal(err)
+	assertSetupRetryDoesNotDuplicateOnboarding(t, server, ctx, project.ID)
+	stale := command
+	stale.ExpectedVersion = 1
+	stale.IdempotencyKey = "stale-retry"
+	if _, err := server.ExecuteLocal(ctx, stale); err == nil {
+		t.Fatal("stale project version started another setup retry")
 	}
+}
+
+func assertSetupRetryDoesNotDuplicateOnboarding(t *testing.T, server *Server, ctx context.Context, projectID string) {
+	t.Helper()
+	operations, err := server.Store.List(ctx, "operations")
+	requireAPISuccess(t, err)
 	setupCount, ideationCount := 0, 0
 	for _, record := range operations {
 		operation, err := store.Decode[model.Operation](record)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if operation.Subject != project.ID {
+		requireAPISuccess(t, err)
+		if operation.Subject != projectID {
 			continue
 		}
 		if operation.Kind == "project_setup" {
@@ -168,28 +160,16 @@ func TestProjectSetupRetryCreatesNewDurableOperation(t *testing.T) {
 	if setupCount != 2 || ideationCount != 1 {
 		t.Fatalf("retry duplicated initial onboarding work: setup=%d ideation=%d", setupCount, ideationCount)
 	}
-	stale := command
-	stale.ExpectedVersion = 1
-	stale.IdempotencyKey = "stale-retry"
-	if _, err := server.ExecuteLocal(ctx, stale); err == nil {
-		t.Fatal("stale project version started another setup retry")
-	}
 }
 
 func TestProjectSetupRetryAllowsExplicitRecheckOfCompletedSetup(t *testing.T) {
 	server := setup(t)
 	ctx := context.Background()
 	project := model.Project{ID: "recheck-project", Name: "Recheck", Path: t.TempDir(), Status: "approved", QualityIdentity: &model.QualityIdentity{Version: 1}}
-	if err := server.Store.Put(ctx, "projects", project.ID, project, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, server.Store.Put(ctx, "projects", project.ID, project, 0))
 	completed := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "complete", Input: map[string]any{"onboarding": true}}
-	if err := server.Store.Put(ctx, "operations", "completed-setup", completed, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := server.Store.Put(ctx, "operations", "initial-ideation", model.Operation{Kind: "ideation", Subject: project.ID, Stage: "queued"}, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, server.Store.Put(ctx, "operations", onboardingFixtureCompletedSetup, completed, 0))
+	requireAPISuccess(t, server.Store.Put(ctx, "operations", "initial-ideation", model.Operation{Kind: "ideation", Subject: project.ID, Stage: "queued"}, 0))
 	command := LocalCommand{Operation: "project.setup.retry", ProjectID: project.ID, ExpectedVersion: 1, IdempotencyKey: "recheck-once"}
 	first, err := server.ExecuteLocal(ctx, command)
 	if err != nil {
@@ -200,11 +180,9 @@ func TestProjectSetupRetryAllowsExplicitRecheckOfCompletedSetup(t *testing.T) {
 		t.Fatalf("recheck receipt changed: %s / %s (%v)", first, second, err)
 	}
 	var receipt model.Record
-	if err := json.Unmarshal(first, &receipt); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, json.Unmarshal(first, &receipt))
 	recheck, err := store.Decode[model.Operation](receipt)
-	if err != nil || receipt.ID == "completed-setup" || recheck.Stage != "queued" {
+	if err != nil || receipt.ID == onboardingFixtureCompletedSetup || recheck.Stage != "queued" {
 		t.Fatalf("recheck did not create a fresh setup operation: %+v (%v)", recheck, err)
 	}
 	var input struct {
@@ -215,9 +193,7 @@ func TestProjectSetupRetryAllowsExplicitRecheckOfCompletedSetup(t *testing.T) {
 		t.Fatalf("recheck dropped automatic qualification mode: %+v (%v)", recheck.Input, err)
 	}
 	saved, err := server.Store.Get(ctx, "projects", project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	project, err = store.Decode[model.Project](saved)
 	if err != nil || project.Status != "draft" || project.QualityIdentity != nil {
 		t.Fatalf("recheck left stale qualification ready: %+v (%v)", project, err)
@@ -225,10 +201,8 @@ func TestProjectSetupRetryAllowsExplicitRecheckOfCompletedSetup(t *testing.T) {
 	if _, err := server.ExecuteLocal(ctx, LocalCommand{Operation: command.Operation, ProjectID: project.ID, ExpectedVersion: 1, IdempotencyKey: "duplicate-recheck"}); err == nil {
 		t.Fatal("recheck accepted a second request after project version advanced")
 	}
-	old, err := server.Store.Get(ctx, "operations", "completed-setup")
-	if err != nil {
-		t.Fatal(err)
-	}
+	old, err := server.Store.Get(ctx, "operations", onboardingFixtureCompletedSetup)
+	requireAPISuccess(t, err)
 	oldOperation, err := store.Decode[model.Operation](old)
 	if err != nil || oldOperation.Stage != "complete" {
 		t.Fatalf("recheck altered completed evidence: %+v (%v)", oldOperation, err)

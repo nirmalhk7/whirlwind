@@ -1,5 +1,29 @@
 # Native nono isolation acceptance (#7)
 
+> Dated macOS evidence for the exact fixtures and runtime below. It does not
+> qualify current HEAD or any Linux execution. See [current support](support.md).
+
+## Coding workflow, 2026-11-19
+
+The deterministic ACP peer ran through Coding, Reviewer, and Finalizer in
+native nono 0.81.0 on macOS arm64. Coding added a regression test via the
+ACP file callback, ran the approved check for red and green evidence, and
+edited and deleted files through an ACP terminal. The independent runner and
+local delivery recorded the same Git tree. The fallback fixture recorded four
+primary attempts, clean shutdown before each replacement, and a successful
+fallback with the same approved write scope.
+
+The new regressions caught a subdirectory terminal shifting write grants,
+repair receiving the wider project scope, a Coding clarification losing its
+pause to a later Reviewer attempt, and conflict resolution requiring the agent
+to write Git metadata. They passed after the fixes.
+
+```sh
+go test -race ./internal/workflow ./internal/provider ./internal/execution \
+  -run '^Test(Coding|Adherence|FailedChecksDoNotStartReview|ParityCoding|ParityReviewerPreparation|ParityTwoCoding|ApprovedPlansForSameRepository|ParityAnsweredQuestion|AnswerQuestion|Nono|ACPTerminalCannotWriteOutsideSandbox|ACPFile)' \
+  -count=1 -timeout=6m
+```
+
 Tested on 2026-11-17: macOS 27.0.1 (build 26A434), Darwin 27.0.0 arm64, nono 0.81.0, Node v24.1.0, Go 1.27.1. These results cover this native macOS boundary, not Linux or legacy OpenShell enforcement.
 
 ## Acceptance coverage

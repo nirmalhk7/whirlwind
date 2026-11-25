@@ -87,10 +87,10 @@ func QualityConfigurationPathAllowed(path string) bool {
 		return true
 	}
 	switch path {
-	case ".semgrep.yml", ".semgrep.yaml", ".gitleaks.toml", "semgrep.yml", "semgrep.yaml", "gitleaks.toml", "trivy.yaml", "sgconfig.yml":
+	case ".gitleaks.toml", "gitleaks.toml", "trivy.yaml", "sgconfig.yml":
 		return true
 	}
-	return strings.HasPrefix(path, ".semgrep/") && (strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml"))
+	return false
 }
 
 func (snapshot QualitySnapshot) Validate() error {
@@ -116,7 +116,7 @@ func (snapshot QualitySnapshot) Validate() error {
 		}
 	}
 	if len(snapshot.PluginCatalog) > 4<<20 {
-		return errors.New("Qlty plugin catalog exceeds retained limit")
+		return errors.New("retained Qlty plugin catalog exceeds size limit")
 	}
 	return nil
 }

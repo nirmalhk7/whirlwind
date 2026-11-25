@@ -39,6 +39,17 @@ func TestRunRejectsLegacyNativeTransportBeforeStartingProcess(t *testing.T) {
 	}
 }
 
+func TestLegacyCodexUsesConfiguredACPCommandForExecution(t *testing.T) {
+	legacy := model.Provider{ID: "legacy-codex", Kind: "codex", Command: []string{"codex", "app-server"}, ModelCommand: []string{"codex-acp", "--stdio"}}
+	resolved, err := ResolveExecutionProvider(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Kind != "acp" || resolved.ACPProfile != "codex" || !reflect.DeepEqual(resolved.Command, legacy.ModelCommand) {
+		t.Fatalf("legacy record resolved to the wrong inference transport: %+v", resolved)
+	}
+}
+
 func TestACPFailuresTellHumanHowToInstallAndAuthenticate(t *testing.T) {
 	missing := actionableACPError(model.Provider{ID: "codex", ACPProfile: "codex"}, errors.New("executable not found"))
 	if !strings.Contains(missing.Error(), "npm install --global @agentclientprotocol/codex-acp@2.5.0") {

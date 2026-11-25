@@ -7,21 +7,49 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
 
-func TestDashboardLoadsSameDatabaseWithoutRecovery(t *testing.T) {
-	ctx := context.Background()
+const dashboardCurrentAttempt = "current-attempt"
+
+func openDashboardFixture(t *testing.T) (string, *store.Store) {
+	t.Helper()
 	data := t.TempDir()
 	db, err := store.Open(filepath.Join(data, "whirlwind.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close dashboard fixture database: %v", err)
+		}
+	})
+	return data, db
+}
+
+func startDashboardFixtureServer(t *testing.T, data string, dispatcher control.Dispatcher) *control.LocalServer {
+	t.Helper()
+	server, err := control.Listen(control.SocketPath(data), dispatcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := server.Close(); err != nil {
+			t.Errorf("close dashboard fixture socket: %v", err)
+		}
+	})
+	return server
+}
+
+func TestDashboardLoadsSameDatabaseWithoutRecovery(t *testing.T) {
+	ctx := context.Background()
+	data, db := openDashboardFixture(t)
 	for _, kind := range []string{"execution_plans", "sessions", "questions"} {
 		if err := db.Put(ctx, kind, "saved", map[string]any{"status": "pending", "finished": false, "restarts": 2, "deadline": "2026-11-06T23:05:00Z"}, 0); err != nil {
 			t.Fatal(err)
@@ -75,12 +103,19 @@ func TestDashboardMissingStateDoesNotCreateDatabase(t *testing.T) {
 
 func TestDashboardRestoresHistoryAndCurrentDecisionsOnlineAndOffline(t *testing.T) {
 	ctx := context.Background()
-	data := t.TempDir()
-	db, err := store.Open(filepath.Join(data, "whirlwind.db"))
-	if err != nil {
+	data, db := openDashboardFixture(t)
+	seedDashboardHistory(t, ctx, db)
+
+	server := startDashboardFixtureServer(t, data, control.SupervisorDispatcher{DB: db.DB})
+	assertDashboardHistory(t, ctx, data, "online")
+	if err := server.Close(); err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	assertDashboardHistory(t, ctx, data, "offline")
+}
+
+func seedDashboardHistory(t *testing.T, ctx context.Context, db *store.Store) {
+	t.Helper()
 	for _, kind := range []string{"execution_plans", "sessions", "questions", "permissions", "plan_versions"} {
 		for i := range 105 {
 			id := fmt.Sprintf("%s-old-%03d", kind, i)
@@ -93,70 +128,57 @@ func TestDashboardRestoresHistoryAndCurrentDecisionsOnlineAndOffline(t *testing.
 		}
 	}
 	for _, kind := range []string{"questions", "permissions"} {
-		if err := db.Put(ctx, kind, kind+"-current", map[string]any{"project_id": "project", "status": "pending", "attempt_id": "current-attempt"}, 0); err != nil {
+		if err := db.Put(ctx, kind, kind+"-current", map[string]any{"project_id": "project", "status": "pending", "attempt_id": dashboardCurrentAttempt}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := db.Put(ctx, "sessions", "current-attempt", map[string]any{"project_id": "project", "status": "running", "restart_count": 3}, 0); err != nil {
+	if err := db.Put(ctx, "sessions", dashboardCurrentAttempt, map[string]any{"project_id": "project", "status": "running", "restart_count": 3}, 0); err != nil {
 		t.Fatal(err)
 	}
+}
 
-	assertHistory := func(mode string) {
-		t.Helper()
-		snapshot, err := loadSnapshot(ctx, data)
-		if err != nil {
-			t.Fatalf("%s inspection: %v", mode, err)
-		}
-		for _, kind := range []string{"execution_plans", "sessions", "questions", "permissions", "plan_versions"} {
-			minimum := 105
-			if kind == "sessions" || kind == "questions" || kind == "permissions" {
-				minimum++
-			}
-			if len(snapshot[kind]) < minimum {
-				t.Errorf("%s dashboard restored only %d %s rows; want at least %d", mode, len(snapshot[kind]), kind, minimum)
-			}
-		}
-		for _, current := range []struct{ kind, id, status string }{
-			{kind: "questions", id: "questions-current", status: "pending"},
-			{kind: "permissions", id: "permissions-current", status: "pending"},
-			{kind: "sessions", id: "current-attempt", status: "running"},
-		} {
-			var saved *model.Record
-			for index := range snapshot[current.kind] {
-				if snapshot[current.kind][index].ID == current.id {
-					saved = &snapshot[current.kind][index]
-					break
-				}
-			}
-			if saved == nil {
-				t.Errorf("%s dashboard omitted current record %q", mode, current.id)
-				continue
-			}
-			var data map[string]any
-			if err := json.Unmarshal(saved.Data, &data); err != nil {
-				t.Fatal(err)
-			}
-			if data["status"] != current.status {
-				t.Errorf("%s dashboard changed %s status: got %v, want %s", mode, current.id, data["status"], current.status)
-			}
-			if current.kind != "sessions" && data["attempt_id"] != "current-attempt" {
-				t.Errorf("%s dashboard detached decision %s from paused attempt: %v", mode, current.id, data["attempt_id"])
-			}
-			if current.kind == "sessions" && data["restart_count"] != float64(3) {
-				t.Errorf("%s dashboard changed persisted restart count: %v", mode, data["restart_count"])
-			}
-		}
-	}
-
-	server, err := control.Listen(control.SocketPath(data), control.SupervisorDispatcher{DB: db.DB})
+func assertDashboardHistory(t *testing.T, ctx context.Context, data, mode string) {
+	t.Helper()
+	snapshot, err := loadSnapshot(ctx, data)
 	if err != nil {
+		t.Fatalf("%s inspection: %v", mode, err)
+	}
+	for _, group := range []struct {
+		kind    string
+		minimum int
+	}{
+		{"execution_plans", 105},
+		{"sessions", 106},
+		{"questions", 106},
+		{"permissions", 106},
+		{"plan_versions", 105},
+	} {
+		if count := len(snapshot[group.kind]); count < group.minimum {
+			t.Errorf("%s dashboard restored only %d %s rows; want at least %d", mode, count, group.kind, group.minimum)
+		}
+	}
+	assertDashboardHistoryRecord(t, mode, snapshot["questions"], "questions-current", "pending", "attempt_id", dashboardCurrentAttempt)
+	assertDashboardHistoryRecord(t, mode, snapshot["permissions"], "permissions-current", "pending", "attempt_id", dashboardCurrentAttempt)
+	assertDashboardHistoryRecord(t, mode, snapshot["sessions"], dashboardCurrentAttempt, "running", "restart_count", float64(3))
+}
+
+func assertDashboardHistoryRecord(t *testing.T, mode string, records []model.Record, id, status, field string, want any) {
+	t.Helper()
+	index := slices.IndexFunc(records, func(record model.Record) bool { return record.ID == id })
+	if index == -1 {
+		t.Errorf("%s dashboard omitted current record %q", mode, id)
+		return
+	}
+	var data map[string]any
+	if err := json.Unmarshal(records[index].Data, &data); err != nil {
 		t.Fatal(err)
 	}
-	assertHistory("online")
-	if err := server.Close(); err != nil {
-		t.Fatal(err)
+	if data["status"] != status {
+		t.Errorf("%s dashboard changed %q status: got %v, want %s", mode, id, data["status"], status)
 	}
-	assertHistory("offline")
+	if data[field] != want {
+		t.Errorf("%s dashboard changed %q %s: got %v, want %v", mode, id, field, data[field], want)
+	}
 }
 
 func TestDashboardPaginationErrorsAndStalledCursorsAreVisible(t *testing.T) {
@@ -174,22 +196,13 @@ func TestDashboardPaginationErrorsAndStalledCursorsAreVisible(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
-			data := t.TempDir()
-			db, err := store.Open(filepath.Join(data, "whirlwind.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
+			data, db := openDashboardFixture(t)
 			for i := range 100 {
 				if err := db.Put(ctx, "execution_plans", fmt.Sprintf("task-%03d", i), map[string]any{"stage": "plan"}, 0); err != nil {
 					t.Fatal(err)
 				}
 			}
-			server, err := control.Listen(control.SocketPath(data), faultyPageDispatcher{base: control.SupervisorDispatcher{DB: db.DB}, fail: test.fail})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer server.Close()
+			startDashboardFixtureServer(t, data, faultyPageDispatcher{base: control.SupervisorDispatcher{DB: db.DB}, fail: test.fail})
 			if _, err := loadSnapshot(ctx, data); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("inspection error=%v, want containing %q", err, test.want)
 			}
@@ -210,17 +223,8 @@ func (d faultyPageDispatcher) Handle(ctx context.Context, request control.Reques
 }
 
 func TestDashboardOnlineInspectionHonorsCancellation(t *testing.T) {
-	data := t.TempDir()
-	db, err := store.Open(filepath.Join(data, "whirlwind.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	server, err := control.Listen(control.SocketPath(data), control.SupervisorDispatcher{DB: db.DB})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer server.Close()
+	data, db := openDashboardFixture(t)
+	startDashboardFixtureServer(t, data, control.SupervisorDispatcher{DB: db.DB})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := loadSnapshot(ctx, data); !errors.Is(err, context.Canceled) {
@@ -230,22 +234,13 @@ func TestDashboardOnlineInspectionHonorsCancellation(t *testing.T) {
 
 func TestDashboardEventPaginationRetainsLaterEvents(t *testing.T) {
 	ctx := context.Background()
-	data := t.TempDir()
-	db, err := store.Open(filepath.Join(data, "whirlwind.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	data, db := openDashboardFixture(t)
 	for i := range 106 {
 		if err := db.Put(ctx, "questions", fmt.Sprintf("question-%03d", i), map[string]any{"status": "resolved"}, 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	server, err := control.Listen(control.SocketPath(data), control.SupervisorDispatcher{DB: db.DB})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer server.Close()
+	startDashboardFixtureServer(t, data, control.SupervisorDispatcher{DB: db.DB})
 	snapshot, err := loadSnapshot(ctx, data)
 	if err != nil {
 		t.Fatal(err)
@@ -264,12 +259,7 @@ func TestDashboardEventPaginationRetainsLaterEvents(t *testing.T) {
 
 func TestDashboardLoadsLargeLegitimateRecordsOverBoundedSocketPages(t *testing.T) {
 	ctx := context.Background()
-	data := t.TempDir()
-	db, err := store.Open(filepath.Join(data, "whirlwind.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
+	data, db := openDashboardFixture(t)
 	largeOutput := strings.Repeat("verification output ", 1400)
 	for i := range 80 {
 		if err := db.Put(ctx, "verification", fmt.Sprintf("verification-%03d", i), map[string]string{"output": largeOutput}, 0); err != nil {
@@ -282,11 +272,7 @@ func TestDashboardLoadsLargeLegitimateRecordsOverBoundedSocketPages(t *testing.T
 	if err := db.Put(ctx, "sessions", "latest-attempt", map[string]any{"status": "running", "restart_count": 2}, 0); err != nil {
 		t.Fatal(err)
 	}
-	server, err := control.Listen(control.SocketPath(data), control.SupervisorDispatcher{DB: db.DB})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer server.Close()
+	startDashboardFixtureServer(t, data, control.SupervisorDispatcher{DB: db.DB})
 	snapshot, err := loadSnapshot(ctx, data)
 	if err != nil {
 		t.Fatal(err)

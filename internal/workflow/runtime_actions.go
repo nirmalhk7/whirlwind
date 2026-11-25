@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -28,49 +29,63 @@ type toolActionEvent struct {
 }
 
 func unresolvedToolActions(events []model.AttemptEvent) []uncertainToolAction {
-	active := map[string]uncertainToolAction{}
-	terminals := map[string]string{}
+	tracker := toolActionTracker{active: map[string]uncertainToolAction{}, terminals: map[string]string{}}
 	for _, event := range events {
 		var value toolActionEvent
 		if json.Unmarshal(event.Metadata, &value) != nil {
 			continue
 		}
-		switch event.Kind {
-		case "whirlwind/action_started":
-			id := value.ActionID
-			if id == "" {
-				id = fmt.Sprintf("event-%d", event.Sequence)
-			}
-			active[id] = uncertainToolAction{ID: id, Method: value.Method}
-		case "whirlwind/action_result":
-			action, exists := active[value.ActionID]
-			if !exists {
-				continue
-			}
-			if action.Method == "terminal/create" && value.TerminalID != "" && value.Status == "completed" {
-				terminals[value.TerminalID] = action.ID
-				continue
-			}
-			if value.Status == "completed" {
-				delete(active, action.ID)
-			}
-		case "whirlwind/terminal/exit":
-			terminalID := value.TerminalIDCamel
-			if terminalID == "" {
-				terminalID = value.TerminalID
-			}
-			if actionID := terminals[terminalID]; actionID != "" && value.CleanupVerified {
-				delete(active, actionID)
-				delete(terminals, terminalID)
-			}
-		}
+		tracker.record(event, value)
 	}
-	result := make([]uncertainToolAction, 0, len(active))
-	for _, action := range active {
+	result := make([]uncertainToolAction, 0, len(tracker.active))
+	for _, action := range tracker.active {
 		result = append(result, action)
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
+}
+
+type toolActionTracker struct {
+	active    map[string]uncertainToolAction
+	terminals map[string]string
+}
+
+func (tracker toolActionTracker) record(event model.AttemptEvent, value toolActionEvent) {
+	switch event.Kind {
+	case "whirlwind/action_started":
+		id := value.ActionID
+		if id == "" {
+			id = fmt.Sprintf("event-%d", event.Sequence)
+		}
+		tracker.active[id] = uncertainToolAction{ID: id, Method: value.Method}
+	case "whirlwind/action_result":
+		tracker.resolveAction(value)
+	case "whirlwind/terminal/exit":
+		tracker.resolveTerminal(value)
+	}
+}
+
+func (tracker toolActionTracker) resolveAction(value toolActionEvent) {
+	action, exists := tracker.active[value.ActionID]
+	if !exists || value.Status != "completed" {
+		return
+	}
+	if action.Method == "terminal/create" && value.TerminalID != "" {
+		tracker.terminals[value.TerminalID] = action.ID
+		return
+	}
+	delete(tracker.active, action.ID)
+}
+
+func (tracker toolActionTracker) resolveTerminal(value toolActionEvent) {
+	terminalID := value.TerminalIDCamel
+	if terminalID == "" {
+		terminalID = value.TerminalID
+	}
+	if actionID := tracker.terminals[terminalID]; actionID != "" && value.CleanupVerified {
+		delete(tracker.active, actionID)
+		delete(tracker.terminals, terminalID)
+	}
 }
 
 func (a *agentRun) reconcilePriorToolActions(ctx context.Context) error {

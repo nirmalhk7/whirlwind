@@ -18,7 +18,7 @@ func (s *providerSession) hasCheckTool() bool {
 
 func (s *providerSession) checkTools() []any {
 	if s.hasFinalizationTool() {
-		return []any{finalizationTool()}
+		return []any{s.finalizationTool()}
 	}
 	if !s.hasCheckTool() {
 		return nil

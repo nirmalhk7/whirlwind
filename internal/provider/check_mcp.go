@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
 	"whirlwind/internal/execution"
 )
 
@@ -81,12 +82,7 @@ func checkMCPHandler(ctx context.Context, session *providerSession, token string
 			http.Error(w, "invalid request", 400)
 			return
 		}
-		var request struct {
-			JSONRPC string          `json:"jsonrpc"`
-			ID      json.RawMessage `json:"id"`
-			Method  string          `json:"method"`
-			Params  json.RawMessage `json:"params"`
-		}
+		var request checkRPCRequest
 		if err := json.Unmarshal(raw, &request); err != nil || request.JSONRPC != "2.0" || request.Method == "" {
 			http.Error(w, "invalid JSON-RPC request", http.StatusBadRequest)
 			return
@@ -95,39 +91,7 @@ func checkMCPHandler(ctx context.Context, session *providerSession, token string
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		var result any
-		var rpcError *checkRPCError
-		switch request.Method {
-		case "initialize":
-			var params struct {
-				ProtocolVersion string `json:"protocolVersion"`
-			}
-			if err := json.Unmarshal(request.Params, &params); err != nil || params.ProtocolVersion == "" {
-				rpcError = &checkRPCError{Code: -32602, Message: "protocolVersion required"}
-			} else {
-				result = map[string]any{"protocolVersion": params.ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{"listChanged": false}}, "serverInfo": map[string]string{"name": "whirlwind_checks", "version": "1"}}
-			}
-		case "tools/list":
-			result = map[string]any{"tools": session.checkTools()}
-		case "tools/call":
-			var params struct {
-				Name      string          `json:"name"`
-				Arguments json.RawMessage `json:"arguments"`
-			}
-			if err := json.Unmarshal(request.Params, &params); err != nil {
-				rpcError = &checkRPCError{Code: -32602, Message: "scoped tool request required"}
-				break
-			}
-			check, err := session.callScopedTool(ctx, params.Name, params.Arguments)
-			if err != nil {
-				result = map[string]any{"content": []any{map[string]string{"type": "text", "text": err.Error()}}, "isError": true}
-			} else {
-				encoded, _ := json.Marshal(check)
-				result = map[string]any{"content": []any{map[string]string{"type": "text", "text": string(encoded)}}, "isError": false}
-			}
-		default:
-			rpcError = &checkRPCError{Code: -32601, Message: "unsupported MCP method"}
-		}
+		result, rpcError := session.dispatchCheckRPC(ctx, request)
 		w.Header().Set("Content-Type", "application/json")
 		response := map[string]any{"jsonrpc": "2.0", "id": request.ID}
 		if rpcError != nil {
@@ -138,6 +102,60 @@ func checkMCPHandler(ctx context.Context, session *providerSession, token string
 		_ = json.NewEncoder(w).Encode(response)
 	})
 	return mux
+}
+
+type checkRPCRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params"`
+}
+
+func (s *providerSession) dispatchCheckRPC(ctx context.Context, request checkRPCRequest) (any, *checkRPCError) {
+	switch request.Method {
+	case "initialize":
+		return initializeCheckRPC(request.Params)
+	case "tools/list":
+		return map[string]any{"tools": s.checkTools()}, nil
+	case "tools/call":
+		return s.callCheckRPC(ctx, request.Params)
+	default:
+		return nil, &checkRPCError{Code: -32601, Message: "unsupported MCP method"}
+	}
+}
+
+func initializeCheckRPC(raw json.RawMessage) (any, *checkRPCError) {
+	var params struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil || params.ProtocolVersion == "" {
+		return nil, &checkRPCError{Code: -32602, Message: "protocolVersion required"}
+	}
+	return map[string]any{
+		"protocolVersion": params.ProtocolVersion,
+		"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
+		"serverInfo":      map[string]string{"name": "whirlwind_checks", "version": "1"},
+	}, nil
+}
+
+func (s *providerSession) callCheckRPC(ctx context.Context, raw json.RawMessage) (any, *checkRPCError) {
+	var params struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil {
+		return nil, &checkRPCError{Code: -32602, Message: "scoped tool request required"}
+	}
+	check, err := s.callScopedTool(ctx, params.Name, params.Arguments)
+	if err != nil {
+		return checkRPCContent(err.Error(), true), nil
+	}
+	encoded, _ := json.Marshal(check)
+	return checkRPCContent(string(encoded), false), nil
+}
+
+func checkRPCContent(text string, failed bool) map[string]any {
+	return map[string]any{"content": []any{map[string]string{"type": "text", "text": text}}, "isError": failed}
 }
 
 type checkRPCError struct {

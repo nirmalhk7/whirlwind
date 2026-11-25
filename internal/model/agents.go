@@ -11,6 +11,11 @@ type AgentChoice struct {
 	Thinking *ThinkingChoice `json:"thinking,omitempty"`
 }
 
+type AgentHookChecks struct {
+	Before []Check `json:"before,omitempty"`
+	After  []Check `json:"after,omitempty"`
+}
+
 type AgentConfig struct {
 	InheritedFrom string        `json:"inherited_from,omitempty"`
 	Role          string        `json:"role"`

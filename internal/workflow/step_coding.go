@@ -9,7 +9,7 @@ func (step *taskStep) coding() (bool, error) {
 	if step.task.Plan == nil {
 		return true, errors.New("plan required")
 	}
-	if step.task.IdeaID != "" && step.taskQueues == nil {
+	if step.task.IdeaID != "" {
 		err = step.codeWithPreparation()
 	} else {
 		err = step.code(step.ctx, step.project, &step.task)

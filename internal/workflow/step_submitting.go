@@ -13,6 +13,12 @@ import (
 	"whirlwind/internal/store"
 )
 
+// publishing advances tasks saved with the publication stage to local delivery.
+func (step *taskStep) publishing() (bool, error) {
+	step.task.Stage = "submitting"
+	return false, nil
+}
+
 func (step *taskStep) submitting() (bool, error) {
 	if step.task.Delivery == nil {
 		return step.prepareLocalDelivery()

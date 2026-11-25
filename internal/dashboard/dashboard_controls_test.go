@@ -6,6 +6,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 )
 
@@ -108,7 +109,7 @@ func TestFooterShowsEveryShortcutAcrossTerminalSizes(t *testing.T) {
 				t.Errorf("width %d footer advertises removed instruction %q", width, unwanted)
 			}
 		}
-		for _, shortcut := range []string{"Shift-Tab", "Home/End", "PgUp/PgDn", "Enter", "Vim", "logs", "a choose direction / prepare plan", "d delete", "h rejected history", "o earlier directions", "t tasks", "r plan review (approve / request changes / reject)", "c questions", "p permissions", "f finalization", "x stop/resume", "Esc", "?", "q/Ctrl-C quit"} {
+		for _, shortcut := range []string{"Shift-Tab", "Home/End", "PgUp/PgDn", "Enter", "Vim", "logs", "a choose direction / prepare plan", "d delete", "h rejected history", "o earlier directions", "t tasks", "r retry failed or recheck completed setup (Runs)", "r plan review (approve / request changes / reject)", "c questions", "p permissions", "f finalization", "x stop/resume", "Esc", "?", "q/Ctrl-C quit"} {
 			if !strings.Contains(footer, shortcut) {
 				t.Errorf("width %d footer missing %q", width, shortcut)
 			}
@@ -132,5 +133,35 @@ func TestLDoesNotOpenPanelLogs(t *testing.T) {
 				t.Fatal("l opened or attempted to load logs")
 			}
 		})
+	}
+}
+
+func TestShortTerminalKeepsRunsAndHelpVisible(t *testing.T) {
+	d := New()
+	screen := dashboardScreen(t, d)
+	screen.SetSize(60, 20)
+	d.ForceDraw()
+	view := screenText(screen)
+	for _, want := range []string{"No runs", "? all keys"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("60x20 dashboard missing %q\n%s", want, view)
+		}
+	}
+}
+
+func TestRunnerStatusEmphasisSettlesOnNextRefresh(t *testing.T) {
+	d := New()
+	screen := dashboardScreen(t, d)
+	for _, step := range []struct{ online, emphasized bool }{
+		{true, false}, {false, true}, {false, false}, {true, true}, {true, false},
+	} {
+		d.Present(control.Snapshot{"supervisor": {record("local", map[string]bool{"online": step.online})}})
+		d.ForceDraw()
+		x, y, _, _ := d.runnerStatus.GetRect()
+		_, _, style, _ := screen.GetContent(x+3, y)
+		_, _, attrs := style.Decompose()
+		if (attrs&tcell.AttrBold != 0) != step.emphasized {
+			t.Errorf("online=%v: want emphasis=%v, attributes=%v", step.online, step.emphasized, attrs)
+		}
 	}
 }

@@ -1,0 +1,158 @@
+name: Whirlwind CI and release
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable release tag (vMAJOR.MINOR.PATCH). Only main can publish.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    outputs:
+      # Both runners compute the same result from the event, independent of the target.
+      publish: ${{ steps.release.outputs.publish }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-amd64
+          - runner: macos-15
+            target: darwin-arm64
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check release request
+        id: release
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: bash .github/scripts/release.sh plan
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Lint workflow and test release guards
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/actionlint.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$archive"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color .github/workflows/release.yml
+          node --test .github/scripts/release.test.mjs
+      - name: Build and package native commands
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          target_os="$(go env GOOS)"
+          target_arch="$(go env GOARCH)"
+          actual_target="$target_os-$target_arch"
+          test "$actual_target" = "$RELEASE_TARGET"
+          bundle="whirlwind-$RELEASE_TARGET"
+          mkdir -p "$RUNNER_TEMP/$bundle"
+          go build -mod=readonly -trimpath -o "$RUNNER_TEMP/$bundle/" \
+            ./cmd/whirlwind ./cmd/whirlwind-dashboard ./cmd/whirlwind-verify
+          for command in whirlwind whirlwind-dashboard whirlwind-verify; do
+            test -x "$RUNNER_TEMP/$bundle/$command"
+          done
+          tar -czf "$RUNNER_TEMP/$bundle.tar.gz" -C "$RUNNER_TEMP" "$bundle"
+          tar -tzf "$RUNNER_TEMP/$bundle.tar.gz"
+      - name: Vet Go packages
+        run: go vet -mod=readonly ./...
+      - name: Run launcher and bridge suites
+        run: node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/native-state.test.mjs
+      - name: Verify Linux refuses native execution
+        if: runner.os == 'Linux'
+        run: node --test --test-name-pattern='^Linux inspection cannot launch execution' bridges/nono/launch.test.mjs
+      - name: Race-test Linux dashboard and control packages
+        if: runner.os == 'Linux'
+        run: go test -mod=readonly -race -count=1 -timeout=25m ./cmd/whirlwind-dashboard ./internal/control ./internal/dashboard
+      - name: Set up pinned macOS test runtimes
+        id: macos-tools
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/nono.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/nolabs-ai/nono/releases/download/v0.81.0/nono-v0.81.0-aarch64-apple-darwin.tar.gz \
+            --output "$archive"
+          echo "728b1deefbf6390c9b74fc982efbded1e1c4b37b99dcdefa2e07266dfef4d9e9  $archive" | shasum -a 256 -c
+          bin="$RUNNER_TEMP/test-tools"
+          mkdir -p "$bin"
+          tar -xzf "$archive" -C "$bin" nono
+          "$bin/nono" --version
+          archive="$RUNNER_TEMP/qlty.tar.xz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/qltysh/qlty/releases/download/v0.668.0/qlty-aarch64-apple-darwin.tar.xz \
+            --output "$archive"
+          echo "ed936ec361a0b5ba13483cddf2252864b77005cb7cca979adc956b22b2bbad42  $archive" | shasum -a 256 -c
+          tar -xJf "$archive" -C "$bin" --strip-components 1 qlty-aarch64-apple-darwin/qlty
+          "$bin/qlty" --version
+          echo "$bin" >> "$GITHUB_PATH"
+          npm ci --prefix bridges/sandbox --ignore-scripts --no-audit --no-fund
+      - name: Run macOS sandbox suites
+        if: runner.os == 'macOS'
+        run: node --test bridges/nono/*.test.mjs bridges/sandbox/launch.test.mjs bridges/sandbox/node-path.test.mjs
+      - name: Run full Go race suite on macOS
+        if: runner.os == 'macOS' && !cancelled() && steps.macos-tools.outcome == 'success'
+        run: go test -mod=readonly -race -count=1 -timeout=25m ./...
+      - name: Stage verified archive for this release run
+        if: steps.release.outputs.publish == 'true'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: whirlwind-${{ matrix.target }}
+          path: ${{ runner.temp }}/whirlwind-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
+
+  publish:
+    name: Publish GitHub release
+    needs: verify
+    if: needs.verify.outputs.publish == 'true' && github.repository == 'nirmalhk7/whirlwind' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: whirlwind-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: whirlwind-*
+          path: ${{ runner.temp }}/release-assets
+          merge-multiple: true
+      - name: Create tag and publish staged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_ASSETS: ${{ runner.temp }}/release-assets
+        run: bash .github/scripts/release.sh publish

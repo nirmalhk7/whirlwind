@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 )
@@ -84,6 +85,14 @@ func assertPreparationFallback(t *testing.T, role string) {
 	if err != nil || out.Text == "" {
 		t.Fatalf("fallback blocked by old budget: %v", err)
 	}
+	assertPreparationFallbackOutput(t, role, out)
+	if calls != 5 {
+		t.Fatalf("unexpected attempts: %d", calls)
+	}
+}
+
+func assertPreparationFallbackOutput(t *testing.T, role string, out provider.Output) {
+	t.Helper()
 	if role == "plan" {
 		var plan model.PlanSpecification
 		if err := json.Unmarshal([]byte(out.Text), &plan); err != nil || plan.Objective != "Add file" {
@@ -91,9 +100,6 @@ func assertPreparationFallback(t *testing.T, role string) {
 		}
 	} else if out.Text != "recovered" {
 		t.Fatalf("ideation fallback output lost: %q", out.Text)
-	}
-	if calls != 5 {
-		t.Fatalf("unexpected attempts: %d", calls)
 	}
 }
 

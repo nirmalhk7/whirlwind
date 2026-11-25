@@ -14,6 +14,12 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	brokerFixtureCallMethod       = "tools/call"
+	brokerFixtureIssue            = "PROJECT-7"
+	brokerFixtureIssueIntegration = "mcp://issues"
+)
+
 type fixtureMCPUpstream struct {
 	calls atomic.Int64
 }
@@ -34,7 +40,7 @@ func (upstream *fixtureMCPUpstream) CallTool(_ context.Context, name string, arg
 
 func TestSelectedIntegrationMCPBrokerFiltersToolsAndEnforcesScope(t *testing.T) {
 	upstream := &fixtureMCPUpstream{}
-	broker, err := startIntegrationMCPBroker(context.Background(), []mcpBrokerSource{{Scope: model.IntegrationSource{Provider: "fixture", Ref: "mcp://issues", Scopes: []string{"PROJECT-7"}}, Client: upstream}})
+	broker, err := startIntegrationMCPBroker(context.Background(), []mcpBrokerSource{{Scope: model.IntegrationSource{Provider: "fixture", Ref: brokerFixtureIssueIntegration, Scopes: []string{brokerFixtureIssue}}, Client: upstream}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,22 +61,22 @@ func TestSelectedIntegrationMCPBrokerFiltersToolsAndEnforcesScope(t *testing.T) 
 		t.Fatalf("broker exposed write or unscoped MCP tools: %s", list)
 	}
 	name := listed.Result.Tools[0].Name
-	if strings.Contains(string(list), "PROJECT-7") || strings.Contains(string(list), "fixture-secret") {
+	if strings.Contains(string(list), brokerFixtureIssue) || strings.Contains(string(list), "fixture-secret") {
 		t.Fatalf("broker leaked scope credentials or secrets in catalog: %s", list)
 	}
-	denied := integrationBrokerCall(t, client, broker, "tools/call", map[string]any{"name": "write_project", "arguments": map[string]any{"projectKey": "PROJECT-7"}})
+	denied := integrationBrokerCall(t, client, broker, brokerFixtureCallMethod, map[string]any{"name": "write_project", "arguments": map[string]any{"projectKey": brokerFixtureIssue}})
 	if !strings.Contains(string(denied), "error") || upstream.calls.Load() != 0 {
 		t.Fatalf("write tool reached upstream: response=%s calls=%d", denied, upstream.calls.Load())
 	}
-	outOfScope := integrationBrokerCall(t, client, broker, "tools/call", map[string]any{"name": name, "arguments": map[string]any{"projectKey": "OTHER-8"}})
+	outOfScope := integrationBrokerCall(t, client, broker, brokerFixtureCallMethod, map[string]any{"name": name, "arguments": map[string]any{"projectKey": "OTHER-8"}})
 	if !strings.Contains(string(outOfScope), "outside the selected integration scope") || upstream.calls.Load() != 0 {
 		t.Fatalf("out-of-scope read reached upstream: response=%s calls=%d", outOfScope, upstream.calls.Load())
 	}
-	additionalScope := integrationBrokerCall(t, client, broker, "tools/call", map[string]any{"name": name, "arguments": map[string]any{"projectKey": "PROJECT-7", "repo": "OTHER/REPO"}})
+	additionalScope := integrationBrokerCall(t, client, broker, brokerFixtureCallMethod, map[string]any{"name": name, "arguments": map[string]any{"projectKey": brokerFixtureIssue, "repo": "OTHER/REPO"}})
 	if !strings.Contains(string(additionalScope), "unselected resource scope") || upstream.calls.Load() != 0 {
 		t.Fatalf("request with an unselected resource scope reached upstream: response=%s calls=%d", additionalScope, upstream.calls.Load())
 	}
-	valid := integrationBrokerCall(t, client, broker, "tools/call", map[string]any{"name": name, "arguments": map[string]any{"projectKey": "PROJECT-7"}})
+	valid := integrationBrokerCall(t, client, broker, brokerFixtureCallMethod, map[string]any{"name": name, "arguments": map[string]any{"projectKey": brokerFixtureIssue}})
 	if !strings.Contains(string(valid), "read read_project PROJECT-7") || upstream.calls.Load() != 1 {
 		t.Fatalf("selected read was not forwarded: response=%s calls=%d", valid, upstream.calls.Load())
 	}
@@ -95,10 +101,10 @@ func TestSelectedIntegrationMCPBrokerRequiresCapabilityAndSelection(t *testing.T
 	if _, err := buildIntegrationMCPBroker(context.Background(), nil); err == nil {
 		t.Fatal("broker accepted an empty selected-source set")
 	}
-	if _, err := buildIntegrationMCPBroker(context.Background(), []mcpBrokerSource{{Scope: model.IntegrationSource{Provider: "fixture", Ref: "mcp://issues"}, Client: upstream}}); err == nil || !strings.Contains(err.Error(), "explicit read scope") {
+	if _, err := buildIntegrationMCPBroker(context.Background(), []mcpBrokerSource{{Scope: model.IntegrationSource{Provider: "fixture", Ref: brokerFixtureIssueIntegration}, Client: upstream}}); err == nil || !strings.Contains(err.Error(), "explicit read scope") {
 		t.Fatalf("broker accepted a selected connection without scope: %v", err)
 	}
-	broker, err := startIntegrationMCPBroker(context.Background(), []mcpBrokerSource{{Scope: model.IntegrationSource{Provider: "fixture", Ref: "mcp://issues", Scopes: []string{"PROJECT-7"}}, Client: upstream}})
+	broker, err := startIntegrationMCPBroker(context.Background(), []mcpBrokerSource{{Scope: model.IntegrationSource{Provider: "fixture", Ref: brokerFixtureIssueIntegration, Scopes: []string{brokerFixtureIssue}}, Client: upstream}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +148,7 @@ func integrationBrokerCall(t *testing.T, client *http.Client, broker *integratio
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { requireWorkflowSuccess(t, response.Body.Close()) }()
 	if response.StatusCode != http.StatusOK {
 		content, _ := io.ReadAll(response.Body)
 		t.Fatalf("broker response status %d: %s", response.StatusCode, content)

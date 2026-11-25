@@ -17,7 +17,7 @@ func Validate(p model.Policy) error {
 	if len(p.Checks) == 0 || len(p.AllowedPaths) == 0 || len(p.RiskRules) == 0 {
 		return errors.New("policy requires checks, allowed_paths and risk_rules")
 	}
-	if err := validateChecks(p.Checks); err != nil {
+	if err := model.ValidateChecks(p.Checks); err != nil {
 		return err
 	}
 	if err := validateRiskRules(p.RiskRules); err != nil {
@@ -76,23 +76,6 @@ func AllowedPath(p model.Policy, path string) bool {
 		}
 	}
 	return false
-}
-
-func validateChecks(checks []model.Check) error {
-	names := map[string]bool{}
-	for _, c := range checks {
-		if !slices.Contains([]string{"", "verify", "autofix"}, c.Mode) {
-			return errors.New("verification command mode must be verify or autofix")
-		}
-		if c.FreshnessSeconds < 0 || (c.Reusable && c.FreshnessSeconds == 0) {
-			return errors.New("reusable checks require positive freshness_seconds")
-		}
-		if c.Name == "" || len(c.Command) == 0 || names[c.Name] {
-			return errors.New("checks need unique names and command arrays")
-		}
-		names[c.Name] = true
-	}
-	return nil
 }
 
 func validateRiskRules(rules []model.RiskRule) error {

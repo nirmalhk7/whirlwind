@@ -1,0 +1,721 @@
+{
+  "report_type": "pre_integration_baseline",
+  "release_status": "not_accepted",
+  "release_candidate": null,
+  "baseline_revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
+  "baseline_tree": "a3b05fafd6bfc5447e647621335545f4cca99c41",
+  "scope": "Exact main baseline and separate Git pairwise compatibility checks. No integrated candidate was built or tested.",
+  "environment": {
+    "go": "go version go1.26.10 linux/amd64",
+    "node": "v24.22.3",
+    "git": "git version 2.56.1",
+    "python": "Python 3.12.14",
+    "platform": "Linux x86_64",
+    "nono": "not installed",
+    "qlty": "not installed",
+    "supervisor_ipc": "private Unix socket denied by this host"
+  },
+  "integration": {
+    "command_per_pair": "git merge-tree --write-tree --messages <left-head> <right-head>",
+    "branch_updates": false,
+    "pr_heads": [
+      {
+        "number": 34,
+        "head": "a4ae71ed7a3c70eea16165d54233ebd511b20d47",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/34"
+      },
+      {
+        "number": 35,
+        "head": "bc35fff2bd1e6522ab4eabef2ad81ec271a0f216",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/35"
+      },
+      {
+        "number": 36,
+        "head": "593371806bbcc0397f1d02649ebc7491679a287d",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/36"
+      },
+      {
+        "number": 37,
+        "head": "4e963ac2059fddf28aa5cdc14ab3487f82d452af",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/37"
+      },
+      {
+        "number": 38,
+        "head": "c9b24e62d69ea115cc7592ae98ce7f82a21d2500",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/38"
+      },
+      {
+        "number": 39,
+        "head": "2b6aa61e8e6c744665a64dd99124b08497830bfb",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/39"
+      },
+      {
+        "number": 40,
+        "head": "b2cdba9914ccfe785b732a781ecd83bb63bbe0ea",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/40"
+      },
+      {
+        "number": 41,
+        "head": "694e2276824054011c52693b1854fea4e71d4666",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/41"
+      },
+      {
+        "number": 42,
+        "head": "1361da816ee9b0ceb11676dd8fc4f662fd48f9be",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/42"
+      },
+      {
+        "number": 43,
+        "head": "4fa4b24ffc87107ca738444b1629ccee889a9bfc",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/43"
+      },
+      {
+        "number": 44,
+        "head": "1909fd9aee617424762be99158d622fa50c6aba4",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/44"
+      },
+      {
+        "number": 45,
+        "head": "cb5d47bd4a890741e5b0364e82d34763b96f7e41",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/45"
+      },
+      {
+        "number": 46,
+        "head": "5785129f585c43aca672aed55c5d45363c4b5ad1",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/46"
+      },
+      {
+        "number": 47,
+        "head": "df54361bbb4f28e73f2edfb161b902d71bbf4630",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/47"
+      },
+      {
+        "number": 48,
+        "head": "2dee2f2c4364ecfce159ccaf887ae031e15349e9",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/48"
+      },
+      {
+        "number": 49,
+        "head": "ca306767cc05d26b8ce7fdae388641c0f9a8a7c0",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/49"
+      },
+      {
+        "number": 50,
+        "head": "f50512f51668913aaa92f216c66fb527a1edc737",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/50"
+      },
+      {
+        "number": 51,
+        "head": "245f8bba27fd6b2d6305d6e1c583603760e91633",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/51"
+      },
+      {
+        "number": 52,
+        "head": "6d23911b180162e4ecf4459850138417ef45097b",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/52"
+      },
+      {
+        "number": 53,
+        "head": "a9e14a40bd7ec67d38a908b298efe3cb1a35ee3d",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/53"
+      },
+      {
+        "number": 54,
+        "head": "06d5d6aafe219bf66369c24e64944ecf7e7265bd",
+        "url": "https://github.com/nirmalhk7/whirlwind/pull/54"
+      }
+    ],
+    "pairs_checked": 210,
+    "pairwise_clean": 204,
+    "conflicts": [
+      {
+        "left": 35,
+        "right": 49,
+        "paths": [
+          "scripts/dashboard_pty_support.py"
+        ]
+      },
+      {
+        "left": 36,
+        "right": 40,
+        "paths": [
+          "internal/dashboard/runs.go"
+        ]
+      },
+      {
+        "left": 38,
+        "right": 49,
+        "paths": [
+          "internal/dashboard/dashboard_input.go"
+        ]
+      },
+      {
+        "left": 39,
+        "right": 43,
+        "paths": [
+          "README.md"
+        ]
+      },
+      {
+        "left": 40,
+        "right": 42,
+        "paths": [
+          "README.md"
+        ]
+      },
+      {
+        "left": 44,
+        "right": 48,
+        "paths": [
+          "README.md"
+        ]
+      }
+    ],
+    "limit": "Pairwise clean is not combined merge, compile, or behavior evidence."
+  },
+  "checks": {
+    "go_race": {
+      "command": "go test -race -json -count=1 -timeout=25m ./...",
+      "status": "failed",
+      "packages_passed": 13,
+      "packages_failed": 8,
+      "packages_skipped": 3,
+      "top_level_tests": {
+        "pass": 1043,
+        "fail": 99,
+        "skip": 49
+      },
+      "race_detector_reports": 0,
+      "packages": [
+        {
+          "package": "whirlwind/cmd/whirlwind",
+          "status": "fail",
+          "top_level_tests": {
+            "pass": 15,
+            "fail": 4,
+            "skip": 0
+          },
+          "failing_test_names": [
+            "TestGoOnboardingRunsRegisteredProvider",
+            "TestGoOnboardingRunsRegisteredProvider/acp",
+            "TestGoOnboardingRunsRegisteredProvider/codex",
+            "TestManualIdeationWaitsForActiveGeneration",
+            "TestProjectSetupCreatesCommittedExecutionPolicy",
+            "TestProjectSetupRetryTraversesSupervisorIPCAndCommandAdapter"
+          ]
+        },
+        {
+          "package": "whirlwind/cmd/whirlwind-dashboard",
+          "status": "fail",
+          "top_level_tests": {
+            "pass": 3,
+            "fail": 9,
+            "skip": 0
+          },
+          "failing_test_names": [
+            "TestDashboardDoesNotHideSettingsInspectionFailures",
+            "TestDashboardEventPaginationRetainsLaterEvents",
+            "TestDashboardLoadsLargeLegitimateRecordsOverBoundedSocketPages",
+            "TestDashboardLoadsRunnerStopStateOnlineAndOffline",
+            "TestDashboardOnlineInspectionHonorsCancellation",
+            "TestDashboardPaginationErrorsAndStalledCursorsAreVisible",
+            "TestDashboardPaginationErrorsAndStalledCursorsAreVisible/page_error",
+            "TestDashboardPaginationErrorsAndStalledCursorsAreVisible/stalled_cursor",
+            "TestDashboardReadsSavedSettingsWithLegacySupervisor",
+            "TestDashboardReadsSavedSettingsWithLegacySupervisor/running",
+            "TestDashboardReadsSavedSettingsWithLegacySupervisor/stopped",
+            "TestDashboardRestoresHistoryAndCurrentDecisionsOnlineAndOffline",
+            "TestOnlineDashboardLoadsConfiguredAgentsAndConnectionResults"
+          ]
+        },
+        {
+          "package": "whirlwind/cmd/whirlwind-verify",
+          "status": "skip",
+          "top_level_tests": {
+            "pass": 0,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/context",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 10,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/control",
+          "status": "fail",
+          "top_level_tests": {
+            "pass": 17,
+            "fail": 4,
+            "skip": 0
+          },
+          "failing_test_names": [
+            "TestLocalSocketAllowsVersionedDirectionReconsideration",
+            "TestLocalSocketIsPrivateAndCorrelatesNamedCommands",
+            "TestLocalSocketRejectsUnknownOperationsBeforeDispatch",
+            "TestSupervisorErrorRetainsRequestCorrelation"
+          ]
+        },
+        {
+          "package": "whirlwind/internal/dashboard",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 119,
+            "fail": 0,
+            "skip": 1
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/evaluation",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 3,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/execution",
+          "status": "fail",
+          "top_level_tests": {
+            "pass": 31,
+            "fail": 8,
+            "skip": 3
+          },
+          "failing_test_names": [
+            "TestCommandFiltersAmbientEnvironment",
+            "TestDefaultNonoCommandRunsWithoutOpenShell",
+            "TestMissingOpenShellNeverRunsTarget",
+            "TestNonoCursorLoadsOnlySelectedReadOnlyRuntime",
+            "TestNonoLinkedWorktreeReadsSharedMetadataWithoutWriteAuthority",
+            "TestNonoProviderCanLoadInstalledNodeDependency",
+            "TestOpenShellProxyTokenIsRegisteredForTraceRedaction",
+            "TestOpenShellReceivesConfiguredCommandForLinuxImage"
+          ]
+        },
+        {
+          "package": "whirlwind/internal/github",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 9,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/httpapi",
+          "status": "fail",
+          "top_level_tests": {
+            "pass": 93,
+            "fail": 2,
+            "skip": 0
+          },
+          "failing_test_names": [
+            "TestConfirmChangedProjectPolicyQueuesOneFreshQualification",
+            "TestProviderStatusCachesChecksAndInvalidatesOnConfigurationAndStop"
+          ]
+        },
+        {
+          "package": "whirlwind/internal/model",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/policy",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 6,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/process",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 11,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/projectregistry",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 2,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/provider",
+          "status": "fail",
+          "top_level_tests": {
+            "pass": 89,
+            "fail": 35,
+            "skip": 4
+          },
+          "failing_test_names": [
+            "TestACPCheckMCPAdvertisesAndRunsCommittedID",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/claude",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/claude/catalog",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/claude/connection",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/codex",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/codex/catalog",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/codex/connection",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/cursor",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/cursor/catalog",
+            "TestACPMetadataEarlyExitHasSelectedProfileGuidance/cursor/connection",
+            "TestACPMetadataGuidanceCannotChangeFailureClassification",
+            "TestACPMetadataGuidanceCannotChangeFailureClassification/unauthorized",
+            "TestACPMetadataGuidanceCannotChangeFailureClassification/unsupported",
+            "TestACPModelConfirmationBeforePrompt",
+            "TestACPModelConfirmationBeforePrompt/config/resume=false/already-current",
+            "TestACPModelConfirmationBeforePrompt/config/resume=false/confirmed",
+            "TestACPModelConfirmationBeforePrompt/config/resume=false/ignored",
+            "TestACPModelConfirmationBeforePrompt/config/resume=false/missing",
+            "TestACPModelConfirmationBeforePrompt/config/resume=false/missing-current",
+            "TestACPModelConfirmationBeforePrompt/config/resume=false/missing-option",
+            "TestACPModelConfirmationBeforePrompt/config/resume=false/wrong",
+            "TestACPModelConfirmationBeforePrompt/config/resume=true/already-current",
+            "TestACPModelConfirmationBeforePrompt/config/resume=true/confirmed",
+            "TestACPModelConfirmationBeforePrompt/config/resume=true/ignored",
+            "TestACPModelConfirmationBeforePrompt/config/resume=true/missing",
+            "TestACPModelConfirmationBeforePrompt/config/resume=true/missing-current",
+            "TestACPModelConfirmationBeforePrompt/config/resume=true/missing-option",
+            "TestACPModelConfirmationBeforePrompt/config/resume=true/wrong",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=false/already-current",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=false/confirmed",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=false/ignored",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=false/missing",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=false/missing-current",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=false/missing-option",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=false/wrong",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=true/already-current",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=true/confirmed",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=true/ignored",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=true/missing",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=true/missing-current",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=true/missing-option",
+            "TestACPModelConfirmationBeforePrompt/legacy/resume=true/wrong",
+            "TestACPProtocolStreamsBeforeCompletion",
+            "TestACPResumeCapabilityAndEmptyLoadResult",
+            "TestACPResumeCapabilityAndEmptyLoadResult/load-empty-result",
+            "TestACPResumeCapabilityAndEmptyLoadResult/no-load",
+            "TestACPResumeExcludesReplayedHistory",
+            "TestACPStopReasonIsObservable",
+            "TestACPTerminalCannotWriteOutsideSandbox",
+            "TestACPTerminalEmitsUnpolledOutputAndExit",
+            "TestACPTerminalLifecycleAndOutputLimit",
+            "TestACPThinkingAppliesAfterModelForNewAndResumedSessions",
+            "TestACPThinkingRetainsConfirmedModel",
+            "TestACPThinkingRetainsConfirmedModel/resume=false/confirmed",
+            "TestACPThinkingRetainsConfirmedModel/resume=false/model-drift",
+            "TestACPThinkingRetainsConfirmedModel/resume=false/thinking-ignored",
+            "TestACPThinkingRetainsConfirmedModel/resume=false/thinking-missing",
+            "TestACPThinkingRetainsConfirmedModel/resume=true/confirmed",
+            "TestACPThinkingRetainsConfirmedModel/resume=true/model-drift",
+            "TestACPThinkingRetainsConfirmedModel/resume=true/thinking-ignored",
+            "TestACPThinkingRetainsConfirmedModel/resume=true/thinking-missing",
+            "TestCheckConnectionUsesPinnedStandaloneRuntime",
+            "TestCodexQuotaReadDoesNotStartInference",
+            "TestCodingTerminalSubdirectoryKeepsWorktreeWriteScope",
+            "TestCursorIntegrationProbeFailureRedactsBothOutputStreams",
+            "TestCursorIntegrationsProbeRunsNativeCLIInsideSandbox",
+            "TestCursorProbeUsesDistinctSandboxAndPreservesMainRuntime",
+            "TestExplicitModelSelection",
+            "TestExplicitModelSelection/acp/model-config",
+            "TestExplicitModelSelection/acp/model-legacy",
+            "TestExplicitModelSelection/acp/model-unsupported",
+            "TestModelCatalogUsesProviderMetadataWithoutPrompt",
+            "TestModelCatalogUsesProviderMetadataWithoutPrompt/acp/catalog-config",
+            "TestModelCatalogUsesProviderMetadataWithoutPrompt/acp/catalog-legacy",
+            "TestModelCatalogUsesProviderMetadataWithoutPrompt/claude/catalog-legacy",
+            "TestModelCatalogUsesProviderMetadataWithoutPrompt/codex/catalog-config",
+            "TestNativeThinkingUsesDiscoveryACPCommand",
+            "TestNativeThinkingUsesDiscoveryACPCommand/claude",
+            "TestNativeThinkingUsesDiscoveryACPCommand/codex",
+            "TestNonoAgentHookDefersFinalization",
+            "TestNonoAgentHookDefersFinalization/passing_after_hook_publishes_once",
+            "TestNonoAgentHookDefersFinalization/persistent_failure_never_publishes",
+            "TestNonoAgentLifecycleHooks",
+            "TestNonoAgentLifecycleHooks/after_repairs_in_same_session",
+            "TestNonoAgentLifecycleHooks/before_blocks_provider",
+            "TestNonoAgentLifecycleHooks/persistent_after_failure",
+            "TestNonoRPCDrainIgnoresUnrelatedActiveProcess",
+            "TestProtocolCallbacks",
+            "TestProtocolCallbacks/acp/allow=false",
+            "TestProtocolCallbacks/acp/allow=true",
+            "TestProtocolCallbacks/codex/allow=false",
+            "TestProtocolCallbacks/codex/allow=true",
+            "TestProtocolCancellationDuringPrompt",
+            "TestProtocolCancellationDuringPrompt/acp",
+            "TestProtocolCancellationDuringPrompt/codex",
+            "TestProtocolFailures",
+            "TestProtocolFailures/acp/empty-session",
+            "TestProtocolFailures/acp/exit",
+            "TestProtocolFailures/acp/incompatible-version",
+            "TestProtocolFailures/acp/initialize-error",
+            "TestProtocolFailures/acp/malformed",
+            "TestProtocolFailures/acp/refusal",
+            "TestProtocolFailures/codex/empty-session",
+            "TestProtocolFailures/codex/exit",
+            "TestProtocolFailures/codex/failed",
+            "TestProtocolFailures/codex/initialize-error",
+            "TestProtocolFailures/codex/interrupted",
+            "TestProtocolFailures/codex/malformed",
+            "TestProtocolMessageContracts",
+            "TestProtocolMessageContracts/acp/resume=false/readOnly=false",
+            "TestProtocolMessageContracts/acp/resume=false/readOnly=true",
+            "TestProtocolMessageContracts/acp/resume=true/readOnly=false",
+            "TestProtocolMessageContracts/acp/resume=true/readOnly=true",
+            "TestProviderConnectivityNeverSendsInference",
+            "TestProviderConnectivityNeverSendsInference/acp/ok",
+            "TestProviderConnectivityNeverSendsInference/claude/ok",
+            "TestProviderConnectivityNeverSendsInference/codex/ok",
+            "TestRPCPipeSetupFailureReleasesOpenShellRedactionState",
+            "TestReadinessAppliesExactACPConfigurationWithoutInference",
+            "TestStandaloneCodexUsesResolvedNonoProfile",
+            "TestThinkingCatalogUsesModelResponseWithoutInference",
+            "TestUnsupportedACPThinkingFailsBeforePrompt"
+          ]
+        },
+        {
+          "package": "whirlwind/internal/redaction",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 1,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/runlog",
+          "status": "skip",
+          "top_level_tests": {
+            "pass": 0,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/settingsfile",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 21,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/store",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 136,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/testutil/openshell",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 12,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/testutil/runlogfixture",
+          "status": "skip",
+          "top_level_tests": {
+            "pass": 0,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        },
+        {
+          "package": "whirlwind/internal/verification",
+          "status": "fail",
+          "top_level_tests": {
+            "pass": 52,
+            "fail": 8,
+            "skip": 13
+          },
+          "failing_test_names": [
+            "TestChecksExecuteAndFailureBlocksAcceptance",
+            "TestCompareBaselineAcceptsUnchangedQltySmellsExitZeroAdvisory",
+            "TestInterruptedSuiteRetainsCompletedChecksWithoutPassing",
+            "TestPreparedDefaultConfigurationRunsActualGitleaks",
+            "TestProjectSetupReadsActualQltyCatalogWithoutSourceWrites",
+            "TestQltyBoundsProgressDiagnostics",
+            "TestQltyKeepsSARIFStdoutSeparateFromProgressStderr",
+            "TestQltyKeepsSARIFStdoutSeparateFromProgressStderr/invalid_stdout_remains_invalid",
+            "TestQltyKeepsSARIFStdoutSeparateFromProgressStderr/tool_error_exit_preserved",
+            "TestQltyKeepsSARIFStdoutSeparateFromProgressStderr/valid_SARIF_with_progress",
+            "TestQltySmellsCannotPassWithFindingsOrInvalidEvidence",
+            "TestQltySmellsCannotPassWithFindingsOrInvalidEvidence/clean"
+          ]
+        },
+        {
+          "package": "whirlwind/internal/workflow",
+          "status": "fail",
+          "top_level_tests": {
+            "pass": 410,
+            "fail": 29,
+            "skip": 28
+          },
+          "failing_test_names": [
+            "TestAgentReceivesOnlyItsHooksFromGlobalSettings",
+            "TestAgenticWorkflowCompletesWithoutGitHubCLI",
+            "TestAgenticWorkflowPreservesExistingTestDebt",
+            "TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant",
+            "TestChangedProviderProbesNewConfigurationImmediately",
+            "TestDiscoveryRotatesTowardLessExploredRepositoryAreas",
+            "TestFailedChecksDoNotStartReview",
+            "TestIdeationDoesNotWrapWholeRunInFiveMinuteDeadline",
+            "TestIntegrationContextRejectsPartialFailedReads",
+            "TestIntegrationContextUsesOnlyConfiguredConnectionsAndScopes",
+            "TestIntegrationContextUsesScopedBrokerWithoutRawNativeIntegrationMounts",
+            "TestIntegrationDiscoveryFingerprintIgnoresCaptureMetadata",
+            "TestLoadAcceptedReviewReportAcceptsUnchangedQltySmellsAdvisory",
+            "TestOwnedCheckPersistsIdentityAndReturnsAfterVerifiedCleanup",
+            "TestOwnedNonoCheckRetainsVerifiedRuntimeProof",
+            "TestPlannerReceivesSameSelectedReadScopesThroughBroker",
+            "TestProductiveReviewHasNoPassCap",
+            "TestProjectSetupPersistsLiveAndCompletedCheckProgress",
+            "TestProjectSetupPreparationDurablyQueuesQualification",
+            "TestProjectSetupRunsHumanCommandsBeforeReadiness",
+            "TestProjectSetupRunsHumanCommandsBeforeReadiness/required_failure",
+            "TestProjectSetupRunsHumanCommandsBeforeReadiness/success",
+            "TestReusableCheckUsesEvidenceButDirtySourceForcesExecution",
+            "TestReviewerBrokerRunsCommittedSnapshotAndCapturesEvidence",
+            "TestScheduledSetupFailureBlocksAcrossDaysAndRestart",
+            "TestSelectedIntegrationMCPBrokerFiltersToolsAndEnforcesScope",
+            "TestSelectedIntegrationMCPBrokerRequiresCapabilityAndSelection",
+            "TestSetupProbeUsesExactACPAndRecovers",
+            "TestStoppedFlagNeverSpawnsAgentProcess",
+            "TestTransportDisconnectRecoveryAfterPersistedBackoffElapsed",
+            "TestZeroCandidatesAreIncompleteAndReportedWithoutExtraInference"
+          ]
+        },
+        {
+          "package": "whirlwind/prompts/agents",
+          "status": "pass",
+          "top_level_tests": {
+            "pass": 2,
+            "fail": 0,
+            "skip": 0
+          },
+          "failing_test_names": []
+        }
+      ]
+    },
+    "go_vet": {
+      "command": "go vet ./...",
+      "status": "passed"
+    },
+    "go_build": {
+      "command": "go build ./...",
+      "status": "passed"
+    },
+    "macos_cross_build": {
+      "command": "GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build ./cmd/whirlwind ./cmd/whirlwind-dashboard ./cmd/whirlwind-verify",
+      "status": "passed",
+      "limit": "Cross-compilation, not native execution."
+    },
+    "node_launcher": {
+      "command": "node --test scripts/dashboard-cli.test.mjs scripts/logs-cli.test.mjs scripts/parity-state.test.mjs scripts/whirlwind-cli.test.mjs",
+      "status": "failed",
+      "counts": {
+        "tests": 21,
+        "pass": 11,
+        "fail": 10,
+        "skip": 0
+      },
+      "failing_test_names": [
+        "a stale PID cannot signal an unrelated process",
+        "an unrelated active Unix socket cannot impersonate the supervisor",
+        "cold concurrent starts create one supervisor",
+        "executable symlink finds checkout from an unrelated working directory",
+        "failed supervisor build leaves no state or temporary binary and preserves build diagnostics",
+        "legacy browser ownership requires explicit stop before supervisor startup",
+        "start, status, restart and stop manage the durable local supervisor",
+        "stop recovers an owned supervisor process after its control socket owner is killed",
+        "stop waits for the owned process to finish after its control socket closes",
+        "supervisor starts and stops from a checkout without web or npm files"
+      ],
+      "observed_limit": "Private Unix socket permission failures blocked the supervisor lifecycle and socket fixtures."
+    },
+    "node_linux_refusal": {
+      "command": "node --test --test-name-pattern='Linux inspection' bridges/nono/launch.test.mjs",
+      "status": "passed",
+      "counts": {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "skip": 0
+      },
+      "limit": "Only the Linux execution refusal, not native boundary acceptance."
+    },
+    "launcher_pty": {
+      "command": "python3 scripts/dashboard-pty-acceptance.py",
+      "status": "blocked",
+      "reason": "The shipped start command failed connecting to its private Unix socket with EPERM before PTY acceptance."
+    },
+    "native_scanner": {
+      "status": "not_run",
+      "issues": [
+        8,
+        9,
+        29,
+        30
+      ],
+      "reason": "No supported native host with pinned Qlty/nono."
+    },
+    "configured_acp": {
+      "status": "not_run",
+      "issues": [
+        6,
+        25
+      ],
+      "reason": "No supported native host with authorized configured test accounts."
+    },
+    "native_acceptance": {
+      "status": "not_run",
+      "issues": [
+        7,
+        10,
+        12,
+        32,
+        33
+      ],
+      "reason": "No supported native host and no frozen integrated revision."
+    }
+  }
+}

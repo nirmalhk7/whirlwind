@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
 	"whirlwind/internal/model"
 )
 
@@ -34,10 +35,10 @@ func TestPlannerRequiresWhatWhyBenefitAndWhere(t *testing.T) {
 			t.Errorf("planner omitted %s", field)
 		}
 	}
-	body := planIssueBody(plan)
+	body := RenderPlanDocument(plan)
 	for _, heading := range []string{"## What", "## Why", "## Benefit", "## Where"} {
 		if !strings.Contains(body, heading) {
-			t.Errorf("published issue omitted %s", heading)
+			t.Errorf("local plan omitted %s", heading)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -77,46 +78,26 @@ func TestLegacyPendingDecisionSurvivesSupervisorRecovery(t *testing.T) {
 	ctx := context.Background()
 	questionID, questionVersion := seedHumanDecision(t, e, task, "review", "review", "question")
 	questionRecord, err := e.Store.Get(ctx, "questions", questionID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	question, err := store.Decode[model.QuestionSet](questionRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	attemptRecord, err := e.Store.Get(ctx, "sessions", question.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	attempt, err := store.Decode[model.Attempt](attemptRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	const originalDeadline = "2026-11-06T20:00:00Z"
 	attempt.Status, attempt.DeadlineAt = "paused", originalDeadline
-	if err := e.Store.Put(ctx, "sessions", question.AttemptID, attempt, attemptRecord.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "sessions", question.AttemptID, attempt, attemptRecord.Version))
 	taskRecord, err := e.Store.Get(ctx, "execution_plans", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	legacyTask, err := store.Decode[model.ExecutionPlan](taskRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	legacyTask.Wait.AttemptID = ""
 	legacyTask.Recoveries = 2
-	if err := e.Store.Put(ctx, "execution_plans", task.ID, legacyTask, taskRecord.Version); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.Store.RecoverInterrupted(ctx, e.owner); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, legacyTask, taskRecord.Version))
+	requireWorkflowSuccess(t, e.Store.RecoverInterrupted(ctx, e.owner))
 	recoveredAttemptRecord, err := e.Store.Get(ctx, "sessions", question.AttemptID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	recoveredAttempt, err := store.Decode[model.Attempt](recoveredAttemptRecord)
 	if err != nil || recoveredAttempt.DeadlineAt != originalDeadline || recoveredAttempt.Status != "paused" {
 		t.Fatalf("legacy paused attempt changed during recovery: %+v %v", recoveredAttempt, err)
@@ -125,20 +106,14 @@ func TestLegacyPendingDecisionSurvivesSupervisorRecovery(t *testing.T) {
 		t.Fatalf("legacy pending decision did not resume after recovery: %v", err)
 	}
 	resumedRecord, err := e.Store.Get(ctx, "execution_plans", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	resumed, err := store.Decode[model.ExecutionPlan](resumedRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if resumed.Stage != "review" || resumed.Recoveries != 2 || resumed.Wait != nil {
 		t.Fatalf("legacy recovery changed stage or retry history: %+v", resumed)
 	}
 	savedQuestion, err := e.Store.Get(ctx, "questions", questionID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	set, err := store.Decode[model.QuestionSet](savedQuestion)
 	if err != nil || set.Status != "answered" || set.Answers["choice"] != "continue reviewed scope" {
 		t.Fatalf("legacy decision was not durably preserved: %+v %v", set, err)
@@ -185,77 +160,61 @@ func TestOlderPendingQuestionCannotResumeNewerPauseAndClarificationsKeepRetryBud
 	ctx := context.Background()
 	oldID, oldVersion := seedHumanDecision(t, e, task, "review", "review", "question")
 	project, err := e.Project(ctx, task.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	taskRecord, err := e.Store.Get(ctx, "execution_plans", task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	task, err = store.Decode[model.ExecutionPlan](taskRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	run := &agentRun{Engine: e, ctx: ctx, project: project, task: task, input: provider.Input{Role: "review", Purpose: "primary"}}
 	choice := model.AgentChoice{Provider: "fake", Model: "fixture"}
 	entryID := recoveryEntryID(recoveryEpisodeID(run), choice)
 	episode := model.RecoveryEpisode{EpisodeID: recoveryEpisodeID(run), EntryID: entryID, ProjectID: task.ProjectID, TaskID: task.ID, Role: "review", Purpose: "primary", Provider: choice.Provider, Model: choice.Model, PlanVersion: 1, Status: "paused", RestartCount: 2}
-	if err := e.Store.Put(ctx, "recovery_episodes", entryID, episode, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "recovery_episodes", entryID, episode, 0))
 	for cycle := 0; cycle < 5; cycle++ {
 		id := fmt.Sprintf("current-question-%d", cycle)
 		attemptID := fmt.Sprintf("current-attempt-%d", cycle)
 		pauseTaskForQuestion(t, e, task.ID, attemptID)
 		deadline := time.Now().Add(attemptWallClockLimit).UTC().Format(time.RFC3339Nano)
 		attempt := model.Attempt{AttemptID: attemptID, Task: task.ID, ProjectID: task.ProjectID, Role: "review", PlanVersion: 1, Finished: true, Status: "paused", RestartCount: 2, DeadlineAt: deadline}
-		if err := e.Store.Put(ctx, "sessions", attemptID, attempt, 0); err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, e.Store.Put(ctx, "sessions", attemptID, attempt, 0))
 		set := model.QuestionSet{ID: id, TaskID: task.ID, AttemptID: attemptID, Provider: "fake", Questions: []model.Question{{ID: "choice", Text: "Choose?"}}, Status: "pending", PlanVersion: 1}
-		if err := e.Store.Put(ctx, "questions", id, set, 0); err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, e.Store.Put(ctx, "questions", id, set, 0))
 		if cycle == 0 {
 			if err := e.AnswerQuestionSet(ctx, oldID, oldVersion, map[string]string{"choice": "stale"}, false); !errors.Is(err, store.ErrConflict) {
 				t.Fatalf("older pending question resumed newer pause: %v", err)
 			}
 		}
-		questionRecord, err := e.Store.Get(ctx, "questions", id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := e.AnswerQuestionSet(ctx, id, questionRecord.Version, map[string]string{"choice": "answer"}, false); err != nil {
-			t.Fatalf("clarification cycle %d failed: %v", cycle+1, err)
-		}
-		attemptRecord, err := e.Store.Get(ctx, "sessions", attemptID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		storedAttempt, err := store.Decode[model.Attempt](attemptRecord)
-		if err != nil || storedAttempt.DeadlineAt != deadline {
-			t.Fatalf("clarification changed attempt deadline: %+v %v", storedAttempt, err)
-		}
+		assertClarificationPreservesDeadline(t, e, id, attemptID, deadline, cycle+1)
 		count, _, err := run.persistedRestartState(choice)
 		if err != nil || count != 2 {
 			t.Fatalf("clarification consumed runtime retry budget: count=%d err=%v", count, err)
 		}
 	}
 	entryRecord, err := e.Store.Get(ctx, "recovery_episodes", entryID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	episode, err = store.Decode[model.RecoveryEpisode](entryRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	episode.Status, episode.FailureKind = "failed", string(provider.FailureTransient)
-	if err := e.Store.Put(ctx, "recovery_episodes", entryID, episode, entryRecord.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "recovery_episodes", entryID, episode, entryRecord.Version))
 	count, _, err := run.persistedRestartState(choice)
 	if err != nil || count != 3 {
 		t.Fatalf("runtime failure did not retain one configured restart after clarifications: count=%d err=%v", count, err)
+	}
+}
+
+func assertClarificationPreservesDeadline(t *testing.T, e *Engine, questionID, attemptID, deadline string, cycle int) {
+	t.Helper()
+	ctx := context.Background()
+	questionRecord, err := e.Store.Get(ctx, "questions", questionID)
+	requireWorkflowSuccess(t, err)
+	if err := e.AnswerQuestionSet(ctx, questionID, questionRecord.Version, map[string]string{"choice": "answer"}, false); err != nil {
+		t.Fatalf("clarification cycle %d failed: %v", cycle, err)
+	}
+	attemptRecord, err := e.Store.Get(ctx, "sessions", attemptID)
+	requireWorkflowSuccess(t, err)
+	storedAttempt, err := store.Decode[model.Attempt](attemptRecord)
+	if err != nil || storedAttempt.DeadlineAt != deadline {
+		t.Fatalf("clarification changed attempt deadline: %+v %v", storedAttempt, err)
 	}
 }
 

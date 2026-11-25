@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 	"whirlwind/internal/workflow"
@@ -41,6 +42,9 @@ func (s *Server) startIdeation(ctx context.Context, command LocalCommand) (any, 
 		return nil, err
 	}
 	if err := normalizeIdeationBrief(&input.IdeationBrief); err != nil {
+		return nil, err
+	}
+	if err := s.Engine.CheckIdeationPrerequisites(ctx, project); err != nil {
 		return nil, err
 	}
 	if err := s.saveIdeationBrief(ctx, project.ID, input.IdeationBrief); err != nil {

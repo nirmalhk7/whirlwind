@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -103,5 +104,31 @@ func assertOriginalIdeaUnchanged(t *testing.T, ctx context.Context, database *st
 	original, err := database.Get(ctx, "ideas", id)
 	if err != nil || string(original.Data) != string(data) {
 		t.Fatalf("linked publication rewrote original: %v", err)
+	}
+}
+
+func TestPlannerCancellationBeforeIntakeIsVersionedAndIdempotent(t *testing.T) {
+	s := setup(t)
+	ctx := t.Context()
+	requireAPISuccess(t, s.Store.Put(ctx, "projects", "p", model.Project{ID: "p", Name: "Project", Path: "/fixture/project"}, 0))
+	requireAPISuccess(t, s.Store.Put(ctx, "operations", "source", model.Operation{Kind: "ideation", Subject: "p", Stage: "complete"}, 0))
+	idea := model.Idea{ID: "idea", ProjectID: "p", RunID: "source", Direction: "expand", Title: "Export", What: "Add an export",
+		Why: "Auditing", Where: "billing", HowItHelps: "Review totals", DecisionStatus: "draft", NoveltyMethod: "legacy_llm"}
+	requireAPISuccess(t, s.Store.Put(ctx, "ideas", idea.ID, idea, 0))
+	approval := LocalCommand{Operation: "idea.approve", ResourceID: idea.ID, ProjectID: "p", ExpectedVersion: 1, IdempotencyKey: "approve-fixture"}
+	_, err := s.ExecuteLocal(ctx, approval)
+	requireAPISuccess(t, err)
+	cancel := LocalCommand{Operation: "planner.cancel", ResourceID: idea.ID, ProjectID: "p", ExpectedVersion: 2, IdempotencyKey: "cancel-fixture"}
+	first, err := s.ExecuteLocal(ctx, cancel)
+	requireAPISuccess(t, err)
+	if replay, err := s.ExecuteLocal(ctx, cancel); err != nil || string(replay) != string(first) {
+		t.Fatalf("cancellation receipt changed: %s %v", replay, err)
+	}
+	record, err := s.Store.Get(ctx, "ideas", idea.ID)
+	requireAPISuccess(t, err)
+	saved, err := store.Decode[model.Idea](record)
+	requireAPISuccess(t, err)
+	if record.Version != 3 || saved.DecisionStatus != "error" || saved.ErrorReason != model.PlannerCancellationReason || saved.PlanID != "" {
+		t.Fatalf("cancellation was not recorded once: version=%d idea=%+v", record.Version, saved)
 	}
 }

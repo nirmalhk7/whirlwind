@@ -17,10 +17,10 @@ func (c *Client) readFile(_ context.Context, _ Message, p clientParams) (any, er
 		return nil, err
 	}
 	lines := strings.Split(string(content), "\n")
-	start := min(max(p.Line-1, 0), len(lines))
+	start := min(max(p.Line, 1)-1, len(lines))
 	end := len(lines)
-	if p.Limit > 0 && start+p.Limit < end {
-		end = start + p.Limit
+	if p.Limit > 0 {
+		end = start + min(p.Limit, end-start)
 	}
 	return map[string]any{"content": strings.Join(lines[start:end], "\n")}, nil
 }
@@ -97,6 +97,15 @@ func (c *Client) writablePath(filePath string) (string, string, string, error) {
 	root, err := filepath.EvalSymlinks(c.input.CWD)
 	if err != nil {
 		return "", "", "", err
+	}
+	if c.input.Execution != nil {
+		info, _ := os.Stat(path)
+		for _, protected := range c.input.Execution.ProtectedFiles {
+			protectedInfo, _ := os.Stat(protected)
+			if path == protected || (info != nil && protectedInfo != nil && os.SameFile(info, protectedInfo)) {
+				return "", "", "", errors.New("ACP write to supervisor settings denied")
+			}
+		}
 	}
 	relative, err := filepath.Rel(root, path)
 	if err != nil || (!c.plannerOutputPath(path) && !policy.AllowedPath(c.input.Policy, relative)) {

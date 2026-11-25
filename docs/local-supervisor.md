@@ -2,6 +2,8 @@
 
 Whirlwind's human interface is a Go terminal application using `rivo/tview`. The supervisor owns SQLite state and runs independently from the terminal session. The dashboard connects through a private Unix-domain socket; it reads the existing database read-only when the supervisor is offline.
 
+See [seeded terminal acceptance](seeded-terminal-acceptance.md) to verify human decisions through the real terminal.
+
 ## Start
 
 ```sh
@@ -15,41 +17,36 @@ The supervisor socket lives under a per-user private directory in `/tmp`; the so
 
 Human mutations include an idempotency key and expected resource version. Plan review also binds to the hash of the exact plan content shown in the approval form. The dashboard never mutates SQLite directly. Closing, redrawing, or reopening the terminal does not reset the supervisor, attempt deadline, retry counters, approvals, or pending questions.
 
-## Native task queues
+From an approved or active idea, **Cancel planning** revokes that approval even if the Planner is still waiting for a slot. A later worker reply cannot write the cancelled plan into the plans directory. Use **Retry planning** to approve a fresh attempt. If Markdown already reached the plans directory, the supervisor resumes publication with the same file and attempt after interruption. Reopen the idea to inspect the completed plan.
 
-The default supervisor starts a second private Unix socket for its HTTP task
-queue API. It uses the same owned mode-`0700` directory and mode-`0600` socket
-as the human control channel. It is not mounted on a TCP or webhook listener.
-The pathname is the human control socket's pathname, replacing the
-`.sock` suffix with `-queues.sock`. The slot names are:
+## Project memory
 
-| Queue | Committed eligibility |
-| --- | --- |
-| `planner_tasks` | Selected work, including an approved idea. A generated plan still requires separate approval. |
-| `coding_tasks` | Approved plan, or correction from implementation review/required verification. |
-| `reviewer_tasks` | Coded or repaired candidate. Reviewer checklist preparation runs in this role, not in the coding role. |
-| `finalizer_tasks` | Accepted review above 80%, passed required checks, and exact-candidate human approval when critical. |
+Add `project_memory: true` to an external project policy, then use
+`whirlwind policy preview` and `whirlwind policy approve` to enable memory
+for that project. Memory is disabled by default. Use the registered project
+ID and one role from `ideate`, `plan`, `code`, or `review`.
 
-SQLite stages only the plan ID, version, role and delivery metadata in the
-same transaction as the associated business state. The supervisor uses HTTP
-push/pop to expose committed work and claim the eligible FIFO head. A live
-lease keeps that queue's head in place. Paused projects are ineligible until
-resumed. The supervisor rotates roles across admissions to avoid starvation
-when slots are scarce. Expired deliveries recover with a fresh receipt;
-completed transitions retire the old revision in the same transaction.
-Workers recheck exact approvals, evidence, and the existing execution fence.
-A failed worker can leave work retryable; this does not guarantee exactly-once
-provider calls after a crash. Finalization remains local.
+```sh
+./bin/whirlwind memory remember PROJECT code ATTEMPT 'Keep the generated fixture in a temporary directory.'
+./bin/whirlwind memory list PROJECT code
+./bin/whirlwind memory clear PROJECT code
+```
 
-`workers.ideation.enabled` controls scheduled ideation. The default remains the
-configured daily `time` in `timezone`. Set `workers.ideation.interval_minutes`
-to 1–10080 for an elapsed-minute schedule instead. Each slot has its own durable
-key, and a restart catches up only the latest slot.
+An operator can save one short note per completed attempt in the same
+project and role. Whirlwind records the source attempt, plan revision,
+operation, policy and checkout commit where available. SQLite keeps up to
+12 notes per role. Agent input can receive up to three relevant notes
+within a total 2 KiB advisory budget, using local word matching and recency.
+A task without matching notes receives no memory advisory. The configured
+role provider receives any notes included in its input. Choose notes suitable
+for that provider and keep credentials out of them.
+The saved context pack records source attempt IDs and reasons for including
+or omitting notes. This evidence contains no note text.
 
-See [role queue HTTP endpoints](../API.md#role-queue-http-endpoints) for
-optional same-user inspection and claiming. Do not leave a manual pop leased
-when the supervisor should continue processing it: release it, or let its
-lease expire.
+Recall requires the exact approved opt-in policy. A new approval starts
+fresh recall. Use `memory clear` to remove a role's saved notes even when
+memory is disabled. Previously generated prompt evidence follows the
+existing run-evidence retention.
 
 ## Existing state and legacy service cutover
 
@@ -57,4 +54,52 @@ The supervisor initializes the current schema directly in `~/.local/share/whirlw
 
 If an older browser/HTTP instance owns the same state directory, `start` fails with an actionable message. Stop that owned instance explicitly with `./bin/whirlwind stop`, then run `start`. Process ownership uses the saved launcher token; unrelated listeners and processes are left alone.
 
-Missing nono does not prevent opening the TUI or inspecting SQLite. Agent execution remains blocked until nono 0.81.0 and the configured host ACP runtime are available. See [nono setup](nono-setup.md).
+The TUI can inspect saved SQLite state without nono. Native agents and nono-backed checks require macOS and nono 0.81.0. Agents also require the configured host ACP adapter. Linux supports [opt-in offline verification](support.md#verification-on-linux) alongside inspection. See [nono setup](nono-setup.md) for the native path.
+
+## Private role queue commands
+
+The existing supervisor Unix socket supports `queue.push` and `queue.pop` for
+`planner_tasks`, `coding_tasks`, `reviewer_tasks`, and `finalizer_tasks`.
+The idea approval and execution plan rows are the durable queue entries.
+Pass `project_id`, the current `expected_version` of the entry, an
+`idempotency_key`, and `payload: {"queue":"coding_tasks"}`. Use `plan_id`
+for a plan. For `queue.push` on an approved idea awaiting Planner intake, use
+its idea ID in `resource_id`.
+
+Push acknowledges an existing eligible revision and wakes the supervisor.
+Repeated pushes for the same revision coalesce. Pop requests admission of
+the specified plan revision at the head of that project's role queue. It
+returns `scheduled` when admitted or `waiting` when runners are stopped,
+capacity is occupied, or earlier work takes priority. The supervisor owns
+the worker lease, completion and retries. A stale revision, another
+project's entry, or a plan waiting for approval is rejected.
+
+Finalizer admission requires the current plan approval, accepted review and
+verification for the exact candidate. Requests cannot set gates or supply
+work payloads. Queue contents are recovered from SQLite at startup.
+
+### Dedicated queue socket
+
+The supervisor also starts an HTTP admission socket alongside the existing
+command socket. Its filename replaces the command socket's `.sock` suffix
+with `-queues.sock`. The socket is mode `0600` in the same owned mode `0700`
+directory. It has no TCP listener.
+
+Send a single JSON object to `POST /api/v1/queues/{queue}/push` or
+`POST /api/v1/queues/{queue}/pop` with the host `localhost`. An empty push
+wakes dispatch, and an empty pop requests the oldest eligible revision for
+that role. Use `plan_id` and `version` to request an exact revision. The
+admission response reports `queued`, `scheduled`, or `waiting`.
+
+The plan transaction is the durable queue record. Dispatch rotates roles and
+projects and orders revisions by their persisted queue entry time. The
+supervisor holds the expiring, fenced execution lease and revalidates the
+current plan, approvals, and required evidence before work starts. Admission
+responses carry no authority to settle work. The paired Coding and Reviewer
+preparation retain their existing separate role reservations and shared
+approved base.
+
+For an elapsed schedule, set `workers.ideation.interval_minutes` to 1–10080
+and omit `cron`. Set `interval_timezone` for the display day, which defaults
+to America/Denver. UTC-anchored slots stay distinct across repeated clocks.
+The existing scheduler catches up only the latest due slot after a restart.

@@ -1,5 +1,9 @@
-{{define "implement"}}Use red-green-refactor TDD. First add a regression test and call run_check with its committed check ID while it fails for expected behavior; then implement, call run_check again, and refactor with passing evidence. Do not claim TDD from a self-report. Implement only this unit, satisfy acceptance criteria, test changes. Do not push, create PR, change .whirlwind.yaml, or alter unrelated files.
-Run the project's complete required test suite and full-project Qlty checks and smells. Add regression tests as needed. Record existing base-branch debt separately. Block new or worsened test failures and code smells. Do not suppress findings, weaken checks, or delete tests to make verification pass. Report exact checks and unresolved failures in your handoff.
+{{define "coding evidence"}}For executable behavior changes, add a regression test first and call run_check with its approved check ID. Confirm that it fails for the expected reason. Implement the change, run the same check for passing evidence, and refactor with checks passing. Report check IDs, results, and unresolved blockers. Ask a specific question if you need clarification.
+The supervisor runs the approved verification commands and analyzers through the independent runner. Keep existing findings distinct from regressions. Do not change policy, weaken checks, suppress findings, or publish changes.
+{{end}}
+
+{{define "implement"}}Implement only this approved unit. Keep all edits within its allowed paths and satisfy the frozen acceptance criteria.
+{{template "coding evidence"}}
 Unit:
 {{.Unit}}
 Plan:
@@ -8,8 +12,8 @@ Handoff:
 {{.Handoff}}
 {{end}}
 
-{{define "repair"}}Correct unresolved review findings and satisfy plan. Do not publish or change policy.
-Run the project's complete required test suite and full-project Qlty checks and smells after repairs. Add regression coverage as needed. Record existing base-branch debt separately. Block new or worsened test failures and code smells. Do not suppress findings, weaken checks, or delete tests to make verification pass.
+{{define "repair"}}Correct the unresolved verification and review findings within the frozen implementation units' allowed paths. Preserve the approved requirements.
+{{template "coding evidence"}}
 Plan:
 {{.Plan}}
 Findings:
@@ -18,7 +22,11 @@ Handoff:
 {{.Handoff}}
 {{end}}
 
-{{define "integrate"}}Resolve cherry-pick conflict for implementation unit. Preserve both intended changes, finish cherry-pick using git cherry-pick --continue.
+{{define "integrate"}}Resolve the listed conflicts by editing only those files. Preserve both intended changes and report the resolution or blocker. The supervisor validates and stages the files, then continues the cherry-pick. Leave the Git index, refs, and sequencer state to the supervisor.
+Conflicted paths:
+{{.Paths}}
 Unit:
 {{.Unit}}
+Approved plan:
+{{.Plan}}
 {{end}}

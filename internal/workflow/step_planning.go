@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -13,7 +14,7 @@ import (
 
 func (step *taskStep) planning() (bool, error) {
 	if step.task.IdeaID != "" {
-		return false, step.generateIdeaPlan()
+		return true, step.generateIdeaPlan()
 	}
 	_, err := step.generatePlan()
 	if err != nil {

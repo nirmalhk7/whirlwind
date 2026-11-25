@@ -25,68 +25,78 @@ func (s *Server) retryLocalProjectSetup(ctx context.Context, command LocalComman
 	if status != 0 {
 		return cached, nil
 	}
-	projectRecord, err := s.Store.Get(ctx, "projects", command.ProjectID)
+	project, latest, err := s.projectSetupRetryTarget(ctx, command)
 	if err != nil {
 		return nil, err
 	}
-	if projectRecord.Version != command.ExpectedVersion {
-		return nil, store.ErrConflict
-	}
-	project, err := store.Decode[model.Project](projectRecord)
+	return s.queueProjectSetupRetry(ctx, project, latest, command.ExpectedVersion, command.IdempotencyKey, fingerprint)
+}
+
+func (s *Server) projectSetupRetryTarget(ctx context.Context, command LocalCommand) (model.Project, model.Operation, error) {
+	record, err := s.Store.Get(ctx, "projects", command.ProjectID)
 	if err != nil {
-		return nil, err
+		return model.Project{}, model.Operation{}, err
+	}
+	if record.Version != command.ExpectedVersion {
+		return model.Project{}, model.Operation{}, store.ErrConflict
+	}
+	project, err := store.Decode[model.Project](record)
+	if err != nil {
+		return model.Project{}, model.Operation{}, err
 	}
 	if project.Paused || project.Status != "error" && project.Status != "approved" {
-		return nil, store.ErrConflict
+		return model.Project{}, model.Operation{}, store.ErrConflict
 	}
-	operations, err := s.Store.List(ctx, "operations")
+	latest, err := s.retryableProjectSetup(ctx, project)
+	return project, latest, err
+}
+
+func (s *Server) retryableProjectSetup(ctx context.Context, project model.Project) (model.Operation, error) {
+	records, err := s.Store.List(ctx, "operations")
 	if err != nil {
-		return nil, err
+		return model.Operation{}, err
 	}
-	latest, latestOrder := model.Operation{}, int64(-1)
-	for _, record := range operations {
-		operation, decodeErr := store.Decode[model.Operation](record)
-		if decodeErr != nil {
-			return nil, decodeErr
+	var latest model.Operation
+	latestOrder := int64(-1)
+	active := false
+	for _, record := range records {
+		operation, err := store.Decode[model.Operation](record)
+		if err != nil {
+			return model.Operation{}, err
 		}
-		if operation.Kind == "project_setup" && operation.Subject == project.ID && record.CreatedOrder > latestOrder {
+		if operation.Kind != "project_setup" || operation.Subject != project.ID {
+			continue
+		}
+		if record.CreatedOrder > latestOrder {
 			latest, latestOrder = operation, record.CreatedOrder
 		}
+		active = active || operation.Stage == "queued" || operation.Stage == "running"
 	}
-	failedRetry := project.Status == "error" && latest.Stage == "failed"
-	completedRecheck := project.Status == "approved" && latest.Stage == "complete"
-	if latestOrder < 0 || !failedRetry && !completedRecheck {
-		return nil, store.ErrConflict
+	if active || latestOrder < 0 || !projectSetupRetryAllowed(project.Status, latest.Stage) {
+		return model.Operation{}, store.ErrConflict
 	}
-	for _, record := range operations {
-		operation, decodeErr := store.Decode[model.Operation](record)
-		if decodeErr != nil {
-			return nil, decodeErr
-		}
-		if operation.Kind == "project_setup" && operation.Subject == project.ID && (operation.Stage == "queued" || operation.Stage == "running") {
-			return nil, store.ErrConflict
-		}
+	return latest, nil
+}
+
+func projectSetupRetryAllowed(status, stage string) bool {
+	return status == "error" && stage == "failed" || status == "approved" && stage == "complete"
+}
+
+func setupRetryIncludesOnboarding(project model.Project, previous model.Operation) bool {
+	if project.Status == "approved" && previous.Stage == "complete" {
+		return true
 	}
-	id := store.ID()
-	operation := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "queued", StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	if completedRecheck {
-		operation.Input = map[string]bool{"onboarding": true}
-	} else {
-		previousInput, _ := json.Marshal(latest.Input)
-		var previousEvidence struct {
-			Onboarding bool `json:"onboarding"`
-		}
-		_ = json.Unmarshal(previousInput, &previousEvidence)
-		if previousEvidence.Onboarding {
-			operation.Input = map[string]bool{"onboarding": true}
-		}
-	}
-	previousInput, _ := json.Marshal(latest.Input)
-	var previousEvidence struct {
+	var evidence struct {
 		Onboarding bool `json:"onboarding"`
 	}
-	_ = json.Unmarshal(previousInput, &previousEvidence)
-	if previousEvidence.Onboarding {
+	_ = json.Unmarshal(encodedInput(previous.Input), &evidence)
+	return evidence.Onboarding
+}
+
+func (s *Server) queueProjectSetupRetry(ctx context.Context, project model.Project, previous model.Operation, version int, key, fingerprint string) (json.RawMessage, error) {
+	id := store.ID()
+	operation := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "queued", StartedAt: time.Now().UTC().Format(time.RFC3339Nano)}
+	if setupRetryIncludesOnboarding(project, previous) {
 		operation.Input = map[string]bool{"onboarding": true}
 	}
 	data, err := json.Marshal(operation)
@@ -99,9 +109,9 @@ func (s *Server) retryLocalProjectSetup(ctx context.Context, command LocalComman
 	}
 	project.Status, project.QualityIdentity = "draft", nil
 	audit := model.Audit{Source: "local_operator", Action: "project.setup.retry", Target: project.ID, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano)}
-	receipt := &store.Receipt{Key: command.IdempotencyKey, Fingerprint: fingerprint, Status: 202, Body: body}
+	receipt := &store.Receipt{Key: key, Fingerprint: fingerprint, Status: 202, Body: body}
 	changes := []store.Change{
-		{Kind: "projects", ID: project.ID, Value: project, Expected: projectRecord.Version},
+		{Kind: "projects", ID: project.ID, Value: project, Expected: version},
 		{Kind: "operations", ID: id, Value: operation},
 		{Kind: "audit", ID: store.ID(), Value: audit},
 	}

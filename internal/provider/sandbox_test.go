@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 )
@@ -81,6 +82,45 @@ func TestTerminalEnvironmentCannotReconfigureSandboxHost(t *testing.T) {
 		if err := params.applyEnvironment(exec.Command("echo")); err == nil {
 			t.Fatalf("host runtime override accepted: %s", name)
 		}
+	}
+}
+
+func TestCodingTerminalSubdirectoryKeepsWorktreeWriteScope(t *testing.T) {
+	t.Setenv("WHIRLWIND_EXECUTION_LAUNCHER", "")
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"allowed", "subdir/allowed"} {
+		if err = os.MkdirAll(filepath.Join(root, name), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profile, err := execution.ForPolicy(root, false, "coding-terminal", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.AllowedPaths = []string{sandboxAllowedPath}
+	client := NewClient(Input{Role: "code", CWD: root, Execution: &profile}, Hooks{Permission: func(context.Context, Permission) (bool, error) { return true, nil }})
+	closeClient(t, client)
+	ctx := context.Background()
+	command := `test "${PWD##*/}" = subdir || exit 40
+if (printf unauthorized > allowed/denied.txt) 2>/dev/null; then exit 41; fi
+printf authorized > ../allowed/accepted.txt`
+	start, err := client.Handle(ctx, clientMessage("terminal/create", map[string]any{"cwd": "subdir", "command": "/bin/sh", "args": []string{"-c", command}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := start.(map[string]any)["terminalId"]
+	result, err := client.Handle(ctx, clientMessage("terminal/wait_for_exit", map[string]any{"terminalId": id}))
+	if err != nil || result.(map[string]any)["exitCode"] != 0 {
+		t.Fatalf("terminal CWD changed the write boundary: %v %v", result, err)
+	}
+	if body, err := os.ReadFile(filepath.Join(root, "allowed", "accepted.txt")); err != nil || string(body) != "authorized" {
+		t.Fatalf("authorized write missing: %q %v", body, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "subdir", "allowed", "denied.txt")); !os.IsNotExist(err) {
+		t.Fatalf("subdirectory unexpectedly became writable: %v", err)
 	}
 }
 

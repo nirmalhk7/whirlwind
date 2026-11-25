@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
-	"whirlwind/internal/workflow"
 )
 
 func TestConfiguredAgentsRenderRegistryAndConnectionColors(t *testing.T) {
@@ -29,8 +29,8 @@ func TestConfiguredAgentsRenderRegistryAndConnectionColors(t *testing.T) {
 			}}),
 		},
 		"provider_status": {
-			record("online", workflow.ProviderStatus{ID: "online", Status: "working"}),
-			record("offline", workflow.ProviderStatus{ID: "offline", Status: "failed"}),
+			record("online", model.ProviderStatus{ID: "online", Status: "working"}),
+			record("offline", model.ProviderStatus{ID: "offline", Status: "failed"}),
 		},
 	})
 	d.ForceDraw()
@@ -102,7 +102,7 @@ func TestAgentHeadingShowsProviderNameOnce(t *testing.T) {
 			d := New()
 			d.Present(control.Snapshot{
 				"providers":       {record("codex", model.Provider{ID: "codex", Name: name, Kind: "codex"})},
-				"provider_status": {record("codex", workflow.ProviderStatus{ID: "codex", Status: "working"})},
+				"provider_status": {record("codex", model.ProviderStatus{ID: "codex", Status: "working"})},
 			})
 			text := d.agents.GetText(true)
 			if strings.Count(strings.ToLower(text), "codex") != 1 {

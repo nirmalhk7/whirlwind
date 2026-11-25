@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -44,23 +45,29 @@ func (a *agentRun) executeChoiceAttempts(source model.Provider, choice model.Age
 	if restarts > 3 {
 		return provider.Output{}, true, fmt.Errorf("%s/%s: restart budget exhausted after 3 restarts", source.ID, choice.Model)
 	}
-	if retryAt != "" {
-		if err = a.waitForPersistedEntryRetry(source, choice, retryAt); err != nil {
-			return provider.Output{}, false, err
-		}
+	if err := a.resumeChoiceRetry(source, choice, retryAt); err != nil {
+		return provider.Output{}, false, err
 	}
+	return a.runRemainingChoiceAttempts(source, choice, restarts)
+}
+
+func (a *agentRun) resumeChoiceRetry(source model.Provider, choice model.AgentChoice, retryAt string) error {
+	if retryAt == "" {
+		return nil
+	}
+	return a.waitForPersistedEntryRetry(source, choice, retryAt)
+}
+
+func (a *agentRun) runRemainingChoiceAttempts(source model.Provider, choice model.AgentChoice, restarts int) (provider.Output, bool, error) {
 	for restarts <= 3 {
 		a.recoveryRestartCount = restarts
 		output, kind, execution, err := a.runChoiceAttempt(source)
 		if execution != nil && attemptDeadlineExpired(execution.state, err) {
 			return output, true, err
 		}
-		if err != nil && a.input.Purpose == "integration:create_pr" {
-			// A failed transport may already have created the remote PR. Return
-			// to the persisted publication stage, which performs lookup first.
-			return output, false, err
-		}
-		if kind == provider.FailureUnknown {
+		// A failed publication transport may already have created the remote
+		// PR. Return to the persisted publication stage for lookup.
+		if kind == provider.FailureUnknown || err != nil && a.input.Purpose == "integration:create_pr" {
 			return output, false, err
 		}
 		if kind != provider.FailureTransient && kind != provider.FailureRateLimit || restarts == 3 {
@@ -225,18 +232,30 @@ func (a *agentRun) clearPersistedRetryCooldown(source model.Provider, choice mod
 	if cooldown.AttemptID != owner {
 		return nil
 	}
-	cooldown.Until = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
-	return a.commitPersistedRetryCooldownClear(ctx, source, choice, episodeID, owner, episodeRecord, episode, cooldownRecord, cooldown)
+	return a.commitPersistedRetryCooldownClear(ctx, source, choice, owner, retryCooldownSnapshot{
+		episodeID: episodeID, episodeVersion: episodeRecord.Version, episode: episode,
+		cooldownVersion: cooldownRecord.Version, cooldown: cooldown,
+	})
 }
 
-func (a *agentRun) commitPersistedRetryCooldownClear(ctx context.Context, source model.Provider, choice model.AgentChoice, episodeID, owner string, episodeRecord model.Record, episode model.RecoveryEpisode, cooldownRecord model.Record, cooldown model.ProviderCooldown) error {
-	if !recoveryChoiceMatchesEpisode(a, choice, episodeID, episode) || episode.LastAttemptID != owner || episode.Status != "failed" || !retryableEpisodeFailure(episode) || cooldown.AttemptID != owner {
+// The episode and cooldown must both still match the versions that authorized
+// the wait. Persisting them together preserves the optimistic ownership check.
+type retryCooldownSnapshot struct {
+	episodeID                       string
+	episodeVersion, cooldownVersion int
+	episode                         model.RecoveryEpisode
+	cooldown                        model.ProviderCooldown
+}
+
+func (a *agentRun) commitPersistedRetryCooldownClear(ctx context.Context, source model.Provider, choice model.AgentChoice, owner string, saved retryCooldownSnapshot) error {
+	episode, cooldown := saved.episode, saved.cooldown
+	if !recoveryChoiceMatchesEpisode(a, choice, saved.episodeID, episode) || episode.LastAttemptID != owner || episode.Status != "failed" || !retryableEpisodeFailure(episode) || cooldown.AttemptID != owner {
 		return nil
 	}
 	cooldown.Until = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
 	return a.Store.Write(ctx, []store.Change{
-		{Kind: "recovery_episodes", ID: episodeID, Value: episode, Expected: episodeRecord.Version},
-		{Kind: "provider_cooldowns", ID: providerPool(source), Value: cooldown, Expected: cooldownRecord.Version},
+		{Kind: "recovery_episodes", ID: saved.episodeID, Value: episode, Expected: saved.episodeVersion},
+		{Kind: "provider_cooldowns", ID: providerPool(source), Value: cooldown, Expected: saved.cooldownVersion},
 	}, nil)
 }
 

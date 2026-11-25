@@ -3,6 +3,7 @@ package provider
 import (
 	"fmt"
 	"strings"
+
 	"whirlwind/internal/model"
 )
 
@@ -57,20 +58,4 @@ func validateConnectedIntegrations(catalog []model.Integration) error {
 	return nil
 }
 
-func (s *providerSession) integrationInputs(catalog []model.Integration) []any {
-	inputs := []any{map[string]any{"type": "text", "text": s.input.Prompt}}
-	for _, item := range catalog {
-		if !item.Enabled || !item.Callable || item.Kind != "app" {
-			continue
-		}
-		wanted := s.input.DiscoverConnected
-		for _, r := range s.input.RequiredIntegrations {
-			wanted = wanted || r.Ref == item.Ref
-		}
-		if wanted {
-			inputs = append(inputs, map[string]any{"type": "mention", "name": item.Name, "path": item.Ref})
-		}
-	}
-	return inputs
-}
 func IntegrationRefName(ref string) string { return strings.TrimPrefix(ref, "mcp://") }

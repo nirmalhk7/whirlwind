@@ -37,10 +37,11 @@ type IntegrationSettings struct {
 	Publication map[string]IntegrationTarget `json:"publication,omitempty"`
 }
 type WorkflowConfig struct {
-	ActiveMode      string              `json:"active_mode"`
-	ConfiguredMode  string              `json:"configured_mode"`
-	RestartRequired bool                `json:"restart_required"`
-	Integrations    IntegrationSettings `json:"integrations"`
+	AgentHooks      map[string]AgentHookChecks `json:"agent_hooks,omitempty"`
+	ActiveMode      string                     `json:"active_mode"`
+	ConfiguredMode  string                     `json:"configured_mode"`
+	RestartRequired bool                       `json:"restart_required"`
+	Integrations    IntegrationSettings        `json:"integrations"`
 }
 type SourceRef struct {
 	Provider   string `json:"provider,omitempty"`

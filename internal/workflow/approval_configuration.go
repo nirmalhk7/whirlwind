@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -107,7 +108,8 @@ func configurationData(kind string, raw json.RawMessage) (json.RawMessage, error
 		value = struct {
 			ID, Path, Repo, PolicyHash string
 			Policy                     model.Policy
-		}{p.ID, p.Path, p.Repo, p.PolicyHash, p.Policy}
+			OfflineQualification       *model.OfflineDockerQualification `json:",omitempty"`
+		}{p.ID, p.Path, p.Repo, p.PolicyHash, p.Policy, p.OfflineQualification}
 	case "providers":
 		var p model.Provider
 		if err := json.Unmarshal(raw, &p); err != nil {

@@ -9,8 +9,16 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
+)
+
+const (
+	reconsiderationDismissedIdea  = "dismissed-one"
+	reconsiderationOtherProject   = "project-two"
+	reconsiderationPrimaryProject = "project-one"
+	reconsiderationProposedIdea   = "proposed-one"
 )
 
 func reconsiderationDashboard(t *testing.T) (*Dashboard, control.Snapshot, tcell.SimulationScreen) {
@@ -22,16 +30,16 @@ func reconsiderationDashboard(t *testing.T) (*Dashboard, control.Snapshot, tcell
 	screen.SetSize(120, 35)
 	snapshot := control.Snapshot{
 		"projects": {
-			record("project-one", model.Project{ID: "project-one", Name: "Current project"}),
-			record("project-two", model.Project{ID: "project-two", Name: "Other project"}),
+			record(reconsiderationPrimaryProject, model.Project{ID: reconsiderationPrimaryProject, Name: "Current project"}),
+			record(reconsiderationOtherProject, model.Project{ID: reconsiderationOtherProject, Name: "Other project"}),
 		},
 		"directions": {
-			{ID: "dismissed-one", Version: 7, Data: encodedDirection(model.Direction{ID: "dismissed-one", ProjectID: "project-one", Title: "Dismissed idea", Status: "dismissed"})},
-			{ID: "rejected-one", Version: 3, Data: encodedDirection(model.Direction{ID: "rejected-one", ProjectID: "project-one", Title: "Rejected idea", Status: "rejected"})},
-			record("foreign-dismissed", model.Direction{ID: "foreign-dismissed", ProjectID: "project-two", Title: "Foreign history", Status: "dismissed"}),
-			record("deferred-one", model.Direction{ID: "deferred-one", ProjectID: "project-one", Title: "Deferred idea", Status: "deferred"}),
-			record("selected-one", model.Direction{ID: "selected-one", ProjectID: "project-one", Title: "Already selected", Status: "dismissed", Selected: true}),
-			record("proposed-one", model.Direction{ID: "proposed-one", ProjectID: "project-one", Title: "Current idea", Status: "proposed"}),
+			{ID: reconsiderationDismissedIdea, Version: 7, Data: encodedDirection(model.Direction{ID: reconsiderationDismissedIdea, ProjectID: reconsiderationPrimaryProject, Title: "Dismissed idea", Status: "dismissed"})},
+			{ID: "rejected-one", Version: 3, Data: encodedDirection(model.Direction{ID: "rejected-one", ProjectID: reconsiderationPrimaryProject, Title: "Rejected idea", Status: "rejected"})},
+			record("foreign-dismissed", model.Direction{ID: "foreign-dismissed", ProjectID: reconsiderationOtherProject, Title: "Foreign history", Status: "dismissed"}),
+			record("deferred-one", model.Direction{ID: "deferred-one", ProjectID: reconsiderationPrimaryProject, Title: "Deferred idea", Status: "deferred"}),
+			record("selected-one", model.Direction{ID: "selected-one", ProjectID: reconsiderationPrimaryProject, Title: "Already selected", Status: "dismissed", Selected: true}),
+			record(reconsiderationProposedIdea, model.Direction{ID: reconsiderationProposedIdea, ProjectID: reconsiderationPrimaryProject, Title: "Current idea", Status: "proposed"}),
 		},
 	}
 	d.Present(snapshot)
@@ -57,7 +65,9 @@ func openDirectionHistory(t *testing.T, d *Dashboard) *tview.List {
 
 func selectHistoryRow(t *testing.T, list *tview.List) {
 	t.Helper()
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {
+		// This fixture drives list selection without a tview focus dispatcher.
+	})
 }
 
 func reconsiderationForm(t *testing.T, d *Dashboard, list *tview.List) *tview.Form {
@@ -77,7 +87,7 @@ func submitReconsideration(t *testing.T, form *tview.Form) {
 
 func TestDirectionHistoryIsProjectScopedAndOnlyShowsDismissedOrRejectedUnselectedRows(t *testing.T) {
 	d, _, screen := reconsiderationDashboard(t)
-	if len(d.directionRows) != 1 || d.directionRows[0].ID != "proposed-one" {
+	if len(d.directionRows) != 1 || d.directionRows[0].ID != reconsiderationProposedIdea {
 		t.Fatalf("normal direction panel changed its active rows: %+v", d.directionRows)
 	}
 	list := openDirectionHistory(t, d)
@@ -114,7 +124,7 @@ func TestDirectionReconsiderationSubmitsCapturedDirectionWithoutApproval(t *test
 	input.SetText("Evidence changed since rejection")
 
 	snapshot["directions"][0].Version = 8
-	snapshot["projects"] = []model.Record{record("project-two", model.Project{ID: "project-two", Name: "Other project"})}
+	snapshot["projects"] = []model.Record{record(reconsiderationOtherProject, model.Project{ID: reconsiderationOtherProject, Name: "Other project"})}
 	d.Present(snapshot)
 	submitReconsideration(t, form)
 
@@ -124,7 +134,7 @@ func TestDirectionReconsiderationSubmitsCapturedDirectionWithoutApproval(t *test
 	case <-time.After(time.Second):
 		t.Fatal("reconsideration form did not submit a command")
 	}
-	if request.Operation != "direction.reconsider" || request.ProjectID != "project-one" || request.ResourceID != "dismissed-one" || request.ExpectedVersion != 7 {
+	if request.Operation != "direction.reconsider" || request.ProjectID != reconsiderationPrimaryProject || request.ResourceID != reconsiderationDismissedIdea || request.ExpectedVersion != 7 {
 		t.Fatalf("reconsideration did not retain its captured target and version: %+v", request)
 	}
 	if request.IdempotencyKey == "" || request.RequestID == "" {
@@ -134,7 +144,7 @@ func TestDirectionReconsiderationSubmitsCapturedDirectionWithoutApproval(t *test
 		ProjectID string `json:"project_id"`
 		Reason    string `json:"reason"`
 	}
-	if err := json.Unmarshal(request.Payload, &payload); err != nil || payload.ProjectID != "project-one" || payload.Reason != "Evidence changed since rejection" {
+	if err := json.Unmarshal(request.Payload, &payload); err != nil || payload.ProjectID != reconsiderationPrimaryProject || payload.Reason != "Evidence changed since rejection" {
 		t.Fatalf("wrong reconsideration payload %s: %v", request.Payload, err)
 	}
 }

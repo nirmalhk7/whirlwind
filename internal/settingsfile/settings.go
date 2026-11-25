@@ -31,13 +31,14 @@ type Provider struct {
 	Cost         *float64             `json:"cost,omitempty"`
 }
 type Document struct {
-	Mode         string                         `json:"mode,omitempty"`
-	Integrations model.IntegrationSettings      `json:"integrations,omitempty"`
-	Version      int                            `json:"version"`
-	Workers      workflow.Settings              `json:"workers"`
-	Providers    []Provider                     `json:"providers"`
-	Agents       map[string][]model.AgentChoice `json:"agents"`
-	Projects     []string                       `json:"projects,omitempty"`
+	AgentHooks   map[string]model.AgentHookChecks `json:"agent_hooks,omitempty"`
+	Mode         string                           `json:"mode,omitempty"`
+	Integrations model.IntegrationSettings        `json:"integrations,omitempty"`
+	Version      int                              `json:"version"`
+	Workers      workflow.Settings                `json:"workers"`
+	Providers    []Provider                       `json:"providers"`
+	Agents       map[string][]model.AgentChoice   `json:"agents"`
+	Projects     []string                         `json:"projects,omitempty"`
 }
 type Source struct {
 	activeMode string
@@ -151,7 +152,7 @@ func validateDocumentPolicies(doc Document) error {
 			return err
 		}
 	}
-	return nil
+	return model.ValidateAgentHooks(doc.AgentHooks)
 }
 func (s *Source) Refresh(ctx context.Context) error {
 	s.mu.Lock()
@@ -189,6 +190,9 @@ func (s *Source) Persist(ctx context.Context, changes []store.Change, commit fun
 	defer s.mu.Unlock()
 	if err := s.refresh(ctx); err != nil {
 		return err
+	}
+	if len(changes) == 0 {
+		return commit()
 	}
 	encoded, _ := json.Marshal(s.doc)
 	var doc Document

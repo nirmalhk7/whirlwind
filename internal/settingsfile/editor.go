@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
@@ -16,6 +17,8 @@ type FileView struct {
 	LoadedAt string `json:"loaded_at,omitempty"`
 	Revision string `json:"revision,omitempty"`
 }
+
+func (s *Source) SettingsPath() string { return s.path }
 
 // Snapshot returns the exact bytes accepted at startup, independent of later disk edits.
 func (s *Source) Snapshot() FileView { return s.startup }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+
 	"whirlwind/internal/store"
 )
 
@@ -79,15 +80,6 @@ func (e *Engine) withDurableIdeationHistoryBudget(ctx context.Context, projectID
 func historyBudgetFrom(ctx context.Context) *ideationHistoryBudget {
 	budget, _ := ctx.Value(ideationHistoryBudgetKey{}).(*ideationHistoryBudget)
 	return budget
-}
-
-func (budget *ideationHistoryBudget) requestLimit() int {
-	budget.mu.Lock()
-	defer budget.mu.Unlock()
-	if budget.remaining < budget.perRetrieval {
-		return budget.remaining
-	}
-	return budget.perRetrieval
 }
 
 func (budget *ideationHistoryBudget) consume(bytes int) error {

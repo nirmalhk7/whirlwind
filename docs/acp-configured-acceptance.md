@@ -1,5 +1,73 @@
 # Configured ACP qualification (#6)
 
+> The dated sections record specific installations, settings and reruns; they
+> do not qualify current HEAD, every model/account, or all three providers.
+> Follow [nono setup](nono-setup.md) for current configuration and use the
+> [configured harness](#harness-and-reproduction) with locally authorized settings.
+
+## Writable Coding, 2026-11-19
+
+The configured Codex Coding smoke test uses a disposable Git repository and a
+frozen, locally approved plan. Coding runs through Codex ACP 2.5.0 with
+`gpt-6-luna`, `reasoning_effort=high`, and nono 0.81.0 on macOS arm64.
+Reviewer preparation uses a local ACP fixture.
+
+```sh
+WHIRLWIND_TEST_ACP_CONFIGURED_LIVE=1 \
+WHIRLWIND_LIVE_SETTINGS="$PWD/settings.yaml" \
+WHIRLWIND_LIVE_ROLE=code \
+go test -race ./internal/workflow -run '^TestConfiguredACPLiveAcceptance$/^codex$/^writable-candidate$' -count=1 -v -timeout=8m
+```
+
+Live Coding qualification remains incomplete. The first candidate entered
+repair after the independent regression check failed. The second run paused
+because the supervisor lacked valid test-first evidence for `src/result.sh`.
+Both ACP attempts completed. Neither candidate reached Reviewer.
+
+## Codex follow-up, 2026-11-19
+
+Codex ACP passed live model and thinking confirmation, inference, read-only file
+tools, and session resume for both `plan` and `ideate` with `gpt-6.1-sol`.
+The configured thinking levels were `medium` and `low`, respectively.
+
+The original no-egress policy blocked the ChatGPT workspace lookup. Codex needs
+both the workspace lookup and model routes. On nono 0.81.0, repeated CLI path
+rules for the same host replaced earlier rules. Whirlwind now emits one
+structured native route per host with all its configured paths. Native tests
+verify that two granted paths are independently reachable and a third is denied.
+The live harness also retains one private runtime directory across turns so
+resume can load the original session.
+
+The following approved Codex provider policy is scoped to the three exact paths
+used in qualification.
+
+```yaml
+sandbox:
+  allowed_domains:
+    - https://chatgpt.com/backend-api/codex/models
+    - https://chatgpt.com/backend-api/codex/responses
+    - https://chatgpt.com/backend-api/wham/accounts/check
+```
+
+Run the Codex checks for both roles with the current local settings.
+
+```sh
+for role in plan ideate; do
+  WHIRLWIND_TEST_ACP_CONFIGURED_LIVE=1 \
+  WHIRLWIND_LIVE_SETTINGS="$PWD/settings.yaml" \
+  WHIRLWIND_LIVE_ROLE="$role" \
+  go test -race ./internal/workflow -run '^TestConfiguredACPLiveAcceptance$/^codex$' -count=1 -v -timeout=5m
+done
+```
+
+A separate scratch queue passed real Codex fallback for both roles after a
+controlled primary quota failure. The real settings keep one entry per role.
+Claude and Cursor qualification is deferred. Claude CLI was signed out, and
+Cursor's existing host login did not provide a credential that Whirlwind's
+sandbox profile can use.
+
+## Original run, 2026-11-17
+
 Recorded on 2026-11-17 with the user's existing `settings.yaml`, unchanged. **Live qualification is incomplete.** No Claude, Codex or Cursor inference/tool/resume/fallback certification is claimed.
 
 The selected role was `plan`: Codex `gpt-6.1-sol`, `reasoning_effort=medium`. Settings SHA-256 was `9f4262a1be43ab5f7c210457e23b069d62613b9a4d53133f449486905eb7f867`. The file grants no provider network domains and its plan queue has one entry. No models, thinking choices, credentials, transport changes, network grants or fallback entries were added. Other role selections were not qualified.

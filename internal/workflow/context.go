@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+
 	ctxengine "whirlwind/internal/context"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
@@ -38,27 +39,7 @@ func (e *Engine) index(ctx context.Context, p model.Project) (ctxengine.Index, e
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return ctxengine.Index{}, err
 	}
-	err = nil
-	base := ""
-	if run := operationID(ctx); run != "" {
-		record, readErr := e.Store.Get(ctx, "operations", run)
-		if readErr != nil {
-			return ctxengine.Index{}, readErr
-		}
-		operation, decodeErr := store.Decode[model.Operation](record)
-		if decodeErr != nil {
-			return ctxengine.Index{}, decodeErr
-		}
-		if operation.Kind == "ideation" {
-			if operation.Subject != p.ID || operation.RepositoryRevision == "" {
-				return ctxengine.Index{}, store.ErrConflict
-			}
-			base = operation.RepositoryRevision
-		}
-	}
-	if base == "" {
-		base, err = e.base(ctx, p)
-	}
+	base, err := e.indexRevision(ctx, p)
 	if err != nil {
 		return ctxengine.Index{}, err
 	}
@@ -72,6 +53,28 @@ func (e *Engine) index(ctx context.Context, p model.Project) (ctxengine.Index, e
 		}
 	}
 	return idx, nil
+}
+
+func (e *Engine) indexRevision(ctx context.Context, project model.Project) (string, error) {
+	run := operationID(ctx)
+	if run == "" {
+		return e.base(ctx, project)
+	}
+	record, err := e.Store.Get(ctx, "operations", run)
+	if err != nil {
+		return "", err
+	}
+	operation, err := store.Decode[model.Operation](record)
+	if err != nil {
+		return "", err
+	}
+	if operation.Kind != "ideation" {
+		return e.base(ctx, project)
+	}
+	if operation.Subject != project.ID || operation.RepositoryRevision == "" {
+		return "", store.ErrConflict
+	}
+	return operation.RepositoryRevision, nil
 }
 
 func (e *Engine) discoveryIndex(ctx context.Context, p model.Project) (ctxengine.Index, error) {
