@@ -1,0 +1,51 @@
+name: Whirlwind PR entry-point verification
+on:
+  push:
+    branches: ['codex/pr-merge-verification-20261125']
+    paths: ['.github/workflows/pr-entry-point-verification.yml']
+permissions:
+  contents: read
+jobs:
+  entry-point:
+    name: "PR #${{ matrix.pr }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 81
+            sha: d19f58f6365e08c9d2ad552fd32c4db912af7b88
+            tree: 913ae6b49f34d4e7d75515f37c60953c0da50ab9
+            test: TestSeededHumanWorkflowThroughPTY
+          - pr: 75
+            sha: ab5ca1a1ad9c7b4a3e2f325b4e36d6d022818073
+            tree: 57d081c07772b035b0b4fa61b768172ba2283061
+            test: TestSeededHumanWorkflowThroughPTY
+          - pr: 76
+            sha: 329b3de188654761e2d132a080d098680ba72566
+            tree: 0819137c8c572b278eeb1d879f4d1a45ab53f294
+            test: TestProjectMemoryThroughLauncher
+    env:
+      GOTOOLCHAIN: local
+      WHIRLWIND_TEST_SEEDED_PTY: '1'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ matrix.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify tree and run shipped entry point
+        env:
+          EXPECTED_TREE: ${{ matrix.tree }}
+          FIXTURE_NAME: ${{ matrix.test }}
+        run: |
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          go test -mod=readonly -race -v -count=1 -timeout=8m ./cmd/whirlwind -run "^${FIXTURE_NAME}$"
