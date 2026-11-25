@@ -116,6 +116,10 @@ func hookSnapshotEntry(source, target *os.Root, name string) (fingerprint string
 	if !info.Mode().IsRegular() {
 		return "", errors.New("regular file or symlink required")
 	}
+	return copyHookRegularFile(source, target, name, info)
+}
+
+func copyHookRegularFile(source, target *os.Root, name string, info os.FileInfo) (fingerprint string, resultErr error) {
 	input, err := source.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return "", err

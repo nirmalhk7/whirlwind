@@ -68,6 +68,21 @@ func parseVimDecision(document, details string, actions []string) (string, strin
 	if !ok || saved != details {
 		return "", "", fmt.Errorf("saved details changed; edit only Decision and Reason")
 	}
+	action, reason, err := readDecisionFields(header)
+	if err != nil {
+		return "", "", err
+	}
+	allowed := action == "cancel"
+	for _, value := range actions {
+		allowed = allowed || action == value
+	}
+	if !allowed {
+		return "", "", fmt.Errorf("choose %s or cancel", strings.Join(actions, ", "))
+	}
+	return action, reason, nil
+}
+
+func readDecisionFields(header string) (string, string, error) {
 	action := ""
 	var reason strings.Builder
 	inReason := false
@@ -92,13 +107,6 @@ func parseVimDecision(document, details string, actions []string) (string, strin
 	}
 	if !inReason || action == "" {
 		return "", "", fmt.Errorf("missing required Decision or Reason field")
-	}
-	allowed := action == "cancel"
-	for _, value := range actions {
-		allowed = allowed || action == value
-	}
-	if !allowed {
-		return "", "", fmt.Errorf("choose %s or cancel", strings.Join(actions, ", "))
 	}
 	return action, strings.TrimSpace(reason.String()), nil
 }

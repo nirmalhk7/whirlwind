@@ -278,16 +278,7 @@ func openShellCLI() (string, error) {
 
 func selectedOpenShellGateway(gateways []openShellGateway, explicitName, explicitEndpoint string) (openShellGateway, error) {
 	if explicitName != "" || explicitEndpoint != "" {
-		for _, gateway := range gateways {
-			if explicitName != "" && gateway.Name != explicitName || explicitEndpoint != "" && gateway.Endpoint != explicitEndpoint {
-				continue
-			}
-			if gateway.Remote || !loopbackEndpoint(gateway.Endpoint) {
-				return openShellGateway{}, fmt.Errorf("%w: explicit OpenShell gateway must be local", ErrSandbox)
-			}
-			return gateway, nil
-		}
-		return openShellGateway{}, fmt.Errorf("%w: explicitly selected OpenShell gateway was not found", ErrSandbox)
+		return findExplicitOpenShellGateway(gateways, explicitName, explicitEndpoint)
 	}
 	var selected openShellGateway
 	for _, gateway := range gateways {
@@ -303,6 +294,20 @@ func selectedOpenShellGateway(gateways []openShellGateway, explicitName, explici
 		return openShellGateway{}, fmt.Errorf("%w: select one recognized local OpenShell gateway", ErrSandbox)
 	}
 	return selected, nil
+}
+
+func findExplicitOpenShellGateway(gateways []openShellGateway, name, endpoint string) (openShellGateway, error) {
+
+	for _, gateway := range gateways {
+		if name != "" && gateway.Name != name || endpoint != "" && gateway.Endpoint != endpoint {
+			continue
+		}
+		if gateway.Remote || !loopbackEndpoint(gateway.Endpoint) {
+			return openShellGateway{}, fmt.Errorf("%w: explicit OpenShell gateway must be local", ErrSandbox)
+		}
+		return gateway, nil
+	}
+	return openShellGateway{}, fmt.Errorf("%w: explicitly selected OpenShell gateway was not found", ErrSandbox)
 }
 
 func loopbackEndpoint(endpoint string) bool {
