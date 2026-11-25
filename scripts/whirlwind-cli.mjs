@@ -19,7 +19,7 @@ const help = `Usage: whirlwind <command>
   policy preview PROJECT FILE
   policy approve PROJECT FILE VERSION HASH
   memory list PROJECT ROLE
-  memory remember PROJECT ROLE ATTEMPT NOTE
+  memory remember PROJECT ROLE ATTEMPT TEXT
   memory clear PROJECT ROLE
 
 The dashboard is available with ./bin/whirlwind dashboard.
@@ -46,7 +46,7 @@ async function projectMemory(args) {
   const remember = action === "remember" && args.length === 5 && attempt && note;
   if (!project || !["ideate", "plan", "code", "review"].includes(role) ||
       (!remember && !(["list", "clear"].includes(action) && args.length === 3))) {
-    throw new Error("Use memory list PROJECT ROLE, memory remember PROJECT ROLE ATTEMPT NOTE, or memory clear PROJECT ROLE");
+    throw new Error("Use memory list PROJECT ROLE, memory remember PROJECT ROLE ATTEMPT TEXT, or memory clear PROJECT ROLE");
   }
   const config = await localConfiguration();
   const scope = { project_id: project, resource_id: role };

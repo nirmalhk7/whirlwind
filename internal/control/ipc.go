@@ -234,25 +234,7 @@ func validateRequest(request Request) error {
 	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" || request.Operation == "finalization.inspect" || request.Operation == "provider.status" || request.Operation == "project.policy.preview" {
 		return nil
 	}
-	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {
-		return errors.New("idempotency_key is required for supervisor commands")
-	}
-	if request.Operation == "memory.remember" || request.Operation == "memory.clear" {
-		if request.ExpectedVersion < 0 {
-			return errors.New("memory expected_version cannot be negative")
-		}
-		return nil
-	}
-	if request.Operation != "project.register" && request.Operation != "supervisor.stop" && request.Operation != "runners.toggle" && request.ExpectedVersion < 1 {
-		return errors.New("expected_version must be positive for this supervisor command")
-	}
-	if (request.Operation == "plan.review" || request.Operation == "plan.document.save" || request.Operation == "plan.approve" || request.Operation == "plan.request_changes" || request.Operation == "plan.reject") && request.ContentHash == "" {
-		return errors.New("content_hash is required for plan review")
-	}
-	if len(request.Payload) > 0 && !json.Valid(request.Payload) {
-		return errors.New("payload must be valid JSON")
-	}
-	return nil
+	return validateCommandFields(request)
 }
 
 func (s *LocalServer) writeError(conn net.Conn, requestID, message string) {
