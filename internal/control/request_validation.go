@@ -50,8 +50,16 @@ func validateMutation(request Request) error {
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {
 		return errors.New("idempotency_key is required for supervisor commands")
 	}
-	if request.Operation != "project.register" && request.Operation != "supervisor.stop" && request.Operation != "runners.toggle" && request.ExpectedVersion < 1 {
-		return errors.New("expected_version must be positive for this supervisor command")
+	switch request.Operation {
+	case "project.register", "supervisor.stop", "runners.toggle":
+	case "memory.remember", "memory.clear":
+		if request.ExpectedVersion < 0 {
+			return errors.New("memory expected_version cannot be negative")
+		}
+	default:
+		if request.ExpectedVersion < 1 {
+			return errors.New("expected_version must be positive for this supervisor command")
+		}
 	}
 	if requiresPlanContentHash(request.Operation) && request.ContentHash == "" {
 		return errors.New("content_hash is required for plan review")

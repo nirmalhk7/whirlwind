@@ -44,6 +44,15 @@ CREATE TABLE IF NOT EXISTS issue_plans (
     PRIMARY KEY(repo, issue),
     FOREIGN KEY(plan_kind, plan_id) REFERENCES resources(kind, id) DEFERRABLE INITIALLY DEFERRED
 );
+CREATE TABLE IF NOT EXISTS project_role_memory (
+    project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK(role IN ('ideate','plan','code','review')),
+    version INTEGER NOT NULL CHECK(version > 0),
+    policy_hash TEXT NOT NULL,
+    policy_version INTEGER NOT NULL CHECK(policy_version >= 0),
+    lessons TEXT NOT NULL CHECK(json_valid(lessons) AND json_type(lessons) = 'array' AND json_array_length(lessons) <= 12 AND length(CAST(lessons AS BLOB)) <= 49152),
+    PRIMARY KEY(project_id, role)
+);
 CREATE TABLE IF NOT EXISTS leases (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,

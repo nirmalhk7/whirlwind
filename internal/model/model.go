@@ -33,6 +33,7 @@ type Embeddings struct {
 }
 type Policy struct {
 	OfflineDockerImage string         `json:"offline_docker_image,omitempty" yaml:"offline_docker_image"`
+	ProjectMemory      bool           `json:"project_memory,omitempty" yaml:"project_memory"`
 	Quality            *QualityPolicy `json:"quality,omitempty" yaml:"quality"`
 	AdaptiveRouting    bool           `json:"adaptive_routing,omitempty" yaml:"adaptive_routing"`
 	Sandbox            *SandboxPolicy `json:"sandbox,omitempty" yaml:"sandbox"`
