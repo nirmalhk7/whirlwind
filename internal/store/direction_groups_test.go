@@ -62,7 +62,11 @@ func TestPartialDirectionRunIsPersistedAsIncomplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer s.Close()
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("close partial direction store: %v", err)
+		}
+	})
 	ctx := context.Background()
 	partial := []model.Direction{{ID: "expand-1", Category: "expand", Title: "Expand", Description: "Evidence-backed expansion"}}
 	if err := s.SaveDirections(ctx, "p", directionTestDay, partial); err != nil {

@@ -179,6 +179,7 @@ func TestCompareBaselineAcceptsUnchangedQltySmellsExitZeroAdvisory(t *testing.T)
 func regressionQltySmells(output string, exit int) Result {
 	r := regressionResult("qlty-smells", output, exit)
 	r.Command = []string{"qlty", "smells", "--all", regressionSARIFArgument}
+	r.QualityIdentity = regressionFixtureIdentity()
 	r.Passed = false
 	r.Error = "qlty reported 1 code smells; repair findings before review"
 	return r

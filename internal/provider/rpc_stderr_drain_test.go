@@ -2,7 +2,9 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -18,14 +20,18 @@ func TestRPCPipesPreserveStderrWhenDiagnosticReaderRunsAfterProcessExit(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer pipes.input.Close()
-	defer pipes.output.Close()
-	defer pipes.stderr.Close()
-	for _, writer := range []io.Writer{cmd.Stdout, cmd.Stderr} {
-		if closer, ok := writer.(io.Closer); ok {
-			defer closer.Close()
+	t.Cleanup(func() {
+		// Cmd.Wait closes its stdin pipe. The test owns the output pipes
+		// and their writers, so unexpected close errors remain failures.
+		if err := pipes.input.Close(); err != nil && !errors.Is(err, os.ErrClosed) {
+			t.Errorf("close process stdin: %v", err)
 		}
-	}
+		for _, pipe := range append(pipes.writers, pipes.output, pipes.stderr) {
+			if err := pipe.Close(); err != nil {
+				t.Errorf("close test output pipe: %v", err)
+			}
+		}
+	})
 	if err := process.Start(cmd); err != nil {
 		t.Fatal(err)
 	}

@@ -10,10 +10,10 @@ import (
 )
 
 func validateIdeationOutput(purpose, text string) error {
-	switch {
-	case purpose == "generation":
+	switch purpose {
+	case "generation":
 		return validateGenerationOutput(text)
-	case purpose == "integration_context":
+	case "integration_context":
 		return validateIntegrationContextOutput(text)
 	default:
 		return nil

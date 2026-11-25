@@ -116,6 +116,9 @@ On macOS with the pinned runtime, the native suites can exercise real nono files
 
 Settings-driven live provider outcomes and reproduction are recorded in [configured ACP acceptance](docs/acp-configured-acceptance.md). Skipped or incomplete checks do not certify authenticated inference.
 
+See [Releasing Whirlwind](docs/releasing.md) for branch checks, release
+dispatch, and artifact verification.
+
 ## Repository
 
 - `cmd/whirlwind/`: durable local supervisor and command entry point.

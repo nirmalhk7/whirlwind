@@ -12,6 +12,10 @@ import (
 )
 
 const (
+	planContextFixtureSourceFile = "src/a.go"
+)
+
+const (
 	approvedContextDraftObjective = "Draft secret webhook credential cleanup"
 )
 
@@ -64,7 +68,7 @@ func TestDiscoveryRotatesTowardLessExploredRepositoryAreas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{"src/a.go", "src/b.go"} {
+	for _, path := range []string{planContextFixtureSourceFile, "src/b.go"} {
 		fullPath := filepath.Join(project.Path, path)
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0700); err != nil {
 			t.Fatal(err)
@@ -82,8 +86,8 @@ func TestDiscoveryRotatesTowardLessExploredRepositoryAreas(t *testing.T) {
 		t.Fatalf("commit repository fixture: %s: %v", output, err)
 	}
 	prior := []model.Direction{
-		{ID: "old-a", ProjectID: project.ID, Day: "2026-11-01", Category: "expand", Title: "Prior A", Problem: "Existing A issue", Mechanism: "Change A behavior", Components: []string{"src/a.go"}},
-		{ID: "old-a-2", ProjectID: project.ID, Day: "2026-11-02", Category: "optimize", Title: "Prior A 2", Problem: "Another A issue", Mechanism: "Tune A behavior", Components: []string{"src/a.go"}},
+		{ID: "old-a", ProjectID: project.ID, Day: "2026-11-01", Category: "expand", Title: "Prior A", Problem: "Existing A issue", Mechanism: "Change A behavior", Components: []string{planContextFixtureSourceFile}},
+		{ID: "old-a-2", ProjectID: project.ID, Day: "2026-11-02", Category: "optimize", Title: "Prior A 2", Problem: "Another A issue", Mechanism: "Tune A behavior", Components: []string{planContextFixtureSourceFile}},
 	}
 	if err := engine.Store.SaveDirections(ctx, project.ID, "2026-11-02", prior); err != nil {
 		t.Fatal(err)
