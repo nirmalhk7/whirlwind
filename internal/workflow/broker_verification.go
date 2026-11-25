@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -164,22 +165,21 @@ func copyCodingSnapshotEntry(source, destination *os.Root, path, value string) e
 	if value == "deleted" {
 		return nil
 	}
-	info, err := source.Lstat(path)
+	file, info, err := openCodingSnapshotFile(source, path)
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() {
-		return errors.New("invalid snapshot: Coding check snapshot requires regular files")
+	if file == nil {
+		return errors.New("source changed while copying Coding check snapshot")
 	}
-	content, err := source.ReadFile(path)
-	if err != nil {
-		return err
-	}
+	defer func() { _ = file.Close() }()
 	if err := destination.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	if err := destination.WriteFile(path, content, info.Mode().Perm()); err != nil {
+	target, err := destination.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
 		return err
 	}
-	return nil
+	_, copyErr := io.Copy(target, file)
+	return errors.Join(copyErr, target.Close())
 }

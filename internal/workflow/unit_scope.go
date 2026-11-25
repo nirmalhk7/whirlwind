@@ -24,6 +24,9 @@ func validateUnitPath(p model.Policy, path string) error {
 	if path == "" || strings.HasSuffix(path, "/") {
 		return fmt.Errorf("directory scope requires /**")
 	}
+	if path == "." || filepath.Clean(path) != path || strings.ContainsAny(path, "\\\x00\r\n") {
+		return fmt.Errorf("scope requires a normalized file or glob")
+	}
 	base := strings.TrimSuffix(path, "/**")
 	if path != "**" && strings.Contains(base, "**") {
 		return fmt.Errorf("recursive glob is supported only as directory/**")
