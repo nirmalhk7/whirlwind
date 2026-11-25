@@ -98,7 +98,9 @@ func TestProcessCrashRecoveryMatrixAcrossCanonicalRoles(t *testing.T) {
 			}
 			fixture.resumeUntilFallback(t, restarted)
 			fixture.assertAdapterObservations(t)
-			assertRuntimeMatrixAttempts(t, fixture, restarted, priorOwner)
+			assertRuntimeMatrixAttempts(t, restarted.Store, role, runtimeAttemptExpectations{
+				first: fixture.first, fallback: fixture.fallback, priorOwner: priorOwner, currentOwner: restarted.Owner(),
+			})
 			fixture.assertRestartCount(t, restarted, 4)
 		})
 	}
@@ -245,38 +247,51 @@ func runtimeMatrixPersistedState(t *testing.T, engine *Engine, project model.Pro
 	return strings.Join(summaries, "; ")
 }
 
-func assertRuntimeMatrixAttempts(t *testing.T, fixture runtimeMatrixFixture, engine *Engine, priorOwner string) {
+type runtimeAttemptExpectations struct {
+	first, fallback          model.AgentChoice
+	priorOwner, currentOwner string
+}
+
+func assertRuntimeMatrixAttempts(t *testing.T, database *store.Store, role string, expected runtimeAttemptExpectations) {
 	t.Helper()
-	attempts := storedRuntimeMatrixAttempts(t, engine.Store, fixture.input.Role)
+	attempts := storedRuntimeMatrixAttempts(t, database, role)
 	if len(attempts) != 5 {
 		t.Fatalf("persisted role attempts=%d, want five: %+v", len(attempts), attempts)
 	}
-	for index := 0; index < 4; index++ {
-		attempt := attempts[index]
-		if attempt.Provider != fixture.first.Provider || attempt.Model != fixture.first.Model || attempt.RestartCount != index || attempt.Status != "failed" || attempt.ExecutionProfile == "" {
-			t.Fatalf("persisted crash attempt %d lost choice or restart count: %+v", index, attempt)
-		}
-		if attempt.Thinking == nil || *attempt.Thinking != *fixture.first.Thinking {
-			t.Fatalf("persisted crash attempt %d lost thinking: %+v", index, attempt.Thinking)
-		}
-		wantOwner := engine.Owner()
-		if index == 0 {
-			wantOwner = priorOwner
-		}
-		if attempt.Owner != wantOwner {
-			t.Fatalf("crash attempt %d owner=%q, want supervisor owner %q", index, attempt.Owner, wantOwner)
-		}
-		assertQueueEntry(t, attempt, 1, 2)
+	for index, attempt := range attempts[:4] {
+		assertRuntimeCrashAttempt(t, attempt, index, expected)
 	}
-	last := attempts[4]
-	if last.Provider != fixture.fallback.Provider || last.Model != fixture.fallback.Model || last.RestartCount != 0 || last.Status != "complete" || last.Success == nil || !*last.Success {
+	assertRuntimeFallbackAttempt(t, attempts[0], attempts[4], expected)
+}
+
+func assertRuntimeCrashAttempt(t *testing.T, attempt model.Attempt, index int, expected runtimeAttemptExpectations) {
+	t.Helper()
+	if attempt.Provider != expected.first.Provider || attempt.Model != expected.first.Model || attempt.RestartCount != index || attempt.Status != "failed" || attempt.ExecutionProfile == "" {
+		t.Fatalf("persisted crash attempt %d lost choice or restart count: %+v", index, attempt)
+	}
+	if attempt.Thinking == nil || *attempt.Thinking != *expected.first.Thinking {
+		t.Fatalf("persisted crash attempt %d lost thinking: %+v", index, attempt.Thinking)
+	}
+	wantOwner := expected.currentOwner
+	if index == 0 {
+		wantOwner = expected.priorOwner
+	}
+	if attempt.Owner != wantOwner {
+		t.Fatalf("crash attempt %d owner=%q, want supervisor owner %q", index, attempt.Owner, wantOwner)
+	}
+	assertQueueEntry(t, attempt, 1, 2)
+}
+
+func assertRuntimeFallbackAttempt(t *testing.T, first, last model.Attempt, expected runtimeAttemptExpectations) {
+	t.Helper()
+	if last.Provider != expected.fallback.Provider || last.Model != expected.fallback.Model || last.RestartCount != 0 || last.Status != "complete" || last.Success == nil || !*last.Success {
 		t.Fatalf("persisted role fallback attempt lost queue authority: %+v", last)
 	}
-	if last.Thinking == nil || *last.Thinking != *fixture.fallback.Thinking || last.ExecutionProfile != attempts[0].ExecutionProfile {
-		t.Fatalf("fallback thinking or sandbox profile changed: first=%+v fallback=%+v", attempts[0], last)
+	if last.Thinking == nil || *last.Thinking != *expected.fallback.Thinking || last.ExecutionProfile != first.ExecutionProfile {
+		t.Fatalf("fallback thinking or sandbox profile changed: first=%+v fallback=%+v", first, last)
 	}
-	if last.Owner != engine.Owner() {
-		t.Fatalf("fallback owner=%q, want recreated supervisor owner %q", last.Owner, engine.Owner())
+	if last.Owner != expected.currentOwner {
+		t.Fatalf("fallback owner=%q, want recreated supervisor owner %q", last.Owner, expected.currentOwner)
 	}
 	assertQueueEntry(t, last, 2, 2)
 }

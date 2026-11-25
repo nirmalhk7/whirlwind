@@ -224,7 +224,9 @@ func assertNonoHealthRecoveryRole(t *testing.T, role string) {
 	if len(resumedBackoff) != 3 || resumedBackoff[0] <= 0 || resumedBackoff[0] > time.Second || resumedBackoff[1] != 2*time.Second || resumedBackoff[2] != 4*time.Second {
 		t.Fatalf("health recovery backoff=%v, want persisted 1s remainder then 2s and 4s", resumedBackoff)
 	}
-	assertRuntimeMatrixAttempts(t, reopened, role, firstChoice, fallbackChoice, priorOwner, restarted.Owner())
+	assertRuntimeMatrixAttempts(t, reopened, role, runtimeAttemptExpectations{
+		first: firstChoice, fallback: fallbackChoice, priorOwner: priorOwner, currentOwner: restarted.Owner(),
+	})
 	assertNativeSandboxMatrixPersistence(t, reopened, role, adapter.profiles)
 }
 
