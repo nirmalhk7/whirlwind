@@ -33,6 +33,9 @@ func Load(path string) (model.Policy, string, error) {
 	if p.OfflineDockerImage != "" {
 		return p, "", errors.New("offline Docker requires an approved external project policy")
 	}
+	if p.ProjectMemory {
+		return p, "", errors.New("project memory requires an approved external project policy")
+	}
 	if err = Validate(p); err != nil {
 		return p, "", err
 	}

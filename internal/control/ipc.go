@@ -74,6 +74,7 @@ var allowedOperations = map[string]bool{
 	"direction.reject": true, "plan.review": true,
 	"direction.reconsider": true, "direction.delete": true,
 	"question.answer": true, "permission.decide": true,
+	"inspect.memory": true, "memory.remember": true, "memory.clear": true,
 	"plan.pause": true, "plan.resume": true,
 	"finalization.inspect": true, "finalization.approve": true,
 }
@@ -235,6 +236,12 @@ func validateRequest(request Request) error {
 	}
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {
 		return errors.New("idempotency_key is required for supervisor commands")
+	}
+	if request.Operation == "memory.remember" || request.Operation == "memory.clear" {
+		if request.ExpectedVersion < 0 {
+			return errors.New("memory expected_version cannot be negative")
+		}
+		return nil
 	}
 	if request.Operation != "project.register" && request.Operation != "supervisor.stop" && request.Operation != "runners.toggle" && request.ExpectedVersion < 1 {
 		return errors.New("expected_version must be positive for this supervisor command")

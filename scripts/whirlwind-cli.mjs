@@ -18,6 +18,9 @@ const help = `Usage: whirlwind <command>
   logs [--follow] Print all logs; optionally follow new output
   policy preview PROJECT FILE
   policy approve PROJECT FILE VERSION HASH
+  memory list PROJECT ROLE
+  memory remember PROJECT ROLE ATTEMPT NOTE
+  memory clear PROJECT ROLE
 
 The dashboard is available with ./bin/whirlwind dashboard.
 The supervisor uses a private local socket; it starts no browser or UI server.
@@ -27,13 +30,38 @@ export async function runCLI(args) {
   const helpRequested = !args.length || (args.length === 1 && ["--help", "-h", "help"].includes(args[0]));
   if (helpRequested) console.log(help);
   const policyRequested = args[0] === "policy";
-  const valid = policyRequested || (args.length === 1 && ["dashboard", "start", "status", "stop", "restart", "doctor", "logs"].includes(args[0])) || (args.length === 2 && args[0] === "logs" && args[1] === "--follow");
+  const memoryRequested = args[0] === "memory";
+  const valid = policyRequested || memoryRequested || (args.length === 1 && ["dashboard", "start", "status", "stop", "restart", "doctor", "logs"].includes(args[0])) || (args.length === 2 && args[0] === "logs" && args[1] === "--follow");
   if (!helpRequested && !valid) console.error(help);
   if (helpRequested || !valid) return helpRequested ? 0 : 1;
   if (!["darwin", "linux"].includes(process.platform)) throw new Error("Whirlwind launcher supports macOS and Linux.");
   if (policyRequested) return projectPolicy(args.slice(1));
+  if (memoryRequested) return projectMemory(args.slice(1));
   const commands = { dashboard, start: startSupervisor, status: supervisorStatus, stop: stopSupervisor, restart: restartSupervisor, doctor, logs: () => logs({ follow: args[1] === "--follow" }) };
   return commands[args[0]]();
+}
+
+async function projectMemory(args) {
+  const [action, project, role, attempt, note] = args;
+  const remember = action === "remember" && args.length === 5 && attempt && note;
+  if (!project || !["ideate", "plan", "code", "review"].includes(role) ||
+      (!remember && !(["list", "clear"].includes(action) && args.length === 3))) {
+    throw new Error("Use memory list PROJECT ROLE, memory remember PROJECT ROLE ATTEMPT NOTE, or memory clear PROJECT ROLE");
+  }
+  const config = await localConfiguration();
+  const scope = { project_id: project, resource_id: role };
+  const { result: memory } = await request(config, "inspect.memory", scope);
+  let result = memory;
+  if (action === "clear") {
+    ({ result } = await request(config, "memory.clear", { ...scope, expected_version: memory.version }));
+  } else if (remember) {
+    if (!memory.enabled) throw new Error("Project memory requires an approved external policy with project_memory enabled");
+    ({ result } = await request(config, "memory.remember", { ...scope, expected_version: memory.version,
+      content_hash: memory.policy_hash, payload: { attempt_id: attempt, note },
+    }));
+  }
+  console.log(JSON.stringify(result, null, 2));
+  return 0;
 }
 
 async function projectPolicy(args) {

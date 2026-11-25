@@ -59,7 +59,11 @@ func (a *agentRun) buildContextPack() error {
 	if err != nil {
 		return err
 	}
-	pack, err := a.index.Pack(ctxengine.PackRequest{Required: a.input.Prompt, Query: a.task.Issue.Title + " " + a.task.Issue.Body, Role: a.input.Role, PolicyHash: a.project.PolicyHash, MaxInputTokens: a.project.Policy.ContextInputTokens, Additional: extra})
+	advisory, err := a.projectMemoryPrompt()
+	if err != nil {
+		return err
+	}
+	pack, err := a.index.Pack(ctxengine.PackRequest{Required: a.input.Prompt, Advisory: advisory, Query: a.task.Issue.Title + " " + a.task.Issue.Body, Role: a.input.Role, PolicyHash: a.project.PolicyHash, MaxInputTokens: a.project.Policy.ContextInputTokens, Additional: extra})
 	if err != nil {
 		return err
 	}

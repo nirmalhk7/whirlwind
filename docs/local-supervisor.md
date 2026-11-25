@@ -19,6 +19,32 @@ Human mutations include an idempotency key and expected resource version. Plan r
 
 From an approved or active idea, **Cancel planning** revokes that approval even if the Planner is still waiting for a slot. A later worker reply cannot write the cancelled plan into the plans directory. Use **Retry planning** to approve a fresh attempt. If Markdown already reached the plans directory, the supervisor resumes publication with the same file and attempt after interruption. Reopen the idea to inspect the completed plan.
 
+## Project memory
+
+Add `project_memory: true` to an external project policy, then use
+`whirlwind policy preview` and `whirlwind policy approve` to enable memory
+for that project. Memory is disabled by default. Use the registered project
+ID and one role from `ideate`, `plan`, `code`, or `review`.
+
+```sh
+./bin/whirlwind memory remember PROJECT code ATTEMPT 'Keep the generated fixture in a temporary directory.'
+./bin/whirlwind memory list PROJECT code
+./bin/whirlwind memory clear PROJECT code
+```
+
+An operator can save one short note per completed attempt in the same
+project and role. Whirlwind records the source attempt, plan revision,
+operation, policy and checkout commit where available. SQLite keeps up to
+12 notes per role. Agent input can receive up to three relevant notes
+within a total 2 KiB advisory budget, using local word matching and recency.
+The configured role provider receives any notes included in its input.
+Choose notes suitable for that provider and keep credentials out of them.
+
+Recall requires the exact approved opt-in policy. A new approval starts
+fresh recall. Use `memory clear` to remove a role's saved notes even when
+memory is disabled. Previously generated prompt evidence follows the
+existing run-evidence retention.
+
 ## Existing state and legacy service cutover
 
 The supervisor initializes the current schema directly in `~/.local/share/whirlwind/whirlwind.db`. There are no schema versions or data migrations. Reopening a current database preserves pending records. Opening an obsolete development layout deletes its database state and recreates the current schema. See [SQL persistence details](persistence.md) for the `projects`, `ideas`, and `plans` tables. Dashboard reads do not initialize, recover, or create a database.

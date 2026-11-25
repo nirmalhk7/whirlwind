@@ -61,7 +61,7 @@ func (d SupervisorDispatcher) Handle(ctx context.Context, request Request) (Resp
 			result = d.DispatchHealth()
 		}
 	default:
-		if !allowedOperations[request.Operation] || (strings.HasPrefix(request.Operation, inspectOperationPrefix) && request.Operation != "inspect.plan" && request.Operation != "inspect.artifact") {
+		if !allowedOperations[request.Operation] || (strings.HasPrefix(request.Operation, inspectOperationPrefix) && request.Operation != "inspect.plan" && request.Operation != "inspect.artifact" && request.Operation != "inspect.memory") {
 			return Response{}, fmt.Errorf("unsupported local operation %q", request.Operation)
 		}
 		if d.Commands == nil {

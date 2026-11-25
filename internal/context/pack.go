@@ -15,6 +15,7 @@ const DefaultInputAllowance = 32768
 
 type PackRequest struct {
 	Required       string
+	Advisory       string
 	Query          string
 	Role           string
 	PolicyHash     string
@@ -51,12 +52,17 @@ func (i Index) Pack(request PackRequest) (ContextPack, error) {
 	}
 	pack := ContextPack{Commit: i.Commit, Role: request.Role, PolicyHash: request.PolicyHash, CountMethod: "utf8_bytes_upper_estimate", Included: []string{}, Omitted: []string{}}
 	selected := packPayload{i.Commit, request.Role, request.PolicyHash, []Entry{}, []string{}}
+	advisory := ""
 	render := func() string {
 		raw, _ := json.Marshal(selected)
-		return request.Required + "\nSelected repository context (excerpts; read referenced files for omitted content):\n" + string(raw)
+		return request.Required + advisory + "\nSelected repository context (excerpts; read referenced files for omitted content):\n" + string(raw)
 	}
-	if len(render()) > limit {
+	requiredBytes := len(render())
+	if requiredBytes > limit {
 		return pack, errors.New("required instructions exceed context input allowance; increase context_input_tokens or reduce task scope")
+	}
+	if len(request.Advisory) <= limit-requiredBytes {
+		advisory = request.Advisory
 	}
 	entries := packEntries(i, request)
 	seen := map[string]bool{}
