@@ -125,14 +125,21 @@ func newDirectionGenerationRequest(ctx context.Context, project model.Project, p
 }
 
 func (e *Engine) runDirectionRepairs(ctx context.Context, request directionGenerationRequest, maxAttempts int) ([]model.Direction, error) {
-	accepted := []model.Direction{}
-	if operationID(ctx) != "" {
-		var err error
-		accepted, err = e.acceptedRunDirections(ctx, request.runID)
-		if err != nil {
-			return nil, err
-		}
+	accepted, err := e.acceptedDirectionRepairs(ctx, request)
+	if err != nil {
+		return nil, err
 	}
+	return e.repairDirections(ctx, request, accepted, maxAttempts)
+}
+
+func (e *Engine) acceptedDirectionRepairs(ctx context.Context, request directionGenerationRequest) ([]model.Direction, error) {
+	if operationID(ctx) == "" {
+		return []model.Direction{}, nil
+	}
+	return e.acceptedRunDirections(ctx, request.runID)
+}
+
+func (e *Engine) repairDirections(ctx context.Context, request directionGenerationRequest, accepted []model.Direction, maxAttempts int) ([]model.Direction, error) {
 	var rejected error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if len(missingDirectionCategories(accepted)) == 0 {

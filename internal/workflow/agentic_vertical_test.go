@@ -229,6 +229,30 @@ func (f *agenticWorkflowFixture) verifyExistingTestDebtBlocksAcceptance() {
 	if blocked.Stage != "repair" || blocked.ChecksPassed || blocked.ReviewID != "" || blocked.Delivery != nil || blocked.VerificationID == "" {
 		t.Fatalf("failed configured test did not block review and local finalization: %+v", blocked)
 	}
+	f.assertPreservedTestDebt(blocked)
+	assertNoFixtureReview(t, f, f.task.ID)
+	f.adapter.mu.Lock()
+	finalizerPrompt := f.adapter.prompt
+	f.adapter.mu.Unlock()
+	if finalizerPrompt != "" {
+		t.Fatalf("finalizer ran despite failed configured test: %q", finalizerPrompt)
+	}
+	legacySource := submissionGit(t, f.repo, "show", agenticFixtureLegacyTestAtHead)
+	if got := submissionGit(t, blocked.Worktree, "show", agenticFixtureLegacyTestAtHead); got != legacySource {
+		t.Fatal("candidate removed or changed the pre-existing failing test")
+	}
+	if got := submissionGit(t, blocked.Worktree, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return true") {
+		t.Fatalf("candidate implementation state was not preserved: %s", got)
+	}
+	if got := submissionGit(t, f.repo, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return false") {
+		t.Fatalf("coding changed original checkout: %s", got)
+	}
+	f.verifyTDD(blocked)
+}
+
+func (f *agenticWorkflowFixture) assertPreservedTestDebt(blocked model.ExecutionPlan) {
+	t, ctx, engine := f.t, f.ctx, f.e
+	t.Helper()
 	record, err := engine.Store.Get(ctx, "verification", blocked.VerificationID)
 	requireWorkflowSuccess(t, err)
 	var evidence struct {
@@ -254,32 +278,6 @@ func (f *agenticWorkflowFixture) verifyExistingTestDebtBlocksAcceptance() {
 	if err != nil || !strings.Contains(string(rawOutput), "TestLegacyDebt") {
 		t.Fatalf("full failed-test evidence was not retained: err=%v output=%q", err, rawOutput)
 	}
-	reviews, err := engine.Store.List(ctx, "reviews")
-	requireWorkflowSuccess(t, err)
-	for _, saved := range reviews {
-		review, err := store.Decode[model.Review](saved)
-		requireWorkflowSuccess(t, err)
-		if review.Provenance != nil && review.Provenance.Task == f.task.ID {
-			t.Fatalf("reviewer ran despite failed configured test: %+v", review)
-		}
-	}
-	f.adapter.mu.Lock()
-	finalizerPrompt := f.adapter.prompt
-	f.adapter.mu.Unlock()
-	if finalizerPrompt != "" {
-		t.Fatalf("finalizer ran despite failed configured test: %q", finalizerPrompt)
-	}
-	legacySource := submissionGit(t, f.repo, "show", agenticFixtureLegacyTestAtHead)
-	if got := submissionGit(t, blocked.Worktree, "show", agenticFixtureLegacyTestAtHead); got != legacySource {
-		t.Fatal("candidate removed or changed the pre-existing failing test")
-	}
-	if got := submissionGit(t, blocked.Worktree, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return true") {
-		t.Fatalf("candidate implementation state was not preserved: %s", got)
-	}
-	if got := submissionGit(t, f.repo, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return false") {
-		t.Fatalf("coding changed original checkout: %s", got)
-	}
-	f.verifyTDD(blocked)
 }
 
 type agenticWorkflowFixture struct {

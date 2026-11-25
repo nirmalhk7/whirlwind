@@ -40,19 +40,9 @@ func (e *Engine) dispatchQueuedIdeation(ctx context.Context) {
 
 func (e *Engine) runQueuedIdeation(ctx context.Context, project model.Project, record model.Record, key string, fence int64) error {
 	ctx = store.WithLeaseFence(ctx, key, store.Lease{Owner: e.owner, Fence: fence})
-	current, err := e.Store.Get(ctx, "operations", record.ID)
+	op, err := e.loadQueuedIdeation(ctx, record)
 	if err != nil {
 		return err
-	}
-	if current.Version != record.Version {
-		return store.ErrConflict
-	}
-	op, err := store.Decode[model.Operation](current)
-	if err != nil {
-		return err
-	}
-	if op.Stage != "queued" {
-		return store.ErrConflict
 	}
 	var guards []store.Change
 	registration, err := e.registrationIdeation(ctx, record.ID, op)
@@ -99,6 +89,24 @@ func (e *Engine) runQueuedIdeation(ctx context.Context, project model.Project, r
 	}
 	failure := e.Ideate(WithFreshDiscovery(WithOperation(ctx, record.ID), request.Fresh), project, request.Day)
 	return e.finishQueuedIdeation(ctx, record.ID, failure)
+}
+
+func (e *Engine) loadQueuedIdeation(ctx context.Context, record model.Record) (model.Operation, error) {
+	current, err := e.Store.Get(ctx, "operations", record.ID)
+	if err != nil {
+		return model.Operation{}, err
+	}
+	if current.Version != record.Version {
+		return model.Operation{}, store.ErrConflict
+	}
+	op, err := store.Decode[model.Operation](current)
+	if err != nil {
+		return model.Operation{}, err
+	}
+	if op.Stage != "queued" {
+		return model.Operation{}, store.ErrConflict
+	}
+	return op, nil
 }
 
 func (e *Engine) finishQueuedIdeation(ctx context.Context, id string, failure error) error {

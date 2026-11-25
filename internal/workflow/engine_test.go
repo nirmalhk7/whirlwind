@@ -218,6 +218,16 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 	if blocked.Stage != "repair" || blocked.ChecksPassed || blocked.ReviewID != "" || blocked.Delivery != nil || blocked.PlanDocument == nil || blocked.PlanDocument.ApprovedHash == "" {
 		t.Fatalf("failed configured check reached review or bypassed human plan approval: %+v", blocked)
 	}
+	assertFailedCheckRuntimeEvidence(t, fixture, blocked)
+	if candidateHead := submissionGit(fixture.t, blocked.Worktree, gitRevParseCommand, "HEAD"); candidateHead == "" {
+		t.Fatal("candidate worktree was not preserved")
+	}
+	fixture.verifyTDD(blocked)
+	assertNoFixtureReview(t, fixture, blocked.ID)
+}
+
+func assertFailedCheckRuntimeEvidence(t *testing.T, fixture *agenticWorkflowFixture, blocked model.ExecutionPlan) {
+	t.Helper()
 	plan, err := fixture.e.Store.Get(fixture.ctx, "plan_versions", blocked.ID+":1")
 	requireWorkflowSuccess(t, err)
 	if !strings.Contains(string(plan.Data), engineFixtureResultRequirement) {
@@ -253,16 +263,16 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 	if err != nil || job.Stage != "complete" || !job.CleanupVerified || job.TaskID != blocked.ID || job.VerificationID != blocked.VerificationID || job.Role != "verify" || job.CheckID != "failing" {
 		t.Fatalf("failed check runtime owner proof mismatch: job=%+v err=%v", job, err)
 	}
-	if candidateHead := submissionGit(fixture.t, blocked.Worktree, gitRevParseCommand, "HEAD"); candidateHead == "" {
-		t.Fatal("candidate worktree was not preserved")
-	}
-	fixture.verifyTDD(blocked)
+}
+
+func assertNoFixtureReview(t *testing.T, fixture *agenticWorkflowFixture, blockedID string) {
+	t.Helper()
 	reviews, err := fixture.e.Store.List(fixture.ctx, "reviews")
 	requireWorkflowSuccess(t, err)
 	for _, saved := range reviews {
 		review, err := store.Decode[model.Review](saved)
 		requireWorkflowSuccess(t, err)
-		if review.Provenance != nil && review.Provenance.Task == blocked.ID {
+		if review.Provenance != nil && review.Provenance.Task == blockedID {
 			t.Fatalf("reviewer started despite failed configured check: %+v", review)
 		}
 	}

@@ -89,6 +89,20 @@ func (e *Engine) runProjectSetup(ctx context.Context, id string) error {
 		record.Version++
 		failure = e.runProjectSetupVerifier(ctx, &record, op, &evidence)
 	}
+	return e.finishSetupOperation(ctx, pendingSetupCompletion{record: record, operation: op, projectRecord: projectRecord, project: project, evidence: evidence, failure: failure})
+}
+
+type pendingSetupCompletion struct {
+	record, projectRecord model.Record
+	operation             model.Operation
+	project               model.Project
+	evidence              projectSetupEvidence
+	failure               error
+}
+
+func (e *Engine) finishSetupOperation(ctx context.Context, setup pendingSetupCompletion) error {
+	record, op, projectRecord, project := setup.record, setup.operation, setup.projectRecord, setup.project
+	evidence, failure := setup.evidence, setup.failure
 	if failure == nil && evidence.Onboarding && evidence.Phase != "qualify" {
 		if evidence.Phase == "catalog" {
 			return e.finishProjectSetupCatalogProbe(ctx, record, op, projectRecord, project, evidence)
@@ -486,20 +500,8 @@ func (e *Engine) finishProjectSetupCatalogProbe(ctx context.Context, record mode
 func (e *Engine) finishProjectSetup(ctx context.Context, record model.Record, op model.Operation, projectRecord model.Record, project model.Project, evidence projectSetupEvidence, failure error) error {
 	finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if failure == nil && (externalQualityConfigured(project) || evidence.Onboarding) {
-		if evidence.Report.QualityIdentity == nil || evidence.Report.QualityIdentity.Validate() != nil {
-			failure = errors.New("setup completed without a valid frozen Qlty scanner runtime identity; retry project setup")
-		} else {
-			project.QualityIdentity = evidence.Report.QualityIdentity
-		}
-	}
 	if failure == nil {
-		if _, err := e.projectPolicy(ctx, project); err != nil {
-			failure = errors.New("project policy changed during verification; setup result rejected")
-		}
-	}
-	if failure == nil && evidence.Manifest.OfflineDockerImage != "" {
-		project.OfflineQualification, failure = offlineSetupQualification(ctx, project, evidence)
+		failure = e.qualifyProjectSetup(ctx, &project, evidence)
 	}
 	op.Input, op.FinishedAt, op.Owner = evidence, time.Now().UTC().Format(time.RFC3339Nano), e.owner
 	op.Stage, op.Error, project.Status = "complete", "", "approved"
@@ -515,6 +517,25 @@ func (e *Engine) finishProjectSetup(ctx context.Context, record model.Record, op
 	changes := []store.Change{{Kind: "operations", ID: record.ID, Value: op, Expected: record.Version}, {Kind: "projects", ID: project.ID, Value: project, Expected: projectRecord.Version}}
 	if err := e.Store.Write(finish, changes, nil); err != nil {
 		return fmt.Errorf("persist project setup: %w", err)
+	}
+	return nil
+}
+
+func (e *Engine) qualifyProjectSetup(ctx context.Context, project *model.Project, evidence projectSetupEvidence) error {
+	if externalQualityConfigured(*project) || evidence.Onboarding {
+		identity := evidence.Report.QualityIdentity
+		if identity == nil || identity.Validate() != nil {
+			return errors.New("setup completed without a valid frozen Qlty scanner runtime identity; retry project setup")
+		}
+		project.QualityIdentity = identity
+	}
+	if _, err := e.projectPolicy(ctx, *project); err != nil {
+		return errors.New("project policy changed during verification; setup result rejected")
+	}
+	if evidence.Manifest.OfflineDockerImage != "" {
+		var err error
+		project.OfflineQualification, err = offlineSetupQualification(ctx, *project, evidence)
+		return err
 	}
 	return nil
 }

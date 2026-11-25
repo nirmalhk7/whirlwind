@@ -192,26 +192,7 @@ func TestCodingConflictResumesAndSupervisorCommitsScopedResolution(t *testing.T)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var launches int
-	e.Adapter = func(model.Provider) provider.Adapter {
-		return connectionAdapterFunc(func(_ context.Context, input provider.Input, _ provider.Hooks) (provider.Output, error) {
-			launches++
-			if input.Execution == nil {
-				return provider.Output{}, errors.New("conflict has no execution profile")
-			}
-			if !slices.Equal(input.Execution.AllowedPaths, []string{resultFile}) {
-				t.Errorf("conflict profile must grant only the conflicted file: %v", input.Execution.AllowedPaths)
-			}
-			if !strings.Contains(input.Prompt, resultFile) || strings.Contains(input.Prompt, "git cherry-pick --continue") {
-				t.Errorf("conflict prompt did not leave Git continuation to the supervisor: %q", input.Prompt)
-			}
-			if launches == 1 {
-				cancel()
-				return provider.Output{}, context.Canceled
-			}
-			err := os.WriteFile(filepath.Join(input.CWD, resultFile), []byte("keep both changes\n"), 0600)
-			return provider.Output{Text: "Resolved in the worktree"}, err
-		})
-	}
+	e.Adapter = conflictRecoveryAdapter(t, cancel, &launches)
 	if _, err := e.mergeUnit(ctx, project, &task, &unit); !errors.Is(err, context.Canceled) {
 		t.Fatalf("interruption did not stop conflict resolution: %v", err)
 	}
@@ -249,6 +230,30 @@ func TestCodingConflictResumesAndSupervisorCommitsScopedResolution(t *testing.T)
 	requireWorkflowSuccess(t, err)
 	if checkpoint.Commit != resolved || checkpoint.Tree != submissionGit(t, task.Worktree, gitRevParseCommand, "HEAD^{tree}") {
 		t.Fatalf("resolved candidate %s was not recovered with exact tree evidence", resolved)
+	}
+}
+
+func conflictRecoveryAdapter(t *testing.T, cancel context.CancelFunc, launches *int) func(model.Provider) provider.Adapter {
+	t.Helper()
+	return func(model.Provider) provider.Adapter {
+		return connectionAdapterFunc(func(_ context.Context, input provider.Input, _ provider.Hooks) (provider.Output, error) {
+			*launches++
+			if input.Execution == nil {
+				return provider.Output{}, errors.New("conflict has no execution profile")
+			}
+			if !slices.Equal(input.Execution.AllowedPaths, []string{resultFile}) {
+				t.Errorf("conflict profile must grant only the conflicted file: %v", input.Execution.AllowedPaths)
+			}
+			if !strings.Contains(input.Prompt, resultFile) || strings.Contains(input.Prompt, "git cherry-pick --continue") {
+				t.Errorf("conflict prompt did not leave Git continuation to the supervisor: %q", input.Prompt)
+			}
+			if *launches == 1 {
+				cancel()
+				return provider.Output{}, context.Canceled
+			}
+			err := os.WriteFile(filepath.Join(input.CWD, resultFile), []byte("keep both changes\n"), 0600)
+			return provider.Output{Text: "Resolved in the worktree"}, err
+		})
 	}
 }
 
