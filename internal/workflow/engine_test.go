@@ -213,31 +213,23 @@ func TestSelectedDirectionPublishesPlanBeforeCoding(t *testing.T) {
 // TestFailedChecksDoNotStartReview verifies failed required checks send the task to repair rather than AI review.
 func TestFailedChecksDoNotStartReview(t *testing.T) {
 	fixture := newAgenticReviewFixture(t, true)
-	if err := fixture.e.Step(fixture.ctx, fixture.task.ID); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, fixture.e.Step(fixture.ctx, fixture.task.ID))
 	blocked, _ := localStoredTask(t, fixture.e, fixture.task.ID)
 	if blocked.Stage != "repair" || blocked.ChecksPassed || blocked.ReviewID != "" || blocked.Delivery != nil || blocked.PlanDocument == nil || blocked.PlanDocument.ApprovedHash == "" {
 		t.Fatalf("failed configured check reached review or bypassed human plan approval: %+v", blocked)
 	}
 	plan, err := fixture.e.Store.Get(fixture.ctx, "plan_versions", blocked.ID+":1")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if !strings.Contains(string(plan.Data), engineFixtureResultRequirement) {
 		t.Fatalf("frozen requirement snapshot missing: %s", plan.Data)
 	}
 	record, err := fixture.e.Store.Get(fixture.ctx, "verification", blocked.VerificationID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	var evidence struct {
 		Stage  string              `json:"stage"`
 		Report verification.Report `json:"report"`
 	}
-	if err := json.Unmarshal(record.Data, &evidence); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, json.Unmarshal(record.Data, &evidence))
 	if evidence.Stage != "failed" || evidence.Report.Passed {
 		t.Fatalf("failed configured check evidence not retained: %+v", evidence)
 	}
@@ -256,9 +248,7 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 		t.Fatalf("failed check artifact unavailable: %v", err)
 	}
 	jobRecord, err := fixture.e.Store.Get(fixture.ctx, "runtime_jobs", failure.Runtime.ExecutionID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	job, err := store.Decode[runtimeCheckJob](jobRecord)
 	if err != nil || job.Stage != "complete" || !job.CleanupVerified || job.TaskID != blocked.ID || job.VerificationID != blocked.VerificationID || job.Role != "verify" || job.CheckID != "failing" {
 		t.Fatalf("failed check runtime owner proof mismatch: job=%+v err=%v", job, err)
@@ -268,14 +258,10 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 	}
 	fixture.verifyTDD(blocked)
 	reviews, err := fixture.e.Store.List(fixture.ctx, "reviews")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	for _, saved := range reviews {
 		review, err := store.Decode[model.Review](saved)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, err)
 		if review.Provenance != nil && review.Provenance.Task == blocked.ID {
 			t.Fatalf("reviewer started despite failed configured check: %+v", review)
 		}

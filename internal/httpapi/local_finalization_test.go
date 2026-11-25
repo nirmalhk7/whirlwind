@@ -65,17 +65,13 @@ func TestExactCandidateDiffRejectsMovedHeadAndOversizedOutput(t *testing.T) {
 	mustCommand(t, worktree, "git", "config", "user.email", "test@example.invalid")
 	mustCommand(t, worktree, "git", "config", "user.name", "Test")
 	source := filepath.Join(worktree, deliveryFixtureSourceFile)
-	if err := os.WriteFile(source, []byte("base\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, os.WriteFile(source, []byte("base\n"), 0600))
 	mustCommand(t, worktree, "git", "add", deliveryFixtureSourceFile)
 	mustCommand(t, worktree, "git", "commit", deliveryFixtureGitQuiet, "-m", "base")
 	base := strings.TrimSpace(mustCommand(t, worktree, "git", deliveryFixtureGitRevParse, "HEAD"))
 	largeLine := strings.Repeat("large diff line ", 256) + "\n"
 	largeContent := strings.Repeat(largeLine, (finalizationDiffPageBytes*18)/len(largeLine))
-	if err := os.WriteFile(source, []byte(largeContent), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, os.WriteFile(source, []byte(largeContent), 0600))
 	mustCommand(t, worktree, "git", "commit", deliveryFixtureGitQuiet, "-am", "large candidate")
 	reviewed := strings.TrimSpace(mustCommand(t, worktree, "git", deliveryFixtureGitRevParse, "HEAD"))
 	task := model.ExecutionPlan{Worktree: worktree, Base: base, ReviewedCommit: reviewed}
@@ -84,9 +80,7 @@ func TestExactCandidateDiffRejectsMovedHeadAndOversizedOutput(t *testing.T) {
 	offset := int64(0)
 	for {
 		page, err := exactCandidateDiffPage(context.Background(), task, offset)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireAPISuccess(t, err)
 		pages++
 		if len(page.Content) > finalizationDiffLineLimit || page.Offset != offset || page.NextOffset < offset {
 			t.Fatalf("diff page exceeded its bounded cursor contract: %+v", page)

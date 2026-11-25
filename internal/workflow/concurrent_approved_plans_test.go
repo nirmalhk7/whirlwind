@@ -68,9 +68,7 @@ func TestApprovedPlansForSameRepositoryExecuteConcurrentlyInIndependentWorktrees
 	defer cancel()
 	e, first, _ := testEngine(t)
 	project, err := e.Project(ctx, first.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 
 	tasks := []model.ExecutionPlan{
 		approveConcurrentPlan(t, e, project, first, "plan-a", "plan-a-unit", concurrentPlanAFile),
@@ -122,9 +120,7 @@ func TestApprovedPlansForSameRepositoryExecuteConcurrentlyInIndependentWorktrees
 	workers.Wait()
 	close(errorsFound)
 	for err := range errorsFound {
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, err)
 	}
 
 	seenUnits := map[string]concurrentPlanCodeStart{}

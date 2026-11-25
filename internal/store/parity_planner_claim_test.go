@@ -76,32 +76,20 @@ func checkPlannerPublication(t *testing.T, pending bool) {
 	s := openTest(t)
 	ctx := context.Background()
 	idea := parityIdea(t, s)
-	if err := s.Put(ctx, "ideas", "i", idea, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireStoreSuccess(t, s.Put(ctx, "ideas", "i", idea, 0))
 	idea["decision_status"] = "approved"
-	if err := s.Put(ctx, "ideas", "i", idea, 1); err != nil {
-		t.Fatal(err)
-	}
+	requireStoreSuccess(t, s.Put(ctx, "ideas", "i", idea, 1))
 	plan := map[string]any{"id": "plan", "project_id": "p", "idea_id": "i", "ideation_run_id": "source", "stage": "planning"}
-	if err := s.Put(ctx, "execution_plans", "plan", plan, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireStoreSuccess(t, s.Put(ctx, "execution_plans", "plan", plan, 0))
 	attempt := map[string]any{"attempt_id": "a", "plan_id": "plan", "project_id": "p", "idea_id": "i", "operation_id": "source", "role": "plan", "status": "running", "started_at": "now"}
-	if err := s.Put(ctx, "sessions", "a", attempt, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.PlannerRunLocation(ctx, "a", plannerClaimFixtureAssignedFile); err != nil {
-		t.Fatal(err)
-	}
+	requireStoreSuccess(t, s.Put(ctx, "sessions", "a", attempt, 0))
+	requireStoreSuccess(t, s.PlannerRunLocation(ctx, "a", plannerClaimFixtureAssignedFile))
 	attempt["status"], attempt["finished"], attempt["success"] = "complete", true, true
 	if pending {
 		attempt["status"], attempt["success"] = model.AttemptAwaitingPlanPublication, nil
 	}
 	attempt["finished_at"] = "2026-11-11T00:00:00Z"
-	if err := s.Put(ctx, "sessions", "a", attempt, 1); err != nil {
-		t.Fatal(err)
-	}
+	requireStoreSuccess(t, s.Put(ctx, "sessions", "a", attempt, 1))
 	plan["stage"], plan["last_attempt_id"] = "plan_approval", "a"
 	plan["plan_document"] = map[string]any{"path": plannerClaimFixtureAssignedFile, "hash": "verified-hash"}
 	plan["plan"] = map[string]any{"requirements": []map[string]string{{"id": "R1", "outcome": "Export invoices", "evidence_method": "behavior test"}}}
@@ -112,18 +100,14 @@ func checkPlannerPublication(t *testing.T, pending bool) {
 			t.Fatalf("finalized a mismatched publication path: %v", err)
 		}
 		record, err := s.Get(ctx, "sessions", "a")
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireStoreSuccess(t, err)
 		current, err := Decode[model.Attempt](record)
 		if err != nil || current.Status != model.AttemptAwaitingPlanPublication || current.Success != nil {
 			t.Fatalf("failed publication did not roll back the attempt transition: %+v %v", current, err)
 		}
 		document["path"] = plannerClaimFixtureAssignedFile
 	}
-	if err := s.Put(ctx, "execution_plans", "plan", plan, 1); err != nil {
-		t.Fatal(err)
-	}
+	requireStoreSuccess(t, s.Put(ctx, "execution_plans", "plan", plan, 1))
 	var status, linked string
 	if err := s.DB.QueryRow("SELECT i.status,json_extract(r.data,'$.plan_id') FROM ideas i JOIN resources r ON r.kind='ideas' AND r.id=i.idea_id WHERE i.idea_id='i'").Scan(&status, &linked); err != nil || status != "complete" || linked != "plan" {
 		t.Fatalf("publication did not atomically complete idea: %s %s %v", status, linked, err)
@@ -132,9 +116,7 @@ func checkPlannerPublication(t *testing.T, pending bool) {
 		t.Fatalf("publication did not complete ACP run: %s %s %v", status, linked, err)
 	}
 	record, err := s.Get(ctx, "sessions", "a")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireStoreSuccess(t, err)
 	current, err := Decode[model.Attempt](record)
 	if err != nil || current.Status != "complete" || current.Success == nil || !*current.Success {
 		t.Fatalf("publication did not complete the attempt: %+v %v", current, err)

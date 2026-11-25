@@ -259,21 +259,15 @@ func TestOpenShellRuntimeHonorsValidatedExplicitCLIPath(t *testing.T) {
 func TestOpenShellProxyTokenIsRegisteredForTraceRedaction(t *testing.T) {
 	useLegacyExecutionLauncher(t)
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "openshell"), []byte(profileFixtureExitFailure), 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.WriteFile(filepath.Join(bin, "openshell"), []byte(profileFixtureExitFailure), 0700))
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	profile, err := ForPolicy(t.TempDir(), true, "policy", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	brokerToken := strings.Repeat("b", 64)
 	profile.MCPBroker = &MCPBroker{ID: profileFixtureSelectedTools, SocketPath: filepath.Join(t.TempDir(), profileFixtureBrokerSocket), Host: profileFixtureMCPEndpoint, Path: "/mcp"}
 	profile.MCPBrokerToken = brokerToken
 	cmd, err := Command(context.Background(), []string{"sh", "-c", "true"}, profile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	var token string
 	for _, entry := range cmd.Env {
 		if strings.HasPrefix(entry, "WHIRLWIND_OPENSHELL_PROXY_TOKEN=") {
@@ -309,9 +303,7 @@ func TestOpenShellProxyTokenIsRegisteredForTraceRedaction(t *testing.T) {
 	if got := store.RedactText("Proxy-Authorization: Basic " + basic); strings.Contains(got, basic) {
 		t.Fatalf("proxy Basic credential was not registered for trace redaction: %q", got)
 	}
-	if err := process.Forget(cmd); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, process.Forget(cmd))
 	if got := store.RedactText(token); got != token {
 		t.Fatalf("proxy redaction registration outlived process cleanup: %q", got)
 	}

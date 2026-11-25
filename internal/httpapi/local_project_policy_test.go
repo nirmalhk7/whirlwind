@@ -14,23 +14,15 @@ func TestManagedPolicyApprovalAtomicallySchedulesQualification(t *testing.T) {
 	server := setup(t)
 	ctx := t.Context()
 	project := model.Project{ID: "managed", Path: t.TempDir(), Status: "approved", PolicyHash: "old", QualityIdentity: &model.QualityIdentity{Version: 1}}
-	if err := server.Store.Put(ctx, "projects", project.ID, project, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, server.Store.Put(ctx, "projects", project.ID, project, 0))
 	old := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "running"}
-	if err := server.Store.Put(ctx, "operations", "old-setup", old, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, server.Store.Put(ctx, "operations", "old-setup", old, 0))
 	const document = "allowed_paths: [result.txt]\nrisk_rules: [{level: low, paths: [result.txt]}]\nchecks: [{name: result, command: [test, -f, result.txt]}]\n"
 	payload, err := json.Marshal(map[string]string{"content": document})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	command := LocalCommand{Operation: "project.policy.preview", ProjectID: project.ID, Payload: payload}
 	body, err := server.ExecuteLocal(ctx, command)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	var preview localPolicyPreview
 	if err := json.Unmarshal(body, &preview); err != nil || preview.Version != 1 || preview.Hash == "" {
 		t.Fatalf("preview: %+v %v", preview, err)
@@ -54,9 +46,7 @@ func TestManagedPolicyApprovalAtomicallySchedulesQualification(t *testing.T) {
 		t.Fatal(err)
 	}
 	approved, err := server.ExecuteLocal(ctx, command)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	if replay, err := server.ExecuteLocal(ctx, command); err != nil || string(replay) != string(approved) {
 		t.Fatalf("approval replay returned %s, %v", replay, err)
 	}
@@ -65,9 +55,7 @@ func TestManagedPolicyApprovalAtomicallySchedulesQualification(t *testing.T) {
 		t.Fatalf("saved approval: %+v %v", current, err)
 	}
 	stored, err := server.Store.Get(ctx, policy.ManagedPolicyResource, project.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, err)
 	approvedDocument, err := store.Decode[model.ProjectPolicyDocument](stored)
 	if err != nil || approvedDocument.Content != document {
 		t.Fatalf("stored policy text changed: %+v %v", approvedDocument, err)

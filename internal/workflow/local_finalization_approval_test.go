@@ -20,9 +20,7 @@ const (
 func TestApproveLocalFinalizationBindsExactReviewAndCommitsReceipt(t *testing.T) {
 	e, task, version, approval := criticalApprovalFixture(t)
 	approved, err := e.ApproveLocalFinalization(context.Background(), task.ID, version, approval, criticalApprovalFixtureReceipt)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if approved.Stage != "submitting" || !approved.Approved || approved.Approval == nil {
 		t.Fatalf("approval did not authorize local finalization: %+v", approved)
 	}

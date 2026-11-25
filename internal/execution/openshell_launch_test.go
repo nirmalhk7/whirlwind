@@ -23,17 +23,11 @@ func TestOpenShellLaunchUsesPinnedDetachedSandboxAndSeparateExec(t *testing.T) {
 	fixture.EnableCommandExecution()
 	root := t.TempDir()
 	root, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	worktree := filepath.Join(root, "worktree")
-	if err := os.Mkdir(worktree, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.Mkdir(worktree, 0700))
 	worktree, err = filepath.EvalSymlinks(worktree)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	profile := Profile{
 		ExecutionID: launchFixtureAttempt, ExecutionGeneration: 3,
 		SandboxName: OpenShellSandboxName(launchFixtureAttempt), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
@@ -42,21 +36,15 @@ func TestOpenShellLaunchUsesPinnedDetachedSandboxAndSeparateExec(t *testing.T) {
 		CWD: worktree, ReadOnly: true, ReadRoots: []string{}, Domains: []string{}, Environment: []string{},
 	}
 	profileData, err := json.Marshal(profile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
 	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "test-image")
 	t.Setenv("WHIRLWIND_OPENSHELL_PROXY_TOKEN", strings.Repeat("a", 64))
 	xdgConfig := filepath.Join(root, "host-config")
-	if err := os.Mkdir(xdgConfig, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.Mkdir(xdgConfig, 0700))
 	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
 	xdgState := filepath.Join(root, "host-state")
-	if err := os.Mkdir(xdgState, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.Mkdir(xdgState, 0700))
 	t.Setenv("XDG_STATE_HOME", xdgState)
 	command := exec.CommandContext(context.Background(), "node", filepath.Join("..", "..", "bridges", "openshell", "launch.mjs"), string(profileData), "--", "/usr/bin/true")
 	command.Dir = filepath.Join("..", "..", "internal", "execution")

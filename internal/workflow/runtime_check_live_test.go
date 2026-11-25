@@ -32,17 +32,11 @@ func TestEngineOwnedCheckOpenShellAcceptance(t *testing.T) {
 
 	engine, task, cwd := testEngine(t)
 	project, err := engine.Project(context.Background(), task.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	source := filepath.Join(cwd, "source.txt")
-	if err := os.WriteFile(source, []byte("original source\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, os.WriteFile(source, []byte("original source\n"), 0600))
 	profile, err := execution.ForPolicy(cwd, true, project.PolicyHash, project.Policy.Sandbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if profile.ExecutionID != "" || profile.SandboxName != "" || profile.GatewayName != "" {
 		t.Fatalf("ForPolicy should be unpinned before the normal Engine-owned check path: %+v", profile)
 	}

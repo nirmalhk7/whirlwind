@@ -127,46 +127,32 @@ func TestExpiredAttemptBeforeAdapterSettlesReservation(t *testing.T) {
 	if _, err := run.reserveAttempt(source, attempt.id); err != nil {
 		t.Fatal(err)
 	}
-	if err := attempt.launch(); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, attempt.launch())
 	record, err := h.engine.Store.Get(ctx, "sessions", attempt.id)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	state, err := store.Decode[model.Attempt](record)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	state.DeadlineAt = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
-	if err := h.engine.Store.Put(ctx, "sessions", attempt.id, state, record.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, h.engine.Store.Put(ctx, "sessions", attempt.id, state, record.Version))
 	attempt.state.DeadlineAt = state.DeadlineAt
 	_, err = attempt.execute()
 	if !errors.Is(err, context.DeadlineExceeded) || !attemptDeadlineExpired(attempt.state, err) || calls != 0 {
 		t.Fatalf("expired pre-adapter attempt was not classified as a deadline: calls=%d error=%v", calls, err)
 	}
 	attempts, err := h.engine.Store.List(context.Background(), "sessions")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if len(attempts) != 1 {
 		t.Fatalf("persisted attempts=%d, want one pre-adapter deadline", len(attempts))
 	}
 	for _, record := range attempts {
 		attempt, decodeErr := store.Decode[model.Attempt](record)
-		if decodeErr != nil {
-			t.Fatal(decodeErr)
-		}
+		requireWorkflowSuccess(t, decodeErr)
 		if attempt.Status != "failed" || attempt.ProcessState != "deadline_before_adapter" || !strings.Contains(attempt.Error, context.DeadlineExceeded.Error()) {
 			t.Fatalf("pre-adapter timeout was not persisted as a failed deadline attempt: %+v", attempt)
 		}
 	}
 	usage, err := h.engine.Store.TaskUsage(context.Background(), h.task.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if usage.ActiveAttempts != 0 || usage.ReservedRuntimeSeconds != 0 || usage.Attempts != 1 {
 		t.Fatalf("pre-adapter timeout left budget reserved or was not accounted: %+v", usage)
 	}

@@ -29,9 +29,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 	engine, task, repo := testEngine(t)
 	ctx := context.Background()
 	project, err := engine.Project(ctx, task.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	writeReviewEvidenceFixture(t, repo)
 
 	plan := model.PlanSpecification{
@@ -52,9 +50,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 	}
 	planDocument := RenderPlanDocument(plan)
 	plan, err = ParsePlanDocument(planDocument)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	task.Plan = &plan
 	task.PlanVersion = 1
 	task.Worktree = repo
@@ -88,48 +84,28 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		Report:     current,
 		Baseline:   baseline,
 	}
-	if err := engine.Store.Put(ctx, "verification", task.VerificationID, verificationRecord, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, engine.Store.Put(ctx, "verification", task.VerificationID, verificationRecord, 0))
 	storedBefore, err := engine.Store.Get(ctx, "verification", task.VerificationID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	redArtifact, greenArtifact := saveReviewTDDArtifacts(t, engine.Store, ctx)
 	_, redContentBefore, err := engine.Store.Artifact(ctx, redArtifact.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	_, greenContentBefore, err := engine.Store.Artifact(ctx, greenArtifact.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	redSnapshot, redProduction, redTests, redFiles, err := codingSnapshotManifest(ctx, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, reviewEvidenceResultFile), []byte("package result\n\nfunc Result() bool {\n\treturn true\n}\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
+	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(repo, reviewEvidenceResultFile), []byte("package result\n\nfunc Result() bool {\n\treturn true\n}\n"), 0600))
 	greenSnapshot, greenProduction, greenTests, greenFiles, err := codingSnapshotManifest(ctx, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if redTests != greenTests {
 		t.Fatal("fixture TDD phases changed the test source")
 	}
 	commitReviewCode(t, repo)
-	if err := engine.Store.Put(ctx, "tdd_checks", "a-review-red", reviewTDDCheck(task, "red", false, reviewTDDIdentity{snapshot: redSnapshot, production: redProduction, tests: redTests}, redFiles, redArtifact.ID), 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.Store.Put(ctx, "tdd_checks", "b-review-green", reviewTDDCheck(task, "green", true, reviewTDDIdentity{snapshot: greenSnapshot, production: greenProduction, tests: greenTests}, greenFiles, greenArtifact.ID), 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, engine.Store.Put(ctx, "tdd_checks", "a-review-red", reviewTDDCheck(task, "red", false, reviewTDDIdentity{snapshot: redSnapshot, production: redProduction, tests: redTests}, redFiles, redArtifact.ID), 0))
+	requireWorkflowSuccess(t, engine.Store.Put(ctx, "tdd_checks", "b-review-green", reviewTDDCheck(task, "green", true, reviewTDDIdentity{snapshot: greenSnapshot, production: greenProduction, tests: greenTests}, greenFiles, greenArtifact.ID), 0))
 
 	evidence, err := step.reviewExecutionEvidence()
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	prompt, err := agents.Render("review.md", map[string]string{
 		"Plan":         jsonText(plan),
 		"Requirements": jsonText(plan.Requirements),
@@ -138,9 +114,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		"Evidence":     evidence,
 		"Source":       jsonText(task.Issue),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	prompt += step.reviewCheckInstructions()
 	pack, err := (ctxengine.Index{Commit: "candidate-head", Files: map[string]ctxengine.Entry{}}).Pack(ctxengine.PackRequest{
 		Required:   prompt,
@@ -165,9 +139,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		}
 	}
 	storedAfter, err := engine.Store.Get(ctx, "verification", task.VerificationID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if string(storedAfter.Data) != string(storedBefore.Data) {
 		t.Fatal("review prompt projection mutated the stored verification report")
 	}
@@ -176,9 +148,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		content []byte
 	}{{redArtifact.ID, redContentBefore}, {greenArtifact.ID, greenContentBefore}} {
 		_, contentAfter, err := engine.Store.Artifact(ctx, artifact.id)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, err)
 		if !bytes.Equal(contentAfter, artifact.content) {
 			t.Fatalf("host TDD artifact %s changed in storage", artifact.id)
 		}

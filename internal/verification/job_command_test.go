@@ -12,17 +12,11 @@ func TestResolveJobCommand(t *testing.T) {
 	stage := t.TempDir()
 	bin := filepath.Join(stage, "bin")
 	ambient := t.TempDir()
-	if err := os.Mkdir(bin, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireVerificationSuccess(t, os.Mkdir(bin, 0700))
 	for _, path := range []string{filepath.Join(bin, "tool"), filepath.Join(stage, "tool"), filepath.Join(ambient, "tool")} {
-		if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
+		requireVerificationSuccess(t, os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0700))
 	}
-	if err := os.WriteFile(filepath.Join(stage, "not-executable"), []byte("data"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireVerificationSuccess(t, os.WriteFile(filepath.Join(stage, "not-executable"), []byte("data"), 0600))
 	t.Setenv("PATH", ambient)
 	for _, tc := range []struct {
 		name, executable, path, want string
@@ -55,9 +49,7 @@ func TestResolveJobCommand(t *testing.T) {
 				}
 				return
 			}
-			if err != nil {
-				t.Fatal(err)
-			}
+			requireVerificationSuccess(t, err)
 			want := []string{tc.want, "--flag=value with spaces", "", "$(touch forbidden)", "*", "a\nb"}
 			if !slices.Equal(got, want) {
 				t.Fatalf("resolved command = %q, want %q", got, want)

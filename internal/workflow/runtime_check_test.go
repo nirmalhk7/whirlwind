@@ -75,17 +75,11 @@ func TestOwnedCheckLiveOpenShellKeepsSourceReadOnlyAndGrantsOnlyDeclaredOutput(t
 	}
 	e, task, cwd := testEngine(t)
 	project, err := e.Project(context.Background(), task.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	source := filepath.Join(cwd, "source.txt")
-	if err := os.WriteFile(source, []byte("original"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, os.WriteFile(source, []byte("original"), 0600))
 	profile, err := execution.ForPolicy(cwd, true, project.PolicyHash, project.Policy.Sandbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	checks := []struct {
 		check model.Check
 		pass  bool

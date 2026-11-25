@@ -124,15 +124,11 @@ func modelClaimingReconsideration(t *testing.T, previous model.Direction) ([]mod
 func distinctUnselectedDirections(t *testing.T, ctx context.Context, prepared noveltyTestFixture, previous model.Direction) map[string]bool {
 	t.Helper()
 	rows, err := prepared.engine.Store.List(ctx, "directions")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	seen := map[string]bool{}
 	for _, row := range rows {
 		direction, err := store.Decode[model.Direction](row)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, err)
 		if direction.ProjectID != prepared.project.ID {
 			continue
 		}

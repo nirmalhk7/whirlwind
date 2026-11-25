@@ -27,16 +27,12 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 	}
 	root := t.TempDir()
 	worktree := filepath.Join(root, "worktree")
-	if err := os.Mkdir(worktree, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.Mkdir(worktree, 0700))
 	if output, err := exec.Command("git", "init", "--quiet", worktree).CombinedOutput(); err != nil {
 		t.Fatalf("initialize disposable live-probe worktree: %v: %s", err, output)
 	}
 	worktree, err := filepath.EvalSymlinks(worktree)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	writable := liveProfile(t, worktree, false, 2*time.Minute)
 	runLiveCommand(t, writable, []string{liveIsolationFixtureShell, "-c", "touch accepted.txt; test -f accepted.txt; printf writable-ok"})
 	if _, err := os.Stat(filepath.Join(worktree, "accepted.txt")); err != nil {
@@ -79,9 +75,7 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 	}
 
 	auth := filepath.Join(root, "synthetic-auth.json")
-	if err := os.WriteFile(auth, []byte(`{"synthetic":true}`), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.WriteFile(auth, []byte(`{"synthetic":true}`), 0600))
 	credentialProfile := liveProfile(t, worktree, true, 2*time.Minute)
 	credentialProfile.NativeFiles = []NativeFile{{Source: auth, Home: "CODEX_HOME", Path: "auth.json"}}
 	homeRoot := "/tmp/ww-" + credentialProfile.ExecutionID + "/home"

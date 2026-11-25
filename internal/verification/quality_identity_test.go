@@ -263,23 +263,15 @@ func TestCopyApprovedQualityTreeVerifiesSourceAndCopy(t *testing.T) {
 	})
 	writeApprovedQualityTreeFixture(t, source)
 	expected, err := hashQualityTree(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := copyApprovedQualityTree(context.Background(), source, dest, expected); err != nil {
-		t.Fatal(err)
-	}
+	requireVerificationSuccess(t, err)
+	requireVerificationSuccess(t, copyApprovedQualityTree(context.Background(), source, dest, expected))
 	got, err := hashQualityTree(dest)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireVerificationSuccess(t, err)
 	if got != expected {
 		t.Fatal("approved scanner runtime copy changed identity")
 	}
 	mode, err := os.Stat(filepath.Join(dest, "trivy", qualityFixtureScannerPackage, "scanner"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireVerificationSuccess(t, err)
 	if mode.Mode().Perm()&0222 != 0 {
 		t.Fatal("copied approved scanner executable remains writable")
 	}
@@ -294,23 +286,15 @@ func TestCopyApprovedQualityTreeVerifiesSourceAndCopy(t *testing.T) {
 	if err := copyApprovedQualityTree(canceled, source, filepath.Join(root, "canceled", "tools"), expected); err == nil {
 		t.Fatal("canceled runtime copy proceeded")
 	}
-	if err := os.WriteFile(filepath.Join(source, "trivy", qualityFixtureScannerPackage, "scanner"), []byte("replacement"), 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireVerificationSuccess(t, os.WriteFile(filepath.Join(source, "trivy", qualityFixtureScannerPackage, "scanner"), []byte("replacement"), 0700))
 	if err := copyApprovedQualityTree(context.Background(), source, filepath.Join(root, "other", "tools"), expected); err == nil {
 		t.Fatal("changed approved source runtime was copied")
 	}
 	unsafeRoot := filepath.Join(root, "unsafe")
-	if err := os.MkdirAll(unsafeRoot, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireVerificationSuccess(t, os.MkdirAll(unsafeRoot, 0700))
 	outside := filepath.Join(root, "outside")
-	if err := os.WriteFile(outside, []byte("outside"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(unsafeRoot, "escape")); err != nil {
-		t.Fatal(err)
-	}
+	requireVerificationSuccess(t, os.WriteFile(outside, []byte("outside"), 0600))
+	requireVerificationSuccess(t, os.Symlink(outside, filepath.Join(unsafeRoot, "escape")))
 	if _, err := hashQualityTree(unsafeRoot); err == nil {
 		t.Fatal("runtime tree with external symlink was accepted")
 	}

@@ -230,16 +230,12 @@ func (f *agenticWorkflowFixture) verifyExistingTestDebtBlocksAcceptance() {
 		t.Fatalf("failed configured test did not block review and local finalization: %+v", blocked)
 	}
 	record, err := engine.Store.Get(ctx, "verification", blocked.VerificationID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	var evidence struct {
 		Stage  string              `json:"stage"`
 		Report verification.Report `json:"report"`
 	}
-	if err := json.Unmarshal(record.Data, &evidence); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, json.Unmarshal(record.Data, &evidence))
 	if evidence.Stage != "failed" || evidence.Report.Passed {
 		t.Fatalf("configured test failure was not retained in verification evidence: %+v", evidence)
 	}
@@ -259,14 +255,10 @@ func (f *agenticWorkflowFixture) verifyExistingTestDebtBlocksAcceptance() {
 		t.Fatalf("full failed-test evidence was not retained: err=%v output=%q", err, rawOutput)
 	}
 	reviews, err := engine.Store.List(ctx, "reviews")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	for _, saved := range reviews {
 		review, err := store.Decode[model.Review](saved)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, err)
 		if review.Provenance != nil && review.Provenance.Task == f.task.ID {
 			t.Fatalf("reviewer ran despite failed configured test: %+v", review)
 		}

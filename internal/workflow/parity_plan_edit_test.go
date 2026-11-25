@@ -61,9 +61,7 @@ func TestParityActiveApprovedPlanWaitsBeforeSavingChanges(t *testing.T) {
 			e, task, view := approvePlanEditFixture(t, ctx)
 			approved, version := localStoredTask(t, e, task.ID)
 			approved.Stage = stage
-			if err := e.Store.Put(ctx, "execution_plans", task.ID, approved, version); err != nil {
-				t.Fatal(err)
-			}
+			requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, approved, version))
 			active, version := localStoredTask(t, e, task.ID)
 			stopped := false
 			e.running[task.ID] = func() { stopped = true }

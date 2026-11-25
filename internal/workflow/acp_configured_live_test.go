@@ -150,9 +150,7 @@ func qualifyLiveACP(t *testing.T, settings liveACPSettings, id string) {
 	// The supervisor reuses private runtime state across compatible turns. A
 	// fresh standalone sandbox cannot load the first turn's saved session.
 	profile, err := execution.ForProvider(input.CWD, input.ReadOnly, "", p.Sandbox, p.Command)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	profile.RuntimeDir = t.TempDir()
 	input.Execution = &profile
 	marker := "WHIRLWIND_" + liveNonce(t)
