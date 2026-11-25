@@ -59,7 +59,6 @@ func assertPolicyConfirmationReceipt(t *testing.T, f policyConfirmationFixture) 
 	if current.Status != "draft" || current.QualityIdentity != nil || current.PolicyHash != f.committedHash {
 		t.Fatalf("changed confirmed policy kept stale qualification ready: %+v", current)
 	}
-
 }
 
 func assertFreshProjectQualification(t *testing.T, f policyConfirmationFixture, superseded bool) {
@@ -94,7 +93,6 @@ func assertFreshProjectQualification(t *testing.T, f policyConfirmationFixture, 
 
 func assertSupersededSetupCannotPublish(t *testing.T, f policyConfirmationFixture, obsolete model.Operation) {
 	t.Helper()
-	obsolete := operations[requalificationFixtureObsoleteSetup]
 	if obsolete.Stage != "cancelled" || obsolete.FinishedAt == "" || obsolete.Error == "" || obsolete.ConfigurationHash != "old-config" {
 		t.Fatalf("superseded setup lost its history or remained eligible: %+v", obsolete)
 	}

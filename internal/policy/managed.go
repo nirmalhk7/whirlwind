@@ -78,7 +78,7 @@ func CheckManagedPolicyLocation(state, checkout string) error {
 	}
 	relative, err := filepath.Rel(repository, root)
 	if err != nil || filepath.IsLocal(relative) {
-		return errors.New("Whirlwind state must be outside the project checkout")
+		return errors.New("supervisor state must be outside the project checkout")
 	}
 	return nil
 }

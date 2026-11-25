@@ -296,7 +296,7 @@ func (d *OfflineDocker) read(ctx context.Context, args ...string) ([]byte, error
 	var out, diagnostics boundedDockerOutput
 	cmd.Stdout, cmd.Stderr = &out, &diagnostics
 	if err := process.Run(cmd); err != nil {
-		return nil, fmt.Errorf("Docker %s command failed: %w: %s", args[0], err, strings.TrimSpace(diagnostics.String()[:min(2048, diagnostics.Len())]))
+		return nil, fmt.Errorf("docker %s command failed: %w: %s", args[0], err, strings.TrimSpace(diagnostics.String()[:min(2048, diagnostics.Len())]))
 	}
 	return out.Bytes(), nil
 }
@@ -305,7 +305,7 @@ type boundedDockerOutput struct{ bytes.Buffer }
 
 func (out *boundedDockerOutput) Write(p []byte) (int, error) {
 	if out.Len()+len(p) > 1<<20 {
-		return 0, errors.New("Docker metadata exceeds 1 MiB")
+		return 0, errors.New("container metadata exceeds 1 MiB")
 	}
 	return out.Buffer.Write(p)
 }
