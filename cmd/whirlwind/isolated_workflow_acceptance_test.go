@@ -21,6 +21,13 @@ import (
 	"whirlwind/internal/workflow"
 )
 
+const (
+	isolatedResultFile     = "result.txt"
+	isolatedRegressionFile = "regression_test.go"
+	isolatedNoSign         = "--no-gpg-sign"
+	isolatedRevParse       = "rev-parse"
+)
+
 // TestIsolatedWorkflowAcceptance traces one plan in a repo with no Whirlwind
 // files or remote. Run from the Whirlwind root with the preloaded Go digest:
 //
@@ -30,9 +37,8 @@ import (
 //
 // The fixture owns its Git repositories, private settings, and database.
 // The supervisor handles decisions, restarts, and offline checks. The fixture
-// supplies model output and the Coding-to-Review handoff. If the settings-backed
-// plan approval fails, the same approval logic is exercised in the stopped
-// fixture's database, separately from the shipped approval result.
+// supplies model output and the Coding-to-Review handoff. Plan approval
+// must succeed through the shipped control socket.
 // WHIRLWIND_TEST_SEEDED_NONO selects an executable sentinel for the in-process
 // Reviewer fixture. That phase supplies deterministic output without native ACP.
 func TestIsolatedWorkflowAcceptance(t *testing.T) {
@@ -40,6 +46,29 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	if image == "" || runtime.GOOS != "linux" {
 		t.Skip("requires Linux and a preloaded immutable Go image for rootless Docker")
 	}
+	fixture := newIsolatedWorkflowFixture(t)
+	fixture.qualifyProject(image)
+	fixture.requireNativeIdeationRefusal()
+	task, version := fixture.approvePlan()
+	red := fixture.verifyRedCandidate(task, version)
+	green := fixture.verifyRepairedCandidate(task, red)
+	fixture.requireUnchangedSourceAndReview(task.ID, green)
+}
+
+type isolatedWorkflowFixture struct {
+	t                                               *testing.T
+	root, data, source, candidate, base, sourceRefs string
+	write                                           func(string, string)
+	writeSettings                                   func(bool)
+	launcher                                        func(...string) string
+	git                                             func(string, ...string) string
+	call                                            func(control.Request) control.Response
+	db                                              *store.Store
+	project                                         model.Project
+	projectVersion                                  int
+}
+
+func newIsolatedWorkflowFixture(t *testing.T) *isolatedWorkflowFixture {
 	ctx := t.Context()
 	root := t.TempDir()
 	repoRoot, err := filepath.Abs("../..")
@@ -112,21 +141,39 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	}
 	git(source, "init", "--template=", "-b", "acceptance-source")
 	write(filepath.Join(source, "go.mod"), "module example.test/acceptance\ngo 1.23.0\n")
-	write(filepath.Join(source, "result.txt"), "broken\n")
+	write(filepath.Join(source, isolatedResultFile), "broken\n")
 	write(filepath.Join(source, "smoke_test.go"), "package acceptance\nimport (\"os\"; \"testing\")\nfunc TestResultExists(t *testing.T) { if _, err := os.Stat(\"result.txt\"); err != nil { t.Fatal(err) } }\n")
 	git(source, "add", "--all")
-	git(source, "commit", "--no-gpg-sign", "-m", "Acceptance baseline")
-	base := git(source, "rev-parse", "HEAD")
+	git(source, "commit", isolatedNoSign, "-m", "Acceptance baseline")
+	base := git(source, isolatedRevParse, "HEAD")
 	sourceRefs := git(source, "show-ref")
 	git(root, "clone", "--no-hardlinks", "--", source, candidate)
 	git(candidate, "remote", "remove", "origin")
 	git(candidate, "checkout", "--detach", base)
-	t.Logf("application=%s fixture_base=%s fixture_tree=%s", git(repoRoot, "rev-parse", "HEAD"), base, git(source, "rev-parse", "HEAD^{tree}"))
+	t.Logf("application=%s fixture_base=%s fixture_tree=%s", git(repoRoot, isolatedRevParse, "HEAD"), base, git(source, isolatedRevParse, "HEAD^{tree}"))
 
 	launcher("start")
 	t.Cleanup(func() { launcher("stop") })
 	db := openSeededTerminalStore(t, data)
-	engine := workflow.New(db, nil, data)
+	client := control.NewClient(control.SocketPath(data))
+	call := func(request control.Request) control.Response {
+		t.Helper()
+		request.RequestID, request.IdempotencyKey = request.Operation, request.Operation
+		response, err := client.Call(ctx, request)
+		if err != nil {
+			t.Fatalf("%s: %v", request.Operation, err)
+		}
+		return response
+	}
+
+	return &isolatedWorkflowFixture{t: t, root: root, data: data, source: source, candidate: candidate, base: base,
+		sourceRefs: sourceRefs, write: write, writeSettings: writeSettings, launcher: launcher, git: git, call: call, db: db}
+}
+
+func (f *isolatedWorkflowFixture) qualifyProject(image string) {
+	t, data, source, db := f.t, f.data, f.source, f.db
+	ctx := t.Context()
+	var err error
 	var projectRecord model.Record
 	var project model.Project
 	waitOfflineFixture(t, data, "isolated source registration", func() bool {
@@ -140,14 +187,14 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 		// Wait for that write before previewing the external policy version.
 		return err == nil && project.Path == source && project.Status == "error"
 	})
-	policyPath := filepath.Join(root, "approved-checks.yaml")
-	write(policyPath, "offline_docker_image: "+image+"\nallowed_paths: [result.txt, regression_test.go]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks:\n  - name: regression\n    command: [go, test, -mod=readonly, -count=1, -json, './...']\n    report_format: go-test-json\n    timeout_seconds: 90\n")
-	preview := launcher("policy", "preview", project.ID, policyPath)
+	policyPath := filepath.Join(f.root, "approved-checks.yaml")
+	f.write(policyPath, "offline_docker_image: "+image+"\nallowed_paths: [result.txt, regression_test.go]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks:\n  - name: regression\n    command: [go, test, -mod=readonly, -count=1, -json, './...']\n    report_format: go-test-json\n    timeout_seconds: 90\n")
+	preview := f.launcher("policy", "preview", project.ID, policyPath)
 	fields := regexp.MustCompile(`Version (\d+)\nSHA256 ([a-f0-9]{64})`).FindStringSubmatch(preview)
 	if len(fields) != 3 {
 		t.Fatalf("policy preview: %s", preview)
 	}
-	launcher("policy", "approve", project.ID, policyPath, fields[1], fields[2])
+	f.launcher("policy", "approve", project.ID, policyPath, fields[1], fields[2])
 	waitOfflineFixture(t, data, "managed setup qualification", func() bool {
 		projectRecord, err = db.Get(ctx, "projects", project.ID)
 		if err != nil {
@@ -155,14 +202,7 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 		}
 		project, err = store.Decode[model.Project](projectRecord)
 		if err == nil && project.Status == "error" && project.ManagedPolicy {
-			rows, listErr := db.List(ctx, "operations")
-			mustSeedTerminal(t, listErr)
-			for _, row := range rows {
-				op, decodeErr := store.Decode[model.Operation](row)
-				if decodeErr == nil && op.Kind == "project_setup" && op.Subject == project.ID && op.Stage == "failed" && !strings.Contains(op.Error, "project policy approval required") {
-					t.Fatalf("managed setup failed: %s", op.Error)
-				}
-			}
+			f.requireNoManagedSetupFailure(project.ID)
 		}
 		return err == nil && project.Status == "approved" && project.OfflineQualification != nil
 	})
@@ -171,17 +211,27 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	}
 	t.Logf("live supervisor setup project=%s policy=%s job=%s image=%s", project.ID, project.PolicyHash, project.OfflineQualification.JobID, project.OfflineQualification.ImageID)
 
-	client := control.NewClient(control.SocketPath(data))
-	call := func(request control.Request) control.Response {
-		t.Helper()
-		request.RequestID, request.IdempotencyKey = request.Operation, request.Operation
-		response, err := client.Call(ctx, request)
-		if err != nil {
-			t.Fatalf("%s: %v", request.Operation, err)
+	f.project, f.projectVersion = project, projectRecord.Version
+}
+
+func (f *isolatedWorkflowFixture) requireNoManagedSetupFailure(projectID string) {
+	t := f.t
+	t.Helper()
+	rows, err := f.db.List(t.Context(), "operations")
+	mustSeedTerminal(t, err)
+	for _, row := range rows {
+		op, err := store.Decode[model.Operation](row)
+		if err == nil && op.Kind == "project_setup" && op.Subject == projectID && op.Stage == "failed" && !strings.Contains(op.Error, "project policy approval required") {
+			t.Fatalf("managed setup failed: %s", op.Error)
 		}
-		return response
 	}
-	started := call(control.Request{Operation: "ideation.start", ProjectID: project.ID, ExpectedVersion: projectRecord.Version})
+}
+
+func (f *isolatedWorkflowFixture) requireNativeIdeationRefusal() {
+	t, data, project, db := f.t, f.data, f.project, f.db
+	ctx := t.Context()
+	var err error
+	started := f.call(control.Request{Operation: "ideation.start", ProjectID: project.ID, ExpectedVersion: f.projectVersion})
 	result, ok := started.Result.(map[string]any)
 	if !ok || result["operation_id"] == nil {
 		t.Fatalf("expected a queued ideation identity: %+v", started)
@@ -200,7 +250,7 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 		t.Fatalf("unexpected first Ideation blocker: %s", blocked.Error)
 	}
 	t.Logf("real supervisor Ideation run=%s stage=%s with credential-free fixture settings: %s", ideationID, blocked.Stage, blocked.Error)
-	profile, err := execution.ForPolicy(source, true, project.PolicyHash, project.Policy.Sandbox)
+	profile, err := execution.ForPolicy(f.source, true, project.PolicyHash, project.Policy.Sandbox)
 	mustSeedTerminal(t, err)
 	command, platformErr := execution.Command(ctx, []string{"codex-acp"}, profile)
 	if command != nil || !errors.Is(platformErr, execution.ErrSandbox) || !strings.Contains(platformErr.Error(), "execution requires macOS") {
@@ -208,17 +258,24 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	}
 	t.Logf("native role launch gate: %s", platformErr)
 
+}
+
+func (f *isolatedWorkflowFixture) approvePlan() (model.ExecutionPlan, int) {
+	t, db, project := f.t, f.db, f.project
+	ctx := t.Context()
+	launcher, call := f.launcher, f.call
+	engine := workflow.New(db, nil, f.data)
 	// Preserve the failed real operation. Approve a separate seeded idea via
 	// the actual socket with worker dispatch held while we publish its plan.
 	launcher("stop")
-	writeSettings(true)
+	f.writeSettings(true)
 	launcher("start")
 	seededRun, ideaID := store.ID(), store.ID()
 	now := time.Now().UTC()
 	mustSeedTerminal(t, db.Put(ctx, "operations", seededRun, model.Operation{Kind: "ideation", Subject: project.ID,
 		Stage: "complete", StartedAt: now.Format(time.RFC3339Nano), FinishedAt: now.Format(time.RFC3339Nano)}, 0))
 	idea := model.Idea{ID: ideaID, ProjectID: project.ID, RunID: seededRun, Title: "Return readiness", Direction: "harden",
-		What: "Correct readiness", Why: "The result currently reports broken", Where: "result.txt", HowItHelps: "Reports readiness correctly",
+		What: "Correct readiness", Why: "The result currently reports broken", Where: isolatedResultFile, HowItHelps: "Reports readiness correctly",
 		NoveltyMethod: "not_checked", NoveltyOutcome: "deferred", DecisionStatus: "draft"}
 	mustSeedTerminal(t, db.Put(ctx, "ideas", ideaID, idea, 0))
 	rejectedIdea := idea
@@ -234,7 +291,7 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 		t.Fatalf("declined idea is active or has a plan: %+v", rejectedIdea)
 	}
 	call(control.Request{Operation: "idea.approve", ProjectID: project.ID, ResourceID: ideaID, ExpectedVersion: 1})
-	task := seedIsolatedPlanner(t, engine, project, idea, base, candidate)
+	task := seedIsolatedPlanner(t, engine, project, idea, f.base, f.candidate)
 	plannerID := task.LastAttemptID
 	draft, err := db.Get(ctx, "execution_plans", task.ID)
 	mustSeedTerminal(t, err)
@@ -269,13 +326,21 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	}
 	t.Logf("seeded Ideation run=%s idea=%s Planner=%s; idea approved by socket; plan=%s version=%d hash=%s via supervisor socket", seededRun, ideaID, plannerID, task.ID, task.PlanVersion, task.PlanDocument.ApprovedHash)
 
-	write(filepath.Join(candidate, "regression_test.go"), "package acceptance\nimport (\"os\"; \"strings\"; \"testing\")\nfunc TestResultReady(t *testing.T) { got, err := os.ReadFile(\"result.txt\"); if err != nil || !strings.HasPrefix(string(got), \"ready\\n\") { t.Fatal(\"result is not ready\") } }\n")
-	git(candidate, "add", "regression_test.go")
-	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed test-first red candidate")
-	red := git(candidate, "rev-parse", "HEAD")
+	return task, approvedRecord.Version
+}
+
+func (f *isolatedWorkflowFixture) verifyRedCandidate(task model.ExecutionPlan, version int) verification.JobReport {
+	t, db, data, candidate, project := f.t, f.db, f.data, f.candidate, f.project
+	ctx := t.Context()
+	var err error
+	write, git, launcher := f.write, f.git, f.launcher
+	write(filepath.Join(candidate, isolatedRegressionFile), "package acceptance\nimport (\"os\"; \"strings\"; \"testing\")\nfunc TestResultReady(t *testing.T) { got, err := os.ReadFile(\"result.txt\"); if err != nil || !strings.HasPrefix(string(got), \"ready\\n\") { t.Fatal(\"result is not ready\") } }\n")
+	git(candidate, "add", isolatedRegressionFile)
+	git(candidate, "commit", isolatedNoSign, "-m", "Seed test-first red candidate")
+	red := git(candidate, isolatedRevParse, "HEAD")
 	task.Stage = "review"
-	mustSeedTerminal(t, db.Put(ctx, "execution_plans", task.ID, task, approvedRecord.Version))
-	writeSettings(false)
+	mustSeedTerminal(t, db.Put(ctx, "execution_plans", task.ID, task, version))
+	f.writeSettings(false)
 	launcher("start")
 	redEvidence := awaitManagedOfflineResult(t, db, data, task.ID, red, "failed", project)
 	if redEvidence.Passed || redEvidence.Results[0].Status != "fail" || !strings.Contains(redEvidence.Results[0].Output, "result is not ready") {
@@ -290,10 +355,19 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	t.Logf("seeded Coding commit=%s; live red tree=%s manifest=%s passed=%t next=repair", red, redEvidence.CandidateTree, redEvidence.ManifestHash, redEvidence.Passed)
 	launcher("stop")
 
-	write(filepath.Join(candidate, "result.txt"), "ready\n")
-	git(candidate, "add", "result.txt")
-	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed implementation repair")
-	green := git(candidate, "rev-parse", "HEAD")
+	return redEvidence
+}
+
+func (f *isolatedWorkflowFixture) verifyRepairedCandidate(task model.ExecutionPlan, redEvidence verification.JobReport) string {
+	t, db, data, candidate, project := f.t, f.db, f.data, f.candidate, f.project
+	ctx := t.Context()
+	git, write, launcher := f.git, f.write, f.launcher
+	red := redEvidence.CandidateCommit
+	var repaired model.ExecutionPlan
+	write(filepath.Join(candidate, isolatedResultFile), "ready\n")
+	git(candidate, "add", isolatedResultFile)
+	git(candidate, "commit", isolatedNoSign, "-m", "Seed implementation repair")
+	green := git(candidate, isolatedRevParse, "HEAD")
 	repairedRecord, err := db.Get(ctx, "execution_plans", task.ID)
 	mustSeedTerminal(t, err)
 	repaired, err = store.Decode[model.ExecutionPlan](repairedRecord)
@@ -305,7 +379,7 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	mustSeedTerminal(t, db.Put(ctx, "execution_plans", task.ID, repaired, repairedRecord.Version))
 	launcher("start")
 	greenEvidence := awaitManagedOfflineResult(t, db, data, task.ID, green, "complete", project)
-	if !greenEvidence.Passed || greenEvidence.CandidateTree != git(candidate, "rev-parse", "HEAD^{tree}") {
+	if !greenEvidence.Passed || greenEvidence.CandidateTree != git(candidate, isolatedRevParse, "HEAD^{tree}") {
 		t.Fatalf("green report does not cover the repaired tree: %+v", greenEvidence)
 	}
 	var fenced model.ExecutionPlan
@@ -327,20 +401,27 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 		t.Logf("retained green report refused stale candidate=%s tree=%s: %s", red, staleManifest.CandidateTree, err)
 	}
 	launcher("stop")
-	if git(source, "rev-parse", "HEAD") != base || git(source, "show-ref") != sourceRefs || git(source, "status", "--porcelain") != "" || git(source, "remote") != "" {
+	t.Logf("seeded repair commit=%s; live green tree=%s verification=%s manifest=%s; managed review blocked: %s", green, greenEvidence.CandidateTree, manifest.JobID, greenEvidence.ManifestHash, fenced.Error)
+
+	return green
+}
+
+func (f *isolatedWorkflowFixture) requireUnchangedSourceAndReview(planID, green string) {
+	t, db, data, project := f.t, f.db, f.data, f.project
+	git, source, candidate := f.git, f.source, f.candidate
+	if git(source, isolatedRevParse, "HEAD") != f.base || git(source, "show-ref") != f.sourceRefs || git(source, "status", "--porcelain") != "" || git(source, "remote") != "" {
 		t.Fatal("acceptance altered the original source checkout")
 	}
-	t.Logf("seeded repair commit=%s; live green tree=%s verification=%s manifest=%s; managed review blocked: %s", green, greenEvidence.CandidateTree, manifest.JobID, greenEvidence.ManifestHash, fenced.Error)
 	if nono := os.Getenv("WHIRLWIND_TEST_SEEDED_NONO"); nono != "" {
 		if git(candidate, "show", green+":result.txt") != "ready" {
 			t.Fatal("checks-green candidate did not omit the separately approved review marker")
 		}
 		t.Log("checks-green candidate lacks the approved review marker; continuing with deterministic Reviewer output")
-		exerciseSeededOfflineHandoffs(t, db, data, project, task.ID, candidate, green, nono, git)
+		exerciseSeededOfflineHandoffs(t, db, data, project, planID, candidate, green, nono, git)
 		if git(candidate, "show", "HEAD:result.txt") != "ready\nreview-correction" {
 			t.Fatal("accepted repair did not restore the approved review marker")
 		}
-		assertIsolatedReviewIdentity(t, openSeededTerminalStore(t, data), task.ID)
+		assertIsolatedReviewIdentity(t, openSeededTerminalStore(t, data), planID)
 	}
 }
 
@@ -390,7 +471,7 @@ func seedIsolatedPlanner(t *testing.T, engine *workflow.Engine, project model.Pr
 	ctx, db := t.Context(), engine.Store
 	now := time.Now().UTC()
 	specification := seededTerminalSpecification()
-	specification.Where = []string{"result.txt", "regression_test.go"}
+	specification.Where = []string{isolatedResultFile, isolatedRegressionFile}
 	specification.Units[0].AllowedPaths = specification.Where
 	specification.Requirements[0].Outcome = "result.txt contains ready followed by the review-correction marker on the next line."
 	specification.Requirements[0].EvidenceMethod = "Inspect both result.txt lines. TestResultReady covers the readiness line."
