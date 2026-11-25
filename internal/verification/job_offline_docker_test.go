@@ -138,31 +138,13 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 				{Name: "isolation", Command: []string{"sh", "-eu", "-c", offlineIsolationControl, "control", canaryPath}, TimeoutSeconds: 12},
 			}}
 	}
-	run := func(m JobManifest, expectedStatus string) (JobReport, Result) {
-		t.Helper()
-		report, err := RunLocalJob(ctx, verifier, m, nil)
-		requireVerificationSuccess(t, err)
-		check := report.Results[0]
-		if check.Status != expectedStatus || !check.Runtime.CleanupVerified || check.Runtime.Kind != "docker-offline" ||
-			report.CandidateCommit != m.CandidateCommit || report.CandidateTree != m.CandidateTree {
-			t.Fatalf("incorrect command or candidate evidence: %+v", check)
-		}
-		if report.Results[1].Status != "pass" || !strings.Contains(report.Results[1].Output, "offline controls passed") {
-			t.Fatalf("physical isolation controls failed: %+v", report.Results[1])
-		}
-		value := check.Result
-		value.Output, _, err = ReadJobStreams(m.Root, 0)
-		requireVerificationSuccess(t, err)
-		t.Logf("%s commit=%s tree=%s status=%s container=%s cleaned=%t", m.JobID, m.CandidateCommit, m.CandidateTree, check.Status, check.Runtime.SandboxID, check.Runtime.CleanupVerified)
-		return report, value
-	}
-	_, baseResult := run(manifest("baseline", base, baseTree), "pass")
-	redReport, redResult := run(manifest("regression-red", red, redTree), "fail")
+	_, baseResult := assertOfflineDockerJob(t, ctx, verifier, manifest("baseline", base, baseTree), "pass")
+	redReport, redResult := assertOfflineDockerJob(t, ctx, verifier, manifest("regression-red", red, redTree), "fail")
 	if redReport.Passed || !IsStructuredTestFailure(redResult) {
 		t.Fatal("failed assertion was not detected from the actual verifier output")
 	}
 	greenManifest := manifest("regression-green", green, greenTree)
-	greenReport, greenResult := run(greenManifest, "pass")
+	greenReport, greenResult := assertOfflineDockerJob(t, ctx, verifier, greenManifest, "pass")
 	requireVerificationSuccess(t, RegressionEvidenceError(baseResult, redResult, greenResult))
 	stale := greenManifest
 	stale.CandidateCommit = red
@@ -187,6 +169,25 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 	if string(canary) != offlineFixtureCanaryText {
 		t.Fatal("outside canary changed")
 	}
+}
+
+func assertOfflineDockerJob(t *testing.T, ctx context.Context, verifier string, m JobManifest, expectedStatus string) (JobReport, Result) {
+	t.Helper()
+	report, err := RunLocalJob(ctx, verifier, m, nil)
+	requireVerificationSuccess(t, err)
+	check := report.Results[0]
+	if check.Status != expectedStatus || !check.Runtime.CleanupVerified || check.Runtime.Kind != "docker-offline" ||
+		report.CandidateCommit != m.CandidateCommit || report.CandidateTree != m.CandidateTree {
+		t.Fatalf("incorrect command or candidate evidence: %+v", check)
+	}
+	if report.Results[1].Status != "pass" || !strings.Contains(report.Results[1].Output, "offline controls passed") {
+		t.Fatalf("physical isolation controls failed: %+v", report.Results[1])
+	}
+	value := check.Result
+	value.Output, _, err = ReadJobStreams(m.Root, 0)
+	requireVerificationSuccess(t, err)
+	t.Logf("%s commit=%s tree=%s status=%s container=%s cleaned=%t", m.JobID, m.CandidateCommit, m.CandidateTree, check.Status, check.Runtime.SandboxID, check.Runtime.CleanupVerified)
+	return report, value
 }
 
 func assertOfflineJobReplay(t *testing.T, ctx context.Context, verifier string, greenManifest JobManifest, greenReport JobReport) {
