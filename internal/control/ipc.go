@@ -18,6 +18,11 @@ import (
 )
 
 const (
+	RoleQueuePushOperation = "queue.push"
+	RoleQueuePopOperation  = "queue.pop"
+)
+
+const (
 	maxIPCMessage = 1 << 20
 	maxDiffCursor = 64 << 20
 	ipcTimeout    = 15 * time.Second
@@ -76,7 +81,7 @@ var allowedOperations = map[string]bool{
 	"question.answer": true, "permission.decide": true,
 	"plan.pause": true, "plan.resume": true,
 	"finalization.inspect": true, "finalization.approve": true,
-	"queue.push": true, "queue.pop": true,
+	RoleQueuePushOperation: true, RoleQueuePopOperation: true,
 }
 
 // Listen creates a private local control socket. It refuses to repair a

@@ -202,10 +202,10 @@ func checkRoleQueueThroughLauncher(t *testing.T, db *store.Store, data string, t
 	mustSeedTerminal(t, err)
 	client := control.NewClient(control.SocketPath(data))
 	for _, tc := range []struct{ name, operation, queue, want string }{
-		{"push", "queue.push", "reviewer_tasks", "queued"},
-		{"push", "queue.push", "reviewer_tasks", "queued"},
-		{"pop-stopped", "queue.pop", "reviewer_tasks", "waiting"},
-		{"push-wrong-role", "queue.push", "finalizer_tasks", ""},
+		{"push", control.RoleQueuePushOperation, "reviewer_tasks", "queued"},
+		{"push", control.RoleQueuePushOperation, "reviewer_tasks", "queued"},
+		{"pop-stopped", control.RoleQueuePopOperation, "reviewer_tasks", "waiting"},
+		{"push-wrong-role", control.RoleQueuePushOperation, "finalizer_tasks", ""},
 	} {
 		payload, err := json.Marshal(map[string]string{"queue": tc.queue})
 		mustSeedTerminal(t, err)

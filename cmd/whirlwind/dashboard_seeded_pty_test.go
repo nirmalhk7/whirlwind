@@ -21,6 +21,7 @@ import (
 )
 
 const (
+	fixtureStartedAt     = "2026-01-01T10:00:00Z"
 	fixtureProject       = "terminal-project"
 	fixtureDraftIdea     = "draft-idea"
 	fixtureCancelIdea    = "cancel-idea"
@@ -67,11 +68,11 @@ func assertTerminalQueueCommands(t *testing.T, s *store.Store, data string) {
 		version                 int
 		wantError               bool
 	}{
-		{"push-current", "queue.push", fixtureProject, 3, false},
-		{"push-current", "queue.push", fixtureProject, 3, false},
-		{"push-stale", "queue.push", fixtureProject, 2, true},
-		{"pop-stale", "queue.pop", fixtureProject, 2, true},
-		{"push-scope", "queue.push", "other-project", 3, true},
+		{"push-current", control.RoleQueuePushOperation, fixtureProject, 3, false},
+		{"push-current", control.RoleQueuePushOperation, fixtureProject, 3, false},
+		{"push-stale", control.RoleQueuePushOperation, fixtureProject, 2, true},
+		{"pop-stale", control.RoleQueuePopOperation, fixtureProject, 2, true},
+		{"push-scope", control.RoleQueuePushOperation, "other-project", 3, true},
 	} {
 		response, err := client.Call(t.Context(), control.Request{RequestID: tc.key, IdempotencyKey: tc.key, Operation: tc.operation,
 			ProjectID: tc.project, PlanID: fixtureDraftPlan, ExpectedVersion: tc.version, Payload: json.RawMessage(`{"queue":"coding_tasks"}`)})
@@ -190,7 +191,7 @@ func seedTerminalWorkflow(t *testing.T, s *store.Store, w *workflow.Engine, data
 	repoPolicy, hash := seedTerminalRepository(t, repo)
 	project := model.Project{ID: fixtureProject, Name: "Terminal Fixture", Path: repo, PolicyHash: hash, Policy: repoPolicy}
 	save("projects", project.ID, project)
-	save("operations", "seeded-ideation", model.Operation{Kind: "ideation", Subject: project.ID, Stage: "complete", StartedAt: "2026-01-01T10:00:00Z"})
+	save("operations", "seeded-ideation", model.Operation{Kind: "ideation", Subject: project.ID, Stage: "complete", StartedAt: fixtureStartedAt})
 	save("providers", "fixture-acp", model.Provider{ID: "fixture-acp", Kind: "acp", Command: []string{"/usr/bin/true"}})
 	for _, role := range model.AgentRoles() {
 		save("agents", role, model.AgentConfig{Role: role, Chain: []model.AgentChoice{{Provider: "fixture-acp", Model: "fixture-model"}}})
@@ -208,11 +209,11 @@ func seedTerminalWorkflow(t *testing.T, s *store.Store, w *workflow.Engine, data
 	save("execution_plans", cancelling.ID, cancelling)
 	save("sessions", "cancel-attempt", model.Attempt{AttemptID: "cancel-attempt", Task: cancelling.ID,
 		ProjectID: project.ID, IdeaID: idea.ID, OperationID: idea.RunID, Role: "plan", Status: "running",
-		StartedAt: "2026-01-01T10:00:00Z", DeadlineAt: fixtureDeadline, PlanVersion: 1})
+		StartedAt: fixtureStartedAt, DeadlineAt: fixtureDeadline, PlanVersion: 1})
 
 	draft := model.ExecutionPlan{ID: fixtureDraftPlan, ProjectID: project.ID, Mode: model.AgenticMode, PlanVersion: 1,
 		Issue: model.Issue{Title: fixtureDraftTitle, Body: "Make result useful"}, Plan: seededTerminalSpecification(),
-		Selection: &model.SelectionAuthorization{CandidateID: "draft-selection", CandidateVersion: 1, SelectedAt: "2026-01-01T10:00:00Z"}}
+		Selection: &model.SelectionAuthorization{CandidateID: "draft-selection", CandidateVersion: 1, SelectedAt: fixtureStartedAt}}
 	mustSeedTerminal(t, w.WriteLocalPlan(ctx, project, &draft))
 	save("execution_plans", draft.ID, draft)
 
@@ -222,7 +223,7 @@ func seedTerminalWorkflow(t *testing.T, s *store.Store, w *workflow.Engine, data
 	save("execution_plans", paused.ID, paused)
 	save("sessions", fixtureAttempt, model.Attempt{AttemptID: fixtureAttempt, Task: paused.ID, ProjectID: project.ID,
 		Role: "code", PlanVersion: paused.PlanVersion, Finished: true, Status: "awaiting_human",
-		StartedAt: "2026-01-01T10:00:00Z", DeadlineAt: fixtureDeadline, RestartCount: 2})
+		StartedAt: fixtureStartedAt, DeadlineAt: fixtureDeadline, RestartCount: 2})
 	save("questions", fixtureQuestion, model.QuestionSet{ID: fixtureQuestion, TaskID: paused.ID, AttemptID: fixtureAttempt,
 		PlanVersion: paused.PlanVersion, Status: "pending", Questions: []model.Question{{ID: "encoding", Text: "Which fixture encoding?"}}})
 

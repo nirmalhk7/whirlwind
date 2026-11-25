@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 
+	"whirlwind/internal/control"
 	"whirlwind/internal/workflow"
 )
 
@@ -44,7 +45,7 @@ func decodeRoleWork(command LocalCommand) (workflow.RoleWork, error) {
 }
 
 func (s *Server) roleQueueStatus(ctx context.Context, operation string, work workflow.RoleWork) (string, error) {
-	if operation == "queue.push" {
+	if operation == control.RoleQueuePushOperation {
 		return "queued", s.Engine.PushRoleWork(ctx, work)
 	}
 	if scheduled, err := s.Engine.PopRoleWork(ctx, work); scheduled || err != nil {
