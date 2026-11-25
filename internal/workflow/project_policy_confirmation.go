@@ -47,22 +47,27 @@ func (e *Engine) projectPolicy(ctx context.Context, project model.Project) (mode
 		}
 		return rules, err
 	}
+	rules, _, err := e.managedProjectPolicy(ctx, project)
+	return rules, err
+}
+
+func (e *Engine) managedProjectPolicy(ctx context.Context, project model.Project) (model.Policy, int, error) {
 	if err := policy.CheckManagedPolicyLocation(e.Root, project.Path); err != nil {
-		return model.Policy{}, err
+		return model.Policy{}, 0, err
 	}
 	record, err := e.Store.Get(ctx, policy.ManagedPolicyResource, project.ID)
 	if err != nil {
-		return model.Policy{}, err
+		return model.Policy{}, 0, err
 	}
 	document, err := store.Decode[model.ProjectPolicyDocument](record)
 	if err != nil || document.ProjectID != project.ID {
-		return model.Policy{}, errors.New("approved policy document is invalid for this project")
+		return model.Policy{}, 0, errors.New("approved policy document is invalid for this project")
 	}
 	rules, hash, err := policy.ParseManagedPolicy(document.ProjectID, document.Content)
 	if err != nil || hash != project.PolicyHash {
-		return model.Policy{}, errors.New("approved policy document does not match the current project approval")
+		return model.Policy{}, 0, errors.New("approved policy document does not match the current project approval")
 	}
-	return rules, nil
+	return rules, record.Version, nil
 }
 
 func (e *Engine) restartProjectQualification(ctx context.Context, projectID string) ([]store.Change, error) {

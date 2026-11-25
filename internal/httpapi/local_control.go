@@ -48,8 +48,8 @@ func (s *Server) ExecuteLocal(ctx context.Context, command LocalCommand) (json.R
 		return s.registerLocalProject(ctx, command)
 	case "project.setup.retry":
 		return s.retryLocalProjectSetup(ctx, command)
-	case "project.policy.preview", "project.policy.approve":
-		return s.executeLocalProjectPolicy(ctx, command)
+	case "project.policy.preview", "project.policy.approve", "inspect.memory", "memory.remember", "memory.clear":
+		return s.executeLocalProjectData(ctx, command)
 	case "finalization.inspect":
 		return s.inspectFinalization(ctx, command)
 	case "finalization.approve":

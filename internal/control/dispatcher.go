@@ -64,7 +64,7 @@ func (d SupervisorDispatcher) Handle(ctx context.Context, request Request) (Resp
 			result = d.DispatchHealth()
 		}
 	default:
-		if !allowedOperations[request.Operation] || (strings.HasPrefix(request.Operation, inspectOperationPrefix) && request.Operation != "inspect.plan" && request.Operation != "inspect.artifact") {
+		if !allowedAdapterOperation(request.Operation) {
 			return Response{}, fmt.Errorf("unsupported local operation %q", request.Operation)
 		}
 		if d.Commands == nil {
@@ -73,6 +73,18 @@ func (d SupervisorDispatcher) Handle(ctx context.Context, request Request) (Resp
 		result, err = d.Commands.Execute(ctx, request)
 	}
 	return Response{RequestID: request.RequestID, Result: result}, err
+}
+
+func allowedAdapterOperation(operation string) bool {
+	if !allowedOperations[operation] {
+		return false
+	}
+	switch operation {
+	case "inspect.plan", "inspect.artifact", "inspect.memory":
+		return true
+	default:
+		return !strings.HasPrefix(operation, inspectOperationPrefix)
+	}
 }
 
 func (d SupervisorDispatcher) records(ctx context.Context, request Request) (page RecordPage, resultErr error) {

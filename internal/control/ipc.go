@@ -78,6 +78,7 @@ var allowedOperations = map[string]bool{
 	"direction.reject": true, "plan.review": true,
 	"direction.reconsider": true, "direction.delete": true,
 	"question.answer": true, "permission.decide": true,
+	"inspect.memory": true, "memory.remember": true, "memory.clear": true,
 	"plan.pause": true, "plan.resume": true,
 	finalizationInspectOperation: true, "finalization.approve": true,
 }
