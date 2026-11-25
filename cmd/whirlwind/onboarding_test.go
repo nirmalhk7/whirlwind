@@ -52,13 +52,9 @@ func newOnboardingFixture(t *testing.T, preferred string) onboardingFixture {
 	t.Cleanup(cancel)
 	root := t.TempDir()
 	repo := filepath.Join(root, "repo")
-	if err := os.Mkdir(repo, 0700); err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, os.Mkdir(repo, 0700))
 	realGit, err := exec.LookPath("git")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.CommandContext(ctx, realGit, args...)
@@ -81,9 +77,7 @@ func newOnboardingFixture(t *testing.T, preferred string) onboardingFixture {
 	remote := filepath.Join(root, "remote.git")
 	git("clone", "--bare", repo, remote)
 	bin := filepath.Join(root, "bin")
-	if err := os.Mkdir(bin, 0700); err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, os.Mkdir(bin, 0700))
 	// Redirect only remote fetch to local bare fixture. Every other Git operation is unchanged.
 	writeFixtureFile(t, filepath.Join(bin, "git"), "#!/bin/sh\nif [ \"$1\" = fetch ]; then exec "+quoteFixtureShell(realGit)+" fetch --no-tags "+quoteFixtureShell(remote)+" main:refs/remotes/origin/main; fi\nexec "+quoteFixtureShell(realGit)+" \"$@\"\n", 0700)
 	writeFixtureFile(t, filepath.Join(bin, "gh"), `#!/bin/sh
@@ -102,64 +96,40 @@ esac
 	writeFixtureFile(t, filepath.Join(bin, "qlty"), "#!/bin/sh\nif [ \"$*\" = 'config validate --no-upgrade-check' ]; then [ -s .qlty/qlty.toml ]; exit $?; fi\n[ \"$*\" = 'init --yes --no-upgrade-check' ] || exit 2\nmkdir -p .qlty\nprintf 'config_version = \"0\"\\n' > .qlty/qlty.toml\n", 0700)
 	writeFixtureFile(t, filepath.Join(bin, "codegraph"), "#!/bin/sh\n[ \"$*\" = init ] || exit 2\nmkdir -p .codegraph\nprintf 'fixture index\\n' > .codegraph/codegraph.db\n", 0700)
 	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	writeFixtureFile(t, filepath.Join(bin, "codex"), "#!/bin/sh\nexec "+quoteFixtureShell(exe)+" -test.run=^TestOnboardingAgentHelper$ -- codex\n", 0700)
 	parentPath := os.Getenv("PATH")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+parentPath)
 	s, err := store.Open(filepath.Join(root, "state.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	t.Cleanup(func() { _ = s.Close() })
-	if err := initializeProviders(ctx, s, filepath.Join(root, "bridge.mjs")); err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, initializeProviders(ctx, s, filepath.Join(root, "bridge.mjs")))
 	openShell := openshell.Install(t)
 	openShell.EnableCommandExecution()
 	t.Setenv("WHIRLWIND_OPENSHELL_CLI", openShell.Binary)
 	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "onboarding-test-image")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+openShell.Directory+string(os.PathListSeparator)+parentPath)
 	providerRecord, err := s.Get(ctx, "providers", "codex")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	codex, err := store.Decode[model.Provider](providerRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	codex.Kind = "acp"
 	codex.ACPProfile = ""
 	codex.Command = []string{executable, "-test.run=^TestOnboardingAgentHelper$", "--", "acp"}
 	codex.Available = true
-	if err := s.Put(ctx, "providers", "codex", codex, providerRecord.Version); err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, s.Put(ctx, "providers", "codex", codex, providerRecord.Version))
 	// Keep tests independent of locally installed external agents.
 	cursorRecord, err := s.Get(ctx, "providers", "cursor")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	cursor, err := store.Decode[model.Provider](cursorRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	cursor.Available = false
-	if err := s.Put(ctx, "providers", "cursor", cursor, cursorRecord.Version); err != nil {
-		t.Fatal(err)
-	}
-	if err := initializeSettings(ctx, s); err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, s.Put(ctx, "providers", "cursor", cursor, cursorRecord.Version))
+	mustSeedTerminal(t, initializeSettings(ctx, s))
 	record, err := s.Get(ctx, "settings", "global")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, err)
 	settings := workflow.DefaultSettings()
 	if err = json.Unmarshal(record.Data, &settings); err != nil {
 		t.Fatal(err)
@@ -170,9 +140,7 @@ esac
 		t.Fatal(err)
 	}
 	ideation := model.AgentConfig{Role: "ideate", Chain: []model.AgentChoice{{Provider: preferred, Model: onboardingModelID}}}
-	if err := s.Put(ctx, "agents", "ideate", ideation, 0); err != nil {
-		t.Fatal(err)
-	}
+	mustSeedTerminal(t, s.Put(ctx, "agents", "ideate", ideation, 0))
 	server := httpapi.New(s, workflow.New(s, github.CLI{}, filepath.Join(root, "work")), "fixture-secret")
 	server.Context = ctx
 	return onboardingFixture{server, repo, ctx}

@@ -15,25 +15,19 @@ func TestRecoveryPreservesPendingHumanDecisionsAndInvalidatesAttempt(t *testing.
 		{Kind: "questions", ID: "question", Value: map[string]any{"status": "pending", "attempt_id": "attempt", "questions": []any{map[string]any{"id": "q1", "text": "Which behavior?"}}}},
 		{Kind: "permissions", ID: "permission", Value: map[string]any{"decision": "pending", "attempt_id": "attempt", "request": map[string]any{"tool": "write"}}},
 	} {
-		if err := s.Put(ctx, change.Kind, change.ID, change.Value, 0); err != nil {
-			t.Fatal(err)
-		}
+		requireStoreSuccess(t, s.Put(ctx, change.Kind, change.ID, change.Value, 0))
 	}
 	if _, err := s.Claim(ctx, "project", "old", time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RecoverInterrupted(ctx, "new"); err != nil {
-		t.Fatal(err)
-	}
+	requireStoreSuccess(t, s.RecoverInterrupted(ctx, "new"))
 	for _, tc := range []struct{ kind, id, field, want string }{
 		{"sessions", "attempt", "status", "interrupted"},
 		{"questions", "question", "status", "pending"},
 		{"permissions", "permission", "decision", "pending"},
 	} {
 		record, err := s.Get(ctx, tc.kind, tc.id)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireStoreSuccess(t, err)
 		var got map[string]any
 		if err = json.Unmarshal(record.Data, &got); err != nil {
 			t.Fatal(err)

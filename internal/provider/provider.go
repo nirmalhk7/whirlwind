@@ -224,34 +224,16 @@ func (s *providerSession) sessionExecutionProfile(ctx context.Context, execution
 }
 
 func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider, profile *execution.Profile) (func(), error) {
-	if s.input.MCPBroker != nil {
-		if s.input.NativeIntegrations {
-			return nil, errors.New("selected read-only MCP broker conflicts with raw native integration mounts")
-		}
-		if s.hasScopedTool() {
-			return nil, errors.New("selected integration broker conflicts with reviewer check broker; use separate agent attempts")
-		}
-		if p.Kind != "acp" {
-			return nil, errors.New("selected integration broker requires the configured ACP transport")
-		}
-		if err := s.prepareBrokerMCP(profile); err != nil {
-			return nil, err
-		}
+	if err := s.prepareSelectedBroker(p, profile); err != nil {
+		return nil, err
 	}
 	if p.Kind == "acp" && p.ACPProfile != "" {
 		if err := provisionACPAuth(profile, provider); err != nil {
 			return nil, err
 		}
 	}
-	if s.input.NativeIntegrations {
-		if err := ProvisionNativeIntegrations(profile, provider); err != nil {
-			return nil, err
-		}
-		if p.Kind == "acp" {
-			if err := s.prepareCursorIntegrations(p, *profile); err != nil {
-				return nil, err
-			}
-		}
+	if err := s.prepareNativeIntegrations(p, provider, profile); err != nil {
+		return nil, err
 	}
 	s.input.Execution = profile
 	s.input.CWD = profile.CWD
@@ -260,6 +242,36 @@ func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider
 		return nil, nil
 	}
 	return s.prepareCheckMCP(s.ctx, profile)
+}
+
+func (s *providerSession) prepareSelectedBroker(p model.Provider, profile *execution.Profile) error {
+	if s.input.MCPBroker == nil {
+		return nil
+	}
+
+	if s.input.NativeIntegrations {
+		return errors.New("selected read-only MCP broker conflicts with raw native integration mounts")
+	}
+	if s.hasScopedTool() {
+		return errors.New("selected integration broker conflicts with reviewer check broker; use separate agent attempts")
+	}
+	if p.Kind != "acp" {
+		return errors.New("selected integration broker requires the configured ACP transport")
+	}
+	return s.prepareBrokerMCP(profile)
+}
+
+func (s *providerSession) prepareNativeIntegrations(p, provider model.Provider, profile *execution.Profile) error {
+	if !s.input.NativeIntegrations {
+		return nil
+	}
+	if err := ProvisionNativeIntegrations(profile, provider); err != nil {
+		return err
+	}
+	if p.Kind == "acp" {
+		return s.prepareCursorIntegrations(p, *profile)
+	}
+	return nil
 }
 
 type providerSession struct {

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"whirlwind/internal/model"
 	"whirlwind/internal/process"
 	"whirlwind/internal/redaction"
 )
@@ -87,8 +88,12 @@ func registerCommandCapabilities(cmd *exec.Cmd, p Profile, token string, c *prox
 	if err := c.environment(cmd.Env, p.Environment); err != nil {
 		return err
 	}
+	return c.registerCommandCredentials(p.Credentials, cmd.Env)
+}
+
+func (c *proxyCapabilities) registerCommandCredentials(credentials map[string]model.NetworkCredential, environment []string) error {
 	seen := map[string]bool{}
-	for _, credential := range p.Credentials {
+	for _, credential := range credentials {
 		scheme, name, err := credentialReference(credential.CredentialKey)
 		if err != nil {
 			return err
@@ -97,21 +102,29 @@ func registerCommandCapabilities(cmd *exec.Cmd, p Profile, token string, c *prox
 			continue
 		}
 		seen[name] = true
-		for _, entry := range cmd.Env {
-			key, value, _ := strings.Cut(entry, "=")
-			if key != name {
-				continue
-			}
-			if len(value) < 16 {
-				return fmt.Errorf("%w: credential environment reference %s is too short to register safely", ErrSandbox, name)
-			}
-			if err := c.register(value); err != nil {
-				return err
-			}
+		if err := c.registerEnvCredential(name, environment); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
+func (c *proxyCapabilities) registerEnvCredential(name string, environment []string) error {
+	for _, entry := range environment {
+		key, value, _ := strings.Cut(entry, "=")
+		if key != name {
+			continue
+		}
+		if len(value) < 16 {
+			return fmt.Errorf("%w: credential environment reference %s is too short to register safely", ErrSandbox, name)
+		}
+		if err := c.register(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func bindCommandCapabilities(cmd *exec.Cmd, p Profile, token string, c *proxyCapabilities) error {
 	if err := process.OnCleanup(cmd, c.release); err != nil {
 		return fmt.Errorf(capabilityRegistrationError, ErrSandbox, err)

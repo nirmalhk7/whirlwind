@@ -9,6 +9,10 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	providerFixtureLastActivity = "2026-01-01T12:00:01Z"
+)
+
 func TestAttemptInspectionSeparatesWorkerLeaseFromACPActivity(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	start := now.Add(-2 * time.Minute).Format(time.RFC3339)
@@ -43,7 +47,7 @@ func TestAttemptInspectionSeparatesWorkerLeaseFromACPActivity(t *testing.T) {
 }
 
 func TestRunInspectionShowsACPActivityEvenWithoutAPlan(t *testing.T) {
-	start := "2026-01-01T12:00:01Z"
+	start := providerFixtureLastActivity
 	last := "2026-01-01T12:00:03Z"
 	d := New()
 	project := model.Project{ID: "project", Name: "Local fixture"}
@@ -63,11 +67,11 @@ func TestProviderActivityDoesNotInventUpdateOrLiveness(t *testing.T) {
 		{"missing", "", "", "", "unknown (not recorded)"},
 		{"invalid", "", "bad value", "", "unknown (invalid update timestamp)"},
 		{"future", "", "2026-01-01T12:00:11Z", "", "unknown (invalid update timestamp)"},
-		{"legacy", "", "2026-01-01T12:00:01Z", "", "recorded at 2026-01-01T12:00:01Z (launch time not recorded)"},
-		{"early", "2026-01-01T12:00:01Z", "2026-01-01T11:59:59Z", "", "unknown (update cannot be reconciled with launch)"},
-		{"late", "2026-01-01T12:00:01Z", "2026-01-01T12:00:09Z", "2026-01-01T12:00:08Z", "unknown (update cannot be reconciled with finish)"},
-		{"quiet", "2026-01-01T12:00:01Z", "2026-01-01T12:00:01Z", "", "no update since launch at 2026-01-01T12:00:01Z (9s ago)"},
-		{"active", "2026-01-01T12:00:01Z", "2026-01-01T12:00:04Z", "", "last update at 2026-01-01T12:00:04Z (6s ago)"},
+		{"legacy", "", providerFixtureLastActivity, "", "recorded at 2026-01-01T12:00:01Z (launch time not recorded)"},
+		{"early", providerFixtureLastActivity, "2026-01-01T11:59:59Z", "", "unknown (update cannot be reconciled with launch)"},
+		{"late", providerFixtureLastActivity, "2026-01-01T12:00:09Z", "2026-01-01T12:00:08Z", "unknown (update cannot be reconciled with finish)"},
+		{"quiet", providerFixtureLastActivity, providerFixtureLastActivity, "", "no update since launch at 2026-01-01T12:00:01Z (9s ago)"},
+		{"active", providerFixtureLastActivity, "2026-01-01T12:00:04Z", "", "last update at 2026-01-01T12:00:04Z (6s ago)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			attempt := model.Attempt{Status: "running", StartedAt: test.started, ProviderProgressAt: test.progress, FinishedAt: test.finished}

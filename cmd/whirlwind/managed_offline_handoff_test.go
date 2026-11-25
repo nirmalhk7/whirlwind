@@ -17,17 +17,29 @@ import (
 	"whirlwind/internal/workflow"
 )
 
+const (
+	seededHandoffResultFile = "result.txt"
+)
+
 type seededOfflineAdapter func(context.Context, provider.Input, provider.Hooks) (provider.Output, error)
 
 func (a seededOfflineAdapter) Run(ctx context.Context, input provider.Input, hooks provider.Hooks) (provider.Output, error) {
 	return a(ctx, input, hooks)
 }
 
+type seededOfflineHandoff struct {
+	data, planID, candidate, green, nono string
+	project                              model.Project
+	git                                  func(string, ...string) string
+}
+
 // The supervisor has stopped before this phase. The harness returns only
 // deterministic Reviewer outputs. The production engine, store, verifier
 // subprocess and immutable snapshots still own the handoffs.
-func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, data string, project model.Project, id, candidate, green, nono string, git func(string, ...string) string) {
+func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, fixture seededOfflineHandoff) {
 	t.Helper()
+	data, id := fixture.data, fixture.planID
+	candidate, green, nono, git := fixture.candidate, fixture.green, fixture.nono, fixture.git
 	ctx := t.Context()
 	t.Setenv("WHIRLWIND_NONO_CLI", nono)
 	t.Setenv("WHIRLWIND_VERIFY_BIN", filepath.Join(data, "runtime", "whirlwind-verify"))
@@ -68,47 +80,14 @@ func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, data string, p
 	}
 	resetReview(task, version)
 
-	reviewCalls, unexpectedCalls := 0, 0
-	accept := false
-	expected := green
-	newEngine := func() *workflow.Engine {
-		e := workflow.New(db, nil, data)
-		e.Adapter = func(p model.Provider) provider.Adapter {
-			return seededOfflineAdapter(func(_ context.Context, in provider.Input, _ provider.Hooks) (provider.Output, error) {
-				if in.Role != "review" {
-					unexpectedCalls++
-					return provider.Output{}, fmt.Errorf("unexpected seeded role %s", in.Role)
-				}
-				if p.ID != "seeded" || !in.ReadOnly || in.Execution == nil || !in.Execution.ReadOnly || in.CWD == candidate || in.CWD == project.Path {
-					return provider.Output{}, fmt.Errorf("fixture role lacks independent read-only snapshot: %s", in.Role)
-				}
-				if git(in.CWD, "rev-parse", "HEAD") != expected {
-					return provider.Output{}, fmt.Errorf("fixture role received a stale snapshot")
-				}
-				if !strings.Contains(in.Prompt, `"name":"regression"`) || !strings.Contains(in.Prompt, `\"Test\":\"TestResultReady\"`) {
-					return provider.Output{}, fmt.Errorf("fixture Reviewer is missing the named regression evidence")
-				}
-				reviewCalls++
-				status, explanation := "fail", "A review-only acceptance correction is still required."
-				if accept {
-					status, explanation = "pass", "The repaired result and the isolated test evidence satisfy the requirement."
-				}
-				review := model.Review{Summary: explanation, Findings: []model.Finding{}, Requirements: []model.RequirementResult{
-					{ID: "REQ-RESULT", Status: status, Code: []string{"result.txt"}, Evidence: []string{"Observed current candidate and regression result."}, Explanation: explanation},
-				}}
-				raw, err := json.Marshal(review)
-				return provider.Output{Text: string(raw)}, err
-			})
-		}
-		return e
-	}
+	review := seededOfflineReview{fixture: fixture, expected: green}
 
-	e := newEngine()
+	e := review.engine(db)
 	if err := e.Step(ctx, id); err != nil {
 		t.Fatalf("seeded Reviewer rejection: %v", err)
 	}
 	rejected, _ := getTask()
-	if rejected.Stage != "repair" || rejected.ReviewID == "" || rejected.Delivery != nil || reviewCalls != 1 {
+	if rejected.Stage != "repair" || rejected.ReviewID == "" || rejected.Delivery != nil || review.calls != 1 {
 		t.Fatalf("rejected review did not persist repair: %+v", rejected)
 	}
 	t.Logf("seeded Reviewer rejected %s; durable review=%s stage=%s", green, rejected.ReviewID, rejected.Stage)
@@ -117,38 +96,90 @@ func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, data string, p
 	mustSeedTerminal(t, db.Close())
 	reopened := openSeededTerminalStore(t, data)
 	db = reopened
-	e = newEngine()
+	e = review.engine(db)
 	recovered, version := getTask()
 	if recovered.Stage != "repair" || recovered.ReviewID != rejected.ReviewID {
 		t.Fatal("restart lost the rejected review or repair state")
 	}
-	mustSeedTerminal(t, os.WriteFile(filepath.Join(candidate, "result.txt"), []byte("ready\nreview-correction\n"), 0600))
-	git(candidate, "add", "result.txt")
+	mustSeedTerminal(t, os.WriteFile(filepath.Join(candidate, seededHandoffResultFile), []byte("ready\nreview-correction\n"), 0600))
+	git(candidate, "add", seededHandoffResultFile)
 	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed review correction")
-	expected, accept = git(candidate, "rev-parse", "HEAD"), true
+	review.expected, review.accept = git(candidate, "rev-parse", "HEAD"), true
 	resetReview(recovered, version)
 	if err := e.Step(ctx, id); err != nil {
 		t.Fatalf("seeded accepted Reviewer: %v", err)
 	}
 	approved, _ := getTask()
-	if approved.Stage != "submitting" || approved.ReviewedCommit != expected || approved.ReviewID == rejected.ReviewID || reviewCalls != 2 {
+	if approved.Stage != "submitting" || approved.ReviewedCommit != review.expected || approved.ReviewID == rejected.ReviewID || review.calls != 2 {
 		t.Fatalf("repair lost the exact accepted candidate: %+v", approved)
 	}
+	review.assertFinalizerEvidence(t, db, e, approved.VerificationID)
+}
+
+type seededOfflineReview struct {
+	fixture           seededOfflineHandoff
+	expected          string
+	accept            bool
+	calls, unexpected int
+}
+
+func (r *seededOfflineReview) engine(db *store.Store) *workflow.Engine {
+	e := workflow.New(db, nil, r.fixture.data)
+	e.Adapter = func(p model.Provider) provider.Adapter {
+		return seededOfflineAdapter(func(_ context.Context, in provider.Input, _ provider.Hooks) (provider.Output, error) {
+			return r.respond(p, in)
+		})
+	}
+	return e
+}
+
+func (r *seededOfflineReview) respond(p model.Provider, in provider.Input) (provider.Output, error) {
+	if in.Role != "review" {
+		r.unexpected++
+		return provider.Output{}, fmt.Errorf("unexpected seeded role %s", in.Role)
+	}
+	if p.ID != "seeded" || !in.ReadOnly || in.Execution == nil || !in.Execution.ReadOnly || in.CWD == r.fixture.candidate || in.CWD == r.fixture.project.Path {
+		return provider.Output{}, fmt.Errorf("fixture role lacks independent read-only snapshot: %s", in.Role)
+	}
+	if r.fixture.git(in.CWD, "rev-parse", "HEAD") != r.expected {
+		return provider.Output{}, fmt.Errorf("fixture role received a stale snapshot")
+	}
+	if !strings.Contains(in.Prompt, `"name":"regression"`) || !strings.Contains(in.Prompt, `\"Test\":\"TestResultReady\"`) {
+		return provider.Output{}, fmt.Errorf("fixture Reviewer is missing the named regression evidence")
+	}
+	r.calls++
+	status, explanation := "fail", "A review-only acceptance correction is still required."
+	if r.accept {
+		status, explanation = "pass", "The repaired result and the isolated test evidence satisfy the requirement."
+	}
+	review := model.Review{Summary: explanation, Findings: []model.Finding{}, Requirements: []model.RequirementResult{
+		{ID: "REQ-RESULT", Status: status, Code: []string{seededHandoffResultFile}, Evidence: []string{"Observed current candidate and regression result."}, Explanation: explanation},
+	}}
+	raw, err := json.Marshal(review)
+	return provider.Output{Text: string(raw)}, err
+}
+
+func (r *seededOfflineReview) assertFinalizerEvidence(t *testing.T, db *store.Store, e *workflow.Engine, verificationID string) {
+	t.Helper()
+	ctx := t.Context()
+	candidate, id, git := r.fixture.candidate, r.fixture.planID, r.fixture.git
 	assertBlocked := func(reason string) {
 		t.Helper()
 		if err := e.Step(ctx, id); err == nil || !strings.Contains(err.Error(), reason) {
 			t.Fatalf("expected finalization to stop with %q: %v", reason, err)
 		}
-		current, _ := getTask()
-		if current.Stage != "submitting" || current.Delivery != nil || unexpectedCalls != 0 || git(candidate, "for-each-ref", "refs/heads/codex/delivery/") != "" {
-			t.Fatalf("blocked finalization attempted a delivery: %+v, unexpected role calls=%d", current.Delivery, unexpectedCalls)
+		task, err := db.Get(ctx, "execution_plans", id)
+		mustSeedTerminal(t, err)
+		current, err := store.Decode[model.ExecutionPlan](task)
+		mustSeedTerminal(t, err)
+		if current.Stage != "submitting" || current.Delivery != nil || r.unexpected != 0 || git(candidate, "for-each-ref", "refs/heads/codex/delivery/") != "" {
+			t.Fatalf("blocked finalization attempted a delivery: %+v, unexpected role calls=%d", current.Delivery, r.unexpected)
 		}
 	}
 	assertBlocked("mandatory Qlty check evidence is required")
-
 	// Finalization must independently revalidate the retained check output and
 	// current checkout before it can stage a local delivery.
-	proof, err := db.Get(ctx, "verification", approved.VerificationID)
+	proof, err := db.Get(ctx, "verification", verificationID)
 	mustSeedTerminal(t, err)
 	value, err := store.Decode[struct {
 		Report verification.JobReport `json:"runner_report"`
@@ -173,11 +204,11 @@ func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, data string, p
 	mustSeedTerminal(t, os.WriteFile(path, []byte("altered evidence"), 0600))
 	assertBlocked("streams differ from retained evidence")
 	mustSeedTerminal(t, os.WriteFile(path, original, 0600))
-	mustSeedTerminal(t, os.WriteFile(filepath.Join(candidate, "result.txt"), []byte("ready\nnew candidate\n"), 0600))
-	git(candidate, "add", "result.txt")
+	mustSeedTerminal(t, os.WriteFile(filepath.Join(candidate, seededHandoffResultFile), []byte("ready\nnew candidate\n"), 0600))
+	git(candidate, "add", seededHandoffResultFile)
 	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed newer candidate")
 	assertBlocked("stale for the current candidate")
-	git(candidate, "checkout", "--detach", expected)
+	git(candidate, "checkout", "--detach", r.expected)
 	assertBlocked("mandatory Qlty check evidence is required")
-	t.Logf("reopened repair and obtained seeded review for %s; delivery gate refused a different project, altered output, a stale commit and missing Qlty evidence", expected)
+	t.Logf("reopened repair and obtained seeded review for %s; delivery gate refused a different project, altered output, a stale commit and missing Qlty evidence", r.expected)
 }

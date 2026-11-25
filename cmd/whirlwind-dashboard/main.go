@@ -57,27 +57,39 @@ func run() error {
 func loadSnapshot(ctx context.Context, data string) (control.Snapshot, error) {
 	controlPath := control.SocketPath(data)
 	if _, err := os.Stat(controlPath); err == nil {
-		snapshot, started, callErr := loadOnlineSnapshot(ctx, control.NewClient(controlPath))
-		if callErr == nil {
-			client := control.NewClient(controlPath)
-			allowProbes, err := loadDispatchHealth(ctx, client, snapshot)
-			if err != nil {
-				return nil, err
-			}
-			if allowProbes {
-				loadProviderStatuses(ctx, client, snapshot)
-			}
-			return finishOnlineSnapshot(ctx, data, snapshot)
+		snapshot, connected, err := loadSupervisorSnapshot(ctx, data, control.NewClient(controlPath))
+		if err != nil || connected {
+			return snapshot, err
 		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+	}
+	return loadReadOnlySnapshot(ctx, data)
+}
+
+func loadSupervisorSnapshot(ctx context.Context, data string, client *control.Client) (control.Snapshot, bool, error) {
+	snapshot, started, callErr := loadOnlineSnapshot(ctx, client)
+	if callErr != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
 		}
 		if started || !strings.HasPrefix(callErr.Error(), "connect to local supervisor at ") {
-			return nil, callErr
+			return nil, false, callErr
 		}
 		// A stale socket that cannot be connected to does not prevent safe
-		// database-only inspection below.
+		// database-only inspection.
+		return nil, false, nil
 	}
+	allowProbes, err := loadDispatchHealth(ctx, client, snapshot)
+	if err != nil {
+		return nil, false, err
+	}
+	if allowProbes {
+		loadProviderStatuses(ctx, client, snapshot)
+	}
+	snapshot, err = finishOnlineSnapshot(ctx, data, snapshot)
+	return snapshot, true, err
+}
+
+func loadReadOnlySnapshot(ctx context.Context, data string) (control.Snapshot, error) {
 	path := filepath.Join(data, "whirlwind.db")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return markSupervisor(control.Snapshot{}, false), nil
@@ -117,37 +129,54 @@ func completeOnlineSnapshot(ctx context.Context, client *control.Client, snapsho
 func completeOnlineEvents(ctx context.Context, client *control.Client, snapshot control.Snapshot) error {
 	var cursor int64
 	for {
-		request := control.Request{RequestID: fmt.Sprintf("dashboard-events-%d", cursor), Operation: "inspect.events", EventCursor: cursor, Limit: 100}
-		response, err := dashboardCall(ctx, client, request)
-		if err != nil {
-			return fmt.Errorf("inspect events: %w", err)
-		}
-		encoded, err := json.Marshal(response.Result)
+		page, err := inspectOnlineEvents(ctx, client, cursor)
 		if err != nil {
 			return err
-		}
-		var page []model.Event
-		if err := json.Unmarshal(encoded, &page); err != nil {
-			return fmt.Errorf("decode event inspection page: %w", err)
 		}
 		if len(page) == 0 {
 			return nil
 		}
-		if page[len(page)-1].ID <= cursor {
-			return errors.New("event inspection cursor did not advance")
-		}
-		for _, event := range page {
-			if event.ID <= cursor {
-				return errors.New("event inspection cursor did not advance")
-			}
-			data, err := json.Marshal(event)
-			if err != nil {
-				return err
-			}
-			snapshot["events"] = append(snapshot["events"], model.Record{ID: strconv.FormatInt(event.ID, 10), Data: data, UpdatedAt: event.CreatedAt})
-			cursor = event.ID
+		cursor, err = appendOnlineEvents(snapshot, cursor, page)
+		if err != nil {
+			return err
 		}
 	}
+}
+
+func inspectOnlineEvents(ctx context.Context, client *control.Client, cursor int64) ([]model.Event, error) {
+	request := control.Request{RequestID: fmt.Sprintf("dashboard-events-%d", cursor), Operation: "inspect.events", EventCursor: cursor, Limit: 100}
+	response, err := dashboardCall(ctx, client, request)
+	if err != nil {
+		return nil, fmt.Errorf("inspect events: %w", err)
+	}
+	encoded, err := json.Marshal(response.Result)
+	if err != nil {
+		return nil, err
+	}
+	var page []model.Event
+	if err := json.Unmarshal(encoded, &page); err != nil {
+		return nil, fmt.Errorf("decode event inspection page: %w", err)
+	}
+	return page, nil
+}
+
+func appendOnlineEvents(snapshot control.Snapshot, cursor int64, page []model.Event) (int64, error) {
+	const invalidCursor = "event inspection cursor did not advance"
+	if page[len(page)-1].ID <= cursor {
+		return cursor, errors.New(invalidCursor)
+	}
+	for _, event := range page {
+		if event.ID <= cursor {
+			return cursor, errors.New(invalidCursor)
+		}
+		data, err := json.Marshal(event)
+		if err != nil {
+			return cursor, err
+		}
+		snapshot["events"] = append(snapshot["events"], model.Record{ID: strconv.FormatInt(event.ID, 10), Data: data, UpdatedAt: event.CreatedAt})
+		cursor = event.ID
+	}
+	return cursor, nil
 }
 
 func dashboardCall(ctx context.Context, client *control.Client, request control.Request) (control.Response, error) {

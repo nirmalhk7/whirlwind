@@ -32,17 +32,11 @@ func TestEngineOwnedCheckOpenShellAcceptance(t *testing.T) {
 
 	engine, task, cwd := testEngine(t)
 	project, err := engine.Project(context.Background(), task.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	source := filepath.Join(cwd, "source.txt")
-	if err := os.WriteFile(source, []byte("original source\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, os.WriteFile(source, []byte("original source\n"), 0600))
 	profile, err := execution.ForPolicy(cwd, true, project.PolicyHash, project.Policy.Sandbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if profile.ExecutionID != "" || profile.SandboxName != "" || profile.GatewayName != "" {
 		t.Fatalf("ForPolicy should be unpinned before the normal Engine-owned check path: %+v", profile)
 	}
@@ -86,6 +80,14 @@ printf 'declared-output-write-succeeded\npayload-completed\n'`},
 	if !result.Runtime.CleanupVerified || result.Runtime.Kind != "openshell" || result.Runtime.ExecutionID == "" || result.Runtime.Generation < 1 || result.Runtime.SandboxID == "" {
 		t.Fatalf("Engine result lacks verified OpenShell execution authority: %+v", result.Runtime)
 	}
+	assertOwnedCheckWorkspaceEvidence(t, cwd, source)
+
+	assertPersistedOwnedCheck(t, engine, task, cwd, check, result.Runtime)
+	assertOwnedSandboxAbsent(t, cli, result.Runtime)
+}
+
+func assertOwnedCheckWorkspaceEvidence(t *testing.T, cwd, source string) {
+	t.Helper()
 	artifact, err := os.ReadFile(filepath.Join(cwd, "dist", "result.txt"))
 	if err != nil || string(artifact) != "approved artifact\n" {
 		t.Fatalf("declared output write was not preserved on the host: %q, %v", artifact, err)
@@ -98,9 +100,6 @@ printf 'declared-output-write-succeeded\npayload-completed\n'`},
 	if _, err := os.Lstat(outside); !os.IsNotExist(err) {
 		t.Fatalf("payload created a host path outside the worktree: %s (%v)", outside, err)
 	}
-
-	assertPersistedOwnedCheck(t, engine, task, cwd, check, result.Runtime)
-	assertOwnedSandboxAbsent(t, cli, result.Runtime)
 }
 
 func requireLiveOwnedCheckSetup(t *testing.T) string {

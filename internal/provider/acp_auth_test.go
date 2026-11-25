@@ -11,10 +11,15 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	codexFixtureAuthFile = "auth.json"
+	codexFixtureAuthPath = ".codex/auth.json"
+)
+
 func TestProvisionACPAuthGrantsOnlySelectedProfileCredential(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	writeNativeFixture(t, filepath.Join(home, ".codex/auth.json"), `{"token":"private"}`)
+	writeNativeFixture(t, filepath.Join(home, codexFixtureAuthPath), `{"token":"private"}`)
 	writeNativeFixture(t, filepath.Join(home, ".codex/config.toml"), "unrelated integration config")
 	t.Setenv("OPENAI_API_KEY", "authorized-env-value-that-is-long-enough")
 	profile := execution.Profile{CWD: t.TempDir(), Environment: []string{"OPENAI_API_KEY", "OTHER_TOKEN"}, NativeFiles: []execution.NativeFile{}}
@@ -27,8 +32,8 @@ func TestProvisionACPAuthGrantsOnlySelectedProfileCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantSource := filepath.Join(resolvedHome, ".codex/auth.json")
-	want := execution.NativeFile{Source: wantSource, Home: "CODEX_HOME", Path: "auth.json"}
+	wantSource := filepath.Join(resolvedHome, codexFixtureAuthPath)
+	want := execution.NativeFile{Source: wantSource, Home: "CODEX_HOME", Path: codexFixtureAuthFile}
 	if len(profile.NativeFiles) != 1 || profile.NativeFiles[0] != want {
 		t.Fatalf("auth grant includes unrelated native state: %+v", profile.NativeFiles)
 	}
@@ -80,7 +85,7 @@ func TestProvisionACPAuthRejectsCredentialSymlinks(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	outside := filepath.Join(t.TempDir(), "auth.json")
+	outside := filepath.Join(t.TempDir(), codexFixtureAuthFile)
 	writeNativeFixture(t, outside, `{"auth":"private"}`)
 	if err := os.Symlink(outside, filepath.Join(home, protocolCursorCredentialPath)); err != nil {
 		t.Fatal(err)
@@ -96,7 +101,7 @@ func TestProvisionACPAuthUsesLinuxProviderConfigHome(t *testing.T) {
 	for _, test := range []struct {
 		id, source, home, path string
 	}{
-		{"codex", ".codex/auth.json", "CODEX_HOME", "auth.json"},
+		{"codex", codexFixtureAuthPath, "CODEX_HOME", codexFixtureAuthFile},
 		{"claude", ".claude/.credentials.json", "CLAUDE_CONFIG_DIR", ".credentials.json"},
 		{"cursor", protocolCursorCredentialPath, "HOME", protocolCursorCredentialPath},
 	} {
@@ -118,13 +123,13 @@ func TestProvisionACPAuthUsesLinuxProviderConfigHome(t *testing.T) {
 func TestProviderPreparationAppliesACPAuthBeforeLaunch(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	writeNativeFixture(t, filepath.Join(home, ".codex/auth.json"), `{"token":"private"}`)
+	writeNativeFixture(t, filepath.Join(home, codexFixtureAuthPath), `{"token":"private"}`)
 	profile := execution.Profile{CWD: t.TempDir(), Environment: []string{}}
 	session := &providerSession{client: NewClient(Input{}, Hooks{})}
 	if _, err := session.prepareProviderIntegrations(model.Provider{Kind: "acp", ACPProfile: "codex"}, model.Provider{Kind: "acp", ID: "codex", ACPProfile: "codex"}, &profile); err != nil {
 		t.Fatal(err)
 	}
-	if len(profile.NativeFiles) != 1 || filepath.Base(profile.NativeFiles[0].Source) != "auth.json" {
+	if len(profile.NativeFiles) != 1 || filepath.Base(profile.NativeFiles[0].Source) != codexFixtureAuthFile {
 		t.Fatalf("ACP command would start without its bounded credential grant: %+v", profile.NativeFiles)
 	}
 }

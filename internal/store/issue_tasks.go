@@ -156,23 +156,28 @@ func (s *Store) SaveDirectionsForSlot(ctx context.Context, project, day, slot st
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
-		present := map[string]bool{}
-		for _, direction := range directions {
-			present[direction.Category] = true
-		}
-		missing := make([]string, 0, 4)
-		for _, category := range []string{"expand", "optimize", "harden", "simplify"} {
-			if !present[category] {
-				missing = append(missing, category)
-			}
-		}
-		stage := "complete"
-		if len(directions) != 4 || len(missing) != 0 {
-			stage = "incomplete"
-		}
+		stage, missing := summarizeDirectionSlot(directions)
 		state := map[string]any{"stage": stage, "day": day, "project": project, "missing_categories": missing}
 		return put(ctx, tx, "schedules", key, state, version)
 	})
+}
+
+func summarizeDirectionSlot(directions []model.Direction) (string, []string) {
+	present := map[string]bool{}
+	for _, direction := range directions {
+		present[direction.Category] = true
+	}
+	missing := make([]string, 0, 4)
+	for _, category := range []string{"expand", "optimize", "harden", "simplify"} {
+		if !present[category] {
+			missing = append(missing, category)
+		}
+	}
+	stage := "complete"
+	if len(directions) != 4 || len(missing) != 0 {
+		stage = "incomplete"
+	}
+	return stage, missing
 }
 
 func insertDirectionIfNew(ctx context.Context, tx *sql.Tx, project, groupID string, direction model.Direction) error {

@@ -178,7 +178,9 @@ func runTransportDisconnectRecovery(t *testing.T, role string, expireBackoff boo
 	}
 	assertTransportMatrixBackoff(t, resumedBackoff, retryAt, adapter.startedAt[1], expireBackoff)
 	assertTransportMatrixChoices(t, adapter, role, firstChoice, fallbackChoice)
-	assertRuntimeMatrixAttempts(t, reopened, role, firstChoice, fallbackChoice, priorOwner, restarted.Owner())
+	assertRuntimeMatrixAttempts(t, reopened, role, runtimeAttemptExpectations{
+		first: firstChoice, fallback: fallbackChoice, priorOwner: priorOwner, currentOwner: restarted.Owner(),
+	})
 	_ = transportMatrixRetryState(t, &agentRun{Engine: restarted, ctx: context.Background(), project: project, task: currentTask, input: provider.Input{Role: role}}, firstChoice, 4)
 }
 

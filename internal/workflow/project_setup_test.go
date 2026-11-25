@@ -18,6 +18,16 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	setupFixturePolicyFile     = ".whirlwind.yaml"
+	setupFixtureCommitSubject  = "Confirm project verification commands"
+	setupFixtureDisableHooks   = "core.hooksPath=/dev/null"
+	setupFixtureCommitError    = "commit policy: %v %s"
+	setupFixtureGitleaksConfig = ".gitleaks.toml"
+	setupFixtureQltyConfig     = ".qlty/qlty.toml"
+	setupFixtureCatalog        = "prepare-catalog"
+)
+
 type setupExecutor interface {
 	runProjectSetup(context.Context, string) error
 	dispatchProjectSetup(context.Context)
@@ -41,14 +51,7 @@ func TestProjectSetupRunsHumanCommandsBeforeReadiness(t *testing.T) {
 				command = "/usr/bin/false"
 			}
 			configuration := "checks:\n  - name: first\n    command: [" + command + "]\n    timeout_seconds: 10\n  - name: later\n    command: [/usr/bin/true]\n    timeout_seconds: 10\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\n"
-			if err := os.WriteFile(filepath.Join(repository, ".whirlwind.yaml"), []byte(configuration), 0600); err != nil {
-				t.Fatal(err)
-			}
-			for _, args := range [][]string{{"add", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Confirm project verification commands"}} {
-				if out, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
-					t.Fatalf("commit policy: %v %s", err, out)
-				}
-			}
+			commitSetupFixturePolicy(t, repository, configuration)
 			project, err := e.Project(context.Background(), "p")
 			requireWorkflowSuccess(t, err)
 			project.Policy, project.PolicyHash, err = policy.Load(repository)
@@ -60,40 +63,46 @@ func TestProjectSetupRunsHumanCommandsBeforeReadiness(t *testing.T) {
 			requireWorkflowSuccess(t, e.Store.Put(context.Background(), "operations", id, op, 0))
 			runner.dispatchProjectSetup(context.Background())
 			e.background.Wait()
-			record, err := e.Store.Get(context.Background(), "operations", id)
-			requireWorkflowSuccess(t, err)
-			op, err = store.Decode[model.Operation](record)
-			requireWorkflowSuccess(t, err)
-			var evidence struct {
-				Manifest verification.JobManifest `json:"manifest"`
-				Report   verification.JobReport   `json:"report"`
-			}
-			raw, _ := json.Marshal(op.Input)
-			requireWorkflowSuccess(t, json.Unmarshal(raw, &evidence))
-			wantStage, wantStatus := "complete", "approved"
-			if failing {
-				wantStage, wantStatus = "failed", "error"
-			}
-			project, err = e.Project(context.Background(), "p")
-			requireWorkflowSuccess(t, err)
-			if op.Stage != wantStage || project.Status != wantStatus {
-				t.Fatalf("setup outcome not reflected truthfully: operation=%+v project=%+v", op, project)
-			}
-			if evidence.Manifest.OperationID != id || evidence.Manifest.ProjectID != "p" || evidence.Manifest.PlanID != "" || evidence.Manifest.Purpose != "project_setup" {
-				t.Fatalf("setup fabricated plan authority or lost identity: %+v", evidence.Manifest)
-			}
-			if len(evidence.Report.Results) != 2 || evidence.Report.Results[1].Status != "pass" || evidence.Report.Passed == failing {
-				t.Fatalf("human commands not all executed: %+v", evidence.Report)
-			}
-			requireWorkflowSuccess(t, evidence.Report.Validate(evidence.Manifest))
+			version := assertHumanSetupOutcome(t, e, id, failing)
 			requireWorkflowSuccess(t, runner.runProjectSetup(context.Background(), id))
 			again, err := e.Store.Get(context.Background(), "operations", id)
 			requireWorkflowSuccess(t, err)
-			if again.Version != record.Version {
+			if again.Version != version {
 				t.Fatal("terminal setup was rerun")
 			}
 		})
 	}
+}
+
+func assertHumanSetupOutcome(t *testing.T, e *Engine, id string, failing bool) int {
+	t.Helper()
+	record, err := e.Store.Get(context.Background(), "operations", id)
+	requireWorkflowSuccess(t, err)
+	op, err := store.Decode[model.Operation](record)
+	requireWorkflowSuccess(t, err)
+	var evidence struct {
+		Manifest verification.JobManifest `json:"manifest"`
+		Report   verification.JobReport   `json:"report"`
+	}
+	raw, _ := json.Marshal(op.Input)
+	requireWorkflowSuccess(t, json.Unmarshal(raw, &evidence))
+	wantStage, wantStatus := "complete", "approved"
+	if failing {
+		wantStage, wantStatus = "failed", "error"
+	}
+	project, err := e.Project(context.Background(), "p")
+	requireWorkflowSuccess(t, err)
+	if op.Stage != wantStage || project.Status != wantStatus {
+		t.Fatalf("setup outcome not reflected truthfully: operation=%+v project=%+v", op, project)
+	}
+	if evidence.Manifest.OperationID != id || evidence.Manifest.ProjectID != "p" || evidence.Manifest.PlanID != "" || evidence.Manifest.Purpose != "project_setup" {
+		t.Fatalf("setup fabricated plan authority or lost identity: %+v", evidence.Manifest)
+	}
+	if len(evidence.Report.Results) != 2 || evidence.Report.Results[1].Status != "pass" || evidence.Report.Passed == failing {
+		t.Fatalf("human commands not all executed: %+v", evidence.Report)
+	}
+	requireWorkflowSuccess(t, evidence.Report.Validate(evidence.Manifest))
+	return record.Version
 }
 
 func TestProjectSetupPersistsLiveAndCompletedCheckProgress(t *testing.T) {
@@ -104,14 +113,7 @@ func TestProjectSetupPersistsLiveAndCompletedCheckProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	configuration := "checks:\n  - name: visible-wait\n    command: [" + sleep + ", '3']\n    timeout_seconds: 10\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\n"
-	if err := os.WriteFile(filepath.Join(repository, ".whirlwind.yaml"), []byte(configuration), 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Confirm project verification commands"}} {
-		if out, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("commit policy: %v %s", err, out)
-		}
-	}
+	commitSetupFixturePolicy(t, repository, configuration)
 	ctx := context.Background()
 	project, err := e.Project(ctx, "p")
 	requireWorkflowSuccess(t, err)
@@ -124,27 +126,7 @@ func TestProjectSetupPersistsLiveAndCompletedCheckProgress(t *testing.T) {
 	requireWorkflowSuccess(t, e.Store.Put(ctx, "operations", id, op, 0))
 	done := make(chan error, 1)
 	go func() { done <- e.runProjectSetup(ctx, id) }()
-	deadline := time.Now().Add(2 * time.Second)
-	observed := false
-	for time.Now().Before(deadline) {
-		record, getErr := e.Store.Get(ctx, "operations", id)
-		if getErr == nil {
-			var state struct {
-				Stage string `json:"stage"`
-				Input struct {
-					Progress struct {
-						Current string `json:"current"`
-					} `json:"progress"`
-				} `json:"input"`
-			}
-			if json.Unmarshal(record.Data, &state) == nil && state.Stage == "running" && state.Input.Progress.Current == "visible-wait" {
-				observed = true
-				break
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !observed {
+	if !waitForLiveSetupProgress(ctx, e, id) {
 		<-done
 		t.Fatal("active project setup check was not durably visible")
 	}
@@ -171,20 +153,34 @@ func TestProjectSetupPersistsLiveAndCompletedCheckProgress(t *testing.T) {
 	}
 }
 
+func waitForLiveSetupProgress(ctx context.Context, e *Engine, id string) bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		record, getErr := e.Store.Get(ctx, "operations", id)
+		if getErr == nil {
+			var state struct {
+				Stage string `json:"stage"`
+				Input struct {
+					Progress struct {
+						Current string `json:"current"`
+					} `json:"progress"`
+				} `json:"input"`
+			}
+			if json.Unmarshal(record.Data, &state) == nil && state.Stage == "running" && state.Input.Progress.Current == "visible-wait" {
+				return true
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
 func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t *testing.T) {
 	e, _, repository := testEngine(t)
 	installSetupRunner(t)
-	policyPath := filepath.Join(repository, ".whirlwind.yaml")
 	qualityRoot := filepath.Join(t.TempDir(), "external-qlty")
 	configuration := "checks:\n  - name: build\n    command: [/usr/bin/true]\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\nquality:\n  root: " + qualityRoot + "\n"
-	if err := os.WriteFile(policyPath, []byte(configuration), 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Confirm project verification commands"}} {
-		if output, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("commit policy: %v %s", err, output)
-		}
-	}
+	commitSetupFixturePolicy(t, repository, configuration)
 	project, err := e.Project(context.Background(), "p")
 	requireWorkflowSuccess(t, err)
 	project.Policy, project.PolicyHash, err = policy.Load(repository)
@@ -197,10 +193,22 @@ func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t
 	if prepare.Quality == nil || prepare.Quality.Root != qualityRoot {
 		t.Fatalf("preparation lacks external Qlty root: %+v", prepare.Quality)
 	}
+	writePreparedSetupFixtureConfig(t, qualityRoot)
+	snapshot := assertChangedSetupConfigIsRefused(t, e, project, qualityRoot)
+	catalogHash := retainSetupFixtureCatalog(t, e, project)
+	qualify, err := e.projectSetupManifest(context.Background(), project, "qualify", projectSetupEvidence{Onboarding: true, Phase: "qualify", QualityRoot: snapshot.Root, SnapshotHash: evidenceDigest(snapshot), PreviousOperationID: setupFixtureCatalog, PluginCatalogHash: catalogHash})
+	requireWorkflowSuccess(t, err)
+	if qualify.Quality == nil || qualify.Quality.Identity != nil || len(qualify.Commands) != 2 || qualify.Commands[1].ReportFormat != "sarif" || !slices.Equal(qualify.Commands[1].Command, []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}) {
+		t.Fatalf("qualification lacks learn-mode frozen configuration and native SARIF scan: %+v", qualify)
+	}
+}
+
+func writePreparedSetupFixtureConfig(t *testing.T, qualityRoot string) {
+	t.Helper()
 	if err := os.MkdirAll(filepath.Join(qualityRoot, "config", ".qlty"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	for path, content := range map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n", ".gitleaks.toml": "[extend]\nuseDefault = true\n"} {
+	for path, content := range map[string]string{setupFixtureQltyConfig: "config_version = \"0\"\n", setupFixtureGitleaksConfig: "[extend]\nuseDefault = true\n"} {
 		full := filepath.Join(qualityRoot, "config", path)
 		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
 			t.Fatal(err)
@@ -209,9 +217,13 @@ func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t
 			t.Fatal(err)
 		}
 	}
+}
+
+func assertChangedSetupConfigIsRefused(t *testing.T, e *Engine, project model.Project, qualityRoot string) model.QualitySnapshot {
+	t.Helper()
 	snapshot, err := externalQualitySnapshot(project)
 	requireWorkflowSuccess(t, err)
-	secretConfig := filepath.Join(qualityRoot, "config", ".gitleaks.toml")
+	secretConfig := filepath.Join(qualityRoot, "config", setupFixtureGitleaksConfig)
 	if err := os.WriteFile(secretConfig, []byte("# changed after preparation\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -219,9 +231,14 @@ func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t
 	if staleErr == nil {
 		t.Fatal("changed external rules were accepted after preparation")
 	}
-	if err := os.WriteFile(secretConfig, []byte(snapshot.Files[".gitleaks.toml"]), 0600); err != nil {
+	if err := os.WriteFile(secretConfig, []byte(snapshot.Files[setupFixtureGitleaksConfig]), 0600); err != nil {
 		t.Fatal(err)
 	}
+	return snapshot
+}
+
+func retainSetupFixtureCatalog(t *testing.T, e *Engine, project model.Project) string {
+	t.Helper()
 	catalog := []byte("plugins:\n  definitions:\n    gitleaks:\n      known_good_version: 4.5.6\n")
 	catalogHash, err := verification.HashQltyPluginCatalog(catalog)
 	requireWorkflowSuccess(t, err)
@@ -235,14 +252,10 @@ func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t
 	if err := os.WriteFile(filepath.Join(priorRoot, "streams", "000.stderr"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	prior := projectSetupEvidence{Onboarding: true, Phase: "catalog", Manifest: verification.JobManifest{Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: "prepare-catalog", Root: priorRoot}}
+	prior := projectSetupEvidence{Onboarding: true, Phase: "catalog", Manifest: verification.JobManifest{Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: setupFixtureCatalog, Root: priorRoot}}
 	priorOperation := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "complete", Input: prior}
-	requireWorkflowSuccess(t, e.Store.Put(context.Background(), "operations", "prepare-catalog", priorOperation, 0))
-	qualify, err := e.projectSetupManifest(context.Background(), project, "qualify", projectSetupEvidence{Onboarding: true, Phase: "qualify", QualityRoot: snapshot.Root, SnapshotHash: evidenceDigest(snapshot), PreviousOperationID: "prepare-catalog", PluginCatalogHash: catalogHash})
-	requireWorkflowSuccess(t, err)
-	if qualify.Quality == nil || qualify.Quality.Identity != nil || len(qualify.Commands) != 2 || qualify.Commands[1].ReportFormat != "sarif" || !slices.Equal(qualify.Commands[1].Command, []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}) {
-		t.Fatalf("qualification lacks learn-mode frozen configuration and native SARIF scan: %+v", qualify)
-	}
+	requireWorkflowSuccess(t, e.Store.Put(context.Background(), "operations", setupFixtureCatalog, priorOperation, 0))
+	return catalogHash
 }
 
 func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
@@ -250,14 +263,7 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	installSetupRunner(t)
 	qualityRoot := filepath.Join(t.TempDir(), "external-qlty")
 	configuration := "checks:\n  - name: build\n    command: [/usr/bin/true]\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\nquality:\n  root: " + qualityRoot + "\n"
-	if err := os.WriteFile(filepath.Join(repository, ".whirlwind.yaml"), []byte(configuration), 0600); err != nil {
-		t.Fatal(err)
-	}
-	for _, args := range [][]string{{"add", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Confirm project verification commands"}} {
-		if output, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("commit policy: %v %s", err, output)
-		}
-	}
+	commitSetupFixturePolicy(t, repository, configuration)
 	ctx := context.Background()
 	project, err := e.Project(ctx, "p")
 	requireWorkflowSuccess(t, err)
@@ -271,15 +277,28 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	requireWorkflowSuccess(t, err)
 	manifest, err := e.projectSetupManifest(ctx, project, "prepare", projectSetupEvidence{Onboarding: true})
 	requireWorkflowSuccess(t, err)
-	if err := os.MkdirAll(filepath.Join(manifest.Root, "streams"), 0700); err != nil {
+	catalog := "plugins:\n  definitions:\n    gitleaks:\n      known_good_version: 4.5.6\n      drivers:\n        lint: {}\n"
+	writeSetupFixtureStreams(t, manifest.Root, catalog)
+	id := finishFixturePreparation(t, ctx, e, projectRecord, project, manifest)
+	catalogID := assertQueuedSetupCatalog(t, ctx, e, project, id, qualityRoot)
+	finishFixtureCatalogProbe(t, ctx, e, project, catalogID, catalog)
+	assertQueuedSetupQualification(t, ctx, e, project.ID, catalogID)
+}
+
+func writeSetupFixtureStreams(t *testing.T, root, catalog string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "streams"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	catalog := "plugins:\n  definitions:\n    gitleaks:\n      known_good_version: 4.5.6\n      drivers:\n        lint: {}\n"
 	for name, content := range map[string]string{"000.stdout": catalog, "000.stderr": ""} {
-		if err := os.WriteFile(filepath.Join(manifest.Root, "streams", name), []byte(content), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "streams", name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+func finishFixturePreparation(t *testing.T, ctx context.Context, e *Engine, projectRecord model.Record, project model.Project, manifest verification.JobManifest) string {
+	t.Helper()
 	id := store.ID()
 	op := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "running", Owner: e.owner, Input: projectSetupEvidence{Onboarding: true, Manifest: manifest}}
 	requireWorkflowSuccess(t, e.Store.Put(ctx, "operations", id, op, 0))
@@ -290,6 +309,11 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	checkpointCtx, cancelCheckpoint := context.WithCancel(ctx)
 	cancelCheckpoint()
 	requireWorkflowSuccess(t, e.finishProjectSetupPreparation(checkpointCtx, record, op, projectRecord, project, projectSetupEvidence{Onboarding: true, Manifest: manifest}))
+	return id
+}
+
+func assertQueuedSetupCatalog(t *testing.T, ctx context.Context, e *Engine, project model.Project, id, qualityRoot string) string {
+	t.Helper()
 	finished, err := e.Store.Get(ctx, "operations", id)
 	requireWorkflowSuccess(t, err)
 	finishedOperation, err := store.Decode[model.Operation](finished)
@@ -316,16 +340,7 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	if !meta.Onboarding || meta.Phase != "catalog" || meta.QualityRoot != canonicalQualityRoot || meta.SnapshotHash == "" {
 		t.Fatalf("catalog checkpoint lost setup evidence: %+v", meta)
 	}
-	savedProject, err := e.Project(ctx, project.ID)
-	requireWorkflowSuccess(t, err)
-	if savedProject.Status != "draft" {
-		t.Fatalf("project became ready before scanner qualification: %s", savedProject.Status)
-	}
-	for _, path := range []string{".qlty/qlty.toml", ".gitleaks.toml"} {
-		if _, err := os.Stat(filepath.Join(qualityRoot, "config", path)); err != nil {
-			t.Fatalf("default file not published outside source: %s: %v", path, err)
-		}
-	}
+	assertPreparedScannerFiles(t, ctx, e, project.ID, qualityRoot)
 	var catalogID string
 	for _, item := range operations {
 		candidate, decodeErr := store.Decode[model.Operation](item)
@@ -337,6 +352,25 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	if catalogID == "" {
 		t.Fatal("effective catalog probe operation missing")
 	}
+	return catalogID
+}
+
+func assertPreparedScannerFiles(t *testing.T, ctx context.Context, e *Engine, projectID, qualityRoot string) {
+	t.Helper()
+	savedProject, err := e.Project(ctx, projectID)
+	requireWorkflowSuccess(t, err)
+	if savedProject.Status != "draft" {
+		t.Fatalf("project became ready before scanner qualification: %s", savedProject.Status)
+	}
+	for _, path := range []string{setupFixtureQltyConfig, setupFixtureGitleaksConfig} {
+		if _, err := os.Stat(filepath.Join(qualityRoot, "config", path)); err != nil {
+			t.Fatalf("default file not published outside source: %s: %v", path, err)
+		}
+	}
+}
+
+func finishFixtureCatalogProbe(t *testing.T, ctx context.Context, e *Engine, project model.Project, catalogID, catalog string) {
+	t.Helper()
 	catalogOperation, err := e.Store.Get(ctx, "operations", catalogID)
 	requireWorkflowSuccess(t, err)
 	catalogOperationValue, err := store.Decode[model.Operation](catalogOperation)
@@ -347,18 +381,7 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	if len(catalogManifest.Commands) != 1 || catalogManifest.Commands[0].Name != "qlty-effective-catalog" {
 		t.Fatalf("effective catalog is not probed after config publication: %+v", catalogManifest.Commands)
 	}
-	if err := os.MkdirAll(filepath.Join(catalogManifest.Root, "streams"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	for _, suffix := range []string{"stdout", "stderr"} {
-		value := catalog
-		if suffix == "stderr" {
-			value = ""
-		}
-		if err := os.WriteFile(filepath.Join(catalogManifest.Root, "streams", "000."+suffix), []byte(value), 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	writeSetupFixtureStreams(t, catalogManifest.Root, catalog)
 	catalogEvidence := projectSetupEvidence{Onboarding: true, Phase: "catalog", QualityRoot: catalogInput.QualityRoot, SnapshotHash: catalogInput.SnapshotHash, Manifest: catalogManifest}
 	catalogInput.Manifest = catalogManifest
 	catalogInput.Onboarding, catalogInput.Phase = true, "catalog"
@@ -368,17 +391,21 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	requireWorkflowSuccess(t, err)
 	catalogOperationValue, err = store.Decode[model.Operation](catalogOperationRecord)
 	requireWorkflowSuccess(t, err)
-	projectRecord, err = e.Store.Get(ctx, "projects", project.ID)
+	projectRecord, err := e.Store.Get(ctx, "projects", project.ID)
 	requireWorkflowSuccess(t, err)
-	savedProject, err = store.Decode[model.Project](projectRecord)
+	savedProject, err := store.Decode[model.Project](projectRecord)
 	requireWorkflowSuccess(t, err)
 	requireWorkflowSuccess(t, e.finishProjectSetupCatalogProbe(ctx, catalogOperationRecord, catalogOperationValue, projectRecord, savedProject, catalogEvidence))
-	operations, err = e.Store.List(ctx, "operations")
+}
+
+func assertQueuedSetupQualification(t *testing.T, ctx context.Context, e *Engine, projectID, catalogID string) {
+	t.Helper()
+	operations, err := e.Store.List(ctx, "operations")
 	requireWorkflowSuccess(t, err)
 	for _, item := range operations {
 		candidate, decodeErr := store.Decode[model.Operation](item)
 		requireWorkflowSuccess(t, decodeErr)
-		if item.ID != catalogID && candidate.Kind == "project_setup" && candidate.Subject == project.ID && candidate.Stage == "queued" {
+		if item.ID != catalogID && candidate.Kind == "project_setup" && candidate.Subject == projectID && candidate.Stage == "queued" {
 			meta := setupEvidenceFromInput(candidate.Input)
 			if meta.Phase != "qualify" || meta.PreviousOperationID != catalogID || meta.PluginCatalogHash == "" {
 				t.Fatalf("qualification checkpoint lacks effective catalog: %+v", meta)
@@ -394,7 +421,7 @@ func TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings(t *testing.T) {
 		Version: 1, Purpose: verification.ProjectSetupPurpose, ProjectID: "project", OperationID: "setup", JobID: "setup",
 		ConfigurationHash: "configuration", CandidateCommit: strings.Repeat("a", 40), CandidateTree: strings.Repeat("b", 40), BaseCommit: strings.Repeat("a", 40),
 		Repository: filepath.Join(root, "source"), Root: filepath.Join(root, "quality", "jobs", "setup"), Launcher: filepath.Join(root, "nono"),
-		Quality:  &model.QualitySnapshot{Root: filepath.Join(root, "quality"), Files: map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n"}, PluginCatalog: []byte("plugins: {}\n")},
+		Quality:  &model.QualitySnapshot{Root: filepath.Join(root, "quality"), Files: map[string]string{setupFixtureQltyConfig: "config_version = \"0\"\n"}, PluginCatalog: []byte("plugins: {}\n")},
 		Commands: []verification.JobCommand{{Name: "build", Command: []string{"/usr/bin/true"}, TimeoutSeconds: 10}, {Name: "quality", Command: []string{"qlty", "check", "--sarif"}, TimeoutSeconds: 10, ReportFormat: "sarif"}},
 	}
 	identity := &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 macos-arm64 (fixture)", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: filepath.Join(root, "runtime"), Tools: []model.QualityToolIdentity{{Name: "gitleaks", Version: "1.0", Fingerprint: strings.Repeat("e", 8)}}}
@@ -456,6 +483,16 @@ func TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings(t *testing.T) {
 	unclean.Results[1].Runtime.CleanupVerified = false
 	if projectSetupAllowsExistingQltyFindings(manifest, unclean) {
 		t.Fatal("unverified Qlty runtime cleanup qualified setup")
+	}
+}
+
+func commitSetupFixturePolicy(t *testing.T, repository, configuration string) {
+	t.Helper()
+	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(repository, setupFixturePolicyFile), []byte(configuration), 0600))
+	for _, args := range [][]string{{"add", setupFixturePolicyFile}, {"-c", setupFixtureDisableHooks, "commit", "-m", setupFixtureCommitSubject}} {
+		if output, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf(setupFixtureCommitError, err, output)
+		}
 	}
 }
 

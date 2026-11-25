@@ -12,6 +12,10 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	defaultQualityFixtureCatalogCheck = "effective-catalog"
+)
+
 func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	if _, err := exec.LookPath("qlty"); err != nil {
 		t.Fatalf("installed Qlty required for default qualification: %v", err)
@@ -38,10 +42,10 @@ func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	requireVerificationSuccess(t, err)
 	snapshot, err := manifest.PrepareQualityDefaults([]byte(catalog))
 	requireVerificationSuccess(t, err)
-	manifest.JobID, manifest.OperationID = "effective-catalog", "effective-catalog"
+	manifest.JobID, manifest.OperationID = defaultQualityFixtureCatalogCheck, defaultQualityFixtureCatalogCheck
 	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
 	manifest.Quality = &snapshot
-	manifest.Commands = []JobCommand{{Name: "effective-catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
+	manifest.Commands = []JobCommand{{Name: defaultQualityFixtureCatalogCheck, Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
 	report, err = RunLocalJob(context.Background(), binary, manifest, nil)
 	if err != nil || !report.Passed {
 		t.Fatalf("effective catalog discovery failed: %+v %v", report, err)

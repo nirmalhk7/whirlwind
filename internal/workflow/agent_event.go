@@ -146,15 +146,23 @@ func (a *agentAttempt) persistenceError(err error) error {
 	if err == nil {
 		return nil
 	}
-	wrapped := fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
+	wrapped := attemptPersistenceFailure(err)
+	a.stopForAttemptError(wrapped)
+	return wrapped
+}
+
+func attemptPersistenceFailure(err error) error {
+	return fmt.Errorf(persistenceErrorFormat, store.ErrPersistence, err)
+}
+
+func (a *agentAttempt) stopForAttemptError(err error) {
 	a.mu.Lock()
 	if a.eventErr == nil {
-		a.eventErr = wrapped
+		a.eventErr = err
 	}
 	cancel := a.cancel
 	a.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
-	return wrapped
 }
