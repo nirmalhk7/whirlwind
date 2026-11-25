@@ -12,6 +12,10 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	concurrentDeliveryFixtureCandidateFile = "candidate.txt"
+)
+
 const secondCandidateBody = "independently reviewed second candidate\n"
 
 // Portable coverage of interleaved deliveries after accepted evidence. The
@@ -32,7 +36,7 @@ func TestConcurrentAcceptedDeliveriesIsolatePausedPlanAndReconcileAfterRestart(t
 	if paused.Stage != "paused" || paused.ResumeStage != "submitting" || paused.Delivery != nil {
 		t.Fatalf("unexpected checkpoint before restart: %+v", paused)
 	}
-	mainBefore := submissionGit(t, project.Path, "rev-parse", "refs/heads/main")
+	mainBefore := submissionGit(t, project.Path, gitRevParseCommand, "refs/heads/main")
 	requireWorkflowSuccess(t, engine.Step(ctx, second.ID))
 	prepared, _ := localStoredTask(t, engine, second.ID)
 	if prepared.Delivery == nil || prepared.Delivery.Stage != "prepared" {
@@ -65,13 +69,13 @@ func TestConcurrentAcceptedDeliveriesIsolatePausedPlanAndReconcileAfterRestart(t
 		t.Fatalf("crossed delivery identities: A=%+v B=%+v", firstDelivery, secondDelivery.Delivery)
 	}
 	for i, d := range []*model.LocalDelivery{firstDelivery, secondDelivery.Delivery} {
-		content, err := os.ReadFile(filepath.Join(d.Worktree, "candidate.txt"))
+		content, err := os.ReadFile(filepath.Join(d.Worktree, concurrentDeliveryFixtureCandidateFile))
 		requireWorkflowSuccess(t, err)
 		if want := []string{"reviewed candidate\n", secondCandidateBody}[i]; string(content) != want {
 			t.Fatalf("plan %d delivered peer content: got %q want %q", i+1, content, want)
 		}
 	}
-	if got := submissionGit(t, project.Path, "rev-parse", "refs/heads/main"); got != mainBefore {
+	if got := submissionGit(t, project.Path, gitRevParseCommand, "refs/heads/main"); got != mainBefore {
 		t.Fatalf("local delivery modified the source branch: %s != %s", got, mainBefore)
 	}
 	refs := strings.Fields(submissionGit(t, project.Path, "for-each-ref", "--format=%(refname)", "refs/heads/codex/delivery/"))
@@ -98,10 +102,10 @@ func secondAcceptedDeliveryCandidate(t *testing.T, ctx context.Context, engine *
 	second.Worktree = filepath.Join(engine.Root, "independent-worktree")
 	second.Base = template.Base
 	submissionGit(t, project.Path, "worktree", "add", "-b", second.Branch, second.Worktree, second.Base)
-	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(second.Worktree, "candidate.txt"), []byte(secondCandidateBody), 0600))
-	submissionGit(t, second.Worktree, "add", "candidate.txt")
+	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(second.Worktree, concurrentDeliveryFixtureCandidateFile), []byte(secondCandidateBody), 0600))
+	submissionGit(t, second.Worktree, "add", concurrentDeliveryFixtureCandidateFile)
 	submissionGit(t, second.Worktree, "commit", "-m", "independent reviewed candidate")
-	second.ReviewedCommit = submissionGit(t, second.Worktree, "rev-parse", "HEAD")
+	second.ReviewedCommit = submissionGit(t, second.Worktree, gitRevParseCommand, "HEAD")
 	second.Stage, second.ChecksPassed = "submitting", true
 	second.VerificationID, second.ReviewID = "verification-second-concurrent", second.ID+":1:1"
 	requireWorkflowSuccess(t, engine.Store.Put(ctx, "execution_plans", second.ID, second, version))
@@ -112,7 +116,7 @@ func secondAcceptedDeliveryCandidate(t *testing.T, ctx context.Context, engine *
 	verification["stage"], verification["report"] = "complete", fixture.completeReport(t)
 	requireWorkflowSuccess(t, engine.Store.Put(ctx, "verification", second.VerificationID, verification, 1))
 	review := model.Review{Provenance: &provenance, Requirements: []model.RequirementResult{{ID: "REQ-RESULT", Status: "pass",
-		Code: []string{"candidate.txt"}, Evidence: []string{"independent verified candidate"}, Explanation: "The second snapshot satisfies the requirement."}}}
+		Code: []string{concurrentDeliveryFixtureCandidateFile}, Evidence: []string{"independent verified candidate"}, Explanation: "The second snapshot satisfies the requirement."}}}
 	requireWorkflowSuccess(t, engine.Store.Put(ctx, "reviews", second.ReviewID, review, 0))
 	return second
 }
@@ -173,10 +177,10 @@ func assertCompletedPortableDelivery(t *testing.T, ctx context.Context, engine *
 		delivery.ReviewedCommit != want.ReviewedCommit || delivery.Base != want.Base {
 		t.Fatalf("delivery %s has wrong provenance: %+v", want.ID, delivery)
 	}
-	if got := submissionGit(t, delivery.Worktree, "rev-parse", "HEAD", "refs/heads/"+delivery.Branch); got != want.ReviewedCommit+"\n"+want.ReviewedCommit {
+	if got := submissionGit(t, delivery.Worktree, gitRevParseCommand, "HEAD", "refs/heads/"+delivery.Branch); got != want.ReviewedCommit+"\n"+want.ReviewedCommit {
 		t.Fatalf("delivery branch or worktree diverged: %q", got)
 	}
-	if got := submissionGit(t, delivery.Worktree, "rev-parse", "HEAD^{tree}"); got != delivery.Tree {
+	if got := submissionGit(t, delivery.Worktree, gitRevParseCommand, "HEAD^{tree}"); got != delivery.Tree {
 		t.Fatalf("delivery tree diverged: %q != %q", got, delivery.Tree)
 	}
 	requireWorkflowSuccess(t, engine.Step(ctx, want.ID))

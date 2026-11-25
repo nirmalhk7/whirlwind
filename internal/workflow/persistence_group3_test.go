@@ -13,12 +13,8 @@ func TestPublicationRejectsChangedCommitPolicyAndPlan(t *testing.T) {
 	}
 	review.Adherence, review.Score = &adherence, adherence.Score
 	reviewRecord, err := e.Store.Get(ctx, "reviews", task.ReviewID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := e.Store.Put(ctx, "reviews", task.ReviewID, review, reviewRecord.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "reviews", task.ReviewID, review, reviewRecord.Version))
 	task.Approved = true
 	task.Approval = &proof
 	if _, err := PublicationEvidence(ctx, e.Store, task, proof.PolicyHash); err != nil || !approvalMatches(task, proof.PolicyHash) {

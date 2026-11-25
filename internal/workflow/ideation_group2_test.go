@@ -19,9 +19,7 @@ func TestIdeationHistoryFailures(t *testing.T) {
 				_ = e.Store.Close()
 			} else {
 				proposal := model.Proposal{ID: "broken", ProjectID: task.ProjectID, Category: "harden", Problem: "Corrupt saved history", Mechanism: "Expose history decode errors", Components: []string{"internal/workflow"}, Title: "Broken history", Description: "Corruption test", Status: "shown"}
-				if err := e.Store.RecordProposalRejection(ctx, proposal, "Corrupt history fixture"); err != nil {
-					t.Fatal(err)
-				}
+				requireWorkflowSuccess(t, e.Store.RecordProposalRejection(ctx, proposal, "Corrupt history fixture"))
 				if _, err := e.Store.DB.ExecContext(ctx, "UPDATE proposals SET data=? WHERE project_id=? AND id=?", `"not a proposal"`, task.ProjectID, proposal.ID); err != nil {
 					t.Fatal(err)
 				}

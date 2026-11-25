@@ -12,6 +12,11 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	onboardingFixtureDay        = "2026-11-24"
+	onboardingFixtureWaitingRun = "operation:waiting"
+)
+
 func queuedOnboardingIdeation(t *testing.T, e *Engine, project model.Project, id string, input map[string]any) {
 	t.Helper()
 	requireWorkflowSuccess(t, e.Store.Put(t.Context(), "operations", id, model.Operation{
@@ -41,7 +46,7 @@ func TestRegistrationIdeationDoesNotStartUntilSetupSucceeds(t *testing.T) {
 	e := f.engine
 	setOnboardingProjectStatus(t, e, f.project, "")
 	queuedOnboardingIdeation(t, e, f.project, "automatic", map[string]any{
-		"project_id": f.project.ID, "day": "2026-11-24", "trigger": "project_registration",
+		"project_id": f.project.ID, "day": onboardingFixtureDay, "trigger": "project_registration",
 	})
 	check := func(reason string, generations int) int {
 		t.Helper()
@@ -83,7 +88,7 @@ func TestLegacyRegistrationOptOutDoesNotBlockManualIdeation(t *testing.T) {
 	workers["ideation"].(map[string]any)["on_registration"] = false
 	requireWorkflowSuccess(t, e.Store.Put(t.Context(), "settings", "global", workers, settings.Version))
 	queuedOnboardingIdeation(t, e, f.project, "legacy-automatic", map[string]any{
-		"project_id": f.project.ID, "day": "2026-11-24",
+		"project_id": f.project.ID, "day": onboardingFixtureDay,
 	})
 	e.dispatchQueuedIdeation(t.Context())
 	e.background.Wait()
@@ -93,7 +98,7 @@ func TestLegacyRegistrationOptOutDoesNotBlockManualIdeation(t *testing.T) {
 	}
 	setOnboardingProjectStatus(t, e, f.project, "error")
 	queuedOnboardingIdeation(t, e, f.project, "manual", map[string]any{
-		"project_id": f.project.ID, "day": "2026-11-24", "fresh": false,
+		"project_id": f.project.ID, "day": onboardingFixtureDay, "fresh": false,
 	})
 	e.dispatchQueuedIdeation(t.Context())
 	e.background.Wait()
@@ -110,14 +115,14 @@ func TestRegistrationIdeationRechecksSetupAtLeasedStart(t *testing.T) {
 	staleReady.Status = "approved"
 	setOnboardingProjectStatus(t, e, f.project, "error")
 	queuedOnboardingIdeation(t, e, f.project, "waiting", map[string]any{
-		"project_id": f.project.ID, "day": "2026-11-24", "trigger": "project_registration",
+		"project_id": f.project.ID, "day": onboardingFixtureDay, "trigger": "project_registration",
 	})
 	record, err := e.Store.Get(t.Context(), "operations", "waiting")
 	requireWorkflowSuccess(t, err)
-	lease, err := e.Store.Claim(t.Context(), "operation:waiting", e.owner, time.Minute)
+	lease, err := e.Store.Claim(t.Context(), onboardingFixtureWaitingRun, e.owner, time.Minute)
 	requireWorkflowSuccess(t, err)
-	defer func() { _ = e.Store.Release(context.Background(), "operation:waiting", e.owner, lease.Fence) }()
-	requireWorkflowSuccess(t, e.runQueuedIdeation(t.Context(), staleReady, record, "operation:waiting", lease.Fence))
+	defer func() { _ = e.Store.Release(context.Background(), onboardingFixtureWaitingRun, e.owner, lease.Fence) }()
+	requireWorkflowSuccess(t, e.runQueuedIdeation(t.Context(), staleReady, record, onboardingFixtureWaitingRun, lease.Fence))
 	op, _ := inspectOnboardingIdeation(t, e, "waiting")
 	if op.Stage != "queued" || !strings.Contains(op.Error, "project setup failed") || f.fixture.generations != 0 {
 		t.Fatalf("stale project readiness granted an automatic model attempt: %+v", op)

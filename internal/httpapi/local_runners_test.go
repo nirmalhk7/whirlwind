@@ -24,18 +24,12 @@ func TestLocalRunnerToggleFlipsPersistedStateAndReplaysOnce(t *testing.T) {
 	s := setup(t)
 	ctx := context.Background()
 	file := filepath.Join(t.TempDir(), "settings.yaml")
-	if err := settingsfile.Attach(ctx, s.Store, file); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, settingsfile.Attach(ctx, s.Store, file))
 	task := model.ExecutionPlan{ID: "active", Stage: "coding", Selection: &model.SelectionAuthorization{CandidateID: "active", SelectedAt: "2026-11-08T00:00:00Z"}}
-	if err := s.Store.Put(ctx, "execution_plans", "active", task, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireAPISuccess(t, s.Store.Put(ctx, "execution_plans", "active", task, 0))
 	for i, want := range []bool{true, false, true} {
 		settings, err := s.Store.Get(ctx, "settings", "global")
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireAPISuccess(t, err)
 		payload, _ := json.Marshal(map[string]bool{"stopped": want})
 		command := LocalCommand{Operation: runnerToggleTestOperation, ResourceID: "global", ExpectedVersion: settings.Version, Payload: payload, IdempotencyKey: fmt.Sprintf("toggle-%d", i)}
 		for retry := 0; retry < 2; retry++ {
@@ -45,9 +39,7 @@ func TestLocalRunnerToggleFlipsPersistedStateAndReplaysOnce(t *testing.T) {
 			assertRunnerToggleState(t, s.Store, file, want)
 		}
 		record, err := s.Store.Get(ctx, "execution_plans", "active")
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireAPISuccess(t, err)
 		task, err := store.Decode[model.ExecutionPlan](record)
 		stage := "coding"
 		if want {

@@ -37,19 +37,7 @@ func removeDirection(ctx context.Context, tx *sql.Tx, id string, expected int) e
 		return err
 	}
 	if direction.ProjectID != "" {
-		proposal, err := loadProposalTx(tx, direction.ProjectID, id)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if errors.Is(err, sql.ErrNoRows) {
-			proposal = proposalFromDirection(direction, "")
-		}
-		proposal.Status = "removed"
-		proposal.DeferralReason = "Removed from active directions by the user"
-		if proposal.CreatedAt == "" {
-			proposal.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-		}
-		if err := writeProposalTx(tx, proposal, false); err != nil {
+		if err := recordRemovedProposal(tx, direction, id); err != nil {
 			return err
 		}
 	}
@@ -62,4 +50,20 @@ func removeDirection(ctx context.Context, tx *sql.Tx, id string, expected int) e
 	}
 	_, err = tx.ExecContext(ctx, "INSERT INTO events(kind,resource_id,data,created_at) VALUES('directions',?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now'))", id, `{"deleted":true}`)
 	return err
+}
+
+func recordRemovedProposal(tx *sql.Tx, direction model.Direction, id string) error {
+	proposal, err := loadProposalTx(tx, direction.ProjectID, id)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		proposal = proposalFromDirection(direction, "")
+	}
+	proposal.Status = "removed"
+	proposal.DeferralReason = "Removed from active directions by the user"
+	if proposal.CreatedAt == "" {
+		proposal.CreatedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	}
+	return writeProposalTx(tx, proposal, false)
 }

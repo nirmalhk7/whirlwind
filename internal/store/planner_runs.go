@@ -29,42 +29,50 @@ func syncPlannerAttemptTx(ctx context.Context, tx *sql.Tx, id string, before, da
 	if attempt.Role != "plan" || attempt.AttemptID != id {
 		return ErrConflict
 	}
+	if err := ensurePlannerAttemptRun(ctx, tx, attempt, len(before) == 0); err != nil {
+		return err
+	}
+	if !attempt.Finished || attempt.Status == "complete" || attempt.Status == model.AttemptAwaitingPlanPublication {
+		return nil
+	}
+	return finishFailedPlannerAttempt(ctx, tx, attempt, previous)
+}
+
+func ensurePlannerAttemptRun(ctx context.Context, tx *sql.Tx, attempt model.Attempt, newAttempt bool) error {
 	idea, version, err := plannerAttemptIdeaTx(ctx, tx, attempt)
 	if err != nil {
 		return err
 	}
-	if len(before) == 0 {
-		plan, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", attempt.Task)
-		if err != nil {
-			return err
-		}
-		if plan.Stage != "planning" || plan.PlanVersion != attempt.PlanVersion {
-			return ErrConflict
-		}
-		if err := createPlannerRunTx(ctx, tx, id, attempt, idea, version); err != nil {
-			return err
-		}
-	} else if err := validateExistingPlannerRunTx(ctx, tx, id, idea.ID); err != nil {
+	if !newAttempt {
+		return validateExistingPlannerRunTx(ctx, tx, attempt.AttemptID, idea.ID)
+	}
+	plan, _, err := txResource[model.ExecutionPlan](ctx, tx, "execution_plans", attempt.Task)
+	if err != nil {
 		return err
 	}
-	if attempt.Finished && attempt.Status != "complete" && attempt.Status != model.AttemptAwaitingPlanPublication {
-		if plannerPublicationCandidate(previous) {
-			if attempt.Status == "cancelled" {
-				if err := checkPlannerCancellationFileTx(ctx, tx, id); err != nil {
-					return err
-				}
-			}
-			if err := finalizePlannerMetricTx(ctx, tx, id, false); err != nil {
+	if plan.Stage != "planning" || plan.PlanVersion != attempt.PlanVersion {
+		return ErrConflict
+	}
+	return createPlannerRunTx(ctx, tx, attempt.AttemptID, attempt, idea, version)
+}
+
+func finishFailedPlannerAttempt(ctx context.Context, tx *sql.Tx, attempt, previous model.Attempt) error {
+	id := attempt.AttemptID
+	if plannerPublicationCandidate(previous) {
+		if attempt.Status == "cancelled" {
+			if err := checkPlannerCancellationFileTx(ctx, tx, id); err != nil {
 				return err
 			}
 		}
-		result, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='error',error_reason=?,finished_at=? WHERE planner_run_id=? AND status='in_process'", attempt.Error, attempt.FinishedAt, id)
-		if err != nil {
+		if err := finalizePlannerMetricTx(ctx, tx, id, false); err != nil {
 			return err
 		}
-		return requireOneRow(result)
 	}
-	return nil
+	result, err := tx.ExecContext(ctx, "UPDATE planner_runs SET status='error',error_reason=?,finished_at=? WHERE planner_run_id=? AND status='in_process'", attempt.Error, attempt.FinishedAt, id)
+	if err != nil {
+		return err
+	}
+	return requireOneRow(result)
 }
 
 // CommitPlannerPublication holds the SQLite writer lock from the checked plan

@@ -14,24 +14,16 @@ func TestIdeationPausesWhenTotalHistoryBudgetCannotFitContext(t *testing.T) {
 	prepared := prepareNoveltyTest(t, []string{`{"unique":true}`})
 	ctx := context.Background()
 	settingsRecord, err := prepared.engine.Store.Get(ctx, "settings", "global")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	settings, err := store.Decode[Settings](settingsRecord)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	settings.Ideation.HistoryRunTokenBudget = 1
-	if err := prepared.engine.Store.Put(ctx, "settings", "global", settings, settingsRecord.Version); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, prepared.engine.Store.Put(ctx, "settings", "global", settings, settingsRecord.Version))
 	if err := prepared.engine.Ideate(ctx, prepared.project, "2026-10-30"); err == nil || !strings.Contains(err.Error(), "history budget exhausted") {
 		t.Fatalf("history exhaustion was not reported as incomplete: %v", err)
 	}
 	records, err := prepared.engine.Store.List(ctx, "directions")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	for _, record := range records {
 		var direction model.Direction
 		if json.Unmarshal(record.Data, &direction) == nil && direction.ProjectID == prepared.project.ID && direction.Day == "2026-10-30" {
@@ -39,9 +31,7 @@ func TestIdeationPausesWhenTotalHistoryBudgetCannotFitContext(t *testing.T) {
 		}
 	}
 	notifications, err := prepared.engine.Store.List(ctx, "inbox")
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	paused := false
 	for _, record := range notifications {
 		var notice model.Notification

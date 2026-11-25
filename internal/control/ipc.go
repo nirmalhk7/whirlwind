@@ -8,18 +8,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
 
 const (
-	RoleQueuePushOperation = "queue.push"
-	RoleQueuePopOperation  = "queue.pop"
+	finalizationInspectOperation = "finalization.inspect"
+	RoleQueuePushOperation       = "queue.push"
+	RoleQueuePopOperation        = "queue.pop"
 )
 
 const (
@@ -80,7 +81,7 @@ var allowedOperations = map[string]bool{
 	"direction.reconsider": true, "direction.delete": true,
 	"question.answer": true, "permission.decide": true,
 	"plan.pause": true, "plan.resume": true,
-	"finalization.inspect": true, "finalization.approve": true,
+	finalizationInspectOperation: true, "finalization.approve": true,
 	RoleQueuePushOperation: true, RoleQueuePopOperation: true,
 }
 
@@ -217,43 +218,6 @@ func (s *LocalServer) handle(conn net.Conn, dispatcher Dispatcher) {
 	_, _ = conn.Write(append(encoded, '\n'))
 }
 
-func validateRequest(request Request) error {
-	if strings.TrimSpace(request.RequestID) == "" || len(request.RequestID) > 128 {
-		return errors.New("request_id is required and must be at most 128 characters")
-	}
-	if !allowedOperations[request.Operation] {
-		return fmt.Errorf("unsupported local operation %q", request.Operation)
-	}
-	if len(request.Payload) > maxIPCMessage/2 {
-		return errors.New("command payload exceeds 512 KiB")
-	}
-	if request.Operation == "inspect.events" {
-		if request.EventCursor < 0 || request.Limit < 0 || request.Limit > 500 {
-			return errors.New("event cursor or page limit is invalid (limit 1..500)")
-		}
-		return nil
-	}
-	if request.Operation == "finalization.inspect" && (request.DiffOffset < 0 || request.DiffOffset > maxDiffCursor) {
-		return errors.New("finalization diff cursor is outside the supported range")
-	}
-	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" || request.Operation == "finalization.inspect" || request.Operation == "provider.status" || request.Operation == "project.policy.preview" {
-		return nil
-	}
-	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {
-		return errors.New("idempotency_key is required for supervisor commands")
-	}
-	if request.Operation != "project.register" && request.Operation != "supervisor.stop" && request.Operation != "runners.toggle" && request.ExpectedVersion < 1 {
-		return errors.New("expected_version must be positive for this supervisor command")
-	}
-	if (request.Operation == "plan.review" || request.Operation == "plan.document.save" || request.Operation == "plan.approve" || request.Operation == "plan.request_changes" || request.Operation == "plan.reject") && request.ContentHash == "" {
-		return errors.New("content_hash is required for plan review")
-	}
-	if len(request.Payload) > 0 && !json.Valid(request.Payload) {
-		return errors.New("payload must be valid JSON")
-	}
-	return nil
-}
-
 func (s *LocalServer) writeError(conn net.Conn, requestID, message string) {
 	_ = json.NewEncoder(conn).Encode(Response{RequestID: requestID, Error: message})
 }
@@ -300,7 +264,13 @@ func (c *Client) Call(ctx context.Context, request Request) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("connect to local supervisor at %s: %w", c.path, err)
 	}
-	defer conn.Close()
+	defer func() {
+		// The server may already have committed a decision. Report a socket
+		// cleanup error without invalidating its received receipt.
+		if err := conn.Close(); err != nil {
+			log.Printf("close supervisor connection: %v", err)
+		}
+	}()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	} else {

@@ -95,24 +95,8 @@ func (e *Engine) approveLocalPlan(ctx context.Context, task *model.ExecutionPlan
 	if err != nil {
 		return nil, err
 	}
-	if project.ManagedPolicy && project.Status != "approved" {
-		return nil, errors.New("finish project setup before approving its execution plan")
-	}
-	if project.Policy.OfflineDockerImage != "" {
-		if task.IdeaID == "" {
-			return nil, errors.New("managed offline verification requires a canonical idea plan")
-		}
-		if _, err := e.qualifiedOfflineProject(ctx, project); err != nil {
-			return nil, err
-		}
-	}
-	if task.IdeaID != "" {
-		if err := validatePairCapacity(e.settings(ctx), project); err != nil {
-			return nil, err
-		}
-		if err := validatePlanCommandReferences(project.Policy, plan); err != nil {
-			return nil, err
-		}
+	if err := e.checkPlanApprovalReadiness(ctx, project, task.IdeaID, plan); err != nil {
+		return nil, err
 	}
 	if err := e.freshLocalPlanVersion(ctx, task, content); err != nil {
 		return nil, err
@@ -133,6 +117,29 @@ func (e *Engine) approveLocalPlan(ctx context.Context, task *model.ExecutionPlan
 	task.Stage, task.ResumeStage, task.Error = "coding", "", ""
 	task.Handoff.NextAction = "Implement the immutable approved local plan."
 	return append(guards, store.Change{Kind: "plan_versions", ID: fmt.Sprintf("%s:%d", task.ID, task.PlanVersion), Value: plan}), nil
+}
+
+func (e *Engine) checkPlanApprovalReadiness(ctx context.Context, project model.Project, ideaID string, plan model.PlanSpecification) error {
+	if project.ManagedPolicy && project.Status != "approved" {
+		return errors.New("finish project setup before approving its execution plan")
+	}
+	if project.Policy.OfflineDockerImage != "" {
+		if ideaID == "" {
+			return errors.New("managed offline verification requires a canonical idea plan")
+		}
+		if _, err := e.qualifiedOfflineProject(ctx, project); err != nil {
+			return err
+		}
+	}
+	if ideaID != "" {
+		if err := validatePairCapacity(e.settings(ctx), project); err != nil {
+			return err
+		}
+		if err := validatePlanCommandReferences(project.Policy, plan); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (e *Engine) readLocalPlanApproval(task model.ExecutionPlan, hash string) (string, model.PlanSpecification, error) {
