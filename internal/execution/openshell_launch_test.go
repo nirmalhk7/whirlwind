@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -13,51 +14,50 @@ import (
 	"whirlwind/internal/testutil/openshell"
 )
 
+const (
+	launchFixtureAttempt       = "attempt-123"
+	launchFixtureFailedAttempt = "attempt-failure"
+)
+
 func TestOpenShellLaunchUsesPinnedDetachedSandboxAndSeparateExec(t *testing.T) {
 	fixture := openshell.Install(t)
 	fixture.EnableCommandExecution()
 	root := t.TempDir()
 	root, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	worktree := filepath.Join(root, "worktree")
-	if err := os.Mkdir(worktree, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.Mkdir(worktree, 0700))
 	worktree, err = filepath.EvalSymlinks(worktree)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	profile := Profile{
-		ExecutionID: "attempt-123", ExecutionGeneration: 3,
-		SandboxName: OpenShellSandboxName("attempt-123"), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
+		ExecutionID: launchFixtureAttempt, ExecutionGeneration: 3,
+		SandboxName: OpenShellSandboxName(launchFixtureAttempt), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
 		GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test",
-		ExecutionLabelValue: OpenShellExecutionLabel("attempt-123", 3), DeadlineAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+		ExecutionLabelValue: OpenShellExecutionLabel(launchFixtureAttempt, 3), DeadlineAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
 		CWD: worktree, ReadOnly: true, ReadRoots: []string{}, Domains: []string{}, Environment: []string{},
 	}
 	profileData, err := json.Marshal(profile)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
 	t.Setenv("WHIRLWIND_OPENSHELL_IMAGE", "test-image")
 	t.Setenv("WHIRLWIND_OPENSHELL_PROXY_TOKEN", strings.Repeat("a", 64))
 	xdgConfig := filepath.Join(root, "host-config")
-	if err := os.Mkdir(xdgConfig, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.Mkdir(xdgConfig, 0700))
 	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
 	xdgState := filepath.Join(root, "host-state")
-	if err := os.Mkdir(xdgState, 0700); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, os.Mkdir(xdgState, 0700))
 	t.Setenv("XDG_STATE_HOME", xdgState)
 	command := exec.CommandContext(context.Background(), "node", filepath.Join("..", "..", "bridges", "openshell", "launch.mjs"), string(profileData), "--", "/usr/bin/true")
 	command.Dir = filepath.Join("..", "..", "internal", "execution")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("OpenShell launcher failed: %v: %s", err, output)
 	}
+	assertDetachedOpenShellIdentity(t, fixture, profile)
+	assertOpenShellBootstrapEnvironment(t, fixture, xdgConfig, xdgState)
+}
+
+func assertDetachedOpenShellIdentity(t *testing.T, fixture *openshell.Fixture, profile Profile) {
+	t.Helper()
 	if !fixture.HasInertInit(t) {
 		t.Fatal("persistent sandbox was not created with the required inert init process")
 	}
@@ -79,15 +79,15 @@ func TestOpenShellLaunchUsesPinnedDetachedSandboxAndSeparateExec(t *testing.T) {
 			t.Fatalf("OpenShell lifecycle call escaped pinned authority: %v", call)
 		}
 	}
+}
+
+func assertOpenShellBootstrapEnvironment(t *testing.T, fixture *openshell.Fixture, xdgConfig, xdgState string) {
+	t.Helper()
 	environmentCalls := fixture.EnvironmentCalls(t)
 	for _, operation := range []string{"create", "exec"} {
-		found := false
-		for _, call := range environmentCalls {
-			if call.Operation == operation && call.XDGPresent && call.XDGConfigHome == xdgConfig && call.XDGStatePresent && call.XDGStateHome == xdgState {
-				found = true
-				break
-			}
-		}
+		found := slices.ContainsFunc(environmentCalls, func(call openshell.EnvironmentCall) bool {
+			return call.Operation == operation && call.XDGPresent && call.XDGConfigHome == xdgConfig && call.XDGStatePresent && call.XDGStateHome == xdgState
+		})
 		if !found {
 			t.Fatalf("host XDG gateway configuration was not preserved for sandbox %s: %+v", operation, environmentCalls)
 		}
@@ -126,10 +126,10 @@ func TestOpenShellLaunchPreservesCreateFailureWhenCleanupAlsoFails(t *testing.T)
 		t.Fatal(err)
 	}
 	profile := Profile{
-		ExecutionID: "attempt-failure", ExecutionGeneration: 1,
-		SandboxName: OpenShellSandboxName("attempt-failure"), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
+		ExecutionID: launchFixtureFailedAttempt, ExecutionGeneration: 1,
+		SandboxName: OpenShellSandboxName(launchFixtureFailedAttempt), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
 		GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test",
-		ExecutionLabelValue: OpenShellExecutionLabel("attempt-failure", 1), DeadlineAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+		ExecutionLabelValue: OpenShellExecutionLabel(launchFixtureFailedAttempt, 1), DeadlineAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
 		CWD: worktree, ReadOnly: true, ReadRoots: []string{}, Domains: []string{}, Environment: []string{},
 	}
 	profileData, err := json.Marshal(profile)

@@ -13,6 +13,15 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	stagingSourceText          = "frozen source\n"
+	stagingSourceFile          = "source.txt"
+	stagingForbiddenCommand    = "/must/not/run"
+	stagingAutofixScenario     = "autofix-checkout"
+	stagingReplacementScenario = "replaced-checkout"
+	stagingVerifyPlaceholder   = "/irrelevant/verify"
+)
+
 func stagingJobFixture(t *testing.T, commands ...JobCommand) JobManifest {
 	t.Helper()
 	repo := t.TempDir()
@@ -27,8 +36,8 @@ func stagingJobFixture(t *testing.T, commands ...JobCommand) JobManifest {
 		return string(bytes.TrimSpace(output))
 	}
 	git("init", "-b", "fixture")
-	requireVerificationSuccess(t, os.WriteFile(filepath.Join(repo, "source.txt"), []byte("frozen source\n"), 0600))
-	git("add", "source.txt")
+	requireVerificationSuccess(t, os.WriteFile(filepath.Join(repo, stagingSourceFile), []byte(stagingSourceText), 0600))
+	git("add", stagingSourceFile)
 	git("commit", "-m", "fixture")
 	head := git("rev-parse", "HEAD")
 	return JobManifest{Version: 1, JobID: "staging-test", PlanID: "plan", PlanVersion: 1, PlanHash: "frozen plan",
@@ -56,7 +65,7 @@ func runStagingJob(t *testing.T, manifest JobManifest, observe func(JobEvent) er
 }
 
 func TestVerificationRetriesAfterStagingMarkerWriteFails(t *testing.T) {
-	m := stagingJobFixture(t, JobCommand{Name: "verify", Command: []string{"/must/not/run"}, TimeoutSeconds: 5})
+	m := stagingJobFixture(t, JobCommand{Name: "verify", Command: []string{stagingForbiddenCommand}, TimeoutSeconds: 5})
 	markerTemp := filepath.Join(m.Root, checkoutOwnershipFile(verificationCheckoutDir)+".tmp")
 	requireVerificationSuccess(t, os.MkdirAll(markerTemp, 0700))
 	requireVerificationSuccess(t, os.WriteFile(filepath.Join(markerTemp, "blocker"), []byte("preserve"), 0600))
@@ -76,9 +85,9 @@ func TestVerificationRetriesAfterStagingMarkerWriteFails(t *testing.T) {
 		if event.Type != "started" || event.Index != 0 {
 			t.Fatalf("unexpected event after retry: %+v", event)
 		}
-		content, err := os.ReadFile(filepath.Join(m.Root, verificationCheckoutDir, "source.txt"))
+		content, err := os.ReadFile(filepath.Join(m.Root, verificationCheckoutDir, stagingSourceFile))
 		requireVerificationSuccess(t, err)
-		if string(content) != "frozen source\n" {
+		if string(content) != stagingSourceText {
 			t.Fatalf("checkout did not restore frozen source: %q", content)
 		}
 		return interrupted
@@ -89,34 +98,16 @@ func TestVerificationRetriesAfterStagingMarkerWriteFails(t *testing.T) {
 }
 
 func TestVerificationRecoversOnlyOwnedUnpublishedCheckouts(t *testing.T) {
-	for _, scenario := range []string{"frozen-checkout", "autofix-checkout", "replaced-checkout"} {
+	for _, scenario := range []string{"frozen-checkout", stagingAutofixScenario, stagingReplacementScenario} {
 		t.Run(scenario, func(t *testing.T) {
-			m := stagingJobFixture(t, JobCommand{Name: "verify", Command: []string{"/must/not/run"}, TimeoutSeconds: 5})
+			m := stagingJobFixture(t, JobCommand{Name: "verify", Command: []string{stagingForbiddenCommand}, TimeoutSeconds: 5})
 			relative := verificationCheckoutDir
-			if scenario == "autofix-checkout" {
+			if scenario == stagingAutofixScenario {
 				m.Commands[0].Mode = "autofix"
 				relative = autofixCheckoutDir(0)
 			}
-			interrupted := errors.New("stop after git clone --no-checkout")
-			var draft string
-			func() {
-				r := stagingJobOpen(t, m)
-				defer r.close()
-				_, err := r.cloneDisposableCheckout(t.Context(), relative, func(stage string) error {
-					draft = stage
-					if _, err := os.Stat(filepath.Join(stage, ".git", "HEAD")); err != nil {
-						t.Fatalf("fixture did not clone with real Git: %v", err)
-					}
-					if _, err := os.Lstat(filepath.Join(stage, "source.txt")); !os.IsNotExist(err) {
-						t.Fatalf("fixture already populated the checkout: %v", err)
-					}
-					return interrupted
-				})
-				if !errors.Is(err, interrupted) {
-					t.Fatalf("expected interrupted Git preparation, got %v", err)
-				}
-			}()
-			if scenario == "replaced-checkout" {
+			draft := interruptStagingClone(t, m, relative)
+			if scenario == stagingReplacementScenario {
 				requireVerificationSuccess(t, os.Rename(draft, draft+".original"))
 				requireVerificationSuccess(t, os.Mkdir(draft, 0700))
 				requireVerificationSuccess(t, os.WriteFile(filepath.Join(draft, "untouched"), []byte("replacement"), 0600))
@@ -125,32 +116,64 @@ func TestVerificationRecoversOnlyOwnedUnpublishedCheckouts(t *testing.T) {
 			defer r.close()
 			var stage string
 			var err error
-			if scenario == "autofix-checkout" {
+			if scenario == stagingAutofixScenario {
 				stage, err = r.prepareFixCheckout(t.Context(), 0)
 			} else {
 				stage, err = r.prepareCheckout(t.Context())
 			}
-			if scenario == "replaced-checkout" {
-				if err == nil || !strings.Contains(err.Error(), "unrecognized verification staging owner") {
-					t.Fatalf("retry accepted a replacement directory: %v", err)
-				}
-				content, err := os.ReadFile(filepath.Join(draft, "untouched"))
-				requireVerificationSuccess(t, err)
-				if string(content) != "replacement" {
-					t.Fatalf("changed replacement directory: %q", content)
-				}
+			if scenario == stagingReplacementScenario {
+				assertReplacementCheckoutPreserved(t, draft, err)
 				return
 			}
 			requireVerificationSuccess(t, err)
-			content, err := os.ReadFile(filepath.Join(stage, "source.txt"))
-			requireVerificationSuccess(t, err)
-			if string(content) != "frozen source\n" {
-				t.Fatalf("retry did not restore frozen source: %q", content)
-			}
-			if _, err := os.Lstat(draft); !os.IsNotExist(err) {
-				t.Fatalf("retry kept the abandoned clone: %v", err)
-			}
+			assertRecoveredStagingSource(t, stage, draft)
 		})
+	}
+}
+
+func interruptStagingClone(t *testing.T, manifest JobManifest, relative string) string {
+	t.Helper()
+	interrupted := errors.New("stop after git clone --no-checkout")
+	r := stagingJobOpen(t, manifest)
+	defer r.close()
+	var draft string
+	_, err := r.cloneDisposableCheckout(t.Context(), relative, func(stage string) error {
+		draft = stage
+		if _, err := os.Stat(filepath.Join(stage, ".git", "HEAD")); err != nil {
+			t.Fatalf("fixture did not clone with real Git: %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(stage, stagingSourceFile)); !os.IsNotExist(err) {
+			t.Fatalf("fixture already populated the checkout: %v", err)
+		}
+		return interrupted
+	})
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("expected interrupted Git preparation, got %v", err)
+	}
+	return draft
+}
+
+func assertReplacementCheckoutPreserved(t *testing.T, draft string, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "unrecognized verification staging owner") {
+		t.Fatalf("retry accepted a replacement directory: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(draft, "untouched"))
+	requireVerificationSuccess(t, err)
+	if string(content) != "replacement" {
+		t.Fatalf("changed replacement directory: %q", content)
+	}
+}
+
+func assertRecoveredStagingSource(t *testing.T, stage, draft string) {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(stage, stagingSourceFile))
+	requireVerificationSuccess(t, err)
+	if string(content) != stagingSourceText {
+		t.Fatalf("retry did not restore frozen source: %q", content)
+	}
+	if _, err := os.Lstat(draft); !os.IsNotExist(err) {
+		t.Fatalf("retry kept the abandoned clone: %v", err)
 	}
 }
 
@@ -183,7 +206,7 @@ func journalStagingResult(t *testing.T, runner *jobRunner, index int, result Job
 func TestCompletedVerificationReleasesStagingAndRetainsEvidence(t *testing.T) {
 	ctx := t.Context()
 	falseValue := false
-	verify := JobCommand{Name: "verify", Command: []string{"/irrelevant/verify"}, OutputPaths: []string{"reports/result.txt"}, TimeoutSeconds: 5}
+	verify := JobCommand{Name: "verify", Command: []string{stagingVerifyPlaceholder}, OutputPaths: []string{"reports/result.txt"}, TimeoutSeconds: 5}
 	fix := JobCommand{Name: "fix", Mode: "autofix", Command: []string{"/irrelevant/autofix"}, TimeoutSeconds: 5, Required: &falseValue}
 	qlty := JobCommand{Name: "scanner", Command: []string{"qlty", "check", "--sarif"}, TimeoutSeconds: 5}
 	m := stagingJobFixture(t, verify, fix, qlty)
@@ -249,44 +272,54 @@ func TestCompletedVerificationReleasesStagingAndRetainsEvidence(t *testing.T) {
 	}
 	run()
 	for i := 0; i < 2; i++ {
-		for _, path := range []string{verificationCheckoutDir, autofixCheckoutDir(1)} {
-			for _, name := range []string{path, checkoutOwnershipFile(path)} {
-				if _, err := os.Lstat(filepath.Join(m.Root, name)); !os.IsNotExist(err) {
-					t.Errorf("completed disposable staging still exists: %s: %v", name, err)
-				}
-			}
-		}
-		saved, err := readJobReport(m)
-		requireVerificationSuccess(t, err)
-		patch, err := ReadAutofixPatch(m, 1, saved.Results[1])
-		requireVerificationSuccess(t, err)
-		if !bytes.Contains(patch, []byte("+corrected content")) {
-			t.Fatalf("lost patch: %q", patch)
-		}
-		retained, err := os.ReadFile(filepath.Join(m.Root, artifact.Artifacts[0].Location))
-		requireVerificationSuccess(t, err)
-		if string(retained) != "retained evidence\n" {
-			t.Fatalf("lost retained artifact: %q", retained)
-		}
-		hash, err := hashQualityTree(identity.ToolRuntimePath)
-		requireVerificationSuccess(t, err)
-		if hash != identity.ToolRuntimeHash {
-			t.Fatal("changed retained scanner runtime")
-		}
-		out, stderr, err := ReadJobStreams(m.Root, 0)
-		requireVerificationSuccess(t, err)
-		if out != "stream evidence\n" || stderr != out {
-			t.Fatal("lost retained streams")
-		}
-		if _, err := os.Stat(filepath.Join(m.Root, jobJournalFilename)); err != nil {
-			t.Fatal(err)
-		}
+		assertRetainedVerificationEvidence(t, m, artifact.Artifacts[0].Location, identity)
 		run()
 	}
 }
 
+func assertRetainedVerificationEvidence(t *testing.T, m JobManifest, artifactLocation string, identity *model.QualityIdentity) {
+	t.Helper()
+	assertCompletedStagingRemoved(t, m.Root)
+	saved, err := readJobReport(m)
+	requireVerificationSuccess(t, err)
+	patch, err := ReadAutofixPatch(m, 1, saved.Results[1])
+	requireVerificationSuccess(t, err)
+	if !bytes.Contains(patch, []byte("+corrected content")) {
+		t.Fatalf("lost patch: %q", patch)
+	}
+	retained, err := os.ReadFile(filepath.Join(m.Root, artifactLocation))
+	requireVerificationSuccess(t, err)
+	if string(retained) != "retained evidence\n" {
+		t.Fatalf("lost retained artifact: %q", retained)
+	}
+	hash, err := hashQualityTree(identity.ToolRuntimePath)
+	requireVerificationSuccess(t, err)
+	if hash != identity.ToolRuntimeHash {
+		t.Fatal("changed retained scanner runtime")
+	}
+	out, stderr, err := ReadJobStreams(m.Root, 0)
+	requireVerificationSuccess(t, err)
+	if out != "stream evidence\n" || stderr != out {
+		t.Fatal("lost retained streams")
+	}
+	if _, err := os.Stat(filepath.Join(m.Root, jobJournalFilename)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertCompletedStagingRemoved(t *testing.T, root string) {
+	t.Helper()
+	for _, path := range []string{verificationCheckoutDir, autofixCheckoutDir(1)} {
+		for _, name := range []string{path, checkoutOwnershipFile(path)} {
+			if _, err := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(err) {
+				t.Errorf("completed disposable staging still exists: %s: %v", name, err)
+			}
+		}
+	}
+}
+
 func TestInterruptedVerificationRetainsStagingAndNeverReplays(t *testing.T) {
-	m := stagingJobFixture(t, JobCommand{Name: "uncertain", Command: []string{"/must/not/run"}, TimeoutSeconds: 5})
+	m := stagingJobFixture(t, JobCommand{Name: "uncertain", Command: []string{stagingForbiddenCommand}, TimeoutSeconds: 5})
 	func() {
 		r := stagingJobOpen(t, m)
 		defer r.close()
@@ -311,7 +344,7 @@ func TestInterruptedVerificationRetainsStagingAndNeverReplays(t *testing.T) {
 }
 
 func TestVerificationDoesNotReleaseStagingIfReportWasNotSaved(t *testing.T) {
-	m := stagingJobFixture(t, JobCommand{Name: "verify", Command: []string{"/irrelevant/verify"}, TimeoutSeconds: 5})
+	m := stagingJobFixture(t, JobCommand{Name: "verify", Command: []string{stagingVerifyPlaceholder}, TimeoutSeconds: 5})
 	r := stagingJobOpen(t, m)
 	defer r.close()
 	stage, err := r.prepareCheckout(t.Context())
@@ -327,7 +360,7 @@ func TestVerificationDoesNotReleaseStagingIfReportWasNotSaved(t *testing.T) {
 }
 
 func TestCompletedVerificationResumesPartialStagingRemoval(t *testing.T) {
-	m := stagingJobFixture(t, JobCommand{Name: "done", Command: []string{"/irrelevant/verify"}, TimeoutSeconds: 5})
+	m := stagingJobFixture(t, JobCommand{Name: "done", Command: []string{stagingVerifyPlaceholder}, TimeoutSeconds: 5})
 	stage := filepath.Join(m.Root, verificationCheckoutDir)
 	func() {
 		r := stagingJobOpen(t, m)
@@ -350,7 +383,7 @@ func TestCompletedVerificationResumesPartialStagingRemoval(t *testing.T) {
 func TestCompletedVerificationKeepsUnownedOrUnverifiedStaging(t *testing.T) {
 	for _, scenario := range []string{"legacy-unmarked", "replaced-owned-directory", "runtime-cleanup-unverified"} {
 		t.Run(scenario, func(t *testing.T) {
-			m := stagingJobFixture(t, JobCommand{Name: "done", Command: []string{"/irrelevant/verify"}, TimeoutSeconds: 5})
+			m := stagingJobFixture(t, JobCommand{Name: "done", Command: []string{stagingVerifyPlaceholder}, TimeoutSeconds: 5})
 			r := stagingJobOpen(t, m)
 			defer r.close()
 			stage, err := r.prepareCheckout(t.Context())

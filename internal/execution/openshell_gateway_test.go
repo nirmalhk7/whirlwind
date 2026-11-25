@@ -9,23 +9,28 @@ import (
 	"time"
 )
 
+const (
+	gatewayFixtureAttempt   = "attempt-123"
+	gatewayFixtureWorkspace = "plan-workspace"
+)
+
 func TestResolveOpenShellGatewayPinsActiveLocalGatewayAndWorkspace(t *testing.T) {
 	fixture := `[{"name":"inactive","endpoint":"https://127.0.0.1:18080","active":false,"is_remote":false},{"name":"worker","endpoint":"https://127.0.0.1:19080","active":true,"is_remote":false}]`
 	installGatewayCLI(t, fixture)
-	t.Setenv("OPENSHELL_WORKSPACE", "plan-workspace")
+	t.Setenv("OPENSHELL_WORKSPACE", gatewayFixtureWorkspace)
 
 	name, endpoint, workspace, err := ResolveOpenShellGateway(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "worker" || endpoint != "https://127.0.0.1:19080" || workspace != "plan-workspace" {
+	if name != "worker" || endpoint != "https://127.0.0.1:19080" || workspace != gatewayFixtureWorkspace {
 		t.Fatalf("resolved gateway identity = %q %q %q", name, endpoint, workspace)
 	}
 }
 
 func TestPinOpenShellRuntimeCreatesExternalDeterministicIdentity(t *testing.T) {
 	installGatewayCLI(t, `[{"name":"worker","endpoint":"https://127.0.0.1:19080","active":true,"is_remote":false}]`)
-	t.Setenv("OPENSHELL_WORKSPACE", "plan-workspace")
+	t.Setenv("OPENSHELL_WORKSPACE", gatewayFixtureWorkspace)
 	root := t.TempDir()
 	worktree := filepath.Join(root, "worktree")
 	runtimeDir := filepath.Join(root, "runtime")
@@ -37,18 +42,18 @@ func TestPinOpenShellRuntimeCreatesExternalDeterministicIdentity(t *testing.T) {
 	}
 	profile := Profile{CWD: worktree, RuntimeDir: runtimeDir, ReadRoots: []string{worktree}}
 	deadline := time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339Nano)
-	first, err := PinOpenShellRuntime(context.Background(), profile, "attempt-123", 4, deadline, filepath.Join(root, "supervisor"))
+	first, err := PinOpenShellRuntime(context.Background(), profile, gatewayFixtureAttempt, 4, deadline, filepath.Join(root, "supervisor"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := PinOpenShellRuntime(context.Background(), profile, "attempt-123", 4, deadline, filepath.Join(root, "supervisor"))
+	second, err := PinOpenShellRuntime(context.Background(), profile, gatewayFixtureAttempt, 4, deadline, filepath.Join(root, "supervisor"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.SandboxName == "" || first.SandboxName != second.SandboxName || first.LifecycleFile != second.LifecycleFile {
 		t.Fatalf("attempt identity was not deterministic: first=%+v second=%+v", first, second)
 	}
-	if first.ExecutionID != "attempt-123" || first.ExecutionGeneration != 4 || first.GatewayName != "worker" || first.GatewayEndpoint != "https://127.0.0.1:19080" || first.Workspace != "plan-workspace" || first.DeadlineAt != deadline {
+	if first.ExecutionID != gatewayFixtureAttempt || first.ExecutionGeneration != 4 || first.GatewayName != "worker" || first.GatewayEndpoint != "https://127.0.0.1:19080" || first.Workspace != gatewayFixtureWorkspace || first.DeadlineAt != deadline {
 		t.Fatalf("pinned runtime identity lost its execution or authority: %+v", first)
 	}
 	if withinPath(first.LifecycleFile, worktree) || withinPath(first.LifecycleFile, runtimeDir) {
@@ -61,7 +66,7 @@ func TestPinOpenShellRuntimeCreatesExternalDeterministicIdentity(t *testing.T) {
 
 func TestPinPersistsExactRuntimeIdentityAndDeadlineBeforeLaunch(t *testing.T) {
 	installGatewayCLI(t, `[{"name":"worker","endpoint":"https://127.0.0.1:19080","active":true,"is_remote":false}]`)
-	t.Setenv("OPENSHELL_WORKSPACE", "plan-workspace")
+	t.Setenv("OPENSHELL_WORKSPACE", gatewayFixtureWorkspace)
 	root := t.TempDir()
 	worktree := filepath.Join(root, "worktree")
 	if err := os.MkdirAll(worktree, 0700); err != nil {
@@ -124,11 +129,11 @@ func TestResolveOpenShellGatewayRejectsUnknownExplicitSelection(t *testing.T) {
 }
 
 func TestOpenShellSandboxNameFitsGatewayLimitAndKeepsDeterministicEntropy(t *testing.T) {
-	name := OpenShellSandboxName("attempt-123")
+	name := OpenShellSandboxName(gatewayFixtureAttempt)
 	if len(name) > 19 {
 		t.Fatalf("sandbox name %q exceeds v0.1.7 limit of 19 characters", name)
 	}
-	if name != OpenShellSandboxName("attempt-123") || name == OpenShellSandboxName("attempt-124") {
+	if name != OpenShellSandboxName(gatewayFixtureAttempt) || name == OpenShellSandboxName("attempt-124") {
 		t.Fatalf("sandbox name is not stable and execution-specific: %q", name)
 	}
 }

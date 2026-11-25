@@ -224,6 +224,7 @@ func qltyResultIndex(t *testing.T, report verification.Report) int {
 func acceptedExitZeroQltyAdvisory(t *testing.T, f *acceptedReviewFixture, raw verification.Result) verification.Result {
 	t.Helper()
 	raw.Output = unchangedQltySmellSARIF
+	raw.QualityIdentity = setupQltyFixtureIdentity(t.TempDir())
 	zero := 0
 	raw.ExitCode, raw.Passed = &zero, false
 	raw.Error = "qlty reported 1 code smells; repair findings before review"

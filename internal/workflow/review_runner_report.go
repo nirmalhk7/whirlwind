@@ -21,44 +21,68 @@ func (step *taskStep) validatedReviewRunnerReport(commit string) (verification.R
 	if step.task.PlanDocument == nil {
 		return verification.Report{}, errors.New("runner report requires an approved plan document")
 	}
-	r, err := step.Store.Get(step.ctx, "verification", step.task.VerificationID)
+	saved, id, err := step.loadReviewRunnerReport()
 	if err != nil {
-		return verification.Report{}, fmt.Errorf("complete runner report unavailable: %w", err)
-	}
-	saved, err := store.Decode[struct {
-		Stage      string                   `json:"stage"`
-		Provenance model.Provenance         `json:"provenance"`
-		Manifest   verification.JobManifest `json:"runner_manifest"`
-		Report     verification.JobReport   `json:"runner_report"`
-	}](r)
-	if err != nil {
-		return verification.Report{}, fmt.Errorf("invalid runner report: %w", err)
-	}
-	m := saved.Manifest
-	if saved.Stage != "complete" || m.JobID != r.ID || m.PlanID != step.task.ID || m.PlanVersion != step.task.PlanVersion || m.PlanHash != step.task.PlanDocument.ApprovedHash || m.ConfigurationHash != verificationConfigurationHash(step.task) || m.CandidateCommit != commit || m.BaseCommit != step.task.Base || saved.Provenance.Task != step.task.ID || saved.Provenance.PlanVersion != step.task.PlanVersion || saved.Provenance.Head != commit || saved.Provenance.Base != step.task.Base || saved.Provenance.PolicyHash != step.project.PolicyHash {
-		return verification.Report{}, errors.New("runner report does not match the complete approved candidate handoff")
-	}
-	if m.OfflineDockerImage != "" && saved.Provenance.VerificationID != m.JobID {
-		return verification.Report{}, errors.New("offline runner report provenance differs from its verification job")
-	}
-	if err := step.validateOfflineReviewAuthority(m, commit); err != nil {
 		return verification.Report{}, err
 	}
-	tree, err := submissionGitRun(step.ctx, step.task.Worktree, "rev-parse", commit+"^{tree}")
+	if err := step.validateRunnerHandoff(saved, id, commit); err != nil {
+		return verification.Report{}, err
+	}
+	checks, err := step.approvedRunnerChecks(saved.Manifest)
+	if err != nil {
+		return verification.Report{}, err
+	}
+	return step.qualifiedRunnerReport(saved.Manifest, saved.Report, checks)
+}
+
+type savedReviewRunnerReport struct {
+	Stage      string                   `json:"stage"`
+	Provenance model.Provenance         `json:"provenance"`
+	Manifest   verification.JobManifest `json:"runner_manifest"`
+	Report     verification.JobReport   `json:"runner_report"`
+}
+
+func (step *taskStep) loadReviewRunnerReport() (savedReviewRunnerReport, string, error) {
+	r, err := step.Store.Get(step.ctx, "verification", step.task.VerificationID)
+	if err != nil {
+		return savedReviewRunnerReport{}, "", fmt.Errorf("complete runner report unavailable: %w", err)
+	}
+	saved, err := store.Decode[savedReviewRunnerReport](r)
+	if err != nil {
+		return savedReviewRunnerReport{}, "", fmt.Errorf("invalid runner report: %w", err)
+	}
+	return saved, r.ID, nil
+}
+
+func (step *taskStep) validateRunnerHandoff(saved savedReviewRunnerReport, id, commit string) error {
+	m := saved.Manifest
+	if saved.Stage != "complete" || m.JobID != id || m.PlanID != step.task.ID || m.PlanVersion != step.task.PlanVersion || m.PlanHash != step.task.PlanDocument.ApprovedHash || m.ConfigurationHash != verificationConfigurationHash(step.task) || m.CandidateCommit != commit || m.BaseCommit != step.task.Base || saved.Provenance.Task != step.task.ID || saved.Provenance.PlanVersion != step.task.PlanVersion || saved.Provenance.Head != commit || saved.Provenance.Base != step.task.Base || saved.Provenance.PolicyHash != step.project.PolicyHash {
+		return errors.New("runner report does not match the complete approved candidate handoff")
+	}
+	if m.OfflineDockerImage != "" && saved.Provenance.VerificationID != m.JobID {
+		return errors.New("offline runner report provenance differs from its verification job")
+	}
+	if err := step.validateOfflineReviewAuthority(m, commit); err != nil {
+		return err
+	}
+	tree, err := submissionGitRun(step.ctx, step.task.Worktree, gitRevParseCommand, commit+"^{tree}")
 	if err != nil || tree != m.CandidateTree {
-		return verification.Report{}, errors.New("runner report candidate tree mismatch")
+		return errors.New("runner report candidate tree mismatch")
 	}
 	if err := saved.Report.Validate(m); err != nil {
-		return verification.Report{}, fmt.Errorf("invalid complete runner report: %w", err)
+		return fmt.Errorf("invalid complete runner report: %w", err)
 	}
+	return nil
+}
 
+func (step *taskStep) approvedRunnerChecks(m verification.JobManifest) ([]model.Check, error) {
 	files, patch, err := checkedDiff(step.ctx, step.project.Policy, &step.task)
 	if err != nil {
-		return verification.Report{}, fmt.Errorf("runner report scope: %w", err)
+		return nil, fmt.Errorf("runner report scope: %w", err)
 	}
 	_, checks := verification.Select(step.project.Policy, strings.Fields(files), patch)
 	if len(m.Commands) != len(checks) {
-		return verification.Report{}, errors.New("runner report omits configured commands")
+		return nil, errors.New("runner report omits configured commands")
 	}
 	for i, check := range checks {
 		timeout := check.TimeoutSeconds
@@ -69,10 +93,10 @@ func (step *taskStep) validatedReviewRunnerReport(commit string) (verification.R
 		// JSON equivalence treats empty and omitted slices identically, as the
 		// persisted manifest does; command argv/order remain exact.
 		if !reflect.DeepEqual(normalizeJobCommand(want), normalizeJobCommand(m.Commands[i])) {
-			return verification.Report{}, errors.New("runner report command differs from approved configuration")
+			return nil, errors.New("runner report command differs from approved configuration")
 		}
 	}
-	return step.qualifiedRunnerReport(m, saved.Report, checks)
+	return checks, nil
 }
 
 func normalizeJobCommand(command verification.JobCommand) verification.JobCommand {

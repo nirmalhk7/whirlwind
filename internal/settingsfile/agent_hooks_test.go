@@ -47,21 +47,26 @@ func TestAgentHooksRefreshFromSettings(t *testing.T) {
 	if !strings.Contains(file.Content, "agent_hooks:") || !strings.Contains(file.Content, "/usr/bin/true") {
 		t.Fatal("recreating settings dropped active hook commands")
 	}
-	for _, tt := range []struct{ from, to, want string }{
-		{"  code:", "  unsupported:", "unknown agent hook role"},
-		{"        command:", "        mode: autofix\n        command:", "mutating check"},
-		{"        command:", "        depends_on: [missing]\n        command:", "unknown hook check"},
-	} {
-		invalid := strings.Replace(content, tt.from, tt.to, 1)
-		if err := save(invalid, file.Revision); err == nil || !strings.Contains(err.Error(), tt.want) {
-			t.Fatalf("want %q, got %v", tt.want, err)
-		}
-	}
+	assertInvalidAgentHooksAreRejected(t, save, content, file.Revision)
 	if err := save(editorYAML, file.Revision); err != nil {
 		t.Fatal(err)
 	}
 	record, err = source.store.Get(ctx, "workflow_config", "global")
 	if err != nil || strings.Contains(string(record.Data), `"agent_hooks"`) {
 		t.Fatalf("removed hooks still active: %s (%v)", record.Data, err)
+	}
+}
+
+func assertInvalidAgentHooksAreRejected(t *testing.T, save func(text, revision string) error, content, revision string) {
+	t.Helper()
+	for _, tt := range []struct{ from, to, want string }{
+		{"  code:", "  unsupported:", "unknown agent hook role"},
+		{"        command:", "        mode: autofix\n        command:", "mutating check"},
+		{"        command:", "        depends_on: [missing]\n        command:", "unknown hook check"},
+	} {
+		invalid := strings.Replace(content, tt.from, tt.to, 1)
+		if err := save(invalid, revision); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("want %q, got %v", tt.want, err)
+		}
 	}
 }

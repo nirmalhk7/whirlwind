@@ -141,7 +141,7 @@ func (step *taskStep) recoverIdeaPlannerMarkdown(publication, output string) (st
 	defer func() { _ = root.Close() }()
 	content, err := readBoundedLocalPlan(root, "plan.md")
 	if errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("Planner did not write the assigned plan.md; check the attempt log for output write errors and retry planning: %w", err)
+		return "", fmt.Errorf("the Planner did not write the assigned plan.md; check the attempt log for output write errors and retry planning: %w", err)
 	}
 	if err != nil {
 		return "", fmt.Errorf("could not read the assigned plan.md; check the output file and retry planning: %w", err)

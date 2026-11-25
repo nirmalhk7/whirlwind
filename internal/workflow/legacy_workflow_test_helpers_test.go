@@ -2,12 +2,10 @@ package workflow
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"testing"
 
 	"whirlwind/internal/model"
-	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
 )
 
@@ -113,12 +111,6 @@ func localStoredTaskRecord(ctx context.Context, database *store.Store, id string
 	}
 	task, err := store.Decode[model.ExecutionPlan](record)
 	return task, record.Version, err
-}
-
-type unexpectedUnitAdapter struct{}
-
-func (unexpectedUnitAdapter) Run(context.Context, provider.Input, provider.Hooks) (provider.Output, error) {
-	return provider.Output{}, errors.New("completed durable unit was executed again")
 }
 
 func validateIntegratedUnitCommits(t *testing.T, task model.ExecutionPlan) {

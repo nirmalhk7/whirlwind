@@ -42,52 +42,64 @@ for await (const line of readline.createInterface({input: process.stdin})) {
 		t.Fatal(err)
 	}
 	adapter := ProcessAdapter{Provider: model.Provider{ID: "fixture", Kind: "acp", Command: []string{"node", peer}}}
-	for _, tt := range []struct {
-		name       string
-		before     bool
-		persistent bool
-		turns      int
-		wantError  string
-	}{
+	for _, tt := range []nonoHookCase{
 		{name: "before blocks provider", before: true, wantError: "before"},
 		{name: "after repairs in same session", turns: 2},
 		{name: "persistent after failure", persistent: true, turns: 4, wantError: "fixture-hook-failure"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			cwd := hookFixtureRepo(t)
-			if tt.persistent {
-				if err := os.WriteFile(filepath.Join(cwd, "persistent"), nil, 0600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			check := model.Check{Name: "candidate", Environment: map[string]string{"EXPECTED_CONTENT": "correct"}, Command: []string{
-				"/bin/sh", "-c", `test "$EXPECTED_CONTENT" = correct || exit 2; grep -qx "$EXPECTED_CONTENT" result.txt || { echo fixture-hook-failure; exit 1; }`,
-			}}
-			hooks := model.AgentHookChecks{After: []model.Check{check}}
-			if tt.before {
-				hooks.Before = []model.Check{check}
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-			defer cancel()
-			out, err := adapter.Run(ctx, Input{
-				CWD: cwd, Role: "code", Prompt: "Implement the result", AgentHooks: hooks,
-				Policy: model.Policy{AllowedPaths: []string{"**"}},
-			}, Hooks{})
-			if tt.wantError == "" {
-				if err != nil || out.SessionID != "fixture-session" || out.Text != "Done" {
-					t.Fatalf("expected accepted repair, got %+v / %v", out, err)
-				}
-			} else if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-				t.Fatalf("expected blocked run with %q, got %v", tt.wantError, err)
-			}
-			turns, readErr := os.ReadFile(filepath.Join(cwd, "turns.txt"))
-			if readErr != nil && !os.IsNotExist(readErr) {
-				t.Fatal(readErr)
-			}
-			if got := strings.Count(string(turns), "turn\n"); got != tt.turns {
-				t.Fatalf("ran %d agent turns, want %d", got, tt.turns)
-			}
+			exerciseNonoAgentHooks(t, adapter, tt)
 		})
+	}
+}
+
+type nonoHookCase struct {
+	name       string
+	before     bool
+	persistent bool
+	turns      int
+	wantError  string
+}
+
+func exerciseNonoAgentHooks(t *testing.T, adapter ProcessAdapter, tt nonoHookCase) {
+	t.Helper()
+	cwd := hookFixtureRepo(t)
+	if tt.persistent {
+		if err := os.WriteFile(filepath.Join(cwd, "persistent"), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := model.Check{Name: "candidate", Environment: map[string]string{"EXPECTED_CONTENT": "correct"}, Command: []string{
+		"/bin/sh", "-c", `test "$EXPECTED_CONTENT" = correct || exit 2; grep -qx "$EXPECTED_CONTENT" result.txt || { echo fixture-hook-failure; exit 1; }`,
+	}}
+	hooks := model.AgentHookChecks{After: []model.Check{check}}
+	if tt.before {
+		hooks.Before = []model.Check{check}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	out, err := adapter.Run(ctx, Input{
+		CWD: cwd, Role: "code", Prompt: "Implement the result", AgentHooks: hooks,
+		Policy: model.Policy{AllowedPaths: []string{"**"}},
+	}, Hooks{})
+	assertNonoHookOutcome(t, out, err, tt.wantError)
+	turns, readErr := os.ReadFile(filepath.Join(cwd, "turns.txt"))
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatal(readErr)
+	}
+	if got := strings.Count(string(turns), "turn\n"); got != tt.turns {
+		t.Fatalf("ran %d agent turns, want %d", got, tt.turns)
+	}
+}
+
+func assertNonoHookOutcome(t *testing.T, out Output, err error, wantError string) {
+	t.Helper()
+	if wantError == "" {
+		if err != nil || out.SessionID != "fixture-session" || out.Text != "Done" {
+			t.Fatalf("expected accepted repair, got %+v / %v", out, err)
+		}
+	} else if err == nil || !strings.Contains(err.Error(), wantError) {
+		t.Fatalf("expected blocked run with %q, got %v", wantError, err)
 	}
 }
 

@@ -12,13 +12,18 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	fixtureMCPBrokerHost  = "whirlwind-mcp.openshell.internal"
+	fixtureMCPReadToolSet = "selected-read-tools"
+)
+
 func TestSessionExecutionProfileCarriesBrokerWithoutSerializingToken(t *testing.T) {
 	profile, err := execution.ForProvider(t.TempDir(), true, "policy", nil, []string{"codex-acp"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	token := strings.Repeat("a", 64)
-	descriptor := &execution.MCPBroker{ID: "selected-tools", SocketPath: "/tmp/whirlwind-mcp.sock", Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}
+	descriptor := &execution.MCPBroker{ID: "selected-tools", SocketPath: "/tmp/whirlwind-mcp.sock", Host: fixtureMCPBrokerHost, Path: "/mcp"}
 	in := Input{Execution: &profile, MCPBroker: descriptor, MCPBrokerToken: token}
 	encodedInput, err := json.Marshal(in)
 	if err != nil {
@@ -50,7 +55,7 @@ func TestSessionExecutionProfileCarriesBrokerWithoutSerializingToken(t *testing.
 }
 
 func TestSelectedIntegrationBrokerConflictsWithCheckOrNativeMountCapabilities(t *testing.T) {
-	broker := &execution.MCPBroker{ID: "selected-read-tools", SocketPath: "/tmp/private/broker.sock", Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}
+	broker := &execution.MCPBroker{ID: fixtureMCPReadToolSet, SocketPath: "/tmp/private/broker.sock", Host: fixtureMCPBrokerHost, Path: "/mcp"}
 	for _, test := range []struct {
 		name  string
 		input Input
@@ -75,7 +80,7 @@ func TestACPSessionDeclaresOnlyBrokerIdentityForGuestShim(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile := execution.Profile{Launcher: launcher}
-	input := Input{Execution: &profile, MCPBroker: &execution.MCPBroker{ID: "selected-read-tools", SocketPath: "/tmp/private/broker.sock", Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}, MCPBrokerToken: strings.Repeat("s", 64)}
+	input := Input{Execution: &profile, MCPBroker: &execution.MCPBroker{ID: fixtureMCPReadToolSet, SocketPath: "/tmp/private/broker.sock", Host: fixtureMCPBrokerHost, Path: "/mcp"}, MCPBrokerToken: strings.Repeat("s", 64)}
 	session := &providerSession{input: input}
 	servers := session.mcpServers()
 	if len(servers) != 1 {
@@ -86,7 +91,7 @@ func TestACPSessionDeclaresOnlyBrokerIdentityForGuestShim(t *testing.T) {
 		t.Fatalf("ACP selected broker shim has unexpected launch metadata: %+v", server)
 	}
 	args := server["args"].([]string)
-	if len(args) != 2 || args[1] != "selected-read-tools" || strings.Contains(strings.Join(args, " "), input.MCPBrokerToken) {
+	if len(args) != 2 || args[1] != fixtureMCPReadToolSet || strings.Contains(strings.Join(args, " "), input.MCPBrokerToken) {
 		t.Fatalf("ACP shim args leaked credentials or lost broker ID: %v", args)
 	}
 	if len(server["env"].([]any)) != 0 {

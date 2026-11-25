@@ -10,6 +10,11 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	setupFixtureErrorBadge          = "Setup ERR"
+	setupFixtureMostRecentOperation = "latest-setup"
+)
+
 func TestFailedProjectSetupIsVisibleAndRecoverableFromMainDashboard(t *testing.T) {
 	d := New(t.TempDir())
 	screen := dashboardScreen(t, d)
@@ -26,15 +31,34 @@ func TestFailedProjectSetupIsVisibleAndRecoverableFromMainDashboard(t *testing.T
 			{ProjectID: "other", Path: "/work/other", Status: "OK"},
 		})},
 		"operations": {
-			record("latest-setup", model.Operation{Kind: "project_setup", Subject: "basera", Stage: "failed", Error: reason, StartedAt: "2026-11-24T09:00:00Z", Input: map[string]bool{"onboarding": true}}),
+			record(setupFixtureMostRecentOperation, model.Operation{Kind: "project_setup", Subject: "basera", Stage: "failed", Error: reason, StartedAt: "2026-11-24T09:00:00Z", Input: map[string]bool{"onboarding": true}}),
 			record("older-setup", model.Operation{Kind: "project_setup", Subject: "basera", Stage: "failed", Error: "outdated setup failure", StartedAt: "2026-11-24T08:00:00Z"}),
 			record("other-setup", model.Operation{Kind: "project_setup", Subject: "other", Stage: "failed", Error: "another project's failure", StartedAt: "2026-11-24T10:00:00Z"}),
 		},
 	}
 	d.Present(snapshot)
 	d.ForceDraw()
-	view := screenText(screen)
-	for _, marker := range []string{"Setup ERR", "Setup failed", "Scanner unavailable"} {
+	assertFailedSetupSummary(t, d, screenText(screen), reason)
+	assertFailedSetupNoticeOpens(t, d, reason)
+	d.projects.SetCurrentItem(1)
+	if inbox, _ := d.inbox.GetItemText(0); inbox != "No inbox items" {
+		t.Errorf("other project inherited a setup failure notice: %q", inbox)
+	}
+	d.projects.SetCurrentItem(0)
+	project.Status = "draft"
+	snapshot["projects"][0] = record("basera", project)
+	d.Present(snapshot)
+	if inbox, _ := d.inbox.GetItemText(0); inbox != "No inbox items" {
+		t.Errorf("stale failure notice persisted after retry: %q", inbox)
+	}
+	if label, _ := d.projects.GetItemText(0); strings.Contains(label, setupFixtureErrorBadge) || !strings.Contains(label, "Git OK") {
+		t.Errorf("retry did not clear setup failure without changing path health: %q", label)
+	}
+}
+
+func assertFailedSetupSummary(t *testing.T, d *Dashboard, view, reason string) {
+	t.Helper()
+	for _, marker := range []string{setupFixtureErrorBadge, "Setup failed", "Scanner unavailable"} {
 		if !strings.Contains(view, marker) {
 			t.Errorf("main dashboard did not show %q:\n%s", marker, view)
 		}
@@ -44,7 +68,7 @@ func TestFailedProjectSetupIsVisibleAndRecoverableFromMainDashboard(t *testing.T
 	}
 
 	label, _ := d.projects.GetItemText(0)
-	if !strings.Contains(label, "Setup ERR") || strings.Contains(label, "Git OK") {
+	if !strings.Contains(label, setupFixtureErrorBadge) || strings.Contains(label, "Git OK") {
 		t.Errorf("failed setup was shown as Git health: %q", label)
 	}
 	run, _ := d.runs.GetItemText(0)
@@ -59,38 +83,30 @@ func TestFailedProjectSetupIsVisibleAndRecoverableFromMainDashboard(t *testing.T
 		t.Errorf("setup should produce one current notice; got %d", d.inbox.GetItemCount())
 	}
 
+}
+
+func assertFailedSetupNoticeOpens(t *testing.T, d *Dashboard, reason string) {
+	t.Helper()
 	d.SetFocus(d.inbox)
-	d.inbox.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	d.inbox.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {
+		// This fixture drives list selection without a tview focus dispatcher.
+	})
 	viewer, ok := d.modal.(*tview.TextView)
 	if !ok {
 		t.Fatal("Enter on the Inbox setup notice did not open the setup run")
 	}
-	for _, marker := range []string{"latest-setup", reason, "Press r in Runs"} {
+	for _, marker := range []string{setupFixtureMostRecentOperation, reason, "Press r in Runs"} {
 		if !strings.Contains(viewer.GetText(false), marker) {
 			t.Errorf("opened setup detail did not show %q: %s", marker, viewer.GetText(false))
 		}
 	}
 	d.input(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
 	d.viewMessage(0)
-	if view, ok := d.modal.(*tview.TextView); !ok || !strings.Contains(view.GetText(false), "latest-setup") {
+	if view, ok := d.modal.(*tview.TextView); !ok || !strings.Contains(view.GetText(false), setupFixtureMostRecentOperation) {
 		t.Fatal("opening the setup notice as a message did not select the current failed setup")
 	}
 	d.input(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
 
-	d.projects.SetCurrentItem(1)
-	if inbox, _ := d.inbox.GetItemText(0); inbox != "No inbox items" {
-		t.Errorf("other project inherited a setup failure notice: %q", inbox)
-	}
-	d.projects.SetCurrentItem(0)
-	project.Status = "draft"
-	snapshot["projects"][0] = record("basera", project)
-	d.Present(snapshot)
-	if inbox, _ := d.inbox.GetItemText(0); inbox != "No inbox items" {
-		t.Errorf("stale failure notice persisted after retry: %q", inbox)
-	}
-	if label, _ := d.projects.GetItemText(0); strings.Contains(label, "Setup ERR") || !strings.Contains(label, "Git OK") {
-		t.Errorf("retry did not clear setup failure without changing path health: %q", label)
-	}
 }
 
 func TestFailedProjectSetupShowsFallbackWithoutRetainedOperation(t *testing.T) {

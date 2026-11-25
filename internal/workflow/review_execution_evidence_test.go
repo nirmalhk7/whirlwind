@@ -16,13 +16,20 @@ import (
 	"whirlwind/prompts/agents"
 )
 
+const (
+	reviewEvidenceResultFile     = "result.go"
+	reviewEvidenceRegressionFile = "result_test.go"
+	reviewEvidenceSARIFArg       = "--sarif"
+	reviewEvidenceScannerName    = "qlty-check"
+	reviewEvidenceRedAttempt     = "review-red-attempt"
+	reviewEvidenceGreenAttempt   = "review-green-attempt"
+)
+
 func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testing.T) {
 	engine, task, repo := testEngine(t)
 	ctx := context.Background()
 	project, err := engine.Project(ctx, task.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	writeReviewEvidenceFixture(t, repo)
 
 	plan := model.PlanSpecification{
@@ -30,7 +37,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		What:                     "Return true from Result with regression coverage",
 		Why:                      "Consumers currently receive false",
 		Benefit:                  "Consumers receive a usable result",
-		Where:                    []string{"result.go", "result_test.go"},
+		Where:                    []string{reviewEvidenceResultFile, reviewEvidenceRegressionFile},
 		AcceptanceCriteria:       []string{"Result returns true", "Regression test fails before the change and passes afterwards"},
 		Scope:                    []string{"Change Result and add a regression test"},
 		Exclusions:               []string{"Do not change unrelated tests"},
@@ -39,13 +46,11 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		RepositoryTestInventory:  "Configured: .whirlwind.yaml: go test -json ./...",
 		RepositoryBuildInventory: "None configured: .whirlwind.yaml inspected",
 		Requirements:             []model.Requirement{{ID: "REQ-RESULT", Outcome: "Result returns true", EvidenceMethod: "Run TestResult"}},
-		Units:                    []model.Unit{{ID: "result", Objective: "Test first, implement Result, verify regression", Dependencies: []string{}, AllowedPaths: []string{"result.go", "result_test.go"}}},
+		Units:                    []model.Unit{{ID: "result", Objective: "Test first, implement Result, verify regression", Dependencies: []string{}, AllowedPaths: []string{reviewEvidenceResultFile, reviewEvidenceRegressionFile}}},
 	}
 	planDocument := RenderPlanDocument(plan)
 	plan, err = ParsePlanDocument(planDocument)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	task.Plan = &plan
 	task.PlanVersion = 1
 	task.Worktree = repo
@@ -56,14 +61,14 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 	baseline := verification.Report{Passed: true, Results: []verification.Result{
 		reviewEvidenceResult("test", []string{"go", "test", "-json", "./..."}, `{"Action":"pass"}`, ""),
 		reviewEvidenceResult("plan-test-1", []string{"go", "test", "-json", "./..."}, `{"Action":"pass"}`, ""),
-		reviewEvidenceResult("qlty-smells", []string{"qlty", "smells", "--all", "--sarif"}, reviewSarif(5), ""),
-		reviewEvidenceResult("qlty-check", []string{"qlty", "check", "--all", "--sarif"}, reviewSarif(7948), ""),
+		reviewEvidenceResult("qlty-smells", []string{"qlty", "smells", "--all", reviewEvidenceSARIFArg}, reviewSarif(5), ""),
+		reviewEvidenceResult(reviewEvidenceScannerName, []string{"qlty", "check", "--all", reviewEvidenceSARIFArg}, reviewSarif(7948), ""),
 	}}
 	current := verification.Report{Passed: true, Results: []verification.Result{
 		reviewEvidenceResult("test", []string{"go", "test", "-json", "./..."}, strings.Repeat(`{"Action":"pass","Output":"fixture"}`+"\n", 28), "test-output-artifact"),
 		reviewEvidenceResult("plan-test-1", []string{"go", "test", "-json", "./..."}, strings.Repeat(`{"Action":"pass","Output":"fixture"}`+"\n", 28), "plan-test-output-artifact"),
-		reviewEvidenceResult("qlty-smells", []string{"qlty", "smells", "--all", "--sarif"}, reviewSarif(496), "smells-output-artifact"),
-		reviewEvidenceResult("qlty-check", []string{"qlty", "check", "--all", "--sarif"}, reviewSarif(4096), "qlty-output-artifact"),
+		reviewEvidenceResult("qlty-smells", []string{"qlty", "smells", "--all", reviewEvidenceSARIFArg}, reviewSarif(496), "smells-output-artifact"),
+		reviewEvidenceResult(reviewEvidenceScannerName, []string{"qlty", "check", "--all", reviewEvidenceSARIFArg}, reviewSarif(4096), "qlty-output-artifact"),
 		reviewEvidenceResult("diff", []string{"git", "diff", "--check", "base...HEAD"}, "", "diff-output-artifact"),
 		reviewEvidenceResult("tracked-files-clean", []string{"git", "diff", "--exit-code"}, "", "tracked-output-artifact"),
 		reviewEvidenceResult("index-clean", []string{"git", "diff", "--cached", "--exit-code"}, "", "index-output-artifact"),
@@ -79,48 +84,28 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		Report:     current,
 		Baseline:   baseline,
 	}
-	if err := engine.Store.Put(ctx, "verification", task.VerificationID, verificationRecord, 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, engine.Store.Put(ctx, "verification", task.VerificationID, verificationRecord, 0))
 	storedBefore, err := engine.Store.Get(ctx, "verification", task.VerificationID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	redArtifact, greenArtifact := saveReviewTDDArtifacts(t, engine.Store, ctx)
 	_, redContentBefore, err := engine.Store.Artifact(ctx, redArtifact.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	_, greenContentBefore, err := engine.Store.Artifact(ctx, greenArtifact.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	redSnapshot, redProduction, redTests, redFiles, err := codingSnapshotManifest(ctx, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "result.go"), []byte("package result\n\nfunc Result() bool {\n\treturn true\n}\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
+	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(repo, reviewEvidenceResultFile), []byte("package result\n\nfunc Result() bool {\n\treturn true\n}\n"), 0600))
 	greenSnapshot, greenProduction, greenTests, greenFiles, err := codingSnapshotManifest(ctx, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if redTests != greenTests {
 		t.Fatal("fixture TDD phases changed the test source")
 	}
 	commitReviewCode(t, repo)
-	if err := engine.Store.Put(ctx, "tdd_checks", "a-review-red", reviewTDDCheck(task, "red", false, reviewTDDIdentity{snapshot: redSnapshot, production: redProduction, tests: redTests}, redFiles, redArtifact.ID), 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := engine.Store.Put(ctx, "tdd_checks", "b-review-green", reviewTDDCheck(task, "green", true, reviewTDDIdentity{snapshot: greenSnapshot, production: greenProduction, tests: greenTests}, greenFiles, greenArtifact.ID), 0); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, engine.Store.Put(ctx, "tdd_checks", "a-review-red", reviewTDDCheck(task, "red", false, reviewTDDIdentity{snapshot: redSnapshot, production: redProduction, tests: redTests}, redFiles, redArtifact.ID), 0))
+	requireWorkflowSuccess(t, engine.Store.Put(ctx, "tdd_checks", "b-review-green", reviewTDDCheck(task, "green", true, reviewTDDIdentity{snapshot: greenSnapshot, production: greenProduction, tests: greenTests}, greenFiles, greenArtifact.ID), 0))
 
 	evidence, err := step.reviewExecutionEvidence()
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	prompt, err := agents.Render("review.md", map[string]string{
 		"Plan":         jsonText(plan),
 		"Requirements": jsonText(plan.Requirements),
@@ -129,9 +114,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		"Evidence":     evidence,
 		"Source":       jsonText(task.Issue),
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	prompt += step.reviewCheckInstructions()
 	pack, err := (ctxengine.Index{Commit: "candidate-head", Files: map[string]ctxengine.Entry{}}).Pack(ctxengine.PackRequest{
 		Required:   prompt,
@@ -145,7 +128,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		t.Fatalf("packed review prompt exceeds default: %d > %d", pack.EstimatedTokens, ctxengine.DefaultInputAllowance)
 	}
 	for _, required := range []string{
-		"REQ-RESULT", "qlty-check", `"command":["qlty","check","--all","--sarif"]`,
+		"REQ-RESULT", reviewEvidenceScannerName, `"command":["qlty","check","--all","--sarif"]`,
 		`"exit_code":0`, `"passed":true`, `"output_artifact":"qlty-output-artifact"`,
 		`"execution_id":"execution-qlty-check"`, `"cleanup_verified":true`,
 		`"phase":"red"`, `"phase":"green"`, redArtifact.ID, greenArtifact.ID,
@@ -156,9 +139,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		}
 	}
 	storedAfter, err := engine.Store.Get(ctx, "verification", task.VerificationID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, err)
 	if string(storedAfter.Data) != string(storedBefore.Data) {
 		t.Fatal("review prompt projection mutated the stored verification report")
 	}
@@ -167,9 +148,7 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 		content []byte
 	}{{redArtifact.ID, redContentBefore}, {greenArtifact.ID, greenContentBefore}} {
 		_, contentAfter, err := engine.Store.Artifact(ctx, artifact.id)
-		if err != nil {
-			t.Fatal(err)
-		}
+		requireWorkflowSuccess(t, err)
 		if !bytes.Equal(contentAfter, artifact.content) {
 			t.Fatalf("host TDD artifact %s changed in storage", artifact.id)
 		}
@@ -179,14 +158,14 @@ func TestReviewEvidenceProjectionFitsDefaultContextAndRetainsHostProof(t *testin
 func writeReviewEvidenceFixture(t *testing.T, repo string) {
 	t.Helper()
 	for name, content := range map[string]string{
-		"result.go":      "package result\n\nfunc Result() bool {\n\treturn false\n}\n",
-		"result_test.go": "package result\n\nimport \"testing\"\n\nfunc TestResult(t *testing.T) {\n\tif !Result() {\n\t\tt.Fatal(\"Result must return true\")\n\t}\n}\n",
+		reviewEvidenceResultFile:     "package result\n\nfunc Result() bool {\n\treturn false\n}\n",
+		reviewEvidenceRegressionFile: "package result\n\nimport \"testing\"\n\nfunc TestResult(t *testing.T) {\n\tif !Result() {\n\t\tt.Fatal(\"Result must return true\")\n\t}\n}\n",
 	} {
 		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, args := range [][]string{{"add", "result.go", "result_test.go"}, {"commit", "-m", "review evidence fixture"}} {
+	for _, args := range [][]string{{"add", reviewEvidenceResultFile, reviewEvidenceRegressionFile}, {"commit", "-m", "review evidence fixture"}} {
 		command := exec.Command("git", append([]string{"-C", repo}, args...)...)
 		command.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
 		if output, err := command.CombinedOutput(); err != nil {
@@ -197,7 +176,7 @@ func writeReviewEvidenceFixture(t *testing.T, repo string) {
 
 func commitReviewCode(t *testing.T, repo string) {
 	t.Helper()
-	command := exec.Command("git", "-C", repo, "add", "result.go")
+	command := exec.Command("git", "-C", repo, "add", reviewEvidenceResultFile)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git add review candidate: %s: %v", output, err)
 	}
@@ -243,19 +222,19 @@ func reviewSarif(size int) string {
 
 func saveReviewTDDArtifacts(t *testing.T, database *store.Store, ctx context.Context) (model.Artifact, model.Artifact) {
 	t.Helper()
-	if err := database.Put(ctx, "sessions", "review-red-attempt", map[string]string{"id": "review-red-attempt"}, 0); err != nil {
+	if err := database.Put(ctx, "sessions", reviewEvidenceRedAttempt, map[string]string{"id": reviewEvidenceRedAttempt}, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Put(ctx, "sessions", "review-green-attempt", map[string]string{"id": "review-green-attempt"}, 0); err != nil {
+	if err := database.Put(ctx, "sessions", reviewEvidenceGreenAttempt, map[string]string{"id": reviewEvidenceGreenAttempt}, 0); err != nil {
 		t.Fatal(err)
 	}
 	redOutput := strings.Repeat("=== RUN   TestResult\n--- FAIL: TestResult (0.00s)\n", 80)
 	greenOutput := strings.Repeat("=== RUN   TestResult\n--- PASS: TestResult (0.00s)\n", 80)
-	red, err := database.Capture(ctx, "review-red-attempt", "tdd_check:test", "text/plain", []byte(redOutput), 4096, false)
+	red, err := database.Capture(ctx, reviewEvidenceRedAttempt, "tdd_check:test", "text/plain", []byte(redOutput), 4096, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	green, err := database.Capture(ctx, "review-green-attempt", "tdd_check:test", "text/plain", []byte(greenOutput), 4096, false)
+	green, err := database.Capture(ctx, reviewEvidenceGreenAttempt, "tdd_check:test", "text/plain", []byte(greenOutput), 4096, false)
 	if err != nil {
 		t.Fatal(err)
 	}

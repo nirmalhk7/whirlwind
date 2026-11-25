@@ -9,6 +9,10 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	unrecordedRuntimeValue = "unknown (not recorded)"
+)
+
 const listBulletFormat = "- %s\n"
 
 func (d *Dashboard) selectPlan(index int, _, _ string, _ rune) {
@@ -147,7 +151,7 @@ func attemptModelDisplay(attempt model.Attempt) string {
 	if attempt.Model != "" {
 		return "configured " + attempt.Model + " (effective not recorded)"
 	}
-	return "unknown (not recorded)"
+	return unrecordedRuntimeValue
 }
 
 func attemptThinkingDisplay(attempt model.Attempt) string {
@@ -169,7 +173,7 @@ func thinkingDisplay(choice *model.ThinkingChoice) string {
 
 func queueEntryDisplay(attempt model.Attempt) string {
 	if attempt.QueuePosition < 1 || attempt.QueueLength < attempt.QueuePosition {
-		return "unknown (not recorded)"
+		return unrecordedRuntimeValue
 	}
 	return fmt.Sprintf("%d/%d", attempt.QueuePosition, attempt.QueueLength)
 }
@@ -197,7 +201,7 @@ func workerHeartbeatStatus(attempt model.Attempt, now time.Time) string {
 
 func recordedRuntimeValue(value string) string {
 	if value == "" {
-		return "unknown (not recorded)"
+		return unrecordedRuntimeValue
 	}
 	return value
 }

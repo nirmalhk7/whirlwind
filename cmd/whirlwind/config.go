@@ -10,8 +10,8 @@ import (
 )
 
 type config struct {
-	data, listen, webhooks, bridge, settings string
-	supervisor                               bool
+	data, bridge, settings string
+	supervisor             bool
 }
 
 const settingsFileName = "settings.yaml"
@@ -19,7 +19,8 @@ const settingsFileName = "settings.yaml"
 func readConfig() (config, error) {
 	data := flag.String("data", defaultData(), "private data directory")
 	listen := flag.String("listen", "127.0.0.1:9877", "loopback control address")
-	webhooks := flag.String("webhook-listen", "", "optional webhook-only listener")
+	// Accept the legacy flag for compatibility with existing launcher invocations.
+	flag.String("webhook-listen", "", "optional webhook-only listener")
 	bridge := flag.String("claude-bridge", "bridges/claude/bridge.mjs", "Claude SDK bridge path")
 	settings := flag.String("settings", defaultSettingsFile(), "authoritative settings.yaml path")
 	supervisor := flag.Bool("supervisor", true, "compatibility flag; Whirlwind always runs the durable local supervisor")
@@ -37,7 +38,7 @@ func readConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
-	return config{data: *data, listen: *listen, webhooks: *webhooks, bridge: *bridge, settings: settingsPath, supervisor: *supervisor}, nil
+	return config{data: *data, bridge: *bridge, settings: settingsPath, supervisor: *supervisor}, nil
 }
 func defaultData() string {
 	if value := os.Getenv("WHIRLWIND_DATA_DIR"); value != "" {

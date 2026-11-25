@@ -12,6 +12,10 @@ import (
 	"whirlwind/internal/workflow"
 )
 
+const (
+	inspectionFixtureTimestampLayout = "2006-01-02 15:04:05 MST"
+)
+
 func TestAgentInspectionSeparatesOrderedQueuesChecksAndOutcomes(t *testing.T) {
 	d := New(t.TempDir())
 	screen := dashboardScreen(t, d)
@@ -63,8 +67,8 @@ func TestAgentInspectionSeparatesOrderedQueuesChecksAndOutcomes(t *testing.T) {
 		"2. Cursor / cursor-model / reasoning: provider default",
 		"1. Sol / gpt-6.2-sol / reasoning: high (reasoning_effort)",
 		"Connection checks (not run outcomes)",
-		"Sol: up · checked " + observed.Format("2006-01-02 15:04:05 MST") + " (current)",
-		"Cursor: down · checked " + stale.Format("2006-01-02 15:04:05 MST") + " (stale)",
+		"Sol: up · checked " + observed.Format(inspectionFixtureTimestampLayout) + " (current)",
+		"Cursor: down · checked " + stale.Format(inspectionFixtureTimestampLayout) + " (stale)",
 		"Claude: paused · no completed check",
 		"Latest attempt outcomes (selected project)", "Sol: Planner failed",
 	} {
@@ -81,7 +85,7 @@ func TestAgentInspectionSeparatesOrderedQueuesChecksAndOutcomes(t *testing.T) {
 	view.ScrollTo(8, 0)
 	snapshot["provider_status"][0] = record("sol", workflow.ProviderStatus{ID: "sol", Status: "failed", CheckedAt: stale.Format(time.RFC3339)})
 	d.Present(snapshot)
-	if d.modal != view || !strings.Contains(view.GetText(false), "Sol: down · checked "+stale.Format("2006-01-02 15:04:05 MST")+" (stale)") {
+	if d.modal != view || !strings.Contains(view.GetText(false), "Sol: down · checked "+stale.Format(inspectionFixtureTimestampLayout)+" (stale)") {
 		t.Fatal("the open view did not refresh the connection observation")
 	}
 	if row, _ := view.GetScrollOffset(); row != 8 {
