@@ -15,6 +15,14 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	profileFixtureBrokerSocket  = "broker.sock"
+	profileFixtureExitFailure   = "#!/bin/sh\nexit 1\n"
+	profileFixtureImageACP      = "image-only-acp"
+	profileFixtureMCPEndpoint   = "whirlwind-mcp.openshell.internal"
+	profileFixtureSelectedTools = "selected-tools"
+)
+
 // Dropping role or policy from the digest would let an old session resume with different authority.
 func TestProfileDigestChangesWithAuthority(t *testing.T) {
 	root := t.TempDir()
@@ -31,14 +39,14 @@ func TestProfileDigestChangesWithAuthority(t *testing.T) {
 		t.Fatal("policy change retained session authority")
 	}
 	brokerA := p
-	brokerA.MCPBroker = &MCPBroker{ID: "tools-a", SocketPath: filepath.Join(root, "broker.sock"), Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}
+	brokerA.MCPBroker = &MCPBroker{ID: "tools-a", SocketPath: filepath.Join(root, profileFixtureBrokerSocket), Host: profileFixtureMCPEndpoint, Path: "/mcp"}
 	brokerA.MCPBrokerToken = strings.Repeat("a", 64)
 	brokerB := brokerA
 	brokerB.MCPBrokerToken = strings.Repeat("b", 64)
 	if brokerA.Digest() != brokerB.Digest() {
 		t.Fatal("ephemeral broker token changed profile authority digest")
 	}
-	brokerB.MCPBroker = &MCPBroker{ID: "tools-a", SocketPath: filepath.Join(root, "broker.sock"), Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}
+	brokerB.MCPBroker = &MCPBroker{ID: "tools-a", SocketPath: filepath.Join(root, profileFixtureBrokerSocket), Host: profileFixtureMCPEndpoint, Path: "/mcp"}
 	brokerB.MCPBroker.ID = "tools-b"
 	if brokerA.Digest() == brokerB.Digest() {
 		t.Fatal("selected broker identity did not change profile authority digest")
@@ -50,7 +58,7 @@ func TestMCPBrokerMustRemainOutsideSandboxMounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile.MCPBroker = &MCPBroker{ID: "selected-tools", SocketPath: filepath.Join(profile.CWD, "broker.sock"), Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}
+	profile.MCPBroker = &MCPBroker{ID: profileFixtureSelectedTools, SocketPath: filepath.Join(profile.CWD, profileFixtureBrokerSocket), Host: profileFixtureMCPEndpoint, Path: "/mcp"}
 	profile.MCPBrokerToken = strings.Repeat("c", 64)
 	if err := validateMCPBroker(profile); err == nil || !strings.Contains(err.Error(), "outside sandbox mounts") {
 		t.Fatalf("MCP broker socket inside the worktree was accepted: %v", err)
@@ -133,7 +141,7 @@ func TestCommandFiltersAmbientEnvironment(t *testing.T) {
 	t.Setenv("WHIRLWIND_TEST_SECRET", "must-not-leak")
 	t.Setenv("NODE_OPTIONS", "--require=/untrusted/inject.js")
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "openshell"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "openshell"), []byte(profileFixtureExitFailure), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -154,7 +162,7 @@ func TestCommandFiltersAmbientEnvironment(t *testing.T) {
 
 func TestOpenShellBridgeReceivesOnlyHostBootstrapEnvironment(t *testing.T) {
 	environment := []string{"PATH=/bin", "WHIRLWIND_OPENSHELL_CLI=/tmp/openshell", "XDG_CONFIG_HOME=/tmp/xdg-config", "XDG_STATE_HOME=/tmp/xdg-state", "OPENSHELL_GATEWAY=local", "OPENSHELL_GATEWAY_ENDPOINT=http://127.0.0.1:8080", "OPENSHELL_WORKSPACE=workspace", "WHIRLWIND_MCP_BROKER_TOKEN=ambient-token-must-not-leak", "WHIRLWIND_ADMIN_TOKEN=must-not-leak", "OPENSHELL_API_KEY=must-not-leak"}
-	profile := Profile{Launcher: "/app/bridges/openshell/launch.mjs", MCPBroker: &MCPBroker{ID: "selected-tools", SocketPath: "/tmp/whirlwind-mcp.sock", Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}, Environment: []string{"OPENSHELL_GATEWAY", "OPENSHELL_API_KEY"}}
+	profile := Profile{Launcher: "/app/bridges/openshell/launch.mjs", MCPBroker: &MCPBroker{ID: profileFixtureSelectedTools, SocketPath: "/tmp/whirlwind-mcp.sock", Host: profileFixtureMCPEndpoint, Path: "/mcp"}, Environment: []string{"OPENSHELL_GATEWAY", "OPENSHELL_API_KEY"}}
 	filtered := filteredEnvironment(environment, profile)
 	for _, required := range []string{"WHIRLWIND_OPENSHELL_CLI=/tmp/openshell", "XDG_CONFIG_HOME=/tmp/xdg-config", "XDG_STATE_HOME=/tmp/xdg-state", "OPENSHELL_GATEWAY=local", "OPENSHELL_GATEWAY_ENDPOINT=http://127.0.0.1:8080", "OPENSHELL_WORKSPACE=workspace"} {
 		if !slices.Contains(filtered, required) {
@@ -251,7 +259,7 @@ func TestOpenShellRuntimeHonorsValidatedExplicitCLIPath(t *testing.T) {
 func TestOpenShellProxyTokenIsRegisteredForTraceRedaction(t *testing.T) {
 	useLegacyExecutionLauncher(t)
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "openshell"), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+	if err := os.WriteFile(filepath.Join(bin, "openshell"), []byte(profileFixtureExitFailure), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -260,7 +268,7 @@ func TestOpenShellProxyTokenIsRegisteredForTraceRedaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	brokerToken := strings.Repeat("b", 64)
-	profile.MCPBroker = &MCPBroker{ID: "selected-tools", SocketPath: filepath.Join(t.TempDir(), "broker.sock"), Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}
+	profile.MCPBroker = &MCPBroker{ID: profileFixtureSelectedTools, SocketPath: filepath.Join(t.TempDir(), profileFixtureBrokerSocket), Host: profileFixtureMCPEndpoint, Path: "/mcp"}
 	profile.MCPBrokerToken = brokerToken
 	cmd, err := Command(context.Background(), []string{"sh", "-c", "true"}, profile)
 	if err != nil {
@@ -331,23 +339,23 @@ func TestOpenShellReceivesConfiguredCommandForLinuxImage(t *testing.T) {
 	}
 	bin := t.TempDir()
 	openShell := filepath.Join(bin, "openshell")
-	if err := os.WriteFile(openShell, []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+	if err := os.WriteFile(openShell, []byte(profileFixtureExitFailure), 0700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	_, args, err := prepareSandboxCommand([]string{"image-only-acp", "--stdio"}, profile)
+	_, args, err := prepareSandboxCommand([]string{profileFixtureImageACP, "--stdio"}, profile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := args[3]; got != "image-only-acp" {
-		t.Fatalf("OpenShell command = %q, want configured image command %q", got, "image-only-acp")
+	if got := args[3]; got != profileFixtureImageACP {
+		t.Fatalf("OpenShell command = %q, want configured image command %q", got, profileFixtureImageACP)
 	}
 	var sandboxProfile Profile
 	if err := json.Unmarshal([]byte(args[1]), &sandboxProfile); err != nil {
 		t.Fatal(err)
 	}
 	for _, root := range sandboxProfile.ReadRoots {
-		if strings.Contains(root, "image-only-acp") {
+		if strings.Contains(root, profileFixtureImageACP) {
 			t.Fatalf("host executable path was mounted into the Linux image: %q", root)
 		}
 	}
