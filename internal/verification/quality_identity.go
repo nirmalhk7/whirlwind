@@ -100,15 +100,8 @@ func captureQualityIdentityWithCatalogPath(output, runtimeDir, executable string
 }
 
 func captureQualityIdentityWithCatalogAt(output, runtimeDir, executable string, snapshot *model.QualitySnapshot, expectedBinarySHA256, observedCatalogHash, pathValue, cwd string) (*model.QualityIdentity, error) {
-	switch {
-	case snapshot == nil:
-		return nil, errors.New("frozen quality configuration is missing")
-	case runtimeDir == "":
-		return nil, errors.New("isolated Qlty runtime directory is missing")
-	case len(output) == 0:
-		return nil, errors.New("Qlty command produced no SARIF on stdout; inspect its saved stderr")
-	case len(output) > 1<<20:
-		return nil, errors.New("Qlty SARIF exceeds the runtime identity evidence limit")
+	if err := validateQualityIdentityInput(output, runtimeDir, snapshot); err != nil {
+		return nil, err
 	}
 	if err := validateFrozenRuleSources(snapshot.Files); err != nil {
 		return nil, err
@@ -528,11 +521,7 @@ func copyApprovedQualityTree(ctx context.Context, source, destination, expectedH
 			if err != nil {
 				return err
 			}
-			mode := info.Mode().Perm() &^ 0222
-			if isQualifiedQltyInstallLock(sourceRoot, relative, info) {
-				mode |= 0200
-			}
-			output, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+			output, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, candidateQualityFileMode(sourceRoot, relative, info))
 			if err != nil {
 				_ = input.Close()
 				return err

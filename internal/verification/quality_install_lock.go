@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+func candidateQualityFileMode(root *os.Root, relative string, info os.FileInfo) os.FileMode {
+	mode := info.Mode().Perm() &^ 0222
+	if isQualifiedQltyInstallLock(root, relative, info) {
+		mode |= 0200
+	}
+	return mode
+}
+
 // Qlty acquires and writes its installer lock even on an already-installed
 // tool. Allow that on the candidate's private copy of an existing, empty,
 // nonexecutable lock beside a completed package, not on package assets, the
