@@ -226,18 +226,36 @@ func validateRequest(request Request) error {
 	if len(request.Payload) > maxIPCMessage/2 {
 		return errors.New("command payload exceeds 512 KiB")
 	}
-	if request.Operation == "inspect.events" {
+	if readOnlyOperation(request.Operation) {
+		return validateInspection(request)
+	}
+	return validateMutation(request)
+}
+
+func readOnlyOperation(operation string) bool {
+	switch operation {
+	case "plan.document.read", finalizationInspectOperation, "provider.status", "project.policy.preview":
+		return true
+	default:
+		return strings.HasPrefix(operation, "inspect.")
+	}
+}
+
+func validateInspection(request Request) error {
+	switch request.Operation {
+	case "inspect.events":
 		if request.EventCursor < 0 || request.Limit < 0 || request.Limit > 500 {
 			return errors.New("event cursor or page limit is invalid (limit 1..500)")
 		}
-		return nil
+	case finalizationInspectOperation:
+		if request.DiffOffset < 0 || request.DiffOffset > maxDiffCursor {
+			return errors.New("finalization diff cursor is outside the supported range")
+		}
 	}
-	if request.Operation == finalizationInspectOperation && (request.DiffOffset < 0 || request.DiffOffset > maxDiffCursor) {
-		return errors.New("finalization diff cursor is outside the supported range")
-	}
-	if strings.HasPrefix(request.Operation, "inspect.") || request.Operation == "plan.document.read" || request.Operation == finalizationInspectOperation || request.Operation == "provider.status" || request.Operation == "project.policy.preview" {
-		return nil
-	}
+	return nil
+}
+
+func validateMutation(request Request) error {
 	if request.IdempotencyKey == "" || len(request.IdempotencyKey) > 256 {
 		return errors.New("idempotency_key is required for supervisor commands")
 	}

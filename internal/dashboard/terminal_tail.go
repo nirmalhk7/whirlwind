@@ -103,44 +103,60 @@ func waitForTailClose(ctx context.Context, terminal int) (bool, error) {
 	var escapeUntil time.Time
 	var buffer [64]byte
 	for ctx.Err() == nil {
-		timeout := tailInputPoll
-		if !escapeUntil.IsZero() {
-			remaining := time.Until(escapeUntil)
-			if remaining <= 0 {
-				return true, nil
-			}
-			timeout = min(timeout, remaining)
+		timeout, expired := tailPollTimeout(escapeUntil)
+		if expired {
+			return true, nil
 		}
-		ready, err := unix.Poll(poll, int((timeout+time.Millisecond-1)/time.Millisecond))
-		if errors.Is(err, unix.EINTR) {
-			continue
-		}
+		keys, err := readTailKeys(terminal, poll, timeout, buffer[:])
 		if err != nil {
 			return false, err
 		}
-		if ready == 0 {
-			continue
-		}
-		if poll[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
-			return false, io.ErrClosedPipe
-		}
-		count, err := unix.Read(terminal, buffer[:])
-		if errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) {
-			continue
-		}
-		if err != nil {
-			return false, err
-		}
-		for _, key := range buffer[:count] {
-			switch key {
-			case 0x03:
-				return true, nil
-			case 0x1b:
-				escapeUntil = time.Now().Add(tailEscapeGrace)
-			default:
-				escapeUntil = time.Time{}
-			}
+		if consumeTailKeys(keys, &escapeUntil) {
+			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func tailPollTimeout(escapeUntil time.Time) (time.Duration, bool) {
+	if escapeUntil.IsZero() {
+		return tailInputPoll, false
+	}
+	remaining := time.Until(escapeUntil)
+	return min(tailInputPoll, remaining), remaining <= 0
+}
+
+func readTailKeys(terminal int, poll []unix.PollFd, timeout time.Duration, buffer []byte) ([]byte, error) {
+	ready, err := unix.Poll(poll, int((timeout+time.Millisecond-1)/time.Millisecond))
+	if errors.Is(err, unix.EINTR) {
+		return nil, nil
+	}
+	if err != nil || ready == 0 {
+		return nil, err
+	}
+	if poll[0].Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+		return nil, io.ErrClosedPipe
+	}
+	count, err := unix.Read(terminal, buffer)
+	if errors.Is(err, unix.EINTR) || errors.Is(err, unix.EAGAIN) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return buffer[:count], nil
+}
+
+func consumeTailKeys(keys []byte, escapeUntil *time.Time) bool {
+	for _, key := range keys {
+		switch key {
+		case 0x03:
+			return true
+		case 0x1b:
+			*escapeUntil = time.Now().Add(tailEscapeGrace)
+		default:
+			*escapeUntil = time.Time{}
+		}
+	}
+	return false
 }

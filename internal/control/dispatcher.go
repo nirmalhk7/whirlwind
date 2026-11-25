@@ -195,7 +195,6 @@ func (d SupervisorDispatcher) events(ctx context.Context, request Request) (even
 	if limit < 1 || limit > 500 {
 		return nil, errors.New("event page limit must be between 1 and 500")
 	}
-	pageBytes := initialInspectionPageSize
 	rows, err := d.DB.QueryContext(ctx, "SELECT id,kind,resource_id,data,created_at FROM events WHERE id>? ORDER BY id LIMIT ?", request.EventCursor, limit+1)
 	if err != nil {
 		return nil, err
@@ -205,23 +204,24 @@ func (d SupervisorDispatcher) events(ctx context.Context, request Request) (even
 			resultErr = closeErr
 		}
 	}()
+	return readInspectionEvents(rows, limit)
+}
+
+func readInspectionEvents(rows *sql.Rows, limit int) ([]model.Event, error) {
+	var events []model.Event
+	pageBytes := initialInspectionPageSize
 	for rows.Next() {
-		var event model.Event
-		var data []byte
-		if err := rows.Scan(&event.ID, &event.Kind, &event.ResourceID, &data, &event.CreatedAt); err != nil {
+		event, err := scanInspectionEvent(rows)
+		if err != nil {
 			return nil, err
 		}
-		event.Data = data
 		encoded, err := json.Marshal(event)
 		if err != nil {
 			return nil, err
 		}
 		rowBytes := len(encoded) + 1
-		if rowBytes+inspectionPageHeadroom > maxInspectionPageBytes {
-			if len(events) == 0 {
-				return nil, errors.New("inspection event exceeds safe local page size")
-			}
-			break
+		if len(events) == 0 && rowBytes+inspectionPageHeadroom > maxInspectionPageBytes {
+			return nil, errors.New("inspection event exceeds safe local page size")
 		}
 		if len(events) == limit || pageBytes+rowBytes > maxInspectionPageBytes-inspectionPageHeadroom {
 			break
@@ -230,6 +230,14 @@ func (d SupervisorDispatcher) events(ctx context.Context, request Request) (even
 		pageBytes += rowBytes
 	}
 	return events, rows.Err()
+}
+
+func scanInspectionEvent(rows *sql.Rows) (model.Event, error) {
+	var event model.Event
+	var data []byte
+	err := rows.Scan(&event.ID, &event.Kind, &event.ResourceID, &data, &event.CreatedAt)
+	event.Data = data
+	return event, err
 }
 
 func (d SupervisorDispatcher) snapshot(ctx context.Context, request Request) (Snapshot, error) {
