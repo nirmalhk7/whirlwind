@@ -7,32 +7,27 @@ permissions:
   contents: read
 jobs:
   entry-point:
-    name: "Candidate ${{ matrix.pr }}"
+    name: "Integrated candidate ${{ matrix.pr }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - pr: main
-            sha: 7346190f9dae0ce649c56cb23d37da3d1a44636c
-            tree: eacc5626e54db801a431fd826f79330e4be878e0
-            test: TestSeededHumanWorkflowThroughPTY
-          - pr: 81
-            sha: d19f58f6365e08c9d2ad552fd32c4db912af7b88
-            tree: 913ae6b49f34d4e7d75515f37c60953c0da50ab9
-            test: TestSeededHumanWorkflowThroughPTY
-          - pr: 75
-            sha: ab5ca1a1ad9c7b4a3e2f325b4e36d6d022818073
-            tree: 57d081c07772b035b0b4fa61b768172ba2283061
-            test: TestSeededHumanWorkflowThroughPTY
+          - pr: 80
+            sha: bc3329ed95100915812590ca014b5298404975e0
+            tree: 8536b970a8098e12dd4a9e61fcf44255ab8cf04f
+          - pr: 52
+            sha: 5bbe9ce86cdb181e260d1bbd882b3cb8a68d17a8
+            tree: 8cc4b55701742c996d4a69b69848b38a9b785496
           - pr: 76
-            sha: 329b3de188654761e2d132a080d098680ba72566
-            tree: 0819137c8c572b278eeb1d879f4d1a45ab53f294
-            test: TestProjectMemoryThroughLauncher
+            sha: 6a16061673ef38651f293d116f9a9aead7a9011a
+            tree: 27ac2e610b927ca7f51d0dde911eec2613d20812
+          - pr: 75
+            sha: 74d826b6b0970ca183b8f45ebf6985e7b009162c
+            tree: 16c769aa295eda1dca6cc259224f3feaa8792513
     env:
       GOTOOLCHAIN: local
-      WHIRLWIND_TEST_SEEDED_PTY: '1'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -42,17 +37,33 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a40d02f
         with:
           node-version: '24'
           package-manager-cache: false
-      - name: Verify tree and run shipped entry point
+      - name: Verify tree and run relevant entry point
         env:
           EXPECTED_TREE: ${{ matrix.tree }}
-          FIXTURE_NAME: ${{ matrix.test }}
+          PR: ${{ matrix.pr }}
         run: |
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
           export GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
           go mod download
-          go build -mod=readonly ./cmd/whirlwind ./cmd/whirlwind-dashboard ./cmd/whirlwind-verify
-          go test -mod=readonly -race -v -count=1 -timeout=8m ./cmd/whirlwind -run "^${FIXTURE_NAME}$"
+          case "$PR" in
+            80)
+              go test -mod=readonly -race -v -count=1 ./internal/verification -run '^(TestResolveJobCommand.*|TestOfflineDockerManagedManifestPinsPolicyAndImage)$'
+              ;;
+            52)
+              go test -mod=readonly -race -v -count=1 ./internal/verification ./internal/workflow -run '^(TestQltyStagingSeparatesUnchangedOnboardingFromCandidateDiff|TestQltyOnboardingBaselineEvidenceIsNotCandidateFindingCoverage|TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings|TestDefaultQualityApprovalFreezesQltyAndSecretConfiguration)$'
+              ;;
+            76|75)
+              go build -mod=readonly ./cmd/whirlwind ./cmd/whirlwind-dashboard ./cmd/whirlwind-verify
+              export WHIRLWIND_TEST_SEEDED_PTY=1
+              if [ "$PR" = 76 ]; then
+                go test -mod=readonly -race -v -count=1 -timeout=8m ./cmd/whirlwind -run '^TestProjectMemoryThroughLauncher$'
+              else
+                go test -mod=readonly -race -v -count=1 -timeout=8m ./cmd/whirlwind -run '^(TestSeededHumanWorkflowThroughPTY|TestProjectMemoryThroughLauncher)$'
+              fi
+              ;;
+            *) exit 2 ;;
+          esac
