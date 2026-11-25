@@ -18,8 +18,9 @@ go mod download
 
 Set absolute local Git checkout paths under `projects` in the authoritative
 `settings.yaml`. Canonical local ideation can use Git evidence from a checkout
-without a remote. If ideation selects GitHub, the source must have readable
-issues through `gh`. Read [workflow modes](workflow-modes.md) for approvals,
+without a remote. The legacy hosted workflow checks GitHub issue access
+through `gh`. Agentic mode uses scoped ACP integrations. Read
+[workflow modes](workflow-modes.md) for approvals,
 the execution lifecycle, and local delivery. Use [nono setup](nono-setup.md)
 for provider installation, then configure independent Ideation, Planner,
 Coding, Reviewer, and Finalizer queues in YAML. One role cannot inherit
