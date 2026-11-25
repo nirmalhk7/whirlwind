@@ -16,12 +16,12 @@ RENDER_MARKER = b"Projects"
 
 
 class PTYSession:
-    def __init__(self, env):
+    def __init__(self, env, *, rows=32, columns=112):
         self.pid, self.master = pty.fork()
         if self.pid == 0:
+            fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
             os.chdir(REPO)
             os.execve(ENTRY, [ENTRY, "dashboard"], env)
-        fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", 32, 112, 0, 0))
         self.output = bytearray()
         self.reaped = False
 
@@ -65,18 +65,21 @@ class PTYSession:
                 time.sleep(0.01)
         raise RuntimeError(f"owned PTY process group {self.pid} did not reap; output={bytes(self.output)[-4000:]!r}")
 
-    def wait_for_render(self):
+    def wait_for_render(self, required_markers=(RENDER_MARKER,)):
+        def missing():
+            return [marker for marker in required_markers if marker not in self.output]
+
         deadline = time.monotonic() + 60
-        while time.monotonic() < deadline and RENDER_MARKER not in self.output:
+        while time.monotonic() < deadline and missing():
             if not self.read_available(0.2):
                 break
             result = self.child_status(os.WNOHANG)
             if result is not None:
                 code = exit_code(result)
                 raise AssertionError(f"dashboard failed to render in PTY, exit={code}: {bytes(self.output)[-4000:]!r}")
-        if RENDER_MARKER not in self.output:
+        if absent := missing():
             status = self.terminate()
-            raise AssertionError(f"dashboard failed to render in PTY, exit={exit_code(status)}: {bytes(self.output)[-4000:]!r}")
+            raise AssertionError(f"dashboard PTY missed {absent!r}, exit={exit_code(status)}: {bytes(self.output)[-4000:]!r}")
 
     def quit_and_wait(self):
         os.write(self.master, b"q")
@@ -98,10 +101,10 @@ class PTYSession:
             os.close(self.master)
 
 
-def dashboard_pty(env):
-    session = PTYSession(env)
+def dashboard_pty(env, *, rows=32, columns=112, additional_markers=()):
+    session = PTYSession(env, rows=rows, columns=columns)
     try:
-        session.wait_for_render()
+        session.wait_for_render((RENDER_MARKER, b"Agents", b"Runs", b"Inbox", *additional_markers))
         code = session.quit_and_wait()
         if code != 0:
             raise AssertionError(f"dashboard did not exit cleanly after q (exit={code}): {bytes(session.output)[-4000:]!r}")

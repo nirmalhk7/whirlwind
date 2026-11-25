@@ -225,6 +225,9 @@ func validateJobResult(m JobManifest, index int, result JobResult) error {
 	if result.Status != "pass" && result.Passed {
 		return errors.New("verification result status contradicts success")
 	}
+	if m.OfflineDockerImage != "" {
+		return validateOfflineDockerResult(m, index, result)
+	}
 	if err := validateRetainedArtifacts(m, index, result); err != nil {
 		return err
 	}

@@ -59,6 +59,11 @@ func TestParityAutofixUsesSeparateStagingAndNeverCertifiesModifiedSource(t *test
 			t.Fatalf("autofix mutated frozen/original source: %s %v", root, err)
 		}
 	}
+	for _, relative := range []string{verificationCheckoutDir, autofixCheckoutDir(0)} {
+		if _, err := os.Lstat(filepath.Join(manifest.Root, relative)); !os.IsNotExist(err) {
+			t.Fatalf("completed disposable checkout %s remains: %v", relative, err)
+		}
+	}
 	assertAutofixPatchReplaysExactBytes(t, manifest.Repository, proposal.PatchPath)
 	requireVerificationSuccess(t, os.WriteFile(proposal.PatchPath, []byte("tampered patch\n"), 0600))
 	retry := exec.Command(binary)

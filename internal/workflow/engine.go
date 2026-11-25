@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
@@ -13,6 +14,7 @@ import (
 )
 
 type Engine struct {
+	dispatchHealth           atomic.Pointer[model.DispatchHealth]
 	Store                    *store.Store
 	GitHub                   github.Client
 	Root                     string
@@ -57,7 +59,7 @@ func (e *Engine) Run(ctx context.Context) {
 	defer ticker.Stop()
 	lastSettingsError := ""
 	nextReconcile := time.Now().Add(5 * time.Minute)
-	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
+	if err := e.checkDispatchRecovery(ctx); err != nil {
 		log.Printf("reconcile standalone sandbox runtimes: %v", err)
 	}
 	if !e.settings(ctx).Stopped {
@@ -94,7 +96,7 @@ func (e *Engine) runCycle(ctx context.Context, lastSettingsError string, nextRec
 		e.StopAll()
 		return "", nextReconcile
 	}
-	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
+	if err := e.checkDispatchRecovery(ctx); err != nil {
 		log.Printf("standalone sandbox runtime recovery blocks dispatch: %v", err)
 		return lastSettingsError, nextReconcile
 	}
@@ -162,5 +164,9 @@ func (e *Engine) Project(ctx context.Context, id string) (model.Project, error) 
 	if err != nil {
 		return model.Project{}, err
 	}
-	return store.Decode[model.Project](r)
+	project, err := store.Decode[model.Project](r)
+	if err == nil && project.ManagedPolicy {
+		project.Policy, err = e.projectPolicy(ctx, project)
+	}
+	return project, err
 }

@@ -1,6 +1,6 @@
 # Native nono execution
 
-Whirlwind runs providers, ACP terminals and committed checks through **nono 0.81.0** on the local host. Docker, a Linux agent image and an OpenShell gateway are no longer prerequisites. Install the [official nono 0.81.0 release](https://github.com/nolabs-ai/nono/releases/tag/v0.81.0) for your platform, place `nono` on `PATH`, and confirm:
+Whirlwind runs providers, ACP terminals and committed checks through **nono 0.81.0** on macOS. Docker, a Linux agent image and an OpenShell gateway are not prerequisites. On macOS, install the [official nono 0.81.0 release](https://github.com/nolabs-ai/nono/releases/tag/v0.81.0), place `nono` on `PATH`, and confirm:
 
 ```sh
 nono --version
@@ -25,7 +25,7 @@ Direct outbound network access is blocked. Provider and project `sandbox.allowed
 
 Codex ACP selects `agent-full-access` **inside the enforced nono boundary** to avoid applying a second nested Seatbelt sandbox. Whirlwind's read-only client permissions and nono's filesystem/network rules still apply. An adapter lacking that mode fails with an actionable setup error.
 
-On Linux, the launcher refuses whole-worktree write grants that Landlock cannot subtract protected metadata from, and unsupported glob grants. Use bounded existing literal directories for Linux coding; do not widen permissions to bypass a refusal. Native read-only work and declared check outputs remain supported.
+The native execution builder and nono launcher reject Linux, including read-only agents and checks. Use the [dashboard](local-supervisor.md) to inspect state and a supported macOS host to run the native workflow. Managed and standalone verification on Linux can opt in to [offline Docker](offline-docker-verifier.md) for pinned local images.
 
 ## Role-specific lifecycle hooks
 
@@ -53,7 +53,7 @@ Each managed execution persists its deadline, generation and private `nono.json`
 
 Legacy OpenShell code remains for recovery of persisted OpenShell attempts and explicit compatibility tests. It is not selected by default. `WHIRLWIND_EXECUTION_LAUNCHER` is a trusted host override for that compatibility path.
 
-Run the native boundary and repository checks with nono installed:
+Run the native boundary and repository checks on macOS with nono installed. A skipped native check or Linux launcher refusal is not physical isolation evidence:
 
 ```sh
 node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs bridges/nono/*.test.mjs

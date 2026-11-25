@@ -182,6 +182,10 @@ func (a *agentAttempt) finish(output provider.Output, runErr error, started time
 	}
 	a.state.Usage = output.Usage
 	metric := a.finalMetric(output, started, runErr)
+	if a.state.Status == model.AttemptAwaitingPlanPublication {
+		metric["success"] = nil
+		metric["awaiting_plan_publication"] = true
+	}
 	entry := a.finalUsageEntry(output, activeElapsed)
 	changes := []store.Change{{Kind: "sessions", ID: a.id, Value: a.state, Expected: record.Version}, {Kind: "metrics", ID: a.id, Value: metric}}
 	recoveryStatus, retryAt := "complete", ""
@@ -230,6 +234,9 @@ func (a *agentAttempt) updateFinalState(output provider.Output, runErr error, st
 	a.state.ElapsedMS = &elapsed
 	success := runErr == nil
 	a.state.Success = &success
+	if success && a.state.IdeaID != "" && a.input.Purpose == "idea_planning" {
+		a.state.Status, a.state.Success = model.AttemptAwaitingPlanPublication, nil
+	}
 	if output.ResolvedModel != "" {
 		a.state.ResolvedModel = output.ResolvedModel
 	}

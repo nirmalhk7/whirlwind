@@ -23,6 +23,7 @@ type tddCheck struct {
 	CheckID          string               `json:"check_id"`
 	Passed           bool                 `json:"passed"`
 	Phase            string               `json:"phase"`
+	ValidationError  string               `json:"validation_error,omitempty"`
 	Snapshot         string               `json:"snapshot"`
 	Production       string               `json:"production"`
 	Tests            string               `json:"tests"`
@@ -117,7 +118,7 @@ func (r *codingCheckRun) persist(ctx context.Context) error {
 		return err
 	}
 	r.entry.Task, r.entry.Unit, r.entry.PlanVersion = a.task.ID, a.input.UnitID, a.task.PlanVersion
-	r.entry.CheckID, r.entry.Passed, r.entry.Phase = r.check.Name, r.gatePassed, r.phase
+	r.entry.CheckID, r.entry.Passed, r.entry.Phase = r.check.Name, r.qualifiedPass(), r.phase
 	r.entry.AttemptID, r.entry.OutputArtifact, r.entry.At = a.id, artifact.ID, time.Now().UTC().Format(time.RFC3339Nano)
 	return a.Store.Put(ctx, "tdd_checks", store.ID(), r.entry, 0)
 }
@@ -195,7 +196,12 @@ func (r *codingCheckRun) output() provider.CheckResult {
 	if r.entry.BaselineAccepted {
 		output += "\nBaseline comparison: preexisting failures remain visible; no new or worsened findings. Raw exit status retained."
 	}
-	return provider.CheckResult{CheckID: r.check.Name, Snapshot: r.entry.Snapshot, Passed: r.gatePassed, Phase: r.phase, BaselineAccepted: r.entry.BaselineAccepted, ExitCode: r.result.ExitCode, Output: output, OutputArtifact: r.artifact.ID, DurationMS: r.result.DurationMS, Truncated: r.result.Truncated}
+	return provider.CheckResult{CheckID: r.check.Name, Snapshot: r.entry.Snapshot, Passed: r.qualifiedPass(), Phase: r.phase, ValidationError: r.entry.ValidationError,
+		BaselineAccepted: r.entry.BaselineAccepted, ExitCode: r.result.ExitCode, Output: output, OutputArtifact: r.artifact.ID, DurationMS: r.result.DurationMS, Truncated: r.result.Truncated}
+}
+
+func (r *codingCheckRun) qualifiedPass() bool {
+	return r.phase == "green" && r.gatePassed
 }
 
 type codingOrigin struct {
