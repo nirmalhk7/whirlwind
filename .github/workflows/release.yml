@@ -62,12 +62,6 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color .github/workflows/release.yml
           node --test .github/scripts/release.test.mjs
-      - name: Run launcher and bridge suites
-        run: node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/*.test.mjs bridges/nono/*.test.mjs
-      - name: Run Go race suite and vet
-        run: |
-          go test -mod=readonly -race -count=1 -timeout=25m ./...
-          go vet -mod=readonly ./...
       - name: Build and package native commands
         shell: bash
         env:
@@ -84,6 +78,37 @@ jobs:
           done
           tar -czf "$RUNNER_TEMP/$bundle.tar.gz" -C "$RUNNER_TEMP" "$bundle"
           tar -tzf "$RUNNER_TEMP/$bundle.tar.gz"
+      - name: Vet Go packages
+        run: go vet -mod=readonly ./...
+      - name: Run launcher and bridge suites
+        run: node --test scripts/*.test.mjs bridges/claude/*.test.mjs bridges/openshell/*.test.mjs bridges/sandbox/native-state.test.mjs
+      - name: Verify Linux refuses native execution
+        if: runner.os == 'Linux'
+        run: node --test --test-name-pattern='^Linux inspection cannot launch execution' bridges/nono/launch.test.mjs
+      - name: Race-test Linux dashboard and control packages
+        if: runner.os == 'Linux'
+        run: go test -mod=readonly -race -count=1 -timeout=25m ./cmd/whirlwind-dashboard ./internal/control ./internal/dashboard
+      - name: Set up pinned macOS test runtimes
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          archive="$RUNNER_TEMP/nono.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/nolabs-ai/nono/releases/download/v0.81.0/nono-v0.81.0-aarch64-apple-darwin.tar.gz \
+            --output "$archive"
+          echo "728b1deefbf6390c9b74fc982efbded1e1c4b37b99dcdefa2e07266dfef4d9e9  $archive" | shasum -a 256 -c
+          bin="$RUNNER_TEMP/nono-bin"
+          mkdir -p "$bin"
+          tar -xzf "$archive" -C "$bin" nono
+          "$bin/nono" --version
+          echo "$bin" >> "$GITHUB_PATH"
+          npm ci --prefix bridges/sandbox --ignore-scripts --no-audit --no-fund
+      - name: Run macOS sandbox suites
+        if: runner.os == 'macOS'
+        run: node --test bridges/nono/*.test.mjs bridges/sandbox/launch.test.mjs bridges/sandbox/node-path.test.mjs
+      - name: Run full Go race suite on macOS
+        if: runner.os == 'macOS'
+        run: go test -mod=readonly -race -count=1 -timeout=25m ./...
       - name: Stage verified archive for this release run
         if: steps.release.outputs.publish == 'true'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
