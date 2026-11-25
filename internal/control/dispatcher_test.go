@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 )
 
@@ -47,12 +48,17 @@ func TestInspectionPagesAreBoundedProjectScopedAndCursorStable(t *testing.T) {
 	if len(second.Records) != 2 || second.HasMore {
 		t.Fatalf("second page did not advance: %+v", second)
 	}
-	for _, record := range append(first.Records, second.Records...) {
+	assertInspectionRowsScoped(t, append(first.Records, second.Records...), "target")
+}
+
+func assertInspectionRowsScoped(t *testing.T, rows []model.Record, projectID string) {
+	t.Helper()
+	for _, record := range rows {
 		var value map[string]string
 		if err := json.Unmarshal(record.Data, &value); err != nil {
 			t.Fatal(err)
 		}
-		if value["project_id"] != "target" {
+		if value["project_id"] != projectID {
 			t.Fatalf("cross-project record leaked: %s", record.Data)
 		}
 	}

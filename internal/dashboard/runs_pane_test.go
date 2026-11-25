@@ -41,20 +41,7 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 		t.Fatalf("Runs did not replace Plans: %s", view)
 	}
 	list := runList(d)
-	if list.GetItemCount() != 3 {
-		t.Fatalf("want 3 project runs, got %d", list.GetItemCount())
-	}
-	for i, want := range []string{"ideate", "review", "code"} {
-		primary, secondary := list.GetItemText(i)
-		if !strings.Contains(primary, want) {
-			t.Errorf("row %d: %q", i, primary)
-		}
-		for _, field := range []string{[]string{"live-model", runsFixtureReviewModel, "old-model"}[i], "2026-11-08"} {
-			if !strings.Contains(secondary, field) {
-				t.Errorf("run row missing %q: %s", field, secondary)
-			}
-		}
-	}
+	assertNewestRunRows(t, list)
 	first, second := list.GetItemText(0)
 	if !strings.Contains(first, "running") || !strings.Contains(second, "high") {
 		t.Fatalf("missing effective run state: %s %s", first, second)
@@ -68,6 +55,24 @@ func TestRunsReplacePlansAndShowNewestAgentHistory(t *testing.T) {
 	last, _ := list.GetItemText(2)
 	if !strings.Contains(last, "completed") {
 		t.Fatalf("completed run mislabeled: %s", last)
+	}
+}
+
+func assertNewestRunRows(t *testing.T, list *tview.List) {
+	t.Helper()
+	if list.GetItemCount() != 3 {
+		t.Fatalf("want 3 project runs, got %d", list.GetItemCount())
+	}
+	for i, want := range []string{"ideate", "review", "code"} {
+		primary, secondary := list.GetItemText(i)
+		if !strings.Contains(primary, want) {
+			t.Errorf("row %d: %q", i, primary)
+		}
+		for _, field := range []string{[]string{"live-model", runsFixtureReviewModel, "old-model"}[i], "2026-11-08"} {
+			if !strings.Contains(secondary, field) {
+				t.Errorf("run row missing %q: %s", field, secondary)
+			}
+		}
 	}
 }
 

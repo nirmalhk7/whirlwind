@@ -38,7 +38,26 @@ func TestFailedProjectSetupIsVisibleAndRecoverableFromMainDashboard(t *testing.T
 	}
 	d.Present(snapshot)
 	d.ForceDraw()
-	view := screenText(screen)
+	assertFailedSetupSummary(t, d, screenText(screen), reason)
+	assertFailedSetupNoticeOpens(t, d, reason)
+	d.projects.SetCurrentItem(1)
+	if inbox, _ := d.inbox.GetItemText(0); inbox != "No inbox items" {
+		t.Errorf("other project inherited a setup failure notice: %q", inbox)
+	}
+	d.projects.SetCurrentItem(0)
+	project.Status = "draft"
+	snapshot["projects"][0] = record("basera", project)
+	d.Present(snapshot)
+	if inbox, _ := d.inbox.GetItemText(0); inbox != "No inbox items" {
+		t.Errorf("stale failure notice persisted after retry: %q", inbox)
+	}
+	if label, _ := d.projects.GetItemText(0); strings.Contains(label, setupFixtureErrorBadge) || !strings.Contains(label, "Git OK") {
+		t.Errorf("retry did not clear setup failure without changing path health: %q", label)
+	}
+}
+
+func assertFailedSetupSummary(t *testing.T, d *Dashboard, view, reason string) {
+	t.Helper()
 	for _, marker := range []string{setupFixtureErrorBadge, "Setup failed", "Scanner unavailable"} {
 		if !strings.Contains(view, marker) {
 			t.Errorf("main dashboard did not show %q:\n%s", marker, view)
@@ -64,6 +83,10 @@ func TestFailedProjectSetupIsVisibleAndRecoverableFromMainDashboard(t *testing.T
 		t.Errorf("setup should produce one current notice; got %d", d.inbox.GetItemCount())
 	}
 
+}
+
+func assertFailedSetupNoticeOpens(t *testing.T, d *Dashboard, reason string) {
+	t.Helper()
 	d.SetFocus(d.inbox)
 	d.inbox.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {
 		// This fixture drives list selection without a tview focus dispatcher.
@@ -84,20 +107,6 @@ func TestFailedProjectSetupIsVisibleAndRecoverableFromMainDashboard(t *testing.T
 	}
 	d.input(tcell.NewEventKey(tcell.KeyEscape, 0, tcell.ModNone))
 
-	d.projects.SetCurrentItem(1)
-	if inbox, _ := d.inbox.GetItemText(0); inbox != "No inbox items" {
-		t.Errorf("other project inherited a setup failure notice: %q", inbox)
-	}
-	d.projects.SetCurrentItem(0)
-	project.Status = "draft"
-	snapshot["projects"][0] = record("basera", project)
-	d.Present(snapshot)
-	if inbox, _ := d.inbox.GetItemText(0); inbox != "No inbox items" {
-		t.Errorf("stale failure notice persisted after retry: %q", inbox)
-	}
-	if label, _ := d.projects.GetItemText(0); strings.Contains(label, setupFixtureErrorBadge) || !strings.Contains(label, "Git OK") {
-		t.Errorf("retry did not clear setup failure without changing path health: %q", label)
-	}
 }
 
 func TestFailedProjectSetupShowsFallbackWithoutRetainedOperation(t *testing.T) {
