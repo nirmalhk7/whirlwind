@@ -2,6 +2,8 @@
 
 Whirlwind's human interface is a Go terminal application using `rivo/tview`. The supervisor owns SQLite state and runs independently from the terminal session. The dashboard connects through a private Unix-domain socket; it reads the existing database read-only when the supervisor is offline.
 
+See [seeded terminal acceptance](seeded-terminal-acceptance.md) to verify human decisions through the real terminal.
+
 ## Start
 
 ```sh
@@ -15,10 +17,12 @@ The supervisor socket lives under a per-user private directory in `/tmp`; the so
 
 Human mutations include an idempotency key and expected resource version. Plan review also binds to the hash of the exact plan content shown in the approval form. The dashboard never mutates SQLite directly. Closing, redrawing, or reopening the terminal does not reset the supervisor, attempt deadline, retry counters, approvals, or pending questions.
 
+From an approved or active idea, **Cancel planning** revokes that approval even if the Planner is still waiting for a slot. A later worker reply cannot write the cancelled plan into the plans directory. Use **Retry planning** to approve a fresh attempt. If Markdown already reached the plans directory, the supervisor resumes publication with the same file and attempt after interruption. Reopen the idea to inspect the completed plan.
+
 ## Existing state and legacy service cutover
 
 The supervisor initializes the current schema directly in `~/.local/share/whirlwind/whirlwind.db`. There are no schema versions or data migrations. Reopening a current database preserves pending records. Opening an obsolete development layout deletes its database state and recreates the current schema. See [SQL persistence details](persistence.md) for the `projects`, `ideas`, and `plans` tables. Dashboard reads do not initialize, recover, or create a database.
 
 If an older browser/HTTP instance owns the same state directory, `start` fails with an actionable message. Stop that owned instance explicitly with `./bin/whirlwind stop`, then run `start`. Process ownership uses the saved launcher token; unrelated listeners and processes are left alone.
 
-Missing nono does not prevent opening the TUI or inspecting SQLite. Agent execution remains blocked until nono 0.81.0 and the configured host ACP runtime are available. See [nono setup](nono-setup.md).
+The TUI can inspect saved SQLite state without nono. Native agents and nono-backed checks require macOS and nono 0.81.0. Agents also require the configured host ACP adapter. Linux supports [opt-in offline verification](support.md#verification-on-linux) alongside inspection. See [nono setup](nono-setup.md) for the native path.

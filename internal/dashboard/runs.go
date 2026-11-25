@@ -33,7 +33,7 @@ func (d *Dashboard) refreshRuns() {
 			d.detail.SetText("Cannot read ideation history: " + err.Error())
 			continue
 		}
-		if (operation.Kind != "ideation" && operation.Kind != "project_setup") || (d.projectID != "" && operation.Subject != d.projectID) {
+		if (operation.Kind != "ideation" && operation.Kind != "project_setup") || (d.projectID != "" && d.checkoutProjectID(operation.Subject) != d.projectID) {
 			continue
 		}
 		started, err := time.Parse(time.RFC3339Nano, operation.StartedAt)
@@ -60,7 +60,7 @@ func (d *Dashboard) refreshRuns() {
 				projectID = task.ProjectID
 			}
 		}
-		if d.projectID != "" && projectID != d.projectID {
+		if d.projectID != "" && d.checkoutProjectID(projectID) != d.projectID {
 			continue
 		}
 		started, err := time.Parse(time.RFC3339Nano, attempt.StartedAt)
@@ -87,11 +87,19 @@ func (d *Dashboard) refreshRuns() {
 			selected = i
 		}
 		if row.operation != nil {
-			label := "Ideation"
-			if row.operation.Kind == "project_setup" {
-				label = "Project setup: " + projectSetupPhaseLabel(row.operation.Input)
+			label := "Ideation · " + row.operation.Stage
+			if row.operation.RegistrationIdeation() {
+				label = "Auto ideation · " + row.operation.Stage
 			}
-			d.runs.AddItem(tview.Escape(label+" · "+row.operation.Stage), tview.Escape(row.id+" · "+recordedRuntimeValue(row.operation.StartedAt)), 0, nil)
+			if row.operation.Kind == "project_setup" {
+				phase := projectSetupPhaseLabel(row.operation.Input)
+				if row.operation.Stage == "failed" {
+					label = "Setup failed: " + phase
+				} else {
+					label = "Project setup: " + phase + " · " + row.operation.Stage
+				}
+			}
+			d.runs.AddItem(tview.Escape(label), tview.Escape(row.id+" · "+recordedRuntimeValue(row.operation.StartedAt)), 0, nil)
 			continue
 		}
 		attempt := row.attempt
@@ -133,6 +141,9 @@ func (d *Dashboard) refreshRuns() {
 }
 
 func runStatus(attempt model.Attempt) string {
+	if attempt.Status == model.AttemptAwaitingPlanPublication {
+		return "awaiting plan publication"
+	}
 	if attempt.Status == "complete" {
 		return "completed"
 	}
@@ -166,6 +177,7 @@ func (d *Dashboard) selectRun(index int, _, _ string, _ rune) {
 	attempt := row.attempt
 	var text strings.Builder
 	fmt.Fprintf(&text, "Run: %s\nAgent: %s\nRole: %s\nModel: %s\nThinking: %s\nStatus: %s\nStarted: %s\nFinished: %s\n", row.id, attempt.Provider, attempt.Role, attemptModelDisplay(attempt), attemptThinkingDisplay(attempt), runStatus(attempt), recordedRuntimeValue(attempt.StartedAt), recordedRuntimeValue(attempt.FinishedAt))
+	fmt.Fprintf(&text, "ACP activity: %s\n", providerActivity(attempt, time.Now()))
 	if attempt.Error != "" {
 		fmt.Fprintf(&text, "Error: %s\n", attempt.Error)
 	}

@@ -1,5 +1,8 @@
 # Whirlwind end-user test with Basera
 
+> Historical observations from the exact revisions below. They do not qualify
+> current HEAD or its managed scanner defaults. See the [support matrix](support.md).
+
 November 23, 2026 · Whirlwind `30de5d9` · Basera `0d95c9d2c113c402d5cfe16476e03a3e860fc6ee` · macOS arm64
 
 Started the shipped `./bin/whirlwind start` launcher and operated `./bin/whirlwind dashboard` in a real terminal. Used a disposable checkout of Basera’s committed `main`, a separate supervisor database, and a copy of Whirlwind settings pointed at that checkout. The run covered a local-only checkout and then the same checkout with Basera’s GitHub origin restored and its push URL disabled. The configured Codex provider was authorized for the live Basera steps. Basera’s original checkout had uncommitted work, which stayed outside the test.

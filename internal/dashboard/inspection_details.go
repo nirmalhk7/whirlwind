@@ -128,6 +128,7 @@ func (d *Dashboard) writeAttempts(text *strings.Builder, planID string) {
 			previous = "none recorded"
 		}
 		fmt.Fprintf(text, "%s | %s | ACP agent: %s | model: %s | thinking: %s | queue entry: %s | restarts: %d | remaining: %s | heartbeat: %s | process: %s | sandbox: %s (%s) | previous attempt: %s\n", attempt.Role, attempt.Status, attempt.Provider, attemptModelDisplay(attempt), attemptThinkingDisplay(attempt), queueEntryDisplay(attempt), attempt.RestartCount, remaining, heartbeat, recordedRuntimeValue(attempt.ProcessState), recordedRuntimeValue(attempt.SandboxHealth), recordedRuntimeValue(attempt.SandboxPhase), previous)
+		fmt.Fprintf(text, "  ACP activity: %s\n", providerActivity(attempt, now))
 		if attempt.Error != "" {
 			fmt.Fprintf(text, "  %s\n", attempt.Error)
 		}

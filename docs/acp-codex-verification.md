@@ -1,4 +1,4 @@
-# Go adapter and onboarding verification
+# Historical native Codex adapter and onboarding verification
 
 This is a historical native Codex record from October 2026. It does not certify the current configured ACP profiles. Use [configured ACP acceptance](acp-configured-acceptance.md) for current commands and qualification limits.
 
@@ -30,7 +30,7 @@ Protocol fixtures validate initialization order, client identity, ACP capabiliti
 
 Codex protocol shapes were checked against the installed CLI's generated JSON schema and [official app-server documentation](https://learn.chatgpt.com/docs/app-server). ACP replay behavior follows [ACP session setup](https://agentclientprotocol.com/protocol/v1/session-setup).
 
-## Reproduce
+## Archived commands (native transport; not current setup)
 
 The current qualification command below replaces the historical default-based roundtrip. Its current incomplete results are recorded in [configured ACP acceptance](acp-configured-acceptance.md).
 

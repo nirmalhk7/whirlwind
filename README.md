@@ -16,7 +16,7 @@ Whirlwind's identity rests on velocity, control, and correctness: maximize verif
 
 ## Run locally
 
-Requirements: Go version specified in `go.mod` or newer, Git, Node.js 20.9+, nono 0.81.0, and an installed, authenticated ACP agent. The terminal dashboard and supervisor can open without nono; agent execution fails closed until the native sandbox is ready.
+The dashboard and supervisor use the Go version specified in `go.mod` or newer, Git, and Node.js 20.9+. Native agents and nono-backed checks require macOS and nono 0.81.0. To run an agent, install and authenticate its configured ACP adapter. On Linux, use the dashboard to inspect state or opt in to offline verification for standalone jobs and managed project setup and candidate checks. See the [support and verification matrix](docs/support.md).
 
 ```sh
 go mod download
@@ -44,7 +44,20 @@ projects:
   - /absolute/path/to/repository
 ```
 
-Valid repositories appear in Projects with green `OK`; invalid paths remain visible with red `ERR` and details in Inbox. Refresh preserves existing project choices and runtime state. Agents lists every configured role's ordered model choices, reasoning effort, and provider connection status: green `up`, red `down`, or a truthful `paused`/`unverified` state when no current check is available. Connection checks follow `workers.provider_status_check_seconds` and pause while runners are stopped.
+Projects shows `Git OK` for a valid repository path and `Git ERR` for an invalid path. A failed setup shows `Setup ERR`. Open its Inbox notice to see the reason and retry instructions. Refresh preserves existing project choices and runtime state. Adding, changing, or removing a remote updates metadata for the same checkout. Existing duplicate registrations for a configured checkout appear as one project, with setup and run history from both registrations available in Runs. Agents lists every configured role's ordered model choices, reasoning effort, and provider connection status: green `up`, red `down`, or a truthful `paused`/`unverified` state when no current check is available. Connection checks follow `workers.provider_status_check_seconds` and pause while runners are stopped.
+
+If sandbox recovery blocks new dispatch, the dashboard shows `BLOCK` and the reason instead of `OK`. Press `!` for the full diagnostic. The block clears only after a successful recovery check.
+
+By default, registration queues one automatic ideation run. It waits for successful project setup. Runs identifies the registration trigger and shows why setup is blocking it. Turn off registration and scheduled ideation to register and inspect projects without automatic model calls.
+
+```yaml
+workers:
+  ideation:
+    on_registration: false
+    cron: ""
+```
+
+Project setup still runs. Operators can explicitly start ideation with `i` in Projects. Coding still requires plan approval.
 
 The Go/tview TUI displays saved plans, questions, permission requests, attempts, review and verification evidence, and local completion data. Inbox occupies the right pane; focus it and press `a` to choose a direction for approval or `h` for direction history. Direction approval and plan approval are separate. Decisions carry expected record versions and idempotency keys over a user-private Unix socket; the supervisor rechecks them before saving. Whirlwind has no browser frontend or UI server.
 
@@ -52,11 +65,11 @@ See [local supervisor and terminal setup](docs/local-supervisor.md), [nono setup
 
 ## Engineering loops
 
-- Onboard a local Git repository without replacing its files or existing state. Each ideation run handles one project and proposes Expand, Optimize, Harden, and Simplify directions using current evidence and bounded proposal history. Idea uniqueness comparison is deferred; repeated ideas are allowed and are not labeled as verified unique.
-- Select and approve a direction, then review and separately approve its detailed plan. Plans live in `~/.whirlwind/plans/`. Approval freezes the requirements and version; later specification changes require another approval. Wait for active approved execution to finish, or explicitly pause it, before saving a changed plan. Saving unchanged content leaves active work running.
+- Onboard a local Git repository without replacing its files or existing state. Each ideation run handles one project and proposes Expand, Optimize, Harden, and Simplify directions using current evidence and bounded proposal history. Idea uniqueness comparison is deferred; repeated ideas are allowed and are not labeled as verified unique. A checkout without a remote uses local Git evidence. The legacy hosted workflow checks GitHub issue read access through `gh` before accepting an ideation request.
+- Select and approve a direction, then review and separately approve its detailed plan. Plans live in `~/.whirlwind/plans/`. The Planner run for an idea is complete only when its validated Markdown has been saved for review. Approval freezes the requirements and version; later specification changes require another approval. Wait for active approved execution to finish, or explicitly pause it, before saving a changed plan. Saving unchanged content leaves active work running.
 - Configure independent ordered ACP agent/model/thinking queues for Ideation, Planner, Coding, Reviewer, and Finalizer in YAML. Bundled Claude, Codex, and Cursor profiles still require compatible installed, authenticated runtimes. Unsupported selections produce errors rather than silent substitutions.
 - Every agent runs inside nono in its own Git worktree. Trusted annotations in `prompts/agents/*.md` select already authorized connections; inserted issue or repository text cannot grant access. General public web access does not authorize additional integrations.
-- Coding and review repeat until the unrounded requirement score is strictly greater than 80% and every mandatory gate passes. Exactly 80% fails. Gates include the frozen plan checks, configured tests and build, and no new Qlty findings. Existing Qlty debt stays visible; failed repository tests cannot be grandfathered into acceptance.
+- Coding and review repeat until the unrounded requirement score is strictly greater than 80% and every mandatory gate passes. Exactly 80% fails. A successful test process does not count as confirmed regression evidence when a required test is missing or skipped; the recorded check explains why. Gates include the frozen plan checks and configured tests and build. On the managed Qlty path, new findings also block acceptance at every severity and existing debt stays visible. Failed repository tests cannot be grandfathered into acceptance.
 - Questions and permissions pause the affected plan. Ordinary answers preserve recovery history; an answer that changes scope returns through planning and human approval. Each active agent attempt has a fixed five-minute deadline; human waiting time is outside that attempt.
 - Finalization preserves the exact reviewed snapshot on the plan's local delivery branch. The dashboard shows its commit, diff, review score, unmet requirements, and verification evidence. Agents cannot push, open PRs, or merge; the human decides whether to publish.
 
@@ -67,13 +80,15 @@ SQLite retains execution records, fenced ownership, pending decisions, mutation 
 - CLI executable: `bin/whirlwind`; backend-only executable: `go run ./cmd/whirlwind`.
 - State directory: `~/.local/share/whirlwind`, overridden by `WHIRLWIND_DATA_DIR` or `--data`.
 - Database: `whirlwind.db` within the state directory.
-- Project policy: human-reviewed, committed `.whirlwind.yml` or `.whirlwind.yaml`. Local onboarding reads existing policy; the operator supplies verification commands before approving execution.
+- Project policy is explicitly approved through `whirlwind policy preview` and `whirlwind policy approve`, then kept in Whirlwind state outside the checkout. Existing committed policies are also supported. See [project policy approval](docs/go-backend.md#project-policy-approval).
 - GitHub labels: `whirlwind:ready` and `whirlwind:work`.
 - Optional webhook secret: `WHIRLWIND_WEBHOOK_SECRET`.
 
 Whirlwind creates one current SQLite schema directly, without schema versions or data migrations. Reopening a current database preserves its records. Opening an obsolete development layout deletes its database state and recreates the current schema, including `projects`, `ideas`, and `plans`. See [local supervisor setup](docs/local-supervisor.md) and [SQL persistence details](docs/persistence.md).
 
-Target repositories may use any language. The Go supervisor runs each project's approved verification commands through the separate local runner; it does not add Go tests or Go analyzer settings. The approved Qlty command is `qlty check --upstream HEAD --fix --no-progress --sarif`, run in isolated staging with the approved base exposed as `HEAD`. Qlty findings in that diff block acceptance at every severity. Scanner configuration and generated state belong under the external per-project quality directory. Project setup selects Gitleaks from the Qlty catalog and verifies the installed scanner before recording qualification.
+Target repositories may use any language and supply their own approved commands to the local verifier. Native managed Qlty setup selects only Gitleaks from the catalog and qualifies the installed scanner before recording readiness. The approved Qlty command runs in isolated staging with the approved base exposed as `HEAD`, and scanner state lives outside the checkout. See [project quality setup](docs/go-backend.md#project-quality-setup) for the command and evidence requirements.
+
+After a verification report is saved and runtime cleanup is confirmed, the verifier releases disposable Git staging. It retains the report, journal, configured artifacts, autofix patches, and qualified scanner runtime.
 
 ## Visual identity
 
@@ -97,7 +112,7 @@ qlty smells --all
 qlty check --all
 ```
 
-The native tests run real nono filesystem, network and ACP terminal boundary checks. Controlled OpenShell fixtures remain for legacy recovery regressions; they do not establish physical isolation. See [nono setup](docs/nono-setup.md) for runtime and platform details.
+On macOS with the pinned runtime, the native suites can exercise real nono filesystem, network and ACP terminal boundaries. Linux launcher tests cover refusal of the native path. The [offline verifier checks](docs/offline-docker-verifier.md#reproduce-on-the-cloud-runner) exercise the separate Linux backend with a pinned local image. Controlled OpenShell fixtures cover legacy recovery. See [nono setup](docs/nono-setup.md) for native boundary checks.
 
 Settings-driven live provider outcomes and reproduction are recorded in [configured ACP acceptance](docs/acp-configured-acceptance.md). Skipped or incomplete checks do not certify authenticated inference.
 

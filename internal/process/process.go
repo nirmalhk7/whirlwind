@@ -25,9 +25,10 @@ var commandCleanups = make(map[*exec.Cmd][]func())
 var commandStarts = make(map[*exec.Cmd][]func() error)
 
 type registration struct {
-	PID     int    `json:"pid"`
-	Token   string `json:"token"`
-	Started string `json:"started,omitempty"`
+	PID           int    `json:"pid"`
+	Token         string `json:"token"`
+	Started       string `json:"started,omitempty"`
+	ParentStarted string `json:"parent_started,omitempty"`
 }
 
 // Configure isolates a child in its own process group so cancellation kills its descendants and bounds pipe cleanup.
@@ -175,12 +176,16 @@ func Start(cmd *exec.Cmd) error {
 }
 
 func prepareCommandRegistration(cmd *exec.Cmd, root string) (*managedCommand, error) {
-	state := &managedCommand{record: registration{Token: token(cmd)}, root: root}
+	parent, err := kernelIdentity(os.Getpid())
+	if err != nil {
+		return nil, fmt.Errorf("%w: read launch parent identity: %w", ErrCleanup, err)
+	}
+	state := &managedCommand{record: registration{Token: token(cmd), ParentStarted: parent.Started}, root: root}
 	if root != "" {
 		if err := os.MkdirAll(root, 0700); err != nil {
 			return nil, err
 		}
-		if err := writeRegistration(root, registration{Token: token(cmd)}); err != nil {
+		if err := writeRegistration(root, state.record); err != nil {
 			return nil, err
 		}
 	}
