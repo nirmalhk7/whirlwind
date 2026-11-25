@@ -11,6 +11,11 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	planEditFixtureMonthlyTitle = "# Improve monthly result"
+	planEditFixtureTitle        = "# Improve result"
+)
+
 func TestParityPlanSavePublishesMarkdownWithoutApproval(t *testing.T) {
 	e, task := localPlanFixture(t)
 	ctx := context.Background()
@@ -25,7 +30,7 @@ func TestParityPlanSavePublishesMarkdownWithoutApproval(t *testing.T) {
 	if !ok {
 		t.Fatal("supervisor cannot save actual edited Markdown")
 	}
-	edited := strings.Replace(before.Content, "# Improve result", "# Improve monthly result", 1)
+	edited := strings.Replace(before.Content, planEditFixtureTitle, planEditFixtureMonthlyTitle, 1)
 	if err := saver.SaveLocalPlan(ctx, task.ID, version, before.Hash, edited); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +75,7 @@ func TestParityActiveApprovedPlanWaitsBeforeSavingChanges(t *testing.T) {
 			active, version := localStoredTask(t, e, task.ID)
 			stopped := false
 			e.running[task.ID] = func() { stopped = true }
-			edited := strings.Replace(view.Content, "# Improve result", "# Improve monthly result", 1)
+			edited := strings.Replace(view.Content, planEditFixtureTitle, planEditFixtureMonthlyTitle, 1)
 			if err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, view.Content); err != nil {
 				t.Fatalf("unchanged active plan save: %v", err)
 			}
@@ -128,7 +133,7 @@ func TestParityPausedAndFinishedApprovedPlansCanBeEdited(t *testing.T) {
 				}
 			}
 			version++
-			edited := strings.Replace(view.Content, "# Improve result", "# Improve monthly result", 1)
+			edited := strings.Replace(view.Content, planEditFixtureTitle, planEditFixtureMonthlyTitle, 1)
 			if err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited); err != nil {
 				t.Fatalf("edit inactive approved plan: %v", err)
 			}

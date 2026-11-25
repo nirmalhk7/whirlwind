@@ -15,6 +15,10 @@ import (
 	"whirlwind/internal/testutil/openshell"
 )
 
+const (
+	runtimeFixtureShell = "/bin/sh"
+)
+
 func TestOwnedCheckPersistsIdentityAndReturnsAfterVerifiedCleanup(t *testing.T) {
 	fixture := openshell.Install(t)
 	fixture.EnableCommandExecution()
@@ -86,9 +90,9 @@ func TestOwnedCheckLiveOpenShellKeepsSourceReadOnlyAndGrantsOnlyDeclaredOutput(t
 		check model.Check
 		pass  bool
 	}{
-		{check: model.Check{Name: "declared-output", OutputPaths: []string{"dist"}, Command: []string{"/bin/sh", "-c", "mkdir -p dist && printf artifact > dist/result"}}, pass: true},
-		{check: model.Check{Name: "source-write-denied", Command: []string{"/bin/sh", "-c", "printf changed > source.txt"}}},
-		{check: model.Check{Name: "outside-write-denied", Command: []string{"/bin/sh", "-c", "printf escaped > ../outside.txt"}}},
+		{check: model.Check{Name: "declared-output", OutputPaths: []string{"dist"}, Command: []string{runtimeFixtureShell, "-c", "mkdir -p dist && printf artifact > dist/result"}}, pass: true},
+		{check: model.Check{Name: "source-write-denied", Command: []string{runtimeFixtureShell, "-c", "printf changed > source.txt"}}},
+		{check: model.Check{Name: "outside-write-denied", Command: []string{runtimeFixtureShell, "-c", "printf escaped > ../outside.txt"}}},
 	}
 	for _, test := range checks {
 		result, err := e.runOwnedCheck(context.Background(), cwd, test.check, profile, runtimeCheckOwner{TaskID: task.ID, Role: "verify"})
@@ -132,7 +136,7 @@ func TestInterruptedCheckIsReconciledAndPausesBeforeReplacement(t *testing.T) {
 	name := execution.OpenShellSandboxName(id)
 	label := execution.OpenShellExecutionLabel(id, generation)
 	endpoint, workspace, gateway := "http://127.0.0.1:8080", "whirlwind-test", "whirlwind-test-local"
-	created, err := fixture.RunCLI(t, "sandbox", "create", "--name", name, "--from", "image", "--policy", "/tmp/policy", "--driver-config-json", "{}", "--label", "whirlwind.io/execution="+label, "--detach", "--no-auto-providers", "--output", "json", "--gateway", gateway, "--gateway-endpoint", endpoint, "--workspace", workspace, "--", "/bin/sh", "-c", "exec sleep infinity")
+	created, err := fixture.RunCLI(t, "sandbox", "create", "--name", name, "--from", "image", "--policy", "/tmp/policy", "--driver-config-json", "{}", "--label", "whirlwind.io/execution="+label, "--detach", "--no-auto-providers", "--output", "json", "--gateway", gateway, "--gateway-endpoint", endpoint, "--workspace", workspace, "--", runtimeFixtureShell, "-c", "exec sleep infinity")
 	if err != nil {
 		t.Fatal(err)
 	}

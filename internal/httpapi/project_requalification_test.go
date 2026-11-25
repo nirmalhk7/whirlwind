@@ -15,6 +15,11 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	requalificationFixtureObsoleteSetup = "obsolete-setup"
+	requalificationFixtureReceipt       = "confirm-policy"
+)
+
 func TestConfirmChangedProjectPolicyQueuesOneFreshQualification(t *testing.T) {
 	for _, active := range []string{"", "queued", "running"} {
 		name := "no active setup"
@@ -27,16 +32,16 @@ func TestConfirmChangedProjectPolicyQueuesOneFreshQualification(t *testing.T) {
 			f.putOperation(t, "prior-setup", prior)
 			if active != "" {
 				obsolete := model.Operation{Kind: "project_setup", Subject: f.project.ID, Stage: active, ConfigurationHash: "old-config", Input: map[string]any{"onboarding": true, "phase": "qualify"}}
-				f.putOperation(t, "obsolete-setup", obsolete)
+				f.putOperation(t, requalificationFixtureObsoleteSetup, obsolete)
 			}
 			ideation := model.Operation{Kind: "ideation", Subject: f.project.ID, Stage: "queued"}
 			f.putOperation(t, "initial-ideation", ideation)
 
-			response := f.confirm("confirm-policy")
+			response := f.confirm(requalificationFixtureReceipt)
 			if response.Code != http.StatusOK {
 				t.Fatalf("confirm changed policy: %d %s", response.Code, response.Body)
 			}
-			if duplicate := f.confirm("confirm-policy"); duplicate.Code != http.StatusOK || duplicate.Body.String() != response.Body.String() {
+			if duplicate := f.confirm(requalificationFixtureReceipt); duplicate.Code != http.StatusOK || duplicate.Body.String() != response.Body.String() {
 				t.Fatalf("idempotent confirmation changed receipt: %d %s", duplicate.Code, duplicate.Body)
 			}
 			if stale := f.confirm("confirm-policy-again"); stale.Code != http.StatusConflict {
@@ -56,13 +61,13 @@ func TestConfirmChangedProjectPolicyQueuesOneFreshQualification(t *testing.T) {
 				t.Fatalf("confirmation modified history or duplicated ideation: %+v", operations)
 			}
 			if active != "" {
-				obsolete := operations["obsolete-setup"]
+				obsolete := operations[requalificationFixtureObsoleteSetup]
 				if obsolete.Stage != "cancelled" || obsolete.FinishedAt == "" || obsolete.Error == "" || obsolete.ConfigurationHash != "old-config" {
 					t.Fatalf("superseded setup lost its history or remained eligible: %+v", obsolete)
 				}
 				// A worker holding the previous version must not publish stale evidence.
 				obsolete.Stage = "complete"
-				if err := f.server.Store.Put(t.Context(), "operations", "obsolete-setup", obsolete, 1); !errors.Is(err, store.ErrConflict) {
+				if err := f.server.Store.Put(t.Context(), "operations", requalificationFixtureObsoleteSetup, obsolete, 1); !errors.Is(err, store.ErrConflict) {
 					t.Fatalf("old setup worker could publish over superseded operation: %v", err)
 				}
 			}
@@ -87,7 +92,7 @@ func TestConfirmChangedProjectPolicyQueuesOneFreshQualification(t *testing.T) {
 
 func TestConfirmUnchangedProjectPolicyKeepsQualification(t *testing.T) {
 	f := newPolicyConfirmationFixture(t, false)
-	if response := f.confirm("confirm-policy"); response.Code != http.StatusOK {
+	if response := f.confirm(requalificationFixtureReceipt); response.Code != http.StatusOK {
 		t.Fatalf("confirm unchanged policy: %d %s", response.Code, response.Body)
 	}
 	project := f.savedProject(t)
@@ -101,7 +106,7 @@ func TestConfirmChangedProjectPolicyRollsBackWithoutReceipt(t *testing.T) {
 	if _, err := f.server.Store.DB.Exec("CREATE TRIGGER fail_policy_receipt BEFORE INSERT ON idempotency BEGIN SELECT RAISE(ABORT,'receipt failure'); END"); err != nil {
 		t.Fatal(err)
 	}
-	if response := f.confirm("confirm-policy"); response.Code != http.StatusServiceUnavailable {
+	if response := f.confirm(requalificationFixtureReceipt); response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("failed persistence reported success: %d %s", response.Code, response.Body)
 	}
 	current := f.savedProject(t)
@@ -111,7 +116,7 @@ func TestConfirmChangedProjectPolicyRollsBackWithoutReceipt(t *testing.T) {
 	if _, err := f.server.Store.DB.Exec("DROP TRIGGER fail_policy_receipt"); err != nil {
 		t.Fatal(err)
 	}
-	if response := f.confirm("confirm-policy"); response.Code != http.StatusOK {
+	if response := f.confirm(requalificationFixtureReceipt); response.Code != http.StatusOK {
 		t.Fatalf("after persistence recovery: %d %s", response.Code, response.Body)
 	}
 	if f.savedProject(t).Status != "draft" || len(f.operations(t)) != 1 {

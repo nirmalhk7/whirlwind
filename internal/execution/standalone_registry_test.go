@@ -9,10 +9,14 @@ import (
 	"time"
 )
 
+const (
+	standaloneFixtureSecondAttempt = "attempt-two"
+)
+
 func TestStandaloneRegistryKeepsRuntimeUntilVerifiedCleanup(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "supervisor", "standalone")
 	first := standaloneRegistryProfile(root, "attempt-one")
-	second := standaloneRegistryProfile(root, "attempt-two")
+	second := standaloneRegistryProfile(root, standaloneFixtureSecondAttempt)
 	if err := RegisterStandaloneRuntime(first); err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +24,7 @@ func TestStandaloneRegistryKeepsRuntimeUntilVerifiedCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, err := ReadStandaloneRuntimes(root)
-	if err != nil || len(entries) != 2 || entries[0].ExecutionID != "attempt-one" || entries[1].ExecutionID != "attempt-two" {
+	if err != nil || len(entries) != 2 || entries[0].ExecutionID != "attempt-one" || entries[1].ExecutionID != standaloneFixtureSecondAttempt {
 		t.Fatalf("standalone registry entries: %+v %v", entries, err)
 	}
 	if entries[0].OwnerPID != os.Getpid() || entries[0].OwnerStarted == "" || entries[0].CWD == "" || entries[0].DeadlineAt == "" {
@@ -52,7 +56,7 @@ func TestStandaloneRegistryKeepsRuntimeUntilVerifiedCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries, err = ReadStandaloneRuntimes(root)
-	if err != nil || len(entries) != 1 || entries[0].ExecutionID != "attempt-two" {
+	if err != nil || len(entries) != 1 || entries[0].ExecutionID != standaloneFixtureSecondAttempt {
 		t.Fatalf("completion removed unrelated locator: %+v %v", entries, err)
 	}
 }

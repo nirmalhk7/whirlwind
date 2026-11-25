@@ -18,6 +18,10 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	nativeSetupFixtureSensitiveFile = "credentials.txt"
+)
+
 // This acceptance test exercises the registered-project path against installed
 // Qlty and Gitleaks. Its distribution network grants are test-local.
 func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
@@ -41,7 +45,7 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	// No credential-shaped value belongs in the tracked test source.
 	seed := sha256.Sum256([]byte("whirlwind native onboarding scanner canary"))
 	canary := fmt.Sprintf("token = \"ghp_%x\"\n", seed[:18])
-	if err := os.WriteFile(filepath.Join(repository, "credentials.txt"), []byte(canary), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repository, nativeSetupFixtureSensitiveFile), []byte(canary), 0600); err != nil {
 		t.Fatal(err)
 	}
 	projectPolicy := model.Policy{
@@ -58,7 +62,7 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repository, ".whirlwind.yaml"), encodedPolicy, 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"add", "app.py", "credentials.txt", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Prepare native quality onboarding fixture"}} {
+	for _, args := range [][]string{{"add", "app.py", nativeSetupFixtureSensitiveFile, ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Prepare native quality onboarding fixture"}} {
 		command := exec.Command("git", append([]string{"-C", repository}, args...)...)
 		command.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Onboarding", "GIT_AUTHOR_EMAIL=onboarding@localhost", "GIT_COMMITTER_NAME=Onboarding", "GIT_COMMITTER_EMAIL=onboarding@localhost")
 		if output, err := command.CombinedOutput(); err != nil {
@@ -160,7 +164,7 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if err := verification.ValidateJobSARIF([]byte(output)); err != nil {
 		t.Fatalf("native scanner SARIF lacks successful complete invocation evidence: %v", err)
 	}
-	if !strings.Contains(output, "gitleaks:") || !strings.Contains(output, "credentials.txt") {
+	if !strings.Contains(output, "gitleaks:") || !strings.Contains(output, nativeSetupFixtureSensitiveFile) {
 		t.Fatalf("native Gitleaks scanner did not report the harmless known canary: %s", output)
 	}
 	savedProject, err := e.Project(ctx, project.ID)

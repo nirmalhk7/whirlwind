@@ -12,6 +12,10 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	concurrentDeliveryFixtureCandidateFile = "candidate.txt"
+)
+
 const secondCandidateBody = "independently reviewed second candidate\n"
 
 // Portable coverage of interleaved deliveries after accepted evidence. The
@@ -65,7 +69,7 @@ func TestConcurrentAcceptedDeliveriesIsolatePausedPlanAndReconcileAfterRestart(t
 		t.Fatalf("crossed delivery identities: A=%+v B=%+v", firstDelivery, secondDelivery.Delivery)
 	}
 	for i, d := range []*model.LocalDelivery{firstDelivery, secondDelivery.Delivery} {
-		content, err := os.ReadFile(filepath.Join(d.Worktree, "candidate.txt"))
+		content, err := os.ReadFile(filepath.Join(d.Worktree, concurrentDeliveryFixtureCandidateFile))
 		requireWorkflowSuccess(t, err)
 		if want := []string{"reviewed candidate\n", secondCandidateBody}[i]; string(content) != want {
 			t.Fatalf("plan %d delivered peer content: got %q want %q", i+1, content, want)
@@ -98,8 +102,8 @@ func secondAcceptedDeliveryCandidate(t *testing.T, ctx context.Context, engine *
 	second.Worktree = filepath.Join(engine.Root, "independent-worktree")
 	second.Base = template.Base
 	submissionGit(t, project.Path, "worktree", "add", "-b", second.Branch, second.Worktree, second.Base)
-	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(second.Worktree, "candidate.txt"), []byte(secondCandidateBody), 0600))
-	submissionGit(t, second.Worktree, "add", "candidate.txt")
+	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(second.Worktree, concurrentDeliveryFixtureCandidateFile), []byte(secondCandidateBody), 0600))
+	submissionGit(t, second.Worktree, "add", concurrentDeliveryFixtureCandidateFile)
 	submissionGit(t, second.Worktree, "commit", "-m", "independent reviewed candidate")
 	second.ReviewedCommit = submissionGit(t, second.Worktree, "rev-parse", "HEAD")
 	second.Stage, second.ChecksPassed = "submitting", true
@@ -112,7 +116,7 @@ func secondAcceptedDeliveryCandidate(t *testing.T, ctx context.Context, engine *
 	verification["stage"], verification["report"] = "complete", fixture.completeReport(t)
 	requireWorkflowSuccess(t, engine.Store.Put(ctx, "verification", second.VerificationID, verification, 1))
 	review := model.Review{Provenance: &provenance, Requirements: []model.RequirementResult{{ID: "REQ-RESULT", Status: "pass",
-		Code: []string{"candidate.txt"}, Evidence: []string{"independent verified candidate"}, Explanation: "The second snapshot satisfies the requirement."}}}
+		Code: []string{concurrentDeliveryFixtureCandidateFile}, Evidence: []string{"independent verified candidate"}, Explanation: "The second snapshot satisfies the requirement."}}}
 	requireWorkflowSuccess(t, engine.Store.Put(ctx, "reviews", second.ReviewID, review, 0))
 	return second
 }

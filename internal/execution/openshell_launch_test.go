@@ -13,6 +13,11 @@ import (
 	"whirlwind/internal/testutil/openshell"
 )
 
+const (
+	launchFixtureAttempt       = "attempt-123"
+	launchFixtureFailedAttempt = "attempt-failure"
+)
+
 func TestOpenShellLaunchUsesPinnedDetachedSandboxAndSeparateExec(t *testing.T) {
 	fixture := openshell.Install(t)
 	fixture.EnableCommandExecution()
@@ -30,10 +35,10 @@ func TestOpenShellLaunchUsesPinnedDetachedSandboxAndSeparateExec(t *testing.T) {
 		t.Fatal(err)
 	}
 	profile := Profile{
-		ExecutionID: "attempt-123", ExecutionGeneration: 3,
-		SandboxName: OpenShellSandboxName("attempt-123"), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
+		ExecutionID: launchFixtureAttempt, ExecutionGeneration: 3,
+		SandboxName: OpenShellSandboxName(launchFixtureAttempt), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
 		GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test",
-		ExecutionLabelValue: OpenShellExecutionLabel("attempt-123", 3), DeadlineAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+		ExecutionLabelValue: OpenShellExecutionLabel(launchFixtureAttempt, 3), DeadlineAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
 		CWD: worktree, ReadOnly: true, ReadRoots: []string{}, Domains: []string{}, Environment: []string{},
 	}
 	profileData, err := json.Marshal(profile)
@@ -126,10 +131,10 @@ func TestOpenShellLaunchPreservesCreateFailureWhenCleanupAlsoFails(t *testing.T)
 		t.Fatal(err)
 	}
 	profile := Profile{
-		ExecutionID: "attempt-failure", ExecutionGeneration: 1,
-		SandboxName: OpenShellSandboxName("attempt-failure"), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
+		ExecutionID: launchFixtureFailedAttempt, ExecutionGeneration: 1,
+		SandboxName: OpenShellSandboxName(launchFixtureFailedAttempt), LifecycleFile: filepath.Join(root, "supervisor", "openshell.json"),
 		GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test",
-		ExecutionLabelValue: OpenShellExecutionLabel("attempt-failure", 1), DeadlineAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
+		ExecutionLabelValue: OpenShellExecutionLabel(launchFixtureFailedAttempt, 1), DeadlineAt: time.Now().UTC().Add(time.Minute).Format(time.RFC3339Nano),
 		CWD: worktree, ReadOnly: true, ReadRoots: []string{}, Domains: []string{}, Environment: []string{},
 	}
 	profileData, err := json.Marshal(profile)

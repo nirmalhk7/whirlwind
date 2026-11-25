@@ -15,6 +15,10 @@ import (
 	"whirlwind/internal/process"
 )
 
+const (
+	liveIsolationFixtureShell = "/bin/sh"
+)
+
 const liveAcceptanceVariable = "WHIRLWIND_OPENSHELL_LIVE_ACCEPTANCE"
 
 func TestLiveOpenShellAcceptance(t *testing.T) {
@@ -34,13 +38,13 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	writable := liveProfile(t, worktree, false, 2*time.Minute)
-	runLiveCommand(t, writable, []string{"/bin/sh", "-c", "touch accepted.txt; test -f accepted.txt; printf writable-ok"})
+	runLiveCommand(t, writable, []string{liveIsolationFixtureShell, "-c", "touch accepted.txt; test -f accepted.txt; printf writable-ok"})
 	if _, err := os.Stat(filepath.Join(worktree, "accepted.txt")); err != nil {
 		t.Fatalf("OpenShell did not persist allowed worktree write: %v", err)
 	}
 
 	readOnly := liveProfile(t, worktree, true, 2*time.Minute)
-	if output, err := runLiveCommandResult(t, readOnly, []string{"/bin/sh", "-c", "if touch readonly-denied.txt 2>/dev/null; then echo write-was-allowed; exit 31; else echo readonly-denied; fi"}); err != nil || !strings.Contains(output, "readonly-denied") {
+	if output, err := runLiveCommandResult(t, readOnly, []string{liveIsolationFixtureShell, "-c", "if touch readonly-denied.txt 2>/dev/null; then echo write-was-allowed; exit 31; else echo readonly-denied; fi"}); err != nil || !strings.Contains(output, "readonly-denied") {
 		t.Fatalf("read-only role denial was not observed in a running payload: %v: %s", err, output)
 	}
 	if _, err := os.Stat(filepath.Join(worktree, "readonly-denied.txt")); !os.IsNotExist(err) {
@@ -48,12 +52,12 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 	}
 	outsideFile := fmt.Sprintf("/home/whirlwind/whirlwind-outside-%d", time.Now().UnixNano())
 	image := os.Getenv("WHIRLWIND_OPENSHELL_IMAGE")
-	baseline := exec.Command("docker", "run", "--rm", "--entrypoint", "/bin/sh", image, "-c", `test "$(id -u)" = 502 && test -w /home/whirlwind && touch "$1" && rm "$1"`, "probe", outsideFile)
+	baseline := exec.Command("docker", "run", "--rm", "--entrypoint", liveIsolationFixtureShell, image, "-c", `test "$(id -u)" = 502 && test -w /home/whirlwind && touch "$1" && rm "$1"`, "probe", outsideFile)
 	if output, err := baseline.CombinedOutput(); err != nil {
 		t.Fatalf("image outside-worktree path is not writable before policy: %v: %s", err, output)
 	}
 	outsideProfile := liveProfile(t, worktree, false, 2*time.Minute)
-	if output, err := runLiveCommandResult(t, outsideProfile, []string{"/bin/sh", "-c", `if touch "$1" 2>/dev/null; then echo outside-write-was-allowed; exit 32; else echo outside-write-denied; fi`, "probe", outsideFile}); err != nil || !strings.Contains(output, "outside-write-denied") {
+	if output, err := runLiveCommandResult(t, outsideProfile, []string{liveIsolationFixtureShell, "-c", `if touch "$1" 2>/dev/null; then echo outside-write-was-allowed; exit 32; else echo outside-write-denied; fi`, "probe", outsideFile}); err != nil || !strings.Contains(output, "outside-write-denied") {
 		t.Fatalf("outside-worktree write denial was not observed in a running payload: %v: %s", err, output)
 	}
 	if _, err := os.Stat(outsideFile); !os.IsNotExist(err) {
@@ -61,7 +65,7 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 	}
 
 	network := liveProfile(t, worktree, true, 2*time.Minute)
-	networkCommand := []string{"/bin/sh", "-c", strings.Join([]string{
+	networkCommand := []string{liveIsolationFixtureShell, "-c", strings.Join([]string{
 		"test -n \"$HTTP_PROXY\" && test -n \"$HTTPS_PROXY\" && test -n \"$http_proxy\" && test -n \"$https_proxy\" && printf proxy-env-present",
 		`status=$(curl -sS --max-time 20 -D /tmp/whirlwind-http-headers -o /dev/null -w '%{http_code}' http://example.com/); denial=$(awk 'tolower($1)=="x-whirlwind-proxy-denial:" {print tolower($2); exit}' /tmp/whirlwind-http-headers); case "$denial" in authentication|target|dns_policy|upstream_connection) category="$denial";; *) category=absent_or_unknown;; esac; printf 'http_status=%s denial=%s\n' "$status" "$category"; case "$status" in 2*|3*) :;; *) exit 41;; esac`,
 		`https_status=$(curl -sS --max-time 20 -D /tmp/whirlwind-https-headers -o /dev/null -w '%{http_code}' https://example.com/); case "$https_status" in 2*|3*) :;; *) printf 'https_status=%s\n' "$https_status"; exit 42;; esac`,
@@ -82,7 +86,7 @@ func TestLiveOpenShellAcceptance(t *testing.T) {
 	credentialProfile.NativeFiles = []NativeFile{{Source: auth, Home: "CODEX_HOME", Path: "auth.json"}}
 	homeRoot := "/tmp/ww-" + credentialProfile.ExecutionID + "/home"
 	stagingRoot := "/tmp/ww-native-" + credentialProfile.ExecutionID
-	credentialCommand := []string{"/bin/sh", "-c", `set -eu
+	credentialCommand := []string{liveIsolationFixtureShell, "-c", `set -eu
 test "$HOME" = "$1"
 test "$CODEX_HOME" = "$HOME/codex"
 test "$CLAUDE_CONFIG_DIR" = "$HOME/claude"
@@ -103,7 +107,7 @@ printf runtime-home-and-selected-auth-ok`, "probe", homeRoot, stagingRoot, workt
 	}
 
 	timeoutProfile := liveProfile(t, worktree, true, 30*time.Second)
-	if output, err := runLiveCommandResult(t, timeoutProfile, []string{"/bin/sh", "-c", "printf child-started; sleep 60"}); err == nil || !strings.Contains(output, "child-started") {
+	if output, err := runLiveCommandResult(t, timeoutProfile, []string{liveIsolationFixtureShell, "-c", "printf child-started; sleep 60"}); err == nil || !strings.Contains(output, "child-started") {
 		t.Fatalf("long child did not start and then honor its persisted attempt deadline: %v: %s", err, output)
 	}
 	lifecycle, ok, err := ReadOpenShellLifecycle(timeoutProfile)

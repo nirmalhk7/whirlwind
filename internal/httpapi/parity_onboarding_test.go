@@ -9,6 +9,11 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	onboardingFixtureCompletedSetup = "completed-setup"
+	onboardingFixtureFailedSetup    = "failed-setup"
+)
+
 func TestParityOnboardingQueuesExactlyOneDurableIdeation(t *testing.T) {
 	s := setup(t)
 	repo := t.TempDir()
@@ -96,7 +101,7 @@ func TestProjectSetupRetryCreatesNewDurableOperation(t *testing.T) {
 		t.Fatal(err)
 	}
 	failed := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "failed", Error: "required scanner was unavailable", Input: map[string]any{"onboarding": true, "checkpoint": "preserve"}}
-	if err := server.Store.Put(ctx, "operations", "failed-setup", failed, 0); err != nil {
+	if err := server.Store.Put(ctx, "operations", onboardingFixtureFailedSetup, failed, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := server.Store.Put(ctx, "operations", "initial-ideation", model.Operation{Kind: "ideation", Subject: project.ID, Stage: "queued"}, 0); err != nil {
@@ -115,7 +120,7 @@ func TestProjectSetupRetryCreatesNewDurableOperation(t *testing.T) {
 	if err := json.Unmarshal(first, &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if receipt.ID == "failed-setup" || receipt.Version != 1 {
+	if receipt.ID == onboardingFixtureFailedSetup || receipt.Version != 1 {
 		t.Fatalf("retry reused old setup journal identity: %+v", receipt)
 	}
 	newOperation, err := store.Decode[model.Operation](receipt)
@@ -137,7 +142,7 @@ func TestProjectSetupRetryCreatesNewDurableOperation(t *testing.T) {
 	if err != nil || project.Status != "draft" {
 		t.Fatalf("retry exposed project as ready or error instead of pending: %+v (%v)", project, err)
 	}
-	oldRecord, err := server.Store.Get(ctx, "operations", "failed-setup")
+	oldRecord, err := server.Store.Get(ctx, "operations", onboardingFixtureFailedSetup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +189,7 @@ func TestProjectSetupRetryAllowsExplicitRecheckOfCompletedSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	completed := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "complete", Input: map[string]any{"onboarding": true}}
-	if err := server.Store.Put(ctx, "operations", "completed-setup", completed, 0); err != nil {
+	if err := server.Store.Put(ctx, "operations", onboardingFixtureCompletedSetup, completed, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := server.Store.Put(ctx, "operations", "initial-ideation", model.Operation{Kind: "ideation", Subject: project.ID, Stage: "queued"}, 0); err != nil {
@@ -204,7 +209,7 @@ func TestProjectSetupRetryAllowsExplicitRecheckOfCompletedSetup(t *testing.T) {
 		t.Fatal(err)
 	}
 	recheck, err := store.Decode[model.Operation](receipt)
-	if err != nil || receipt.ID == "completed-setup" || recheck.Stage != "queued" {
+	if err != nil || receipt.ID == onboardingFixtureCompletedSetup || recheck.Stage != "queued" {
 		t.Fatalf("recheck did not create a fresh setup operation: %+v (%v)", recheck, err)
 	}
 	var input struct {
@@ -225,7 +230,7 @@ func TestProjectSetupRetryAllowsExplicitRecheckOfCompletedSetup(t *testing.T) {
 	if _, err := server.ExecuteLocal(ctx, LocalCommand{Operation: command.Operation, ProjectID: project.ID, ExpectedVersion: 1, IdempotencyKey: "duplicate-recheck"}); err == nil {
 		t.Fatal("recheck accepted a second request after project version advanced")
 	}
-	old, err := server.Store.Get(ctx, "operations", "completed-setup")
+	old, err := server.Store.Get(ctx, "operations", onboardingFixtureCompletedSetup)
 	if err != nil {
 		t.Fatal(err)
 	}

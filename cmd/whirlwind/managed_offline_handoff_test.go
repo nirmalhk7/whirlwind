@@ -17,6 +17,10 @@ import (
 	"whirlwind/internal/workflow"
 )
 
+const (
+	seededHandoffResultFile = "result.txt"
+)
+
 type seededOfflineAdapter func(context.Context, provider.Input, provider.Hooks) (provider.Output, error)
 
 func (a seededOfflineAdapter) Run(ctx context.Context, input provider.Input, hooks provider.Hooks) (provider.Output, error) {
@@ -102,7 +106,7 @@ func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, fixture seeded
 					status, explanation = "pass", "The repaired result and the isolated test evidence satisfy the requirement."
 				}
 				review := model.Review{Summary: explanation, Findings: []model.Finding{}, Requirements: []model.RequirementResult{
-					{ID: "REQ-RESULT", Status: status, Code: []string{"result.txt"}, Evidence: []string{"Observed current candidate and regression result."}, Explanation: explanation},
+					{ID: "REQ-RESULT", Status: status, Code: []string{seededHandoffResultFile}, Evidence: []string{"Observed current candidate and regression result."}, Explanation: explanation},
 				}}
 				raw, err := json.Marshal(review)
 				return provider.Output{Text: string(raw)}, err
@@ -130,8 +134,8 @@ func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, fixture seeded
 	if recovered.Stage != "repair" || recovered.ReviewID != rejected.ReviewID {
 		t.Fatal("restart lost the rejected review or repair state")
 	}
-	mustSeedTerminal(t, os.WriteFile(filepath.Join(candidate, "result.txt"), []byte("ready\nreview-correction\n"), 0600))
-	git(candidate, "add", "result.txt")
+	mustSeedTerminal(t, os.WriteFile(filepath.Join(candidate, seededHandoffResultFile), []byte("ready\nreview-correction\n"), 0600))
+	git(candidate, "add", seededHandoffResultFile)
 	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed review correction")
 	expected, accept = git(candidate, "rev-parse", "HEAD"), true
 	resetReview(recovered, version)
@@ -181,8 +185,8 @@ func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, fixture seeded
 	mustSeedTerminal(t, os.WriteFile(path, []byte("altered evidence"), 0600))
 	assertBlocked("streams differ from retained evidence")
 	mustSeedTerminal(t, os.WriteFile(path, original, 0600))
-	mustSeedTerminal(t, os.WriteFile(filepath.Join(candidate, "result.txt"), []byte("ready\nnew candidate\n"), 0600))
-	git(candidate, "add", "result.txt")
+	mustSeedTerminal(t, os.WriteFile(filepath.Join(candidate, seededHandoffResultFile), []byte("ready\nnew candidate\n"), 0600))
+	git(candidate, "add", seededHandoffResultFile)
 	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed newer candidate")
 	assertBlocked("stale for the current candidate")
 	git(candidate, "checkout", "--detach", expected)

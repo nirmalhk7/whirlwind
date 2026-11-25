@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+const (
+	offlineFixtureCanaryText  = "synthetic only"
+	offlineFixtureGitRevParse = "rev-parse"
+)
+
 const offlineFixtureImage = "golang@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696"
 
 func TestOfflineDockerManifestRequiresExplicitNarrowAuthority(t *testing.T) {
@@ -101,7 +106,7 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 	commit := func() (string, string) {
 		git("add", "--all")
 		git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "fixture")
-		return git("rev-parse", "HEAD"), git("rev-parse", "HEAD^{tree}")
+		return git(offlineFixtureGitRevParse, "HEAD"), git(offlineFixtureGitRevParse, "HEAD^{tree}")
 	}
 	git("init", "-q", "-b", "offline-fixture")
 	write(".gitattributes", "go.mod filter=canary export-ignore\n")
@@ -117,8 +122,8 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 	git("config", "filter.canary.smudge", "cat; touch '"+filterCanary+"'")
 	before := git("status", "--porcelain")
 	canaryPath := filepath.Join(root, "outside-canary")
-	requireVerificationSuccess(t, os.WriteFile(canaryPath, []byte("synthetic only"), 0600))
-	t.Setenv("WHIRLWIND_TEST_OFFLINE_HOST_CANARY", "synthetic only")
+	requireVerificationSuccess(t, os.WriteFile(canaryPath, []byte(offlineFixtureCanaryText), 0600))
+	t.Setenv("WHIRLWIND_TEST_OFFLINE_HOST_CANARY", offlineFixtureCanaryText)
 
 	verifier := filepath.Join(root, "whirlwind-verify")
 	build := exec.CommandContext(ctx, "go", "build", "-buildvcs=false", "-o", verifier, "../../cmd/whirlwind-verify")
@@ -195,7 +200,7 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 	if remaining, err := look.CombinedOutput(); err != nil || strings.TrimSpace(string(remaining)) != "" {
 		t.Fatalf("daemon still reports the timed-out container: %s (%v)", remaining, err)
 	}
-	if git("status", "--porcelain") != before || git("rev-parse", "HEAD") != green {
+	if git("status", "--porcelain") != before || git(offlineFixtureGitRevParse, "HEAD") != green {
 		t.Fatal("offline verifier changed the input checkout")
 	}
 	canary, err := os.ReadFile(canaryPath)
@@ -203,7 +208,7 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 	if _, err := os.Stat(filterCanary); !os.IsNotExist(err) {
 		t.Fatalf("host Git smudge filter executed: %v", err)
 	}
-	if string(canary) != "synthetic only" {
+	if string(canary) != offlineFixtureCanaryText {
 		t.Fatal("outside canary changed")
 	}
 }

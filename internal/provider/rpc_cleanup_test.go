@@ -18,6 +18,10 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	fixtureRedactedValue = "[redacted]"
+)
+
 func TestRPCCleanupFailureIsReportedBeforeProcessExit(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("WHIRLWIND_PROCESS_REGISTRY", root)
@@ -76,7 +80,7 @@ func TestRPCPipeSetupFailureReleasesOpenShellRedactionState(t *testing.T) {
 			token = strings.TrimPrefix(entry, "WHIRLWIND_OPENSHELL_PROXY_TOKEN=")
 		}
 	}
-	if token == "" || store.RedactText(token) != "[redacted]" {
+	if token == "" || store.RedactText(token) != fixtureRedactedValue {
 		t.Fatal("OpenShell capability was not registered before process launch")
 	}
 	cmd.Stdin = strings.NewReader("already assigned")
@@ -166,7 +170,7 @@ func TestRPCDrainsTrailingStderrBeforeReleasingCredentialRedaction(t *testing.T)
 		t.Fatal("credential was released before trailing stderr reader drained")
 	case <-time.After(50 * time.Millisecond):
 	}
-	if got := store.RedactText(secret); got != "[redacted]" {
+	if got := store.RedactText(secret); got != fixtureRedactedValue {
 		t.Fatalf("credential redaction ended before stderr capture drained: %q", got)
 	}
 	close(continueCapture)
@@ -212,7 +216,7 @@ func TestRPCCleanupFailureRetainsCredentialRedaction(t *testing.T) {
 	if err := rpc.Close(); err == nil || !strings.Contains(err.Error(), "controlled runtime cleanup failure") {
 		t.Fatalf("runtime cleanup failure was not reported: %v", err)
 	}
-	if got := store.RedactText(secret); got != "[redacted]" {
+	if got := store.RedactText(secret); got != fixtureRedactedValue {
 		t.Fatalf("runtime cleanup failure released credential redaction: %q", got)
 	}
 }

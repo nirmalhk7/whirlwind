@@ -8,6 +8,10 @@ import (
 	"whirlwind/internal/model"
 )
 
+const (
+	plannerClaimFixtureAssignedFile = "/assigned/plan.md"
+)
+
 func TestParityPlannerAttemptClaimsIdeaAtomically(t *testing.T) {
 	s := openTest(t)
 	ctx := context.Background()
@@ -87,7 +91,7 @@ func checkPlannerPublication(t *testing.T, pending bool) {
 	if err := s.Put(ctx, "sessions", "a", attempt, 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PlannerRunLocation(ctx, "a", "/assigned/plan.md"); err != nil {
+	if err := s.PlannerRunLocation(ctx, "a", plannerClaimFixtureAssignedFile); err != nil {
 		t.Fatal(err)
 	}
 	attempt["status"], attempt["finished"], attempt["success"] = "complete", true, true
@@ -99,7 +103,7 @@ func checkPlannerPublication(t *testing.T, pending bool) {
 		t.Fatal(err)
 	}
 	plan["stage"], plan["last_attempt_id"] = "plan_approval", "a"
-	plan["plan_document"] = map[string]any{"path": "/assigned/plan.md", "hash": "verified-hash"}
+	plan["plan_document"] = map[string]any{"path": plannerClaimFixtureAssignedFile, "hash": "verified-hash"}
 	plan["plan"] = map[string]any{"requirements": []map[string]string{{"id": "R1", "outcome": "Export invoices", "evidence_method": "behavior test"}}}
 	if pending {
 		document := plan["plan_document"].(map[string]any)
@@ -115,7 +119,7 @@ func checkPlannerPublication(t *testing.T, pending bool) {
 		if err != nil || current.Status != model.AttemptAwaitingPlanPublication || current.Success != nil {
 			t.Fatalf("failed publication did not roll back the attempt transition: %+v %v", current, err)
 		}
-		document["path"] = "/assigned/plan.md"
+		document["path"] = plannerClaimFixtureAssignedFile
 	}
 	if err := s.Put(ctx, "execution_plans", "plan", plan, 1); err != nil {
 		t.Fatal(err)

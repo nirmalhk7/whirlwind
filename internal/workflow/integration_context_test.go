@@ -17,6 +17,12 @@ import (
 )
 
 const (
+	contextFixtureBrokerHost         = "whirlwind-mcp.openshell.internal"
+	contextFixtureRepositoryRevision = "repo-rev"
+	contextFixtureRepositoryScope    = "repo:o/r"
+)
+
+const (
 	integrationContextRef = "mcp://ci"
 )
 
@@ -105,7 +111,7 @@ func integrationDiscoveryFixture(t *testing.T) (*Engine, model.Project, *integra
 	t.Setenv("HOME", t.TempDir())
 	e, task, _ := testEngine(t)
 	ctx := context.Background()
-	config := model.WorkflowConfig{ActiveMode: model.AgenticMode, ConfiguredMode: model.AgenticMode, Integrations: model.IntegrationSettings{Sources: []model.IntegrationSource{{Provider: "fake", Ref: integrationContextRef, Scopes: []string{"repo:o/r"}}}}}
+	config := model.WorkflowConfig{ActiveMode: model.AgenticMode, ConfiguredMode: model.AgenticMode, Integrations: model.IntegrationSettings{Sources: []model.IntegrationSource{{Provider: "fake", Ref: integrationContextRef, Scopes: []string{contextFixtureRepositoryScope}}}}}
 	if err := e.Store.Put(ctx, "workflow_config", "global", config, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +158,7 @@ func TestIntegrationContextUsesOnlyConfiguredConnectionsAndScopes(t *testing.T) 
 		t.Fatal(err)
 	}
 	input := adapter.input
-	if input.MCPBroker == nil || input.MCPBroker.Host != "whirlwind-mcp.openshell.internal" || input.MCPBroker.Path != "/mcp" {
+	if input.MCPBroker == nil || input.MCPBroker.Host != contextFixtureBrokerHost || input.MCPBroker.Path != "/mcp" {
 		t.Fatalf("integration discovery did not use selected broker: %+v", input.MCPBroker)
 	}
 	if input.NativeIntegrations || input.DiscoverConnected || len(input.RequiredIntegrations) != 0 || len(input.IntegrationScopes) != 0 {
@@ -169,7 +175,7 @@ func TestIntegrationContextUsesScopedBrokerWithoutRawNativeIntegrationMounts(t *
 	if _, _, err := e.integrationContext(context.Background(), project, index.Commit); err != nil {
 		t.Fatal(err)
 	}
-	if adapter.input.MCPBroker == nil || adapter.input.MCPBroker.Host != "whirlwind-mcp.openshell.internal" || adapter.input.MCPBroker.Path != "/mcp" {
+	if adapter.input.MCPBroker == nil || adapter.input.MCPBroker.Host != contextFixtureBrokerHost || adapter.input.MCPBroker.Path != "/mcp" {
 		t.Fatalf("selected integration did not reach ACP through a broker descriptor: %+v", adapter.input.MCPBroker)
 	}
 	if adapter.input.NativeIntegrations || adapter.input.DiscoverConnected || len(adapter.input.RequiredIntegrations) != 0 || len(adapter.input.IntegrationScopes) != 0 {
@@ -187,7 +193,7 @@ func TestPlannerReceivesSameSelectedReadScopesThroughBroker(t *testing.T) {
 	if cleanup != nil {
 		defer cleanup()
 	}
-	if input.MCPBroker == nil || input.MCPBroker.Host != "whirlwind-mcp.openshell.internal" {
+	if input.MCPBroker == nil || input.MCPBroker.Host != contextFixtureBrokerHost {
 		t.Fatalf("planner did not receive selected broker descriptor: %+v", input.MCPBroker)
 	}
 	if input.NativeIntegrations || input.DiscoverConnected || len(input.RequiredIntegrations) != 0 || len(input.IntegrationScopes) != 0 {
@@ -244,8 +250,8 @@ func TestUnannotatedAuthorizedSourceIsNotSelected(t *testing.T) {
 func TestPromptAnnotationCannotSelectAmbiguousAuthorizedConnections(t *testing.T) {
 	e, _, _ := integrationDiscoveryFixture(t)
 	config := model.WorkflowConfig{ActiveMode: model.AgenticMode, ConfiguredMode: model.AgenticMode, Integrations: model.IntegrationSettings{Sources: []model.IntegrationSource{
-		{Provider: "fake", Ref: "mcp://ci", Scopes: []string{"repo:o/r"}},
-		{Provider: "fake", Ref: "mcp://issues", Scopes: []string{"repo:o/r"}},
+		{Provider: "fake", Ref: "mcp://ci", Scopes: []string{contextFixtureRepositoryScope}},
+		{Provider: "fake", Ref: "mcp://issues", Scopes: []string{contextFixtureRepositoryScope}},
 	}}}
 	if err := e.Store.Put(context.Background(), "workflow_config", "global", config, 1); err != nil {
 		t.Fatal(err)
@@ -315,12 +321,12 @@ func TestIntegrationCandidateFingerprintExcludesTitleAndCaptureMetadata(t *testi
 		return []model.Direction{{ID: "integration-proposal", ProjectID: "p", Title: "Fix build failure", Description: "Investigate CI regression", Problem: "CI build is failing", Mechanism: "Repair the failing build path", Components: []string{"ci/build"}, ExpectedBenefit: "Restore builds", EffortEstimate: "Small", ProblemKind: "opportunity", Uncertainty: []string{"Confirm cause"}, Evidence: []model.EvidenceRef{ref}}}
 	}
 	first := candidate()
-	if err := validateCandidateEvidence(first, discoverySnapshot{Commit: "repo-rev", Evidence: []model.EvidenceRef{ref}}); err != nil {
+	if err := validateCandidateEvidence(first, discoverySnapshot{Commit: contextFixtureRepositoryRevision, Evidence: []model.EvidenceRef{ref}}); err != nil {
 		t.Fatal(err)
 	}
 	ref.AttemptID, ref.RetrievedAt = "attempt-2", "2026-10-22T11:00:00Z"
 	second := candidate()
-	if err := validateCandidateEvidence(second, discoverySnapshot{Commit: "repo-rev", Evidence: []model.EvidenceRef{ref}}); err != nil {
+	if err := validateCandidateEvidence(second, discoverySnapshot{Commit: contextFixtureRepositoryRevision, Evidence: []model.EvidenceRef{ref}}); err != nil {
 		t.Fatal(err)
 	}
 	if first[0].Fingerprint != second[0].Fingerprint {
@@ -331,7 +337,7 @@ func TestIntegrationCandidateFingerprintExcludesTitleAndCaptureMetadata(t *testi
 	}
 	ref.Revision = "rev-2"
 	third := candidate()
-	if err := validateCandidateEvidence(third, discoverySnapshot{Commit: "repo-rev", Evidence: []model.EvidenceRef{ref}}); err != nil {
+	if err := validateCandidateEvidence(third, discoverySnapshot{Commit: contextFixtureRepositoryRevision, Evidence: []model.EvidenceRef{ref}}); err != nil {
 		t.Fatal(err)
 	}
 	if third[0].Fingerprint != second[0].Fingerprint || third[0].Evidence[0].Revision != "rev-2" {

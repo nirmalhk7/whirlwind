@@ -13,6 +13,10 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	retryFixtureOriginalAttempt = "attempt-one"
+)
+
 func TestCancellationDuringBackoffStopsChain(t *testing.T) {
 	for _, cancelAt := range []int{1, 2} {
 		t.Run(string(rune('0'+cancelAt)), func(t *testing.T) {
@@ -316,7 +320,7 @@ func TestRetryableEpisodeFailurePrefersRecordedKindWithLegacyFallback(t *testing
 
 func TestRetryCooldownAdmissionRequiresExactFailedEpisodeOwner(t *testing.T) {
 	h := newRetryHarness(t, model.AgentChoice{Provider: "fake", Model: "m"})
-	run, source, choice, episode, cooldown := persistedCooldownFixture(t, h, "attempt-one", "attempt-one")
+	run, source, choice, episode, cooldown := persistedCooldownFixture(t, h, retryFixtureOriginalAttempt, retryFixtureOriginalAttempt)
 	if err := saveCooldownFixture(t, run, episode, cooldown); err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +356,7 @@ func TestRetryCooldownAdmissionRequiresExactFailedEpisodeOwner(t *testing.T) {
 
 func TestRetryCooldownClearRechecksEpisodeGenerationAndOwner(t *testing.T) {
 	h := newRetryHarness(t, model.AgentChoice{Provider: "fake", Model: "m"})
-	run, source, choice, episode, cooldown := persistedCooldownFixture(t, h, "attempt-one", "attempt-one")
+	run, source, choice, episode, cooldown := persistedCooldownFixture(t, h, retryFixtureOriginalAttempt, retryFixtureOriginalAttempt)
 	if err := saveCooldownFixture(t, run, episode, cooldown); err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +390,7 @@ func TestRetryCooldownClearRechecksEpisodeGenerationAndOwner(t *testing.T) {
 
 func TestRetryCooldownClearRejectsStaleCapturedEpisodeVersion(t *testing.T) {
 	h := newRetryHarness(t, model.AgentChoice{Provider: "fake", Model: "m"})
-	run, source, choice, episode, cooldown := persistedCooldownFixture(t, h, "attempt-one", "attempt-one")
+	run, source, choice, episode, cooldown := persistedCooldownFixture(t, h, retryFixtureOriginalAttempt, retryFixtureOriginalAttempt)
 	if err := saveCooldownFixture(t, run, episode, cooldown); err != nil {
 		t.Fatal(err)
 	}

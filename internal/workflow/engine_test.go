@@ -17,6 +17,10 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	engineFixtureResultRequirement = "REQ-RESULT"
+)
+
 const resultFile = "result.txt"
 
 type fakeGitHub struct{}
@@ -55,7 +59,7 @@ func (f fakeAgent) Run(ctx context.Context, in provider.Input, h provider.Hooks)
 		b, _ := json.Marshal(model.PlanSpecification{
 			Objective: "Add file", What: "Add result.txt", Why: "Result is missing", Benefit: "Result becomes available", Where: []string{resultFile},
 			Scope: []string{"Create the result file in the approved worktree."}, Exclusions: []string{"Do not change unrelated files."}, Steps: []string{"Add a failing result check.", "Create result.txt.", "Run the configured result check."},
-			AcceptanceCriteria: []string{"file exists"}, Requirements: []model.Requirement{{ID: "REQ-RESULT", Outcome: "result.txt exists in the candidate worktree.", EvidenceMethod: "Run the configured test -f result.txt check."}},
+			AcceptanceCriteria: []string{"file exists"}, Requirements: []model.Requirement{{ID: engineFixtureResultRequirement, Outcome: "result.txt exists in the candidate worktree.", EvidenceMethod: "Run the configured test -f result.txt check."}},
 			RepositoryTestCommands: [][]string{{"sh", "-c", "test -f result.txt"}}, RepositoryTestInventory: "Configured: .whirlwind.yaml checks.test: sh -c 'test -f result.txt'", RepositoryBuildInventory: "None configured: .whirlwind.yaml inspected.",
 			Units: []model.Unit{{ID: "one", Objective: "add result.txt", AllowedPaths: []string{resultFile}}},
 		})
@@ -198,7 +202,7 @@ func TestSelectedDirectionPublishesPlanBeforeCoding(t *testing.T) {
 		t.Fatalf("coding started before separate local plan approval: %+v", planned)
 	}
 	view, err := e.ReadLocalPlan(ctx, planned.ID)
-	if err != nil || view.Hash == "" || len(view.Plan.Requirements) != 1 || view.Plan.Requirements[0].ID != "REQ-RESULT" {
+	if err != nil || view.Hash == "" || len(view.Plan.Requirements) != 1 || view.Plan.Requirements[0].ID != engineFixtureResultRequirement {
 		t.Fatalf("selected direction did not publish its reviewable specification: %+v %v", view, err)
 	}
 	if _, err := e.Store.Get(ctx, "plan_versions", planned.ID+":1"); !errors.Is(err, store.ErrNotFound) {
@@ -220,7 +224,7 @@ func TestFailedChecksDoNotStartReview(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(plan.Data), "REQ-RESULT") {
+	if !strings.Contains(string(plan.Data), engineFixtureResultRequirement) {
 		t.Fatalf("frozen requirement snapshot missing: %s", plan.Data)
 	}
 	record, err := fixture.e.Store.Get(fixture.ctx, "verification", blocked.VerificationID)

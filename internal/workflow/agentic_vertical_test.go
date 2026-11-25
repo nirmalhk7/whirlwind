@@ -21,6 +21,11 @@ import (
 )
 
 const (
+	agenticFixtureLegacyTestAtHead = "HEAD:legacy_test.go"
+	agenticFixtureResultAtHead     = "HEAD:result.go"
+)
+
+const (
 	agenticResultRequirement = "REQ-RESULT"
 )
 
@@ -272,14 +277,14 @@ func (f *agenticWorkflowFixture) verifyExistingTestDebtBlocksAcceptance() {
 	if finalizerPrompt != "" {
 		t.Fatalf("finalizer ran despite failed configured test: %q", finalizerPrompt)
 	}
-	legacySource := submissionGit(t, f.repo, "show", "HEAD:legacy_test.go")
-	if got := submissionGit(t, blocked.Worktree, "show", "HEAD:legacy_test.go"); got != legacySource {
+	legacySource := submissionGit(t, f.repo, "show", agenticFixtureLegacyTestAtHead)
+	if got := submissionGit(t, blocked.Worktree, "show", agenticFixtureLegacyTestAtHead); got != legacySource {
 		t.Fatal("candidate removed or changed the pre-existing failing test")
 	}
-	if got := submissionGit(t, blocked.Worktree, "show", "HEAD:result.go"); !strings.Contains(got, "return true") {
+	if got := submissionGit(t, blocked.Worktree, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return true") {
 		t.Fatalf("candidate implementation state was not preserved: %s", got)
 	}
-	if got := submissionGit(t, f.repo, "show", "HEAD:result.go"); !strings.Contains(got, "return false") {
+	if got := submissionGit(t, f.repo, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return false") {
 		t.Fatalf("coding changed original checkout: %s", got)
 	}
 	f.verifyTDD(blocked)
@@ -532,7 +537,7 @@ func (f *agenticWorkflowFixture) verifyTDD(done model.ExecutionPlan) {
 	if f.debt {
 		f.verifyDebtTDDPair(red, green)
 	}
-	if f.debt && submissionGit(t, done.Worktree, "show", "HEAD:legacy_test.go") != submissionGit(t, f.repo, "show", "HEAD:legacy_test.go") {
+	if f.debt && submissionGit(t, done.Worktree, "show", agenticFixtureLegacyTestAtHead) != submissionGit(t, f.repo, "show", agenticFixtureLegacyTestAtHead) {
 		t.Fatal("submission changed unrelated failing test")
 	}
 }
@@ -588,7 +593,7 @@ func (f *agenticWorkflowFixture) reconcile(done model.ExecutionPlan) {
 	if contents, err := os.ReadFile(f.marker); !os.IsNotExist(err) {
 		t.Fatalf("Agentic workflow invoked gh: %s %v", contents, err)
 	}
-	if got := submissionGit(t, f.repo, "show", "HEAD:result.go"); !strings.Contains(got, "return false") {
+	if got := submissionGit(t, f.repo, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return false") {
 		t.Fatal("coding modified original checkout")
 	}
 }
