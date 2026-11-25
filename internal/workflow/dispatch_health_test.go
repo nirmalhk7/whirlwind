@@ -14,6 +14,10 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	dispatchFixtureQueuedOperation = "queued-ideation"
+)
+
 func TestRunCycleReportsRecoveryBlockWithoutDispatchAndOnlyClearsAfterCheck(t *testing.T) {
 	f := prepareNoveltyTest(t, nil)
 	e, ctx := f.engine, t.Context()
@@ -38,7 +42,7 @@ func TestRunCycleReportsRecoveryBlockWithoutDispatchAndOnlyClearsAfterCheck(t *t
 		requireWorkflowSuccess(t, e.Store.Put(ctx, "settings", "global", settings, record.Version))
 	}
 	setStopped(false)
-	requireWorkflowSuccess(t, e.Store.Put(ctx, "operations", "queued-ideation", model.Operation{
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "operations", dispatchFixtureQueuedOperation, model.Operation{
 		Kind: "ideation", Subject: f.project.ID, Stage: "queued", Input: map[string]any{"day": "2026-11-24", "fresh": true},
 	}, 0))
 	registry := filepath.Join(e.Root, "supervisor", "standalone")
@@ -54,7 +58,7 @@ func TestRunCycleReportsRecoveryBlockWithoutDispatchAndOnlyClearsAfterCheck(t *t
 	if !blocked.Checked || !strings.Contains(blocked.BlockReason, "registered standalone runtime identity is incomplete or invalid") {
 		t.Fatalf("real recovery failure not exposed: %+v", blocked)
 	}
-	queued, err := e.Store.Get(ctx, "operations", "queued-ideation")
+	queued, err := e.Store.Get(ctx, "operations", dispatchFixtureQueuedOperation)
 	requireWorkflowSuccess(t, err)
 	op, err := store.Decode[model.Operation](queued)
 	requireWorkflowSuccess(t, err)
@@ -72,7 +76,7 @@ func TestRunCycleReportsRecoveryBlockWithoutDispatchAndOnlyClearsAfterCheck(t *t
 	if state := e.DispatchHealth(); !state.Checked || state.BlockReason != "" {
 		t.Fatalf("verified recovery did not clear the block: %+v", state)
 	}
-	finished, err := e.Store.Get(ctx, "operations", "queued-ideation")
+	finished, err := e.Store.Get(ctx, "operations", dispatchFixtureQueuedOperation)
 	requireWorkflowSuccess(t, err)
 	op, err = store.Decode[model.Operation](finished)
 	requireWorkflowSuccess(t, err)

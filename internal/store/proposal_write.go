@@ -70,75 +70,97 @@ type proposalReconsiderationQuery interface {
 }
 
 func pendingProposalReconsideration(ctx context.Context, query proposalReconsiderationQuery, project, predecessor, reason string) (model.ProposalReconsideration, int, error) {
-	rows, err := query.QueryContext(ctx, "SELECT id,version,data FROM resources WHERE kind='proposal_reconsiderations' AND json_extract(data,'$.project_id')=? AND json_extract(data,'$.predecessor_id')=? AND json_extract(data,'$.status')='pending' ORDER BY rowid", project, predecessor)
+	candidates, err := reconsiderationCandidates(ctx, query, project, predecessor)
 	if err != nil {
 		return model.ProposalReconsideration{}, 0, err
-	}
-	type reconsiderationRow struct {
-		id      string
-		version int
-		data    []byte
-	}
-	var candidates []reconsiderationRow
-	for rows.Next() {
-		var candidate reconsiderationRow
-		if err := rows.Scan(&candidate.id, &candidate.version, &candidate.data); err != nil {
-			_ = rows.Close()
-			return model.ProposalReconsideration{}, 0, err
-		}
-		candidates = append(candidates, candidate)
-	}
-	rowErr := rows.Err()
-	_ = rows.Close()
-	if rowErr != nil {
-		return model.ProposalReconsideration{}, 0, rowErr
 	}
 	for _, candidate := range candidates {
 		var request model.ProposalReconsideration
 		if err := json.Unmarshal(candidate.data, &request); err != nil {
 			return model.ProposalReconsideration{}, 0, err
 		}
-		if request.ID != candidate.id || request.ProjectID != project || request.PredecessorID != predecessor || request.Status != "pending" || strings.TrimSpace(request.Reason) == "" || (reason != "" && request.Reason != strings.TrimSpace(reason)) {
+		if !pendingReconsiderationMatches(request, candidate.id, project, predecessor, reason) {
 			continue
 		}
-
-		if request.RequestedIdeaVersion > 0 {
-			var raw []byte
-			var version int
-			err := query.QueryRowContext(ctx, "SELECT version,data FROM resources WHERE kind='ideas' AND id=?", predecessor).Scan(&version, &raw)
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return model.ProposalReconsideration{}, 0, err
-			}
-			var idea model.Idea
-			if err := json.Unmarshal(raw, &idea); err != nil {
-				return model.ProposalReconsideration{}, 0, err
-			}
-			if idea.ProjectID == project && idea.ArchivedAt != "" && idea.ReconsiderationID == request.ID && version == request.RequestedIdeaVersion {
-				return request, candidate.version, nil
-			}
-			continue
-		}
-		var directionData []byte
-		var directionVersion int
-		err := query.QueryRowContext(ctx, "SELECT version,data FROM resources WHERE kind='directions' AND id=?", predecessor).Scan(&directionVersion, &directionData)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
+		matches, err := reconsiderationPredecessorMatches(ctx, query, request)
 		if err != nil {
 			return model.ProposalReconsideration{}, 0, err
 		}
-		var direction model.Direction
-		if err := json.Unmarshal(directionData, &direction); err != nil {
-			return model.ProposalReconsideration{}, 0, err
-		}
-		if direction.ProjectID == project && direction.Status == "reconsider_requested" && !direction.Selected && request.RequestedDirectionVersion == directionVersion {
+		if matches {
 			return request, candidate.version, nil
 		}
 	}
 	return model.ProposalReconsideration{}, 0, ErrNotFound
+}
+
+type reconsiderationRow struct {
+	id      string
+	version int
+	data    []byte
+}
+
+func reconsiderationCandidates(ctx context.Context, query proposalReconsiderationQuery, project, predecessor string) ([]reconsiderationRow, error) {
+	rows, err := query.QueryContext(ctx, "SELECT id,version,data FROM resources WHERE kind='proposal_reconsiderations' AND json_extract(data,'$.project_id')=? AND json_extract(data,'$.predecessor_id')=? AND json_extract(data,'$.status')='pending' ORDER BY rowid", project, predecessor)
+	if err != nil {
+		return nil, err
+	}
+	return readReconsiderationRows(rows)
+}
+
+func readReconsiderationRows(rows *sql.Rows) ([]reconsiderationRow, error) {
+	// Close this cursor before looking up the matching predecessor using the
+	// same database connection or transaction.
+	defer func() { _ = rows.Close() }()
+	var candidates []reconsiderationRow
+	for rows.Next() {
+		var candidate reconsiderationRow
+		if err := rows.Scan(&candidate.id, &candidate.version, &candidate.data); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates, rows.Err()
+}
+
+func pendingReconsiderationMatches(request model.ProposalReconsideration, id, project, predecessor, reason string) bool {
+	return request.ID == id && request.ProjectID == project && request.PredecessorID == predecessor && request.Status == "pending" && strings.TrimSpace(request.Reason) != "" && (reason == "" || request.Reason == strings.TrimSpace(reason))
+}
+
+func reconsiderationPredecessorMatches(ctx context.Context, query proposalReconsiderationQuery, request model.ProposalReconsideration) (bool, error) {
+	if request.RequestedIdeaVersion > 0 {
+		return reconsiderationIdeaMatches(ctx, query, request)
+	}
+	var raw []byte
+	var version int
+	err := query.QueryRowContext(ctx, "SELECT version,data FROM resources WHERE kind='directions' AND id=?", request.PredecessorID).Scan(&version, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var direction model.Direction
+	if err := json.Unmarshal(raw, &direction); err != nil {
+		return false, err
+	}
+	return direction.ProjectID == request.ProjectID && direction.Status == "reconsider_requested" && !direction.Selected && request.RequestedDirectionVersion == version, nil
+}
+
+func reconsiderationIdeaMatches(ctx context.Context, query proposalReconsiderationQuery, request model.ProposalReconsideration) (bool, error) {
+	var raw []byte
+	var version int
+	err := query.QueryRowContext(ctx, "SELECT version,data FROM resources WHERE kind='ideas' AND id=?", request.PredecessorID).Scan(&version, &raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var idea model.Idea
+	if err := json.Unmarshal(raw, &idea); err != nil {
+		return false, err
+	}
+	return idea.ProjectID == request.ProjectID && idea.ArchivedAt != "" && idea.ReconsiderationID == request.ID && version == request.RequestedIdeaVersion, nil
 }
 
 func sameProposalEvidence(left, right []model.EvidenceRef) bool {

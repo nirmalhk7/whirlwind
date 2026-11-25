@@ -116,7 +116,7 @@ func (snapshot QualitySnapshot) Validate() error {
 		}
 	}
 	if len(snapshot.PluginCatalog) > 4<<20 {
-		return errors.New("Qlty plugin catalog exceeds retained limit")
+		return errors.New("retained Qlty plugin catalog exceeds size limit")
 	}
 	return nil
 }

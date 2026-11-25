@@ -10,6 +10,10 @@ import (
 	"testing"
 )
 
+const (
+	fixtureActionResultEvent = "whirlwind/action_result"
+)
+
 type actionTestWriteCloser struct{ *bytes.Buffer }
 
 func (actionTestWriteCloser) Close() error { return nil }
@@ -24,14 +28,14 @@ func TestRPCPersistsActionBoundariesAroundSideEffectingHandler(t *testing.T) {
 		},
 		observe: func(kind string, payload any) {
 			events = append(events, kind)
-			if kind == "whirlwind/action_result" {
+			if kind == fixtureActionResultEvent {
 				encoded, _ := json.Marshal(payload)
 				_ = json.Unmarshal(encoded, &actionResult)
 			}
 		},
 	}
 	rpc.handle(Message{ID: json.RawMessage(`7`), Method: "terminal/create"})
-	if !reflect.DeepEqual(events, []string{"whirlwind/action_started", "whirlwind/tool_result", "whirlwind/action_result"}) {
+	if !reflect.DeepEqual(events, []string{"whirlwind/action_started", "whirlwind/tool_result", fixtureActionResultEvent}) {
 		t.Fatalf("side-effecting request boundaries were not observed in order: %v", events)
 	}
 	if actionResult["action_id"] != "7" || actionResult["method"] != "terminal/create" || actionResult["status"] != "completed" || actionResult["terminal_id"] != "term-1" {
@@ -75,7 +79,7 @@ func TestRPCDoesNotAcknowledgeSideEffectWhenActionResultCannotBePersisted(t *tes
 			return map[string]any{"written": true}, nil
 		},
 		observe: func(kind string, _ any) {
-			if kind == "whirlwind/action_result" {
+			if kind == fixtureActionResultEvent {
 				// The workflow event callback cancels the attempt when its durable
 				// action-result record cannot be committed.
 				cancel()

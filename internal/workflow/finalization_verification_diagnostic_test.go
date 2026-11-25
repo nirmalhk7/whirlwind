@@ -46,7 +46,7 @@ func TestFinalizationVerificationPersistsBaselineSetupFailure(t *testing.T) {
 	project, err := e.Project(ctx, plan.ProjectID)
 	requireWorkflowSuccess(t, err)
 	plan.Worktree = project.Path
-	plan.Base = submissionGit(t, project.Path, "rev-parse", "HEAD")
+	plan.Base = submissionGit(t, project.Path, gitRevParseCommand, "HEAD")
 	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(project.Path, "result.txt"), []byte("candidate fixture\n"), 0600))
 	submissionGit(t, project.Path, "add", "result.txt")
 	submissionGit(t, project.Path, "commit", "-m", "verified candidate fixture")
@@ -102,15 +102,15 @@ func TestFinalizationVerificationQualificationIsRequiredWithoutRunningAHostComma
 	if quality == nil || quality.Identity != nil {
 		t.Fatal("fixture no longer represents approved config without qualified tools")
 	}
-	head := submissionGit(t, project.Path, "rev-parse", "HEAD")
-	tree := submissionGit(t, project.Path, "rev-parse", "HEAD^{tree}")
+	head := submissionGit(t, project.Path, gitRevParseCommand, "HEAD")
+	tree := submissionGit(t, project.Path, gitRevParseCommand, "HEAD^{tree}")
 	const jobID = "finalization-fixture"
 	manifest := verification.JobManifest{Version: 1, JobID: jobID, PlanID: plan.ID, PlanVersion: plan.PlanVersion,
 		PlanHash: plan.PlanDocument.ApprovedHash, ConfigurationHash: verificationConfigurationHash(plan), CandidateCommit: head, BaseCommit: head, CandidateTree: tree,
 		Root: filepath.Join(quality.Root, "jobs", jobID), Repository: project.Path, Launcher: "/fixture/launcher", Quality: quality,
 		Commands: []verification.JobCommand{{Name: scanner.Name, Command: scanner.Command, Mode: scanner.Mode, TimeoutSeconds: scanner.TimeoutSeconds, ReportFormat: scanner.ReportFormat}}}
 	err = (verification.JobReport{}).Validate(manifest)
-	if err == nil || !strings.Contains(err.Error(), "Qlty verification requires an approved runtime identity") {
+	if err == nil || !strings.Contains(err.Error(), "verification with Qlty requires an approved runtime identity") {
 		t.Fatalf("could not isolate the missing native fixture prerequisite: %v", err)
 	}
 }

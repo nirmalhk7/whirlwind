@@ -127,25 +127,11 @@ func (m JobManifest) validateDefinition() error {
 	if err := m.validateAuthority(); err != nil {
 		return err
 	}
-	if !gitObject.MatchString(m.CandidateCommit) || !gitObject.MatchString(m.CandidateTree) || !gitObject.MatchString(m.BaseCommit) {
-		return errors.New("verification requires frozen Git object identities")
+	if err := m.validateSnapshotPaths(); err != nil {
+		return err
 	}
-	if !filepath.IsAbs(m.Repository) || !filepath.IsAbs(m.Root) || (m.OfflineDockerImage == "" && !filepath.IsAbs(m.Launcher)) {
-		return errors.New("verification requires absolute repository, staging, and launcher paths")
-	}
-	if m.Quality != nil {
-		if err := m.Quality.Validate(); err != nil {
-			return err
-		}
-		if m.Purpose != ProjectSetupPurpose && m.Quality.Identity == nil && hasQltyCheck(m.Commands) {
-			return errors.New("Qlty verification requires an approved runtime identity; rerun project setup")
-		}
-		if m.Purpose != ProjectSetupPurpose && m.Quality.Identity == nil && hasQltyCheck(m.Commands) {
-			return errors.New("Qlty verification requires an approved runtime identity; rerun project setup")
-		}
-		if filepath.Clean(m.Root) != filepath.Join(m.Quality.Root, "jobs", m.JobID) {
-			return errors.New("quality staging must stay under approved external quality root")
-		}
+	if err := m.validateFrozenQuality(); err != nil {
+		return err
 	}
 	if len(m.Commands) == 0 || len(m.Commands) > 128 {
 		return errors.New("verification requires 1 to 128 approved commands")
@@ -157,14 +143,40 @@ func (m JobManifest) validateDefinition() error {
 		return m.validateOfflineDocker()
 	}
 	if hasQltyCheck(m.Commands) && m.Quality == nil {
-		return errors.New("Qlty verification requires frozen external quality configuration")
+		return errors.New("verification with Qlty requires frozen external quality configuration")
+	}
+	return nil
+}
+
+func (m JobManifest) validateSnapshotPaths() error {
+	if !gitObject.MatchString(m.CandidateCommit) || !gitObject.MatchString(m.CandidateTree) || !gitObject.MatchString(m.BaseCommit) {
+		return errors.New("verification requires frozen Git object identities")
+	}
+	if !filepath.IsAbs(m.Repository) || !filepath.IsAbs(m.Root) || (m.OfflineDockerImage == "" && !filepath.IsAbs(m.Launcher)) {
+		return errors.New("verification requires absolute repository, staging, and launcher paths")
+	}
+	return nil
+}
+
+func (m JobManifest) validateFrozenQuality() error {
+	if m.Quality == nil {
+		return nil
+	}
+	if err := m.Quality.Validate(); err != nil {
+		return err
+	}
+	if m.Purpose != ProjectSetupPurpose && m.Quality.Identity == nil && hasQltyCheck(m.Commands) {
+		return errors.New("verification with Qlty requires an approved runtime identity; rerun project setup")
+	}
+	if filepath.Clean(m.Root) != filepath.Join(m.Quality.Root, "jobs", m.JobID) {
+		return errors.New("quality staging must stay under approved external quality root")
 	}
 	return nil
 }
 
 func hasQltyCheck(commands []JobCommand) bool {
 	for _, command := range commands {
-		if len(command.Command) > 1 && filepath.Base(command.Command[0]) == "qlty" && (command.Command[1] == "check" || command.Command[1] == "smells") {
+		if isQltyCheckCommand(command.Command) {
 			return true
 		}
 	}

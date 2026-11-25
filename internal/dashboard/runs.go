@@ -26,48 +26,16 @@ type ideationRunView struct {
 }
 
 func (d *Dashboard) refreshRuns() {
-	rows := make([]runRow, 0, len(d.snapshot["sessions"]))
-	for _, record := range d.snapshot["operations"] {
-		var operation ideationRunView
-		if err := json.Unmarshal(record.Data, &operation); err != nil {
-			d.detail.SetText("Cannot read ideation history: " + err.Error())
-			continue
-		}
-		if (operation.Kind != "ideation" && operation.Kind != "project_setup") || (d.projectID != "" && d.checkoutProjectID(operation.Subject) != d.projectID) {
-			continue
-		}
-		started, err := time.Parse(time.RFC3339Nano, operation.StartedAt)
-		if err != nil {
-			started, _ = time.Parse(time.RFC3339Nano, record.UpdatedAt)
-		}
-		rows = append(rows, runRow{id: record.ID, operation: &operation, started: started, order: record.CreatedOrder})
-	}
-	for _, record := range d.snapshot["sessions"] {
-		attempt, err := store.Decode[model.Attempt](record)
-		if err != nil {
-			d.updating = true
-			d.runRows = nil
-			d.runID = ""
-			d.runs.Clear().AddItem("Cannot read run history", "", 0, nil)
-			d.updating = false
-			d.detail.SetText("Cannot read run history: " + err.Error())
-			return
-		}
-		projectID := attempt.ProjectID
-		if projectID == "" {
-			_, task, ok := d.planRecord(attempt.Task)
-			if ok {
-				projectID = task.ProjectID
-			}
-		}
-		if d.projectID != "" && d.checkoutProjectID(projectID) != d.projectID {
-			continue
-		}
-		started, err := time.Parse(time.RFC3339Nano, attempt.StartedAt)
-		if err != nil {
-			started, _ = time.Parse(time.RFC3339Nano, record.UpdatedAt)
-		}
-		rows = append(rows, runRow{id: record.ID, attempt: attempt, started: started, order: record.CreatedOrder})
+	rows := d.appendOperationRuns(make([]runRow, 0, len(d.snapshot["sessions"])))
+	rows, err := d.appendAttemptRuns(rows)
+	if err != nil {
+		d.updating = true
+		d.runRows = nil
+		d.runID = ""
+		d.runs.Clear().AddItem("Cannot read run history", "", 0, nil)
+		d.updating = false
+		d.detail.SetText("Cannot read run history: " + err.Error())
+		return
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
 		if !rows[i].started.Equal(rows[j].started) {
@@ -78,55 +46,68 @@ func (d *Dashboard) refreshRuns() {
 		}
 		return rows[i].id > rows[j].id
 	})
+	d.renderRunRows(rows)
+}
+
+func (d *Dashboard) appendOperationRuns(rows []runRow) []runRow {
+	for _, record := range d.snapshot["operations"] {
+		var operation ideationRunView
+		if err := json.Unmarshal(record.Data, &operation); err != nil {
+			d.detail.SetText("Cannot read ideation history: " + err.Error())
+			continue
+		}
+		if (operation.Kind != "ideation" && operation.Kind != "project_setup") || !d.runProjectMatches(operation.Subject) {
+			continue
+		}
+		rows = append(rows, runRow{id: record.ID, operation: &operation, started: runStart(operation.StartedAt, record.UpdatedAt), order: record.CreatedOrder})
+	}
+	return rows
+}
+
+func (d *Dashboard) appendAttemptRuns(rows []runRow) ([]runRow, error) {
+	for _, record := range d.snapshot["sessions"] {
+		attempt, err := store.Decode[model.Attempt](record)
+		if err != nil {
+			return nil, err
+		}
+		projectID := attempt.ProjectID
+		if projectID == "" {
+			_, task, ok := d.planRecord(attempt.Task)
+			if ok {
+				projectID = task.ProjectID
+			}
+		}
+		if !d.runProjectMatches(projectID) {
+			continue
+		}
+		rows = append(rows, runRow{id: record.ID, attempt: attempt, started: runStart(attempt.StartedAt, record.UpdatedAt), order: record.CreatedOrder})
+	}
+	return rows, nil
+}
+
+func (d *Dashboard) runProjectMatches(projectID string) bool {
+	return d.projectID == "" || d.checkoutProjectID(projectID) == d.projectID
+}
+
+func runStart(start, updated string) time.Time {
+	started, err := time.Parse(time.RFC3339Nano, start)
+	if err != nil {
+		started, _ = time.Parse(time.RFC3339Nano, updated)
+	}
+	return started
+}
+
+func (d *Dashboard) renderRunRows(rows []runRow) {
 	d.updating = true
 	d.runs.Clear()
 	d.runRows = rows
 	selected := 0
-	for i, row := range rows {
+	for index, row := range rows {
 		if row.id == d.runID {
-			selected = i
+			selected = index
 		}
-		if row.operation != nil {
-			label := "Ideation · " + row.operation.Stage
-			if row.operation.RegistrationIdeation() {
-				label = "Auto ideation · " + row.operation.Stage
-			}
-			if row.operation.Kind == "project_setup" {
-				phase := projectSetupPhaseLabel(row.operation.Input)
-				if row.operation.Stage == "failed" {
-					label = "Setup failed: " + phase
-				} else {
-					label = "Project setup: " + phase + " · " + row.operation.Stage
-				}
-			}
-			d.runs.AddItem(tview.Escape(label), tview.Escape(row.id+" · "+recordedRuntimeValue(row.operation.StartedAt)), 0, nil)
-			continue
-		}
-		attempt := row.attempt
-		name := attempt.ProviderName
-		if name == "" {
-			name = attempt.Provider
-		}
-		modelName := attempt.ResolvedModel
-		if modelName == "" {
-			modelName = attempt.Model
-		}
-		if modelName == "" {
-			modelName = "unknown model"
-		}
-		thinking := attempt.EffectiveThinking
-		if thinking == nil {
-			thinking = attempt.Thinking
-		}
-		effort := "not recorded"
-		if thinking != nil {
-			effort = thinking.Value
-		}
-		when := "time not recorded"
-		if !row.started.IsZero() {
-			when = row.started.Local().Format("2006-01-02 15:04")
-		}
-		d.runs.AddItem(tview.Escape(fmt.Sprintf("%s · %s · %s", attempt.Role, name, runStatus(attempt))), tview.Escape(fmt.Sprintf("%s · %s · %s", modelName, effort, when)), 0, nil)
+		label, details := runRowText(row)
+		d.runs.AddItem(tview.Escape(label), tview.Escape(details), 0, nil)
 	}
 	if len(rows) == 0 {
 		d.runID = ""
@@ -138,6 +119,51 @@ func (d *Dashboard) refreshRuns() {
 	if !d.taskView {
 		d.selectRun(selected, "", "", 0)
 	}
+}
+
+func runRowText(row runRow) (string, string) {
+	if row.operation != nil {
+		return operationRunLabel(*row.operation), row.id + " · " + recordedRuntimeValue(row.operation.StartedAt)
+	}
+	attempt := row.attempt
+	name := attempt.ProviderName
+	if name == "" {
+		name = attempt.Provider
+	}
+	modelName := attempt.ResolvedModel
+	if modelName == "" {
+		modelName = attempt.Model
+	}
+	if modelName == "" {
+		modelName = "unknown model"
+	}
+	thinking := attempt.EffectiveThinking
+	if thinking == nil {
+		thinking = attempt.Thinking
+	}
+	effort := "not recorded"
+	if thinking != nil {
+		effort = thinking.Value
+	}
+	when := "time not recorded"
+	if !row.started.IsZero() {
+		when = row.started.Local().Format("2006-01-02 15:04")
+	}
+	return fmt.Sprintf("%s · %s · %s", attempt.Role, name, runStatus(attempt)), fmt.Sprintf("%s · %s · %s", modelName, effort, when)
+}
+
+func operationRunLabel(operation ideationRunView) string {
+	if operation.Kind == "project_setup" {
+		phase := projectSetupPhaseLabel(operation.Input)
+		if operation.Stage == "failed" {
+			return "Setup failed: " + phase
+		}
+		return "Project setup: " + phase + " · " + operation.Stage
+	}
+	if operation.RegistrationIdeation() {
+		return "Auto ideation · " + operation.Stage
+	}
+	return "Ideation · " + operation.Stage
 }
 
 func runStatus(attempt model.Attempt) string {

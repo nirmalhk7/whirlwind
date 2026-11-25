@@ -104,22 +104,30 @@ func (step *taskStep) reviewSnapshot() (reviewSnapshot, error) {
 	if err != nil {
 		return reviewSnapshot{}, err
 	}
-	if step.task.IdeaID != "" {
-		key := fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion)
-		row, err := step.Store.Get(step.ctx, "review_preparations", key)
-		if err != nil {
-			return reviewSnapshot{}, fmt.Errorf("missing preparation: Reviewer preparation unavailable: %w", err)
-		}
-		prepared, err := store.Decode[reviewerPreparation](row)
-		if err != nil {
-			return reviewSnapshot{}, err
-		}
-		if prepared.PlanID != step.task.ID || prepared.PlanVersion != step.task.PlanVersion || prepared.DocumentHash != step.task.PlanDocument.ApprovedHash || prepared.Base != step.task.Base {
-			return reviewSnapshot{}, store.ErrConflict
-		}
-		prompt += "\nCompleted Reviewer preparation against approved base (evaluate each checklist item against this immutable candidate and the complete runner report):\n" + jsonText(prepared)
+	preparation, err := step.approvedReviewerPreparation()
+	if err != nil {
+		return reviewSnapshot{}, err
 	}
-	return reviewSnapshot{commit, prompt}, nil
+	return reviewSnapshot{commit, prompt + preparation}, nil
+}
+
+func (step *taskStep) approvedReviewerPreparation() (string, error) {
+	if step.task.IdeaID == "" {
+		return "", nil
+	}
+	key := fmt.Sprintf("%s:%d", step.task.ID, step.task.PlanVersion)
+	row, err := step.Store.Get(step.ctx, "review_preparations", key)
+	if err != nil {
+		return "", fmt.Errorf("missing preparation: Reviewer preparation unavailable: %w", err)
+	}
+	prepared, err := store.Decode[reviewerPreparation](row)
+	if err != nil {
+		return "", err
+	}
+	if prepared.PlanID != step.task.ID || prepared.PlanVersion != step.task.PlanVersion || prepared.DocumentHash != step.task.PlanDocument.ApprovedHash || prepared.Base != step.task.Base {
+		return "", store.ErrConflict
+	}
+	return "\nCompleted Reviewer preparation against approved base (evaluate each checklist item against this immutable candidate and the complete runner report):\n" + jsonText(prepared), nil
 }
 
 func (step *taskStep) reusableReview(raw, head string) *model.Provenance {

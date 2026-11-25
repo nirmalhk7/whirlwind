@@ -188,6 +188,14 @@ func (a *agentAttempt) finish(output provider.Output, runErr error, started time
 	}
 	entry := a.finalUsageEntry(output, activeElapsed)
 	changes := []store.Change{{Kind: "sessions", ID: a.id, Value: a.state, Expected: record.Version}, {Kind: "metrics", ID: a.id, Value: metric}}
+	recoveryChange, err := a.finishedAttemptRecovery(ctx, runErr)
+	if err != nil {
+		return err
+	}
+	return a.Store.CompleteUsage(ctx, entry, append(changes, recoveryChange))
+}
+
+func (a *agentAttempt) finishedAttemptRecovery(ctx context.Context, runErr error) (store.Change, error) {
 	recoveryStatus, retryAt := "complete", ""
 	failureKind := ""
 	if runErr != nil {
@@ -196,7 +204,7 @@ func (a *agentAttempt) finish(output provider.Output, runErr error, started time
 		if errors.Is(runErr, ErrRuntimeHealthLost) && a.ctx.Err() == nil {
 			classified, classificationErr := a.failureKind(runErr)
 			if classificationErr != nil {
-				return classificationErr
+				return store.Change{}, classificationErr
 			}
 			kind = classified
 		}
@@ -208,12 +216,7 @@ func (a *agentAttempt) finish(output provider.Output, runErr error, started time
 			retryAt = retryDeadline(a.state.RestartCount + 1).Format(time.RFC3339Nano)
 		}
 	}
-	recoveryChange, recoveryErr := a.recoveryEpisodeChange(ctx, recoveryStatus, failureKind, retryAt)
-	if recoveryErr != nil {
-		return recoveryErr
-	}
-	changes = append(changes, recoveryChange)
-	return a.Store.CompleteUsage(ctx, entry, changes)
+	return a.recoveryEpisodeChange(ctx, recoveryStatus, failureKind, retryAt)
 }
 
 func (a *agentAttempt) updateFinalState(output provider.Output, runErr error, started time.Time, artifactID string) int64 {

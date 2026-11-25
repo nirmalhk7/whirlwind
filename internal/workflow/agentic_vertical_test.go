@@ -21,6 +21,11 @@ import (
 )
 
 const (
+	agenticFixtureLegacyTestAtHead = "HEAD:legacy_test.go"
+	agenticFixtureResultAtHead     = "HEAD:result.go"
+)
+
+const (
 	agenticResultRequirement = "REQ-RESULT"
 )
 
@@ -224,17 +229,37 @@ func (f *agenticWorkflowFixture) verifyExistingTestDebtBlocksAcceptance() {
 	if blocked.Stage != "repair" || blocked.ChecksPassed || blocked.ReviewID != "" || blocked.Delivery != nil || blocked.VerificationID == "" {
 		t.Fatalf("failed configured test did not block review and local finalization: %+v", blocked)
 	}
-	record, err := engine.Store.Get(ctx, "verification", blocked.VerificationID)
-	if err != nil {
-		t.Fatal(err)
+	f.assertPreservedTestDebt(blocked)
+	assertNoFixtureReview(t, f, f.task.ID)
+	f.adapter.mu.Lock()
+	finalizerPrompt := f.adapter.prompt
+	f.adapter.mu.Unlock()
+	if finalizerPrompt != "" {
+		t.Fatalf("finalizer ran despite failed configured test: %q", finalizerPrompt)
 	}
+	legacySource := submissionGit(t, f.repo, "show", agenticFixtureLegacyTestAtHead)
+	if got := submissionGit(t, blocked.Worktree, "show", agenticFixtureLegacyTestAtHead); got != legacySource {
+		t.Fatal("candidate removed or changed the pre-existing failing test")
+	}
+	if got := submissionGit(t, blocked.Worktree, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return true") {
+		t.Fatalf("candidate implementation state was not preserved: %s", got)
+	}
+	if got := submissionGit(t, f.repo, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return false") {
+		t.Fatalf("coding changed original checkout: %s", got)
+	}
+	f.verifyTDD(blocked)
+}
+
+func (f *agenticWorkflowFixture) assertPreservedTestDebt(blocked model.ExecutionPlan) {
+	t, ctx, engine := f.t, f.ctx, f.e
+	t.Helper()
+	record, err := engine.Store.Get(ctx, "verification", blocked.VerificationID)
+	requireWorkflowSuccess(t, err)
 	var evidence struct {
 		Stage  string              `json:"stage"`
 		Report verification.Report `json:"report"`
 	}
-	if err := json.Unmarshal(record.Data, &evidence); err != nil {
-		t.Fatal(err)
-	}
+	requireWorkflowSuccess(t, json.Unmarshal(record.Data, &evidence))
 	if evidence.Stage != "failed" || evidence.Report.Passed {
 		t.Fatalf("configured test failure was not retained in verification evidence: %+v", evidence)
 	}
@@ -253,36 +278,6 @@ func (f *agenticWorkflowFixture) verifyExistingTestDebtBlocksAcceptance() {
 	if err != nil || !strings.Contains(string(rawOutput), "TestLegacyDebt") {
 		t.Fatalf("full failed-test evidence was not retained: err=%v output=%q", err, rawOutput)
 	}
-	reviews, err := engine.Store.List(ctx, "reviews")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, saved := range reviews {
-		review, err := store.Decode[model.Review](saved)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if review.Provenance != nil && review.Provenance.Task == f.task.ID {
-			t.Fatalf("reviewer ran despite failed configured test: %+v", review)
-		}
-	}
-	f.adapter.mu.Lock()
-	finalizerPrompt := f.adapter.prompt
-	f.adapter.mu.Unlock()
-	if finalizerPrompt != "" {
-		t.Fatalf("finalizer ran despite failed configured test: %q", finalizerPrompt)
-	}
-	legacySource := submissionGit(t, f.repo, "show", "HEAD:legacy_test.go")
-	if got := submissionGit(t, blocked.Worktree, "show", "HEAD:legacy_test.go"); got != legacySource {
-		t.Fatal("candidate removed or changed the pre-existing failing test")
-	}
-	if got := submissionGit(t, blocked.Worktree, "show", "HEAD:result.go"); !strings.Contains(got, "return true") {
-		t.Fatalf("candidate implementation state was not preserved: %s", got)
-	}
-	if got := submissionGit(t, f.repo, "show", "HEAD:result.go"); !strings.Contains(got, "return false") {
-		t.Fatalf("coding changed original checkout: %s", got)
-	}
-	f.verifyTDD(blocked)
 }
 
 type agenticWorkflowFixture struct {
@@ -532,7 +527,7 @@ func (f *agenticWorkflowFixture) verifyTDD(done model.ExecutionPlan) {
 	if f.debt {
 		f.verifyDebtTDDPair(red, green)
 	}
-	if f.debt && submissionGit(t, done.Worktree, "show", "HEAD:legacy_test.go") != submissionGit(t, f.repo, "show", "HEAD:legacy_test.go") {
+	if f.debt && submissionGit(t, done.Worktree, "show", agenticFixtureLegacyTestAtHead) != submissionGit(t, f.repo, "show", agenticFixtureLegacyTestAtHead) {
 		t.Fatal("submission changed unrelated failing test")
 	}
 }
@@ -588,7 +583,7 @@ func (f *agenticWorkflowFixture) reconcile(done model.ExecutionPlan) {
 	if contents, err := os.ReadFile(f.marker); !os.IsNotExist(err) {
 		t.Fatalf("Agentic workflow invoked gh: %s %v", contents, err)
 	}
-	if got := submissionGit(t, f.repo, "show", "HEAD:result.go"); !strings.Contains(got, "return false") {
+	if got := submissionGit(t, f.repo, "show", agenticFixtureResultAtHead); !strings.Contains(got, "return false") {
 		t.Fatal("coding modified original checkout")
 	}
 }

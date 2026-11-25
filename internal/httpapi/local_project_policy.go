@@ -27,31 +27,39 @@ func (s *Server) executeLocalProjectPolicy(ctx context.Context, command LocalCom
 		return json.Marshal(preview)
 	}
 	return s.commitLocalCommand(ctx, command, func(ctx context.Context) (any, error) {
-		preview, project, document, err := s.readPolicyApproval(ctx, command)
-		if err != nil {
-			return nil, err
-		}
-		if command.ExpectedVersion != preview.Version || command.ContentHash != preview.Hash {
-			return nil, store.ErrConflict
-		}
-		version, err := s.managedPolicyVersion(ctx, project.ID)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.Store.Put(ctx, policy.ManagedPolicyResource, project.ID, document, version); err != nil {
-			return nil, err
-		}
-		project.ManagedPolicy = true
-		if err := s.Engine.ConfirmProjectPolicy(ctx, project, preview.Version, project.Policy, preview.Hash); err != nil {
-			return nil, err
-		}
-		audit := model.Audit{Source: "local_operator", Action: command.Operation, Target: project.ID, Version: preview.Version, Reason: preview.Hash}
-		if err := s.Store.Audit(ctx, audit); err != nil {
-			return nil, err
-		}
-		preview.Version++
-		return preview, nil
+		return s.approveLocalProjectPolicy(ctx, command)
 	})
+}
+
+func (s *Server) approveLocalProjectPolicy(ctx context.Context, command LocalCommand) (localPolicyPreview, error) {
+	preview, project, document, err := s.readPolicyApproval(ctx, command)
+	if err != nil {
+		return localPolicyPreview{}, err
+	}
+	if command.ExpectedVersion != preview.Version || command.ContentHash != preview.Hash {
+		return localPolicyPreview{}, store.ErrConflict
+	}
+	if err := s.savePolicyApproval(ctx, preview, project, document); err != nil {
+		return localPolicyPreview{}, err
+	}
+	audit := model.Audit{Source: "local_operator", Action: command.Operation, Target: project.ID, Version: preview.Version, Reason: preview.Hash}
+	if err := s.Store.Audit(ctx, audit); err != nil {
+		return localPolicyPreview{}, err
+	}
+	preview.Version++
+	return preview, nil
+}
+
+func (s *Server) savePolicyApproval(ctx context.Context, preview localPolicyPreview, project model.Project, document model.ProjectPolicyDocument) error {
+	version, err := s.managedPolicyVersion(ctx, project.ID)
+	if err != nil {
+		return err
+	}
+	if err := s.Store.Put(ctx, policy.ManagedPolicyResource, project.ID, document, version); err != nil {
+		return err
+	}
+	project.ManagedPolicy = true
+	return s.Engine.ConfirmProjectPolicy(ctx, project, preview.Version, project.Policy, preview.Hash)
 }
 
 func (s *Server) readPolicyApproval(ctx context.Context, command LocalCommand) (localPolicyPreview, model.Project, model.ProjectPolicyDocument, error) {
@@ -88,16 +96,24 @@ func (s *Server) projectForPolicyApproval(ctx context.Context, ref string) (mode
 		return model.Project{}, 0, errors.New("registered project ID or absolute checkout path required")
 	}
 	if !filepath.IsAbs(ref) {
-		record, err := s.Store.Get(ctx, "projects", ref)
-		if err != nil {
-			return model.Project{}, 0, err
-		}
-		project, err := store.Decode[model.Project](record)
-		if err == nil && project.ID != record.ID {
-			err = store.ErrConflict
-		}
-		return project, record.Version, err
+		return s.projectForPolicyID(ctx, ref)
 	}
+	return s.projectForPolicyCheckout(ctx, ref)
+}
+
+func (s *Server) projectForPolicyID(ctx context.Context, id string) (model.Project, int, error) {
+	record, err := s.Store.Get(ctx, "projects", id)
+	if err != nil {
+		return model.Project{}, 0, err
+	}
+	project, err := store.Decode[model.Project](record)
+	if err == nil && project.ID != record.ID {
+		err = store.ErrConflict
+	}
+	return project, record.Version, err
+}
+
+func (s *Server) projectForPolicyCheckout(ctx context.Context, ref string) (model.Project, int, error) {
 	canonical, err := filepath.EvalSymlinks(ref)
 	if err != nil {
 		return model.Project{}, 0, err
@@ -106,6 +122,10 @@ func (s *Server) projectForPolicyApproval(ctx context.Context, ref string) (mode
 	if err != nil {
 		return model.Project{}, 0, err
 	}
+	return findPolicyCheckout(records, canonical)
+}
+
+func findPolicyCheckout(records []model.Record, canonical string) (model.Project, int, error) {
 	var project model.Project
 	var version int
 	for _, record := range records {

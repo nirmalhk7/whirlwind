@@ -12,6 +12,8 @@ import (
 	"whirlwind/internal/store"
 )
 
+const gitRevParseCommand = "rev-parse"
+
 // safe strips unsafe characters from generated path/branch identifiers and substitutes a random ID if nothing remains.
 func safe(id string) string {
 	var b strings.Builder
@@ -47,7 +49,7 @@ func (e *Engine) worktree(ctx context.Context, repo, path, branch, base string) 
 }
 
 func validateExistingWorktree(ctx context.Context, repo, path, branch, base string) error {
-	top, err := github.Run(ctx, path, "git", "rev-parse", "--show-toplevel")
+	top, err := github.Run(ctx, path, "git", gitRevParseCommand, "--show-toplevel")
 	if err != nil {
 		return fmt.Errorf("existing worktree is not a Git worktree: %w", err)
 	}
@@ -172,7 +174,7 @@ func validateCodingPaths(scope model.Policy, paths []string) error {
 // base fetches and resolves the configured remote default branch, or uses local HEAD when no default branch is recorded.
 func (e *Engine) base(ctx context.Context, p model.Project) (string, error) {
 	if p.DefaultBranch == "" {
-		return github.Run(ctx, p.Path, "git", "rev-parse", "HEAD")
+		return github.Run(ctx, p.Path, "git", gitRevParseCommand, "HEAD")
 	}
 	remotes, err := github.Run(ctx, p.Path, "git", "remote")
 	if err != nil {
@@ -187,7 +189,7 @@ func (e *Engine) base(ctx context.Context, p model.Project) (string, error) {
 	}
 	if !hasOrigin {
 		ref := "refs/heads/" + p.DefaultBranch + "^{commit}"
-		commit, err := github.Run(ctx, p.Path, "git", "rev-parse", "--verify", ref)
+		commit, err := github.Run(ctx, p.Path, "git", gitRevParseCommand, "--verify", ref)
 		if err != nil {
 			return "", fmt.Errorf("local default branch %q is unavailable and no origin remote is configured: %w", p.DefaultBranch, err)
 		}
@@ -198,7 +200,7 @@ func (e *Engine) base(ctx context.Context, p model.Project) (string, error) {
 	if _, err := github.Read(ctx, p.Path, "git", "fetch", "--no-tags", "origin", p.DefaultBranch); err != nil {
 		return "", err
 	}
-	return github.Run(ctx, p.Path, "git", "rev-parse", "refs/remotes/origin/"+p.DefaultBranch)
+	return github.Run(ctx, p.Path, "git", gitRevParseCommand, "refs/remotes/origin/"+p.DefaultBranch)
 }
 
 func safeRune(c rune) bool {

@@ -24,6 +24,13 @@ import (
 )
 
 const (
+	nativeCodingFixtureHeadTree = "HEAD^{tree}"
+	nativeCodingFixtureModel    = "fixture-model"
+	nativeCodingFixturePrimary  = "coding-primary"
+	nativeCodingFixtureRevParse = "rev-parse"
+)
+
+const (
 	nativeCodingSource = "src/result.sh"
 	nativeCodingTest   = "src/test_result.sh"
 	nativeCodingDelete = "src/obsolete.txt"
@@ -41,7 +48,7 @@ func TestCodingNativeACPDeliversExactVerifiedTree(t *testing.T) {
 		task, _ := localStoredTask(t, e, plan.ID)
 		if task.Stage == "complete" {
 			if task.Delivery == nil || task.ReviewedCommit != candidate.CandidateCommit || task.Delivery.Tree != candidate.CandidateTree ||
-				submissionGit(t, task.Delivery.Worktree, "rev-parse", "HEAD^{tree}") != candidate.CandidateTree {
+				submissionGit(t, task.Delivery.Worktree, nativeCodingFixtureRevParse, nativeCodingFixtureHeadTree) != candidate.CandidateTree {
 				t.Fatalf("review or delivery changed the verified tree: %+v", task.Delivery)
 			}
 			return
@@ -76,7 +83,7 @@ func TestCodingNativeACPFallbackRetainsScopeAndStopsPriorWriter(t *testing.T) {
 			t.Fatalf("replacement started before prior attempt stopped: %d", n)
 		}
 	}
-	if attempts[0].Provider != "coding-primary" || attempts[3].Provider != "coding-primary" ||
+	if attempts[0].Provider != nativeCodingFixturePrimary || attempts[3].Provider != nativeCodingFixturePrimary ||
 		attempts[4].Provider != "fake" || attempts[4].RequestedSessionID != "" || attempts[4].Success == nil || !*attempts[4].Success {
 		t.Fatal("fallback did not start a fresh successful Coding session")
 	}
@@ -207,8 +214,8 @@ func qualifyCodingFixtureScanner(t *testing.T, project model.Project, scanner mo
 	quality, err := externalQualitySnapshot(project)
 	requireWorkflowSuccess(t, err)
 	quality.PluginCatalog = []byte("plugins: {}\n")
-	head := submissionGit(t, project.Path, "rev-parse", "HEAD")
-	tree := submissionGit(t, project.Path, "rev-parse", "HEAD^{tree}")
+	head := submissionGit(t, project.Path, nativeCodingFixtureRevParse, "HEAD")
+	tree := submissionGit(t, project.Path, nativeCodingFixtureRevParse, nativeCodingFixtureHeadTree)
 	const id = "coding-quality-setup"
 	manifest := verification.JobManifest{
 		Version: 1, Purpose: verification.ProjectSetupPurpose,
@@ -241,17 +248,17 @@ func configureNativeCodingPeers(t *testing.T, e *Engine, project model.Project, 
 	requireWorkflowSuccess(t, err)
 	secondary.Command = []string{node, script, "code", project.Path}
 	requireWorkflowSuccess(t, e.Store.Put(ctx, "providers", secondary.ID, secondary, fixture.Version))
-	chain := []model.AgentChoice{{Provider: secondary.ID, Model: "fixture-model"}}
+	chain := []model.AgentChoice{{Provider: secondary.ID, Model: nativeCodingFixtureModel}}
 	if live != nil {
 		live.Available, live.Quota = provider.Available(*live), "unknown"
 		requireWorkflowSuccess(t, e.Store.Put(ctx, "providers", live.ID, *live, 0))
 		chain = []model.AgentChoice{*choice}
 	} else if fallback {
 		primary := secondary
-		primary.ID = "coding-primary"
+		primary.ID = nativeCodingFixturePrimary
 		primary.Command = []string{node, script, "transport-failure", project.Path}
 		requireWorkflowSuccess(t, e.Store.Put(ctx, "providers", primary.ID, primary, 0))
-		chain = append([]model.AgentChoice{{Provider: primary.ID, Model: "fixture-model"}}, chain...)
+		chain = append([]model.AgentChoice{{Provider: primary.ID, Model: nativeCodingFixtureModel}}, chain...)
 	}
 	putFixtureAgent(t, e.Store, "code", model.AgentConfig{Role: "code", Chain: chain})
 	for _, role := range []string{"review", "finalizer"} {
@@ -259,7 +266,7 @@ func configureNativeCodingPeers(t *testing.T, e *Engine, project model.Project, 
 		peer.ID = "coding-fixture-" + role
 		peer.Command = []string{node, script, role, project.Path}
 		requireWorkflowSuccess(t, e.Store.Put(ctx, "providers", peer.ID, peer, 0))
-		putFixtureAgent(t, e.Store, role, model.AgentConfig{Role: role, Chain: []model.AgentChoice{{Provider: peer.ID, Model: "fixture-model"}}})
+		putFixtureAgent(t, e.Store, role, model.AgentConfig{Role: role, Chain: []model.AgentChoice{{Provider: peer.ID, Model: nativeCodingFixtureModel}}})
 	}
 	e.Adapter = func(selected model.Provider) provider.Adapter { return provider.ProcessAdapter{Provider: selected} }
 }
@@ -287,8 +294,8 @@ func assertNativeCodingCandidate(t *testing.T, e *Engine, project model.Project,
 	requireWorkflowSuccess(t, err)
 	report := record.Report
 	if !report.Passed || report.PlanVersion != plan.PlanVersion || report.PlanHash != plan.PlanDocument.ApprovedHash ||
-		report.CandidateCommit != submissionGit(t, task.Worktree, "rev-parse", "HEAD") ||
-		report.CandidateTree != submissionGit(t, task.Worktree, "rev-parse", "HEAD^{tree}") || record.Patch == "" {
+		report.CandidateCommit != submissionGit(t, task.Worktree, nativeCodingFixtureRevParse, "HEAD") ||
+		report.CandidateTree != submissionGit(t, task.Worktree, nativeCodingFixtureRevParse, nativeCodingFixtureHeadTree) || record.Patch == "" {
 		t.Fatalf("runner output does not identify the exact approved candidate: %+v", report)
 	}
 	for path, want := range map[string]string{nativeCodingSource: "printf verified", resultFile: "protected"} {

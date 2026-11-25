@@ -12,6 +12,13 @@ import (
 	"whirlwind/internal/testutil/openshell"
 )
 
+const (
+	runtimeFixtureOpenShellLauncher  = "/opt/whirlwind/bridges/openshell/launch.mjs"
+	runtimeFixtureProviderReturn     = "provider-return"
+	runtimeFixtureReconcileAttempt   = "attempt-456"
+	runtimeFixtureStandaloneLauncher = "/opt/whirlwind/bridges/sandbox/launch.mjs"
+)
+
 func TestPriorOpenShellAttemptIsIsolatedBeforeReplacement(t *testing.T) {
 	fixture := openshell.Install(t)
 	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
@@ -21,7 +28,7 @@ func TestPriorOpenShellAttemptIsIsolatedBeforeReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "code", Purpose: "primary", CWD: cwd, Execution: &execution.Profile{Launcher: "/tmp/bridges/openshell/launch.mjs"}}}
-	prior := model.Attempt{AttemptID: "prior-open-shell", Task: task.ID, ProjectID: project.ID, PlanVersion: task.PlanVersion, Role: "code", Purpose: "primary", Status: "failed", Transport: "acp", ExecutionID: "attempt-456", ExecutionGeneration: 2, SandboxName: execution.OpenShellSandboxName("attempt-456"), SandboxID: "test-sandbox-" + execution.OpenShellSandboxName("attempt-456"), GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test", ExecutionLabelValue: execution.OpenShellExecutionLabel("attempt-456", 2)}
+	prior := model.Attempt{AttemptID: "prior-open-shell", Task: task.ID, ProjectID: project.ID, PlanVersion: task.PlanVersion, Role: "code", Purpose: "primary", Status: "failed", Transport: "acp", ExecutionID: runtimeFixtureReconcileAttempt, ExecutionGeneration: 2, SandboxName: execution.OpenShellSandboxName(runtimeFixtureReconcileAttempt), SandboxID: "test-sandbox-" + execution.OpenShellSandboxName(runtimeFixtureReconcileAttempt), GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test", ExecutionLabelValue: execution.OpenShellExecutionLabel(runtimeFixtureReconcileAttempt, 2)}
 	if err := e.Store.Put(context.Background(), "sessions", prior.AttemptID, prior, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -40,12 +47,12 @@ func TestPriorOpenShellAttemptIsIsolatedBeforeReplacement(t *testing.T) {
 func TestAgentAttemptReconcilesItsSandboxBeforeProviderReturn(t *testing.T) {
 	fixture := openshell.Install(t)
 	t.Setenv("WHIRLWIND_OPENSHELL_CLI", fixture.Binary)
-	profile := execution.Profile{ExecutionID: "provider-return", ExecutionGeneration: 2, SandboxName: execution.OpenShellSandboxName("provider-return"), GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test", ExecutionLabelValue: execution.OpenShellExecutionLabel("provider-return", 2)}
+	profile := execution.Profile{ExecutionID: runtimeFixtureProviderReturn, ExecutionGeneration: 2, SandboxName: execution.OpenShellSandboxName(runtimeFixtureProviderReturn), GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test", ExecutionLabelValue: execution.OpenShellExecutionLabel(runtimeFixtureProviderReturn, 2)}
 	args := []string{"sandbox", "create", "--name", profile.SandboxName, "--from", "image", "--policy", "/tmp/policy", "--driver-config-json", "{}", "--label", "whirlwind.io/execution=" + profile.ExecutionLabelValue, "--detach", "--no-auto-providers", "--output", "json", "--gateway", profile.GatewayName, "--gateway-endpoint", profile.GatewayEndpoint, "--workspace", profile.Workspace, "--", "/bin/sh", "-c", "exec sleep infinity"}
 	if _, err := fixture.RunCLI(t, args...); err != nil {
 		t.Fatal(err)
 	}
-	attempt := &agentAttempt{agentRun: &agentRun{input: provider.Input{Execution: &execution.Profile{Launcher: "/opt/whirlwind/bridges/openshell/launch.mjs", ExecutionID: profile.ExecutionID, ExecutionGeneration: profile.ExecutionGeneration, SandboxName: profile.SandboxName, SandboxID: "test-sandbox-" + profile.SandboxName, GatewayName: profile.GatewayName, GatewayEndpoint: profile.GatewayEndpoint, Workspace: profile.Workspace, ExecutionLabelValue: profile.ExecutionLabelValue}}}}
+	attempt := &agentAttempt{agentRun: &agentRun{input: provider.Input{Execution: &execution.Profile{Launcher: runtimeFixtureOpenShellLauncher, ExecutionID: profile.ExecutionID, ExecutionGeneration: profile.ExecutionGeneration, SandboxName: profile.SandboxName, SandboxID: "test-sandbox-" + profile.SandboxName, GatewayName: profile.GatewayName, GatewayEndpoint: profile.GatewayEndpoint, Workspace: profile.Workspace, ExecutionLabelValue: profile.ExecutionLabelValue}}}}
 	if err := attempt.reconcileOwnedRuntime(); err != nil {
 		t.Fatal(err)
 	}
@@ -85,8 +92,8 @@ func TestInterruptedKnownLocalRuntimeResumesOnlyAfterCleanProcessReap(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "code", Purpose: "primary", CWD: cwd, Execution: &execution.Profile{Launcher: "/opt/whirlwind/bridges/openshell/launch.mjs"}}}
-	legacy := model.Attempt{AttemptID: "legacy-local-clean", Task: task.ID, ProjectID: project.ID, PlanVersion: task.PlanVersion, Role: "code", Purpose: "primary", Status: "interrupted", Transport: "acp", RuntimeKind: "local", RuntimeLauncher: "/opt/whirlwind/bridges/sandbox/launch.mjs"}
+	run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "code", Purpose: "primary", CWD: cwd, Execution: &execution.Profile{Launcher: runtimeFixtureOpenShellLauncher}}}
+	legacy := model.Attempt{AttemptID: "legacy-local-clean", Task: task.ID, ProjectID: project.ID, PlanVersion: task.PlanVersion, Role: "code", Purpose: "primary", Status: "interrupted", Transport: "acp", RuntimeKind: "local", RuntimeLauncher: runtimeFixtureStandaloneLauncher}
 	if err := e.Store.Put(context.Background(), "sessions", legacy.AttemptID, legacy, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +107,7 @@ func TestRunningLocalAndUnknownExternalLegacyAttemptsRemainBlocked(t *testing.T)
 		name    string
 		attempt model.Attempt
 	}{
-		{name: "local still running", attempt: model.Attempt{RuntimeKind: "local", RuntimeLauncher: "/opt/whirlwind/bridges/sandbox/launch.mjs", Status: "running"}},
+		{name: "local still running", attempt: model.Attempt{RuntimeKind: "local", RuntimeLauncher: runtimeFixtureStandaloneLauncher, Status: "running"}},
 		{name: "unknown external", attempt: model.Attempt{RuntimeKind: "openshell", Status: "interrupted"}},
 	}
 	for _, test := range tests {
@@ -110,7 +117,7 @@ func TestRunningLocalAndUnknownExternalLegacyAttemptsRemainBlocked(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "code", Purpose: "primary", CWD: cwd, Execution: &execution.Profile{Launcher: "/opt/whirlwind/bridges/openshell/launch.mjs"}}}
+			run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "code", Purpose: "primary", CWD: cwd, Execution: &execution.Profile{Launcher: runtimeFixtureOpenShellLauncher}}}
 			attempt := test.attempt
 			attempt.AttemptID = "legacy-blocked"
 			attempt.Task = task.ID
@@ -140,8 +147,8 @@ func TestLegacyLocalProcessInspectionFailureBlocksRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.Root = root
-	run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "code", Purpose: "primary", CWD: cwd, Execution: &execution.Profile{Launcher: "/opt/whirlwind/bridges/openshell/launch.mjs"}}}
-	legacy := model.Attempt{AttemptID: "legacy-local-inspection-error", Task: task.ID, ProjectID: task.ProjectID, PlanVersion: task.PlanVersion, Role: "code", Purpose: "primary", Status: "interrupted", Transport: "acp", RuntimeKind: "local", RuntimeLauncher: "/opt/whirlwind/bridges/sandbox/launch.mjs"}
+	run := &agentRun{Engine: e, ctx: context.Background(), project: project, task: task, input: provider.Input{Role: "code", Purpose: "primary", CWD: cwd, Execution: &execution.Profile{Launcher: runtimeFixtureOpenShellLauncher}}}
+	legacy := model.Attempt{AttemptID: "legacy-local-inspection-error", Task: task.ID, ProjectID: task.ProjectID, PlanVersion: task.PlanVersion, Role: "code", Purpose: "primary", Status: "interrupted", Transport: "acp", RuntimeKind: "local", RuntimeLauncher: runtimeFixtureStandaloneLauncher}
 	if err := e.Store.Put(context.Background(), "sessions", legacy.AttemptID, legacy, 0); err != nil {
 		t.Fatal(err)
 	}

@@ -160,6 +160,13 @@ func validateOfflineDockerResult(m JobManifest, index int, result JobResult) err
 	if (result.Status == "pass" || result.Status == "fail") && (result.Truncated || !result.Runtime.CleanupVerified || !execution.IsOfflineDockerIdentity(result.Runtime.SandboxID, result.Runtime.ImageID) || result.ExitCode == nil || *result.ExitCode < 0 || *result.ExitCode > 255 || (*result.ExitCode == 0) != (result.Status == "pass")) {
 		return errors.New("offline Docker verification lacks complete command and cleanup proof")
 	}
+	if err := validateOfflineDockerImage(m, result.Runtime.ImageID); err != nil {
+		return err
+	}
+	return validateOfflineDockerStreams(m.Root, index, result)
+}
+
+func validateOfflineDockerImage(m JobManifest, runtimeImage string) error {
 	root, err := os.OpenRoot(m.Root)
 	if err != nil {
 		return err
@@ -167,10 +174,14 @@ func validateOfflineDockerResult(m JobManifest, index int, result JobResult) err
 	raw, err := root.ReadFile("offline-image.json")
 	closeErr := root.Close()
 	var imageID string
-	if err := errors.Join(err, closeErr, json.Unmarshal(raw, &imageID)); err != nil || imageID == "" || imageID != result.Runtime.ImageID || m.OfflineImageID != "" && m.OfflineImageID != imageID {
+	if err := errors.Join(err, closeErr, json.Unmarshal(raw, &imageID)); err != nil || imageID == "" || imageID != runtimeImage || m.OfflineImageID != "" && m.OfflineImageID != imageID {
 		return errors.New("offline Docker verification image evidence mismatch")
 	}
-	stdout, stderr, err := ReadJobStreams(m.Root, index)
+	return nil
+}
+
+func validateOfflineDockerStreams(root string, index int, result JobResult) error {
+	stdout, stderr, err := ReadJobStreams(root, index)
 	if err != nil {
 		return err
 	}

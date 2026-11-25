@@ -12,6 +12,10 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	codingBaselineFixtureOldTests = "old-tests"
+)
+
 type codingBaselineOutcome struct{ name, action string }
 
 func codingBaselineResult(tests ...codingBaselineOutcome) verification.Result {
@@ -132,7 +136,7 @@ func TestCodingInvalidRegressionNeverClaimsACompletedPass(t *testing.T) {
 	saveCodingBaselineRed(t, run, "recorded-red", red)
 
 	var err error
-	run.phase, err = run.phaseAgainstBaseline(t.Context(), codingOrigin{Production: "original", Tests: "old-tests"},
+	run.phase, err = run.phaseAgainstBaseline(t.Context(), codingOrigin{Production: "original", Tests: codingBaselineFixtureOldTests},
 		verification.Report{Passed: base.Passed, Results: []verification.Result{base}})
 	requireWorkflowSuccess(t, err)
 	got := run.output()
@@ -156,7 +160,7 @@ func TestCodingInvalidRegressionRetainsRawResultAndSpecificDiagnostic(t *testing
 	run.entry.Snapshot = "stored-candidate"
 	run.entry.Files = map[string]string{"main.go": "implemented", "main_test.go": "regression"}
 	requireWorkflowSuccess(t, a.Store.Put(ctx, "sessions", a.id, model.Attempt{AttemptID: a.id, Task: a.task.ID, Role: "code"}, 0))
-	origin := codingOrigin{Production: "original", Tests: "old-tests"}
+	origin := codingOrigin{Production: "original", Tests: codingBaselineFixtureOldTests}
 	requireWorkflowSuccess(t, a.Store.Put(ctx, "tdd_origins", codingOriginKey(a.task, a.input.UnitID), origin, 0))
 	baseline := verification.Report{Passed: true, Results: []verification.Result{base}}
 	// Use the persisted baseline precisely as the real check would; no
@@ -185,7 +189,7 @@ func TestCodingInvalidRegressionRetainsRawResultAndSpecificDiagnostic(t *testing
 func TestCodingInvalidRegressionExplainsMissingRedAndRunnerProblems(t *testing.T) {
 	base := codingBaselineResult(codingBaselineOutcome{"TestOld", "pass"})
 	baseline := verification.Report{Passed: true, Results: []verification.Result{base}}
-	origin := codingOrigin{Production: "original", Tests: "old-tests"}
+	origin := codingOrigin{Production: "original", Tests: codingBaselineFixtureOldTests}
 	for _, tc := range []struct {
 		name, want string
 		run        func() verification.Result
