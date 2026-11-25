@@ -105,44 +105,7 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	launcher("start")
 	db := openSeededTerminalStore(t, data)
 	engine := workflow.New(db, nil, data)
-	var project model.Project
-	waitOfflineFixture(t, data, "project registration", func() bool {
-		records, err := db.List(ctx, "projects")
-		if err != nil || len(records) != 1 {
-			return false
-		}
-		project, err = store.Decode[model.Project](records[0])
-		return err == nil
-	})
-	policyPath := filepath.Join(root, "reviewed-policy.yaml")
-	write(policyPath, "offline_docker_image: "+image+"\nallowed_paths: [result.txt, regression_test.go]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks:\n  - name: regression\n    command: [go, test, -mod=readonly, -count=1, -json, './...']\n    report_format: go-test-json\n    timeout_seconds: 90\n")
-	preview := launcher("policy", "preview", project.ID, policyPath)
-	fields := regexp.MustCompile(`Version (\d+)\nSHA256 ([a-f0-9]{64})`).FindStringSubmatch(preview)
-	if len(fields) != 3 {
-		t.Fatalf("read policy preview: %s", preview)
-	}
-	launcher("policy", "approve", project.ID, policyPath, fields[1], fields[2])
-	waitOfflineFixture(t, data, "managed offline setup", func() bool {
-		current, err := engine.Project(ctx, project.ID)
-		if err != nil {
-			return false
-		}
-		project = current
-		if project.Status == "error" && project.ManagedPolicy {
-			rows, _ := db.List(ctx, "operations")
-			for _, row := range rows {
-				op, _ := store.Decode[model.Operation](row)
-				if op.Kind == "project_setup" && op.Error != "" && op.ConfigurationHash == project.PolicyHash {
-					t.Fatalf("managed setup failed: %s", op.Error)
-				}
-			}
-		}
-		return project.Status == "approved" && project.OfflineQualification != nil
-	})
-	if project.PolicyHash != fields[2] || project.OfflineQualification.PolicyHash != fields[2] {
-		t.Fatalf("setup qualification differs from the approved policy: %+v", project.OfflineQualification)
-	}
-	t.Logf("qualified project=%s policy=%s setup=%s image=%s", project.ID, project.PolicyHash, project.OfflineQualification.JobID, project.OfflineQualification.ImageID)
+	project := approveManagedOfflineFixture(t, root, data, image, launcher, db, engine)
 
 	launcher("stop")
 	write(filepath.Join(candidate, "regression_test.go"), "package result\nimport (\"os\"; \"strings\"; \"testing\")\nfunc TestResultReady(t *testing.T) { data, err := os.ReadFile(\"result.txt\"); if err != nil || !strings.HasPrefix(string(data), \"ready\\n\") { t.Fatal(\"result is not ready\") } }\n")
@@ -193,6 +156,50 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 		t.Fatal("supervisor changed the original checkout")
 	}
 	t.Logf("seeded red=%s repair=%s qualified as green=%s; shipped supervisor reached the Reviewer preparation gate", red, green, green)
+}
+
+func approveManagedOfflineFixture(t *testing.T, root, data, image string, launcher func(...string) string, db *store.Store, engine *workflow.Engine) model.Project {
+	t.Helper()
+	ctx := t.Context()
+	var project model.Project
+	waitOfflineFixture(t, data, "project registration", func() bool {
+		records, err := db.List(ctx, "projects")
+		if err != nil || len(records) != 1 {
+			return false
+		}
+		project, err = store.Decode[model.Project](records[0])
+		return err == nil
+	})
+	policyPath := filepath.Join(root, "reviewed-policy.yaml")
+	mustSeedTerminal(t, os.WriteFile(policyPath, []byte("offline_docker_image: "+image+"\nallowed_paths: [result.txt, regression_test.go]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks:\n  - name: regression\n    command: [go, test, -mod=readonly, -count=1, -json, './...']\n    report_format: go-test-json\n    timeout_seconds: 90\n"), 0600))
+	preview := launcher("policy", "preview", project.ID, policyPath)
+	fields := regexp.MustCompile(`Version (\d+)\nSHA256 ([a-f0-9]{64})`).FindStringSubmatch(preview)
+	if len(fields) != 3 {
+		t.Fatalf("read policy preview: %s", preview)
+	}
+	launcher("policy", "approve", project.ID, policyPath, fields[1], fields[2])
+	waitOfflineFixture(t, data, "managed offline setup", func() bool {
+		current, err := engine.Project(ctx, project.ID)
+		if err != nil {
+			return false
+		}
+		project = current
+		if project.Status == "error" && project.ManagedPolicy {
+			rows, _ := db.List(ctx, "operations")
+			for _, row := range rows {
+				op, _ := store.Decode[model.Operation](row)
+				if op.Kind == "project_setup" && op.Error != "" && op.ConfigurationHash == project.PolicyHash {
+					t.Fatalf("managed setup failed: %s", op.Error)
+				}
+			}
+		}
+		return project.Status == "approved" && project.OfflineQualification != nil
+	})
+	if project.PolicyHash != fields[2] || project.OfflineQualification.PolicyHash != fields[2] {
+		t.Fatalf("setup qualification differs from the approved policy: %+v", project.OfflineQualification)
+	}
+	t.Logf("qualified project=%s policy=%s setup=%s image=%s", project.ID, project.PolicyHash, project.OfflineQualification.JobID, project.OfflineQualification.ImageID)
+	return project
 }
 
 func seedOfflineCandidatePlan(t *testing.T, e *workflow.Engine, db *store.Store, project model.Project, candidate, base string) model.ExecutionPlan {

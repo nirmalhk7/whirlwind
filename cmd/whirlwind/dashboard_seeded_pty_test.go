@@ -274,6 +274,43 @@ func bumpSeededIdea(ctx context.Context, s *store.Store) error {
 
 func assertSeededTerminalDecisions(t *testing.T, s *store.Store, data, initialHash string) {
 	t.Helper()
+	writes := assertSeededTerminalJournal(t, data)
+	idea := terminalFixtureRecord[model.Idea](t, s, "ideas", fixtureDraftIdea, 4)
+	if idea.DecisionStatus != "approved" || idea.Why != "Background update preserved" ||
+		strings.Contains(idea.What, "STALE") || !strings.Contains(idea.What, "APPROVED") {
+		t.Fatalf("draft write, stale protection, or distinct idea approval lost: %+v", idea)
+	}
+	cancelled := terminalFixtureRecord[model.Idea](t, s, "ideas", fixtureCancelIdea, 4)
+	if cancelled.DecisionStatus != "error" || cancelled.ErrorReason != "user_cancelled" {
+		t.Fatalf("planner cancellation did not persist: %+v", cancelled)
+	}
+	cancelledPlan := terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", model.PlanID("idea:"+fixtureCancelIdea), 2)
+	cancelledAttempt := terminalFixtureRecord[model.Attempt](t, s, "sessions", terminalFixtureCancelledAttempt, 2)
+	if cancelledPlan.Stage != "cancelled" || cancelledAttempt.Status != "cancelled" || !cancelledAttempt.Finished {
+		t.Fatalf("planner cancellation left plan or attempt active: stage=%s attempt=%s", cancelledPlan.Stage, cancelledAttempt.Status)
+	}
+	plan := terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", fixtureDraftPlan, 3)
+	if writes[4].Request.ContentHash != initialHash || writes[5].Request.ContentHash == initialHash ||
+		plan.PlanDocument.ApprovedHash != writes[5].Request.ContentHash ||
+		plan.Plan.Objective != fixtureEditedTitle || plan.Stage != "coding" {
+		t.Fatalf("Vim save/approval did not bind separate document identities: %+v; %+v", plan, writes[4:6])
+	}
+	q := terminalFixtureRecord[model.QuestionSet](t, s, "questions", fixtureQuestion, 2)
+	if q.Status != "answered" || q.Answers["encoding"] != "UTF-8" {
+		t.Fatalf("saved clarification not answered: %+v", q)
+	}
+	attemptRecord, err := s.Get(context.Background(), "sessions", fixtureAttempt)
+	mustSeedTerminal(t, err)
+	attempt, err := store.Decode[model.Attempt](attemptRecord)
+	mustSeedTerminal(t, err)
+	if attempt.DeadlineAt != fixtureDeadline || attempt.RestartCount != 2 {
+		t.Fatalf("reopening or answering reset attempt deadline/retry history: %+v", attempt)
+	}
+	terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", fixtureCompletedPlan, 1)
+}
+
+func assertSeededTerminalJournal(t *testing.T, data string) []terminalJournalEntry {
+	t.Helper()
 	contents, err := os.ReadFile(filepath.Join(data, terminalFixtureRequestsFile))
 	mustSeedTerminal(t, err)
 	var writes []terminalJournalEntry
@@ -311,38 +348,7 @@ func assertSeededTerminalDecisions(t *testing.T, s *store.Store, data, initialHa
 			t.Fatalf("decision %d: got %+v want %+v", i, got, want)
 		}
 	}
-	idea := terminalFixtureRecord[model.Idea](t, s, "ideas", fixtureDraftIdea, 4)
-	if idea.DecisionStatus != "approved" || idea.Why != "Background update preserved" ||
-		strings.Contains(idea.What, "STALE") || !strings.Contains(idea.What, "APPROVED") {
-		t.Fatalf("draft write, stale protection, or distinct idea approval lost: %+v", idea)
-	}
-	cancelled := terminalFixtureRecord[model.Idea](t, s, "ideas", fixtureCancelIdea, 4)
-	if cancelled.DecisionStatus != "error" || cancelled.ErrorReason != "user_cancelled" {
-		t.Fatalf("planner cancellation did not persist: %+v", cancelled)
-	}
-	cancelledPlan := terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", model.PlanID("idea:"+fixtureCancelIdea), 2)
-	cancelledAttempt := terminalFixtureRecord[model.Attempt](t, s, "sessions", terminalFixtureCancelledAttempt, 2)
-	if cancelledPlan.Stage != "cancelled" || cancelledAttempt.Status != "cancelled" || !cancelledAttempt.Finished {
-		t.Fatalf("planner cancellation left plan or attempt active: stage=%s attempt=%s", cancelledPlan.Stage, cancelledAttempt.Status)
-	}
-	plan := terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", fixtureDraftPlan, 3)
-	if writes[4].Request.ContentHash != initialHash || writes[5].Request.ContentHash == initialHash ||
-		plan.PlanDocument.ApprovedHash != writes[5].Request.ContentHash ||
-		plan.Plan.Objective != fixtureEditedTitle || plan.Stage != "coding" {
-		t.Fatalf("Vim save/approval did not bind separate document identities: %+v; %+v", plan, writes[4:6])
-	}
-	q := terminalFixtureRecord[model.QuestionSet](t, s, "questions", fixtureQuestion, 2)
-	if q.Status != "answered" || q.Answers["encoding"] != "UTF-8" {
-		t.Fatalf("saved clarification not answered: %+v", q)
-	}
-	attemptRecord, err := s.Get(context.Background(), "sessions", fixtureAttempt)
-	mustSeedTerminal(t, err)
-	attempt, err := store.Decode[model.Attempt](attemptRecord)
-	mustSeedTerminal(t, err)
-	if attempt.DeadlineAt != fixtureDeadline || attempt.RestartCount != 2 {
-		t.Fatalf("reopening or answering reset attempt deadline/retry history: %+v", attempt)
-	}
-	terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", fixtureCompletedPlan, 1)
+	return writes
 }
 
 func terminalFixtureRecord[T any](t *testing.T, s *store.Store, kind, id string, wantVersion int) T {
