@@ -44,9 +44,10 @@ func projectSetupRunDetails(id string, run ideationRunView) string {
 	if run.Error != "" {
 		fmt.Fprintf(&text, "\nSetup error: %s\n", run.Error)
 	}
-	if run.Stage == "failed" {
+	switch run.Stage {
+	case "failed":
 		text.WriteString("\nPress r in Runs to explicitly retry setup.\n")
-	} else if run.Stage == "complete" {
+	case "complete":
 		text.WriteString("\nPress r in Runs to explicitly recheck project setup.\n")
 	}
 	return text.String()

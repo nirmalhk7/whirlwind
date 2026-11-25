@@ -130,7 +130,11 @@ func (s *Store) searchProposalRows(ctx context.Context, query model.ProposalQuer
 }
 
 func ftsQuery(input string) string {
-	words := strings.FieldsFunc(strings.ToLower(input), func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9') })
+	words := strings.FieldsFunc(strings.ToLower(input), func(r rune) bool {
+		letter := r >= 'a' && r <= 'z'
+		digit := r >= '0' && r <= '9'
+		return !letter && !digit
+	})
 	if len(words) > 16 {
 		words = words[:16]
 	}

@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -146,7 +145,7 @@ func writeOfflineBlob(root *os.Root, reader io.Reader, blob offlineBlob, size in
 	if err := root.MkdirAll(filepath.Dir(blob.path), 0755); err != nil {
 		return err
 	}
-	var digest hash.Hash = sha1.New() // SHA-1 is the Git object format for 40-hex IDs.
+	digest := sha1.New() // SHA-1 is the Git object format for 40-hex IDs.
 	if len(blob.hash) == 64 {
 		digest = sha256.New()
 	}

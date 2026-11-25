@@ -88,10 +88,7 @@ func remotePublicationMutation(perm provider.Permission) bool {
 			return true
 		}
 	}
-	if isRemoteMutationCommand(perm.Command, 0) {
-		return true
-	}
-	return false
+	return isRemoteMutationCommand(perm.Command, 0)
 }
 
 func isRemoteMutationCommand(command []string, depth int) bool {

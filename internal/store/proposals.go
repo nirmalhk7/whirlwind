@@ -49,9 +49,10 @@ func (s *Store) UpdateProposalOutcome(ctx context.Context, project, id, status, 
 			return err
 		}
 		proposal.Status = status
-		if status == "rejected" {
+		switch status {
+		case "rejected":
 			proposal.RejectionReason = strings.TrimSpace(reason)
-		} else if status == "deferred" || status == "dismissed" || status == "removed" {
+		case "deferred", "dismissed", "removed":
 			proposal.DeferralReason = strings.TrimSpace(reason)
 		}
 		if len(plans) > 0 {
