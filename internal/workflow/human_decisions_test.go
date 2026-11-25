@@ -183,17 +183,7 @@ func TestOlderPendingQuestionCannotResumeNewerPauseAndClarificationsKeepRetryBud
 				t.Fatalf("older pending question resumed newer pause: %v", err)
 			}
 		}
-		questionRecord, err := e.Store.Get(ctx, "questions", id)
-		requireWorkflowSuccess(t, err)
-		if err := e.AnswerQuestionSet(ctx, id, questionRecord.Version, map[string]string{"choice": "answer"}, false); err != nil {
-			t.Fatalf("clarification cycle %d failed: %v", cycle+1, err)
-		}
-		attemptRecord, err := e.Store.Get(ctx, "sessions", attemptID)
-		requireWorkflowSuccess(t, err)
-		storedAttempt, err := store.Decode[model.Attempt](attemptRecord)
-		if err != nil || storedAttempt.DeadlineAt != deadline {
-			t.Fatalf("clarification changed attempt deadline: %+v %v", storedAttempt, err)
-		}
+		assertClarificationPreservesDeadline(t, e, id, attemptID, deadline, cycle+1)
 		count, _, err := run.persistedRestartState(choice)
 		if err != nil || count != 2 {
 			t.Fatalf("clarification consumed runtime retry budget: count=%d err=%v", count, err)
@@ -208,6 +198,22 @@ func TestOlderPendingQuestionCannotResumeNewerPauseAndClarificationsKeepRetryBud
 	count, _, err := run.persistedRestartState(choice)
 	if err != nil || count != 3 {
 		t.Fatalf("runtime failure did not retain one configured restart after clarifications: count=%d err=%v", count, err)
+	}
+}
+
+func assertClarificationPreservesDeadline(t *testing.T, e *Engine, questionID, attemptID, deadline string, cycle int) {
+	t.Helper()
+	ctx := context.Background()
+	questionRecord, err := e.Store.Get(ctx, "questions", questionID)
+	requireWorkflowSuccess(t, err)
+	if err := e.AnswerQuestionSet(ctx, questionID, questionRecord.Version, map[string]string{"choice": "answer"}, false); err != nil {
+		t.Fatalf("clarification cycle %d failed: %v", cycle, err)
+	}
+	attemptRecord, err := e.Store.Get(ctx, "sessions", attemptID)
+	requireWorkflowSuccess(t, err)
+	storedAttempt, err := store.Decode[model.Attempt](attemptRecord)
+	if err != nil || storedAttempt.DeadlineAt != deadline {
+		t.Fatalf("clarification changed attempt deadline: %+v %v", storedAttempt, err)
 	}
 }
 

@@ -41,15 +41,7 @@ func (a *runtimeMatrixUnhealthyAdapter) Run(ctx context.Context, input provider.
 		}
 		a.fallbacks++
 		if input.Execution != nil && execution.IsNonoLauncher(input.Execution.Launcher) {
-			command := []string{"/bin/sh", "-c", `IFS= read -r request; id=$(printf '%s' "$request" | sed -E 's/.*"id":([^,}]+).*/\1/'); printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"`}
-			rpc, err := provider.StartWithProfile(ctx, command, *input.Execution, nil)
-			if err != nil {
-				return provider.Output{}, err
-			}
-			if err := rpc.Call(ctx, "initialize", map[string]any{"protocolVersion": 1}, nil); err != nil {
-				return provider.Output{}, errors.Join(err, rpc.Close())
-			}
-			if err := rpc.Close(); err != nil {
+			if err := initializeRuntimeMatrixFallback(ctx, *input.Execution); err != nil {
 				return provider.Output{}, err
 			}
 		}
@@ -60,6 +52,21 @@ func (a *runtimeMatrixUnhealthyAdapter) Run(ctx context.Context, input provider.
 	}
 	a.failures++
 	return a.runWithUnhealthySandbox(ctx, input)
+}
+
+func initializeRuntimeMatrixFallback(ctx context.Context, profile execution.Profile) error {
+	command := []string{"/bin/sh", "-c", `IFS= read -r request; id=$(printf '%s' "$request" | sed -E 's/.*"id":([^,}]+).*/\1/'); printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"`}
+	rpc, err := provider.StartWithProfile(ctx, command, profile, nil)
+	if err != nil {
+		return err
+	}
+	if err := rpc.Call(ctx, "initialize", map[string]any{"protocolVersion": 1}, nil); err != nil {
+		return errors.Join(err, rpc.Close())
+	}
+	if err := rpc.Close(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *runtimeMatrixUnhealthyAdapter) runWithUnhealthySandbox(ctx context.Context, input provider.Input) (provider.Output, error) {

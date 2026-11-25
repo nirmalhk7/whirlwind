@@ -141,10 +141,7 @@ func (e *Engine) acceptedDirectionRepairs(ctx context.Context, request direction
 
 func (e *Engine) repairDirections(ctx context.Context, request directionGenerationRequest, accepted []model.Direction, maxAttempts int) ([]model.Direction, error) {
 	var rejected error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if len(missingDirectionCategories(accepted)) == 0 {
-			return accepted, nil
-		}
+	for attempt := 0; attempt < maxAttempts && len(missingDirectionCategories(accepted)) != 0; attempt++ {
 		request.accepted = accepted
 		request.attempt = attempt
 		if err := e.reserveRepairCandidates(ctx, &request); err != nil {

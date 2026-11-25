@@ -57,37 +57,44 @@ func TestParityPlanSavePublishesMarkdownWithoutApproval(t *testing.T) {
 func TestParityActiveApprovedPlanWaitsBeforeSavingChanges(t *testing.T) {
 	for _, stage := range []string{"coding", "review", "repair", "publishing", "submitting", "waiting_quota", "questions", "approval"} {
 		t.Run(stage, func(t *testing.T) {
-			ctx := context.Background()
-			e, task, view := approvePlanEditFixture(t, ctx)
-			approved, version := localStoredTask(t, e, task.ID)
-			approved.Stage = stage
-			requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, approved, version))
-			active, version := localStoredTask(t, e, task.ID)
-			stopped := false
-			e.running[task.ID] = func() { stopped = true }
-			edited := strings.Replace(view.Content, planEditFixtureTitle, planEditFixtureMonthlyTitle, 1)
-			if err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, view.Content); err != nil {
-				t.Fatalf("unchanged active plan save: %v", err)
-			}
-			current, currentVersion := localStoredTask(t, e, task.ID)
-			if currentVersion != version || !reflect.DeepEqual(current, active) || stopped {
-				t.Fatalf("unchanged active save changed plan or stopped runner: version=%d want=%d task=%+v stopped=%v", currentVersion, version, current, stopped)
-			}
-
-			err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
-			if !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "wait until") || !strings.Contains(err.Error(), "pause") {
-				t.Fatalf("active approved plan edit lacked actionable conflict: %v", err)
-			}
-			current, currentVersion = localStoredTask(t, e, task.ID)
-			if currentVersion != version || !reflect.DeepEqual(current, active) || stopped {
-				t.Fatalf("active approved plan changed or runner stopped: version=%d want=%d task=%+v stopped=%v", currentVersion, version, current, stopped)
-			}
-			content, err := os.ReadFile(view.Path)
-			if err != nil || string(content) != view.Content {
-				t.Fatalf("active document changed: %v", err)
-			}
-			assertFrozenPlanEditSnapshot(t, ctx, e, task.ID, view, "active immutable approval changed")
+			assertActivePlanEditIsFenced(t, stage)
 		})
+	}
+}
+
+func assertActivePlanEditIsFenced(t *testing.T, stage string) {
+	t.Helper()
+	ctx := context.Background()
+	e, task, view := approvePlanEditFixture(t, ctx)
+	approved, version := localStoredTask(t, e, task.ID)
+	approved.Stage = stage
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "execution_plans", task.ID, approved, version))
+	active, version := localStoredTask(t, e, task.ID)
+	stopped := false
+	e.running[task.ID] = func() { stopped = true }
+	edited := strings.Replace(view.Content, planEditFixtureTitle, planEditFixtureMonthlyTitle, 1)
+	if err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, view.Content); err != nil {
+		t.Fatalf("unchanged active plan save: %v", err)
+	}
+	assertActivePlanUnchanged(t, e, active, version, stopped, "unchanged active save")
+
+	err := e.SaveLocalPlan(ctx, task.ID, version, view.Hash, edited)
+	if !errors.Is(err, store.ErrConflict) || !strings.Contains(err.Error(), "wait until") || !strings.Contains(err.Error(), "pause") {
+		t.Fatalf("active approved plan edit lacked actionable conflict: %v", err)
+	}
+	assertActivePlanUnchanged(t, e, active, version, stopped, "active approved plan edit")
+	content, err := os.ReadFile(view.Path)
+	if err != nil || string(content) != view.Content {
+		t.Fatalf("active document changed: %v", err)
+	}
+	assertFrozenPlanEditSnapshot(t, ctx, e, task.ID, view, "active immutable approval changed")
+}
+
+func assertActivePlanUnchanged(t *testing.T, e *Engine, active model.ExecutionPlan, version int, stopped bool, action string) {
+	t.Helper()
+	current, currentVersion := localStoredTask(t, e, active.ID)
+	if currentVersion != version || !reflect.DeepEqual(current, active) || stopped {
+		t.Fatalf("%s changed plan or stopped runner: version=%d want=%d task=%+v stopped=%v", action, currentVersion, version, current, stopped)
 	}
 }
 

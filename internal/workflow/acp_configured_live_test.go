@@ -134,6 +134,11 @@ func qualifyLiveACP(t *testing.T, settings liveACPSettings, id string) {
 		t.Log("inference/effective-settings/tools/resume/unsupported-settings=incomplete (no configured selection)")
 		return
 	}
+	qualifyLiveReadOnlyTurns(t, p, cwd, choice)
+}
+
+func qualifyLiveReadOnlyTurns(t *testing.T, p model.Provider, cwd string, choice model.AgentChoice) {
+	t.Helper()
 	t.Logf("configured role=%s model=%s thinking=%+v; sandbox grants unchanged", liveRole(), choice.Model, choice.Thinking)
 	input := provider.Input{Role: liveRole(), CWD: cwd, ReadOnly: true, Model: choice.Model, Thinking: choice.Thinking, Policy: model.Policy{Sandbox: p.Sandbox}}
 	adapter := provider.ProcessAdapter{Provider: p}

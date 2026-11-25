@@ -340,16 +340,7 @@ func assertQueuedSetupCatalog(t *testing.T, ctx context.Context, e *Engine, proj
 	if !meta.Onboarding || meta.Phase != "catalog" || meta.QualityRoot != canonicalQualityRoot || meta.SnapshotHash == "" {
 		t.Fatalf("catalog checkpoint lost setup evidence: %+v", meta)
 	}
-	savedProject, err := e.Project(ctx, project.ID)
-	requireWorkflowSuccess(t, err)
-	if savedProject.Status != "draft" {
-		t.Fatalf("project became ready before scanner qualification: %s", savedProject.Status)
-	}
-	for _, path := range []string{setupFixtureQltyConfig, setupFixtureGitleaksConfig} {
-		if _, err := os.Stat(filepath.Join(qualityRoot, "config", path)); err != nil {
-			t.Fatalf("default file not published outside source: %s: %v", path, err)
-		}
-	}
+	assertPreparedScannerFiles(t, ctx, e, project.ID, qualityRoot)
 	var catalogID string
 	for _, item := range operations {
 		candidate, decodeErr := store.Decode[model.Operation](item)
@@ -362,6 +353,20 @@ func assertQueuedSetupCatalog(t *testing.T, ctx context.Context, e *Engine, proj
 		t.Fatal("effective catalog probe operation missing")
 	}
 	return catalogID
+}
+
+func assertPreparedScannerFiles(t *testing.T, ctx context.Context, e *Engine, projectID, qualityRoot string) {
+	t.Helper()
+	savedProject, err := e.Project(ctx, projectID)
+	requireWorkflowSuccess(t, err)
+	if savedProject.Status != "draft" {
+		t.Fatalf("project became ready before scanner qualification: %s", savedProject.Status)
+	}
+	for _, path := range []string{setupFixtureQltyConfig, setupFixtureGitleaksConfig} {
+		if _, err := os.Stat(filepath.Join(qualityRoot, "config", path)); err != nil {
+			t.Fatalf("default file not published outside source: %s: %v", path, err)
+		}
+	}
 }
 
 func finishFixtureCatalogProbe(t *testing.T, ctx context.Context, e *Engine, project model.Project, catalogID, catalog string) {
