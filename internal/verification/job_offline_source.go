@@ -119,24 +119,31 @@ func unpackOfflineBlobs(ctx context.Context, stage string, raw io.Reader, blobs 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		header, err := reader.ReadSlice('\n')
-		fields := strings.Fields(string(header))
-		if err != nil || len(fields) != 3 || fields[0] != blob.hash || fields[1] != "blob" {
-			return errors.New("offline export omitted a Git blob or changed its identity")
-		}
-		size, err := strconv.ParseInt(fields[2], 10, 64)
-		if err != nil || size < 0 || size > offlineSourceLimit {
-			return errors.New("offline export has an invalid Git blob size")
-		}
-		if err := writeOfflineBlob(root, reader, blob, size); err != nil {
+		if err := unpackOfflineBlob(root, reader, blob); err != nil {
 			return err
-		}
-		if end, err := reader.ReadByte(); err != nil || end != '\n' {
-			return errors.New("offline export has invalid Git blob framing")
 		}
 	}
 	if _, err := reader.ReadByte(); !errors.Is(err, io.EOF) {
 		return errors.New("offline export includes unexpected Git data")
+	}
+	return nil
+}
+
+func unpackOfflineBlob(root *os.Root, reader *bufio.Reader, blob offlineBlob) error {
+	header, err := reader.ReadSlice('\n')
+	fields := strings.Fields(string(header))
+	if err != nil || len(fields) != 3 || fields[0] != blob.hash || fields[1] != "blob" {
+		return errors.New("offline export omitted a Git blob or changed its identity")
+	}
+	size, err := strconv.ParseInt(fields[2], 10, 64)
+	if err != nil || size < 0 || size > offlineSourceLimit {
+		return errors.New("offline export has an invalid Git blob size")
+	}
+	if err := writeOfflineBlob(root, reader, blob, size); err != nil {
+		return err
+	}
+	if end, err := reader.ReadByte(); err != nil || end != '\n' {
+		return errors.New("offline export has invalid Git blob framing")
 	}
 	return nil
 }

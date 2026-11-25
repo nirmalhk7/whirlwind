@@ -169,6 +169,28 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 	if greenReport.Validate(stale) == nil {
 		t.Fatal("report accepted a changed candidate")
 	}
+	assertOfflineJobReplay(t, ctx, verifier, greenManifest, greenReport)
+	missing := manifest("missing-image", green, greenTree)
+	missing.OfflineDockerImage = "golang@sha256:" + strings.Repeat("0", 64)
+	if _, err := RunLocalJob(ctx, verifier, missing, nil); err == nil || !strings.Contains(err.Error(), "already be present locally") {
+		t.Fatalf("missing image did not fail closed: %v", err)
+	}
+	assertOfflineJobDeadline(t, ctx, verifier, manifest("expired", green, greenTree))
+	if git("status", "--porcelain") != before || git(offlineFixtureGitRevParse, "HEAD") != green {
+		t.Fatal("offline verifier changed the input checkout")
+	}
+	canary, err := os.ReadFile(canaryPath)
+	requireVerificationSuccess(t, err)
+	if _, err := os.Stat(filterCanary); !os.IsNotExist(err) {
+		t.Fatalf("host Git smudge filter executed: %v", err)
+	}
+	if string(canary) != offlineFixtureCanaryText {
+		t.Fatal("outside canary changed")
+	}
+}
+
+func assertOfflineJobReplay(t *testing.T, ctx context.Context, verifier string, greenManifest JobManifest, greenReport JobReport) {
+	t.Helper()
 	// The same job can reopen its journal, preserving container identity and raw evidence.
 	reopened, err := RunLocalJob(ctx, verifier, greenManifest, nil)
 	requireVerificationSuccess(t, err)
@@ -182,12 +204,10 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 	if _, err := RunLocalJob(ctx, verifier, greenManifest, nil); err == nil {
 		t.Fatal("shipped verifier replayed or accepted a tampered report")
 	}
-	missing := manifest("missing-image", green, greenTree)
-	missing.OfflineDockerImage = "golang@sha256:" + strings.Repeat("0", 64)
-	if _, err := RunLocalJob(ctx, verifier, missing, nil); err == nil || !strings.Contains(err.Error(), "already be present locally") {
-		t.Fatalf("missing image did not fail closed: %v", err)
-	}
-	expired := manifest("expired", green, greenTree)
+}
+
+func assertOfflineJobDeadline(t *testing.T, ctx context.Context, verifier string, expired JobManifest) {
+	t.Helper()
 	expired.Commands = []JobCommand{{Name: "deadline", Command: []string{"sh", "-c", "printf started; sleep 30"}, TimeoutSeconds: 5}}
 	lapsed, err := RunLocalJob(ctx, verifier, expired, nil)
 	requireVerificationSuccess(t, err)
@@ -196,20 +216,9 @@ func TestOfflineDockerShippedVerifier(t *testing.T) {
 	}
 	identity := lapsed.Results[0].Runtime.ExecutionID
 	look := exec.CommandContext(ctx, "docker", "--host=unix:///var/run/docker.sock", "container", "ls", "--all", "--quiet", "--filter", "name=^/"+identity+"$")
-	look.Env = []string{"HOME=" + root, "PATH=" + os.Getenv("PATH")}
+	look.Env = []string{"HOME=" + filepath.Dir(expired.Root), "PATH=" + os.Getenv("PATH")}
 	if remaining, err := look.CombinedOutput(); err != nil || strings.TrimSpace(string(remaining)) != "" {
 		t.Fatalf("daemon still reports the timed-out container: %s (%v)", remaining, err)
-	}
-	if git("status", "--porcelain") != before || git(offlineFixtureGitRevParse, "HEAD") != green {
-		t.Fatal("offline verifier changed the input checkout")
-	}
-	canary, err := os.ReadFile(canaryPath)
-	requireVerificationSuccess(t, err)
-	if _, err := os.Stat(filterCanary); !os.IsNotExist(err) {
-		t.Fatalf("host Git smudge filter executed: %v", err)
-	}
-	if string(canary) != offlineFixtureCanaryText {
-		t.Fatal("outside canary changed")
 	}
 }
 

@@ -272,33 +272,38 @@ func TestCompletedVerificationReleasesStagingAndRetainsEvidence(t *testing.T) {
 	}
 	run()
 	for i := 0; i < 2; i++ {
-		assertCompletedStagingRemoved(t, m.Root)
-		saved, err := readJobReport(m)
-		requireVerificationSuccess(t, err)
-		patch, err := ReadAutofixPatch(m, 1, saved.Results[1])
-		requireVerificationSuccess(t, err)
-		if !bytes.Contains(patch, []byte("+corrected content")) {
-			t.Fatalf("lost patch: %q", patch)
-		}
-		retained, err := os.ReadFile(filepath.Join(m.Root, artifact.Artifacts[0].Location))
-		requireVerificationSuccess(t, err)
-		if string(retained) != "retained evidence\n" {
-			t.Fatalf("lost retained artifact: %q", retained)
-		}
-		hash, err := hashQualityTree(identity.ToolRuntimePath)
-		requireVerificationSuccess(t, err)
-		if hash != identity.ToolRuntimeHash {
-			t.Fatal("changed retained scanner runtime")
-		}
-		out, stderr, err := ReadJobStreams(m.Root, 0)
-		requireVerificationSuccess(t, err)
-		if out != "stream evidence\n" || stderr != out {
-			t.Fatal("lost retained streams")
-		}
-		if _, err := os.Stat(filepath.Join(m.Root, jobJournalFilename)); err != nil {
-			t.Fatal(err)
-		}
+		assertRetainedVerificationEvidence(t, m, artifact.Artifacts[0].Location, identity)
 		run()
+	}
+}
+
+func assertRetainedVerificationEvidence(t *testing.T, m JobManifest, artifactLocation string, identity *model.QualityIdentity) {
+	t.Helper()
+	assertCompletedStagingRemoved(t, m.Root)
+	saved, err := readJobReport(m)
+	requireVerificationSuccess(t, err)
+	patch, err := ReadAutofixPatch(m, 1, saved.Results[1])
+	requireVerificationSuccess(t, err)
+	if !bytes.Contains(patch, []byte("+corrected content")) {
+		t.Fatalf("lost patch: %q", patch)
+	}
+	retained, err := os.ReadFile(filepath.Join(m.Root, artifactLocation))
+	requireVerificationSuccess(t, err)
+	if string(retained) != "retained evidence\n" {
+		t.Fatalf("lost retained artifact: %q", retained)
+	}
+	hash, err := hashQualityTree(identity.ToolRuntimePath)
+	requireVerificationSuccess(t, err)
+	if hash != identity.ToolRuntimeHash {
+		t.Fatal("changed retained scanner runtime")
+	}
+	out, stderr, err := ReadJobStreams(m.Root, 0)
+	requireVerificationSuccess(t, err)
+	if out != "stream evidence\n" || stderr != out {
+		t.Fatal("lost retained streams")
+	}
+	if _, err := os.Stat(filepath.Join(m.Root, jobJournalFilename)); err != nil {
+		t.Fatal(err)
 	}
 }
 

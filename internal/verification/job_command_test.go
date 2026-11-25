@@ -18,10 +18,7 @@ func TestResolveJobCommand(t *testing.T) {
 	}
 	requireVerificationSuccess(t, os.WriteFile(filepath.Join(stage, "not-executable"), []byte("data"), 0600))
 	t.Setenv("PATH", ambient)
-	for _, tc := range []struct {
-		name, executable, path, want string
-		override, wantError          bool
-	}{
+	for _, tc := range []jobCommandResolutionCase{
 		{name: "approved PATH", executable: "tool", path: bin, override: true, want: filepath.Join(bin, "tool")},
 		{name: "inherited PATH", executable: "tool", want: filepath.Join(ambient, "tool")},
 		{name: "relative PATH entry", executable: "tool", path: "bin", override: true, want: filepath.Join(bin, "tool")},
@@ -37,30 +34,41 @@ func TestResolveJobCommand(t *testing.T) {
 		{name: "directory", executable: "./bin", wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			command := JobCommand{Command: []string{tc.executable, "--flag=value with spaces", "", "$(touch forbidden)", "*", "a\nb"}}
-			if tc.override {
-				command.Environment = map[string]string{"PATH": tc.path}
-			}
-			original := slices.Clone(command.Command)
-			got, err := resolveJobCommand(stage, command)
-			if tc.wantError {
-				if err == nil {
-					t.Fatalf("resolved unavailable executable: %q", got)
-				}
-				return
-			}
-			requireVerificationSuccess(t, err)
-			want := []string{tc.want, "--flag=value with spaces", "", "$(touch forbidden)", "*", "a\nb"}
-			if !slices.Equal(got, want) {
-				t.Fatalf("resolved command = %q, want %q", got, want)
-			}
-			if !slices.Equal(command.Command, original) {
-				t.Fatalf("approved command changed: %q", command.Command)
-			}
-			got[1] = "changed"
-			if !slices.Equal(command.Command, original) {
-				t.Fatal("resolved arguments alias the approved command")
-			}
+			assertJobCommandResolution(t, stage, tc)
 		})
+	}
+}
+
+type jobCommandResolutionCase struct {
+	name, executable, path, want string
+	override, wantError          bool
+}
+
+func assertJobCommandResolution(t *testing.T, stage string, tc jobCommandResolutionCase) {
+	t.Helper()
+	arguments := []string{"--flag=value with spaces", "", "$(touch forbidden)", "*", "a\nb"}
+	command := JobCommand{Command: append([]string{tc.executable}, arguments...)}
+	if tc.override {
+		command.Environment = map[string]string{"PATH": tc.path}
+	}
+	original := slices.Clone(command.Command)
+	got, err := resolveJobCommand(stage, command)
+	if tc.wantError {
+		if err == nil {
+			t.Fatalf("resolved unavailable executable: %q", got)
+		}
+		return
+	}
+	requireVerificationSuccess(t, err)
+	want := append([]string{tc.want}, arguments...)
+	if !slices.Equal(got, want) {
+		t.Fatalf("resolved command = %q, want %q", got, want)
+	}
+	if !slices.Equal(command.Command, original) {
+		t.Fatalf("approved command changed: %q", command.Command)
+	}
+	got[1] = "changed"
+	if !slices.Equal(command.Command, original) {
+		t.Fatal("resolved arguments alias the approved command")
 	}
 }
