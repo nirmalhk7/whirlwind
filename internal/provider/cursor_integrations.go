@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -26,11 +27,7 @@ func (s *providerSession) prepareCursorIntegrations(p model.Provider, profile ex
 	if err != nil {
 		return err
 	}
-	names := make([]string, 0, len(definitions))
-	for name := range definitions {
-		names = append(names, name)
-	}
-	slices.Sort(names)
+	names := slices.Sorted(maps.Keys(definitions))
 	catalog := make([]model.Integration, 0, len(names))
 	servers := make([]any, 0, len(names))
 	for _, name := range names {
@@ -274,11 +271,7 @@ func (config cursorMCPTransport) remote(name string) (map[string]any, error) {
 }
 
 func cursorNamedValues(values map[string]string) []map[string]string {
-	names := make([]string, 0, len(values))
-	for name := range values {
-		names = append(names, name)
-	}
-	slices.Sort(names)
+	names := slices.Sorted(maps.Keys(values))
 	result := make([]map[string]string, 0, len(names))
 	for _, name := range names {
 		result = append(result, map[string]string{"name": name, "value": values[name]})

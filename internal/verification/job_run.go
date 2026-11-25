@@ -5,9 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -195,11 +196,7 @@ func (r *jobRunner) prepareCommandRuntime(ctx context.Context, stage string, com
 			return profile, err
 		}
 	}
-	keys := make([]string, 0, len(command.Environment))
-	for key := range command.Environment {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(command.Environment))
 	profile.Environment = append(profile.Environment, keys...)
 	deadline := time.Now().Add(time.Duration(command.TimeoutSeconds) * time.Second).UTC().Format(time.RFC3339Nano)
 	return execution.PinRuntime(ctx, profile, r.manifest.JobID+"-"+command.Name, 1, deadline, filepath.Join(r.root.Name(), "executions"))

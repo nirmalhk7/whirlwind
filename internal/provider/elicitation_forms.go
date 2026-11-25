@@ -3,7 +3,8 @@ package provider
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 
 	"whirlwind/internal/model"
 )
@@ -19,11 +20,7 @@ func elicitationQuestions(schema any) (map[string]map[string]any, []model.Questi
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	names := make([]string, 0, len(properties))
-	for name := range properties {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	names := slices.Sorted(maps.Keys(properties))
 	fields := map[string]map[string]any{}
 	questions := []model.Question{}
 	for _, name := range names {

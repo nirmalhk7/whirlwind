@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -115,11 +116,7 @@ func packEntries(index Index, request PackRequest) []Entry {
 	for _, entry := range entries {
 		dirs[filepath.Dir(entry.Path)] = true
 	}
-	keys := make([]string, 0, len(index.Files))
-	for key := range index.Files {
-		keys = append(keys, key)
-	}
-	slices.Sort(keys)
+	keys := slices.Sorted(maps.Keys(index.Files))
 	for _, key := range keys {
 		entry := index.Files[key]
 		if (dirs[filepath.Dir(key)] && len(entry.Tests) > 0) || slices.Contains([]string{"go.mod", "package.json"}, key) {

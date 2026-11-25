@@ -3,8 +3,8 @@ package evaluation
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
-	"sort"
 
 	"whirlwind/internal/model"
 )
@@ -199,11 +199,7 @@ func addAttemptGroup(groups map[string]*Group, seen map[string]bool, sample Samp
 }
 
 func orderedGroups(groups map[string]*Group) []Group {
-	keys := make([]string, 0, len(groups))
-	for key := range groups {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(groups))
 	out := make([]Group, 0, len(keys))
 	for _, key := range keys {
 		out = append(out, *groups[key])

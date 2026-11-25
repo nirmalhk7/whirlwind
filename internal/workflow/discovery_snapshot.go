@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -11,11 +13,7 @@ import (
 
 func indexedDiscoveryChanges(index ctxengine.Index, previous discoverySnapshot, snapshot *discoverySnapshot) ([]map[string]any, []string) {
 	changed := []map[string]any{}
-	paths := make([]string, 0, len(index.Files))
-	for path := range index.Files {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
+	paths := slices.Sorted(maps.Keys(index.Files))
 	for _, path := range paths {
 		entry := index.Files[path]
 		fingerprint := model.Fingerprint([]byte(entry.Text))

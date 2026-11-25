@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -196,11 +197,7 @@ func (result baselineSARIFResult) identity(message string) (string, error) {
 }
 
 func (result baselineSARIFResult) fingerprint() string {
-	keys := make([]string, 0, len(result.PartialFingerprints))
-	for key := range result.PartialFingerprints {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := slices.Sorted(maps.Keys(result.PartialFingerprints))
 	identity := ""
 	for _, key := range keys {
 		identity += key + "=" + result.PartialFingerprints[key] + ";"
