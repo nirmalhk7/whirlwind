@@ -26,3 +26,25 @@ The supervisor initializes the current schema directly in `~/.local/share/whirlw
 If an older browser/HTTP instance owns the same state directory, `start` fails with an actionable message. Stop that owned instance explicitly with `./bin/whirlwind stop`, then run `start`. Process ownership uses the saved launcher token; unrelated listeners and processes are left alone.
 
 The TUI can inspect saved SQLite state without nono. Native agents and nono-backed checks require macOS and nono 0.81.0. Agents also require the configured host ACP adapter. Linux supports [opt-in offline verification](support.md#verification-on-linux) alongside inspection. See [nono setup](nono-setup.md) for the native path.
+
+## Private role queue commands
+
+The existing supervisor Unix socket supports `queue.push` and `queue.pop` for
+`planner_tasks`, `coding_tasks`, `reviewer_tasks`, and `finalizer_tasks`.
+The idea approval and execution plan rows are the durable queue entries.
+Pass `project_id`, the current `expected_version` of the entry, an
+`idempotency_key`, and `payload: {"queue":"coding_tasks"}`. Use `plan_id`
+for a plan. For `queue.push` on an approved idea awaiting Planner intake, use
+its idea ID in `resource_id`.
+
+Push acknowledges an existing eligible revision and wakes the supervisor.
+Repeated pushes for the same revision coalesce. Pop requests admission of
+the specified plan revision at the head of that project's role queue. It
+returns `scheduled` when admitted or `waiting` when runners are stopped,
+capacity is occupied, or earlier work takes priority. The supervisor owns
+the worker lease, completion and retries. A stale revision, another
+project's entry, or a plan waiting for approval is rejected.
+
+Finalizer admission requires the current plan approval, accepted review and
+verification for the exact candidate. Requests cannot set gates or supply
+work payloads. Queue contents are recovered from SQLite at startup.

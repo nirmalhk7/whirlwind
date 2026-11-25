@@ -55,7 +55,7 @@ func (e *Engine) dispatch(ctx context.Context) {
 			}
 			remaining = true
 			queues[project] = queue[1:]
-			e.dispatchTask(ctx, queue[0], counts)
+			_, _ = e.dispatchTask(ctx, queue[0], counts, 0)
 		}
 		if !remaining {
 			return
@@ -86,49 +86,53 @@ func (e *Engine) runningCounts(records []model.Record) map[string]int {
 	}
 	return counts
 }
-func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, counts map[string]int) {
+func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, counts map[string]int, expected int) (bool, error) {
 	record, err := e.Store.Get(ctx, "projects", task.ProjectID)
 	if err != nil {
-		return
+		return false, err
 	}
-	project, _ := store.Decode[model.Project](record)
+	project, err := store.Decode[model.Project](record)
+	if err != nil {
+		return false, err
+	}
 	if project.Paused {
-		return
+		return false, ErrProjectPaused
 	}
 	limit := project.Policy.ProjectSlots
 	if limit <= 0 {
 		limit = e.settings(ctx).ProjectSlots
 	}
 	if counts[project.ID] >= limit {
-		return
+		return false, nil
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	globalLimit := e.settings(ctx).GlobalSlots
-	if globalLimit <= 0 || len(e.running) >= globalLimit {
-		return
+	settings := e.settings(ctx)
+	if e.closing || settings.Stopped || settings.GlobalSlots <= 0 || len(e.running) >= settings.GlobalSlots {
+		return false, nil
 	}
 	if _, busy := e.running[task.ID]; busy {
-		return
+		return false, nil
 	}
-	expected := 0
+	cursorVersion := 0
 	if current, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans"); err == nil {
-		expected = current.Version
+		cursorVersion = current.Version
 	} else if !errors.Is(err, store.ErrNotFound) {
-		return
+		return false, err
 	}
-	if err := e.Store.Put(ctx, "dispatch_cursors", "execution_plans", dispatchCursor{ProjectID: task.ProjectID}, expected); err != nil {
-		return
+	if err := e.Store.Put(ctx, "dispatch_cursors", "execution_plans", dispatchCursor{ProjectID: task.ProjectID}, cursorVersion); err != nil {
+		return false, err
 	}
 	run, cancel := context.WithCancel(ctx)
 	e.running[task.ID] = cancel
 	counts[project.ID]++
 	e.background.Go(func() {
 		defer func() { e.mu.Lock(); delete(e.running, task.ID); e.mu.Unlock() }()
-		if err := e.runStep(run, task.ID, e.failOwnedStep); stepFailed(err) {
+		if err := e.runStepAtVersion(run, task.ID, expected, e.failOwnedStep); expected == 0 && stepFailed(err) {
 			e.fail(ctx, task.ID, err)
 		}
 	})
+	return true, nil
 }
 func stepFailed(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {

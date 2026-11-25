@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 	"whirlwind/internal/verification"
@@ -138,6 +139,7 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	}
 	t.Logf("qualified project=%s policy=%s setup=%s image=%s", project.ID, project.PolicyHash, project.OfflineQualification.JobID, project.OfflineQualification.ImageID)
 
+	setLauncherRunnersStopped(t, db, data, true)
 	launcher("stop")
 	write(filepath.Join(candidate, "regression_test.go"), "package result\nimport (\"os\"; \"strings\"; \"testing\")\nfunc TestResultReady(t *testing.T) { data, err := os.ReadFile(\"result.txt\"); if err != nil || !strings.HasPrefix(string(data), \"ready\\n\") { t.Fatal(\"result is not ready\") } }\n")
 	write(filepath.Join(candidate, "result.txt"), "broken\n")
@@ -145,7 +147,8 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	git(candidate, "commit", "--no-gpg-sign", "-m", "Seed red candidate")
 	red := git(candidate, "rev-parse", "HEAD")
 	task := seedOfflineCandidatePlan(t, engine, db, project, candidate, base)
-	launcher("start")
+	checkRoleQueueThroughLauncher(t, db, data, task, launcher)
+	setLauncherRunnersStopped(t, db, data, false)
 	redEvidence := awaitManagedOfflineResult(t, db, data, task.ID, red, "failed", project)
 	if redEvidence.Results[0].Status != "fail" || !strings.Contains(redEvidence.Results[0].Output, "TestResultReady") {
 		t.Fatalf("expected an actual failing assertion: %+v", redEvidence.Results[0])
@@ -187,6 +190,55 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 		t.Fatal("supervisor changed the original checkout")
 	}
 	t.Logf("seeded red=%s repair=%s qualified as green=%s; shipped supervisor reached the Reviewer preparation gate", red, green, green)
+}
+
+// A stopped supervisor retains the approved queue entry across restart,
+// accepts an idempotent wake, and keeps worker admission stopped.
+func checkRoleQueueThroughLauncher(t *testing.T, db *store.Store, data string, task model.ExecutionPlan, launcher func(...string) string) {
+	t.Helper()
+	ctx := t.Context()
+	launcher("start")
+	record, err := db.Get(ctx, "execution_plans", task.ID)
+	mustSeedTerminal(t, err)
+	client := control.NewClient(control.SocketPath(data))
+	for _, tc := range []struct{ name, operation, queue, want string }{
+		{"push", "queue.push", "reviewer_tasks", "queued"},
+		{"push", "queue.push", "reviewer_tasks", "queued"},
+		{"pop-stopped", "queue.pop", "reviewer_tasks", "waiting"},
+		{"push-wrong-role", "queue.push", "finalizer_tasks", ""},
+	} {
+		payload, err := json.Marshal(map[string]string{"queue": tc.queue})
+		mustSeedTerminal(t, err)
+		response, err := client.Call(ctx, control.Request{RequestID: tc.name, IdempotencyKey: tc.name, Operation: tc.operation,
+			ProjectID: task.ProjectID, PlanID: task.ID, ExpectedVersion: record.Version, Payload: payload})
+		if tc.want == "" {
+			if err == nil {
+				t.Fatalf("%s reached the wrong role: %+v", tc.name, response)
+			}
+			continue
+		}
+		mustSeedTerminal(t, err)
+		if got, _ := response.Result.(map[string]any); got["status"] != tc.want {
+			t.Fatalf("%s response %+v; want %s", tc.name, response, tc.want)
+		}
+	}
+}
+
+func setLauncherRunnersStopped(t *testing.T, db *store.Store, data string, stopped bool) {
+	t.Helper()
+	ctx := t.Context()
+	record, err := db.Get(ctx, "settings", "global")
+	mustSeedTerminal(t, err)
+	payload, err := json.Marshal(map[string]bool{"stopped": stopped})
+	mustSeedTerminal(t, err)
+	key := "fixture-start-runners"
+	if stopped {
+		key = "fixture-stop-runners"
+	}
+	_, err = control.NewClient(control.SocketPath(data)).Call(ctx, control.Request{
+		RequestID: key, IdempotencyKey: key, Operation: "runners.toggle", ResourceID: "global", ExpectedVersion: record.Version, Payload: payload,
+	})
+	mustSeedTerminal(t, err)
 }
 
 func seedOfflineCandidatePlan(t *testing.T, e *workflow.Engine, db *store.Store, project model.Project, candidate, base string) model.ExecutionPlan {

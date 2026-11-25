@@ -24,10 +24,14 @@ func (e *Engine) Step(ctx context.Context, id string) error {
 }
 
 func (e *Engine) runStep(ctx context.Context, id string, onFailure func(*taskStep, error)) error {
+	return e.runStepAtVersion(ctx, id, 0, onFailure)
+}
+
+func (e *Engine) runStepAtVersion(ctx context.Context, id string, expected int, onFailure func(*taskStep, error)) error {
 	if err := e.reconcileStandaloneRuntimes(ctx); err != nil {
 		return err
 	}
-	task, ready, err := e.validateStepInput(ctx, id)
+	task, ready, err := e.validateStepInputAtVersion(ctx, id, expected)
 	if err != nil {
 		return err
 	}
@@ -43,6 +47,9 @@ func (e *Engine) runStep(ctx context.Context, id string, onFailure func(*taskSte
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	step, err := e.prepareStep(ctx, id)
+	if expected > 0 && step != nil && step.record.Version != expected {
+		return store.ErrConflict
+	}
 	if err != nil {
 		if step != nil {
 			return step.finishStep(err, onFailure)
@@ -74,9 +81,16 @@ func (e *Engine) renewStepLease(ctx context.Context, cancel context.CancelFunc, 
 }
 
 func (e *Engine) validateStepInput(ctx context.Context, id string) (model.ExecutionPlan, bool, error) {
+	return e.validateStepInputAtVersion(ctx, id, 0)
+}
+
+func (e *Engine) validateStepInputAtVersion(ctx context.Context, id string, expected int) (model.ExecutionPlan, bool, error) {
 	task, record, err := loadStepInput(ctx, e.Store, id)
 	if err != nil {
 		return model.ExecutionPlan{}, false, err
+	}
+	if expected > 0 && record.Version != expected {
+		return task, false, store.ErrConflict
 	}
 	if !runnableStage(task.Stage) {
 		return task, false, nil

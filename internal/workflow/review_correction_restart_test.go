@@ -68,6 +68,18 @@ func TestReviewCorrectionSurvivesReopenedSQLite(t *testing.T) {
 	if resumed.Stage != "repair" || resumed.ReviewID != step.task.ReviewID || resumed.PlanDocument.ApprovedHash != view.Hash || resumed.Progress == nil || resumed.Progress.BlockingFindings != 1 {
 		t.Fatalf("replacement lost correction or approval: %+v", resumed)
 	}
+	work := RoleWork{ProjectID: resumed.ProjectID, Queue: CodingQueue, PlanID: resumed.ID, Version: currentVersion}
+	requireWorkflowSuccess(t, replacement.PushRoleWork(ctx, work))
+	requireWorkflowSuccess(t, replacement.PushRoleWork(ctx, work))
+	for _, wrong := range []RoleWork{
+		{ProjectID: resumed.ProjectID, Queue: ReviewerQueue, PlanID: resumed.ID, Version: currentVersion},
+		{ProjectID: resumed.ProjectID, Queue: CodingQueue, PlanID: resumed.ID, Version: currentVersion - 1},
+		{ProjectID: "other-project", Queue: CodingQueue, PlanID: resumed.ID, Version: currentVersion},
+	} {
+		if err := replacement.PushRoleWork(ctx, wrong); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("accepted stale or misrouted push: %+v, %v", wrong, err)
+		}
+	}
 	_, err = resumedStore.Get(ctx, "findings", task.ID+":1:missing-result")
 	requireWorkflowSuccess(t, err)
 	storedAttempt, err := resumedStore.Get(ctx, "sessions", attempt.AttemptID)

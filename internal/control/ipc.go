@@ -76,6 +76,7 @@ var allowedOperations = map[string]bool{
 	"question.answer": true, "permission.decide": true,
 	"plan.pause": true, "plan.resume": true,
 	"finalization.inspect": true, "finalization.approve": true,
+	"queue.push": true, "queue.pop": true,
 }
 
 // Listen creates a private local control socket. It refuses to repair a

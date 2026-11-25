@@ -56,6 +56,30 @@ func TestSeededHumanWorkflowThroughPTY(t *testing.T) {
 	}
 	t.Logf("%s", output)
 	assertSeededTerminalDecisions(t, s, data, hash)
+	assertTerminalQueueCommands(t, s, data)
+}
+
+func assertTerminalQueueCommands(t *testing.T, s *store.Store, data string) {
+	t.Helper()
+	client := control.NewClient(control.SocketPath(data))
+	for _, tc := range []struct {
+		key, operation, project string
+		version                 int
+		wantError               bool
+	}{
+		{"push-current", "queue.push", fixtureProject, 3, false},
+		{"push-current", "queue.push", fixtureProject, 3, false},
+		{"push-stale", "queue.push", fixtureProject, 2, true},
+		{"pop-stale", "queue.pop", fixtureProject, 2, true},
+		{"push-scope", "queue.push", "other-project", 3, true},
+	} {
+		response, err := client.Call(t.Context(), control.Request{RequestID: tc.key, IdempotencyKey: tc.key, Operation: tc.operation,
+			ProjectID: tc.project, PlanID: fixtureDraftPlan, ExpectedVersion: tc.version, Payload: json.RawMessage(`{"queue":"coding_tasks"}`)})
+		if (err != nil) != tc.wantError {
+			t.Fatalf("%s: response=%+v error=%v", tc.key, response, err)
+		}
+	}
+	terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", fixtureDraftPlan, 3)
 }
 
 func startSeededTerminalControl(t *testing.T, s *store.Store, w *workflow.Engine, data string) {
@@ -187,7 +211,8 @@ func seedTerminalWorkflow(t *testing.T, s *store.Store, w *workflow.Engine, data
 		StartedAt: "2026-01-01T10:00:00Z", DeadlineAt: fixtureDeadline, PlanVersion: 1})
 
 	draft := model.ExecutionPlan{ID: fixtureDraftPlan, ProjectID: project.ID, Mode: model.AgenticMode, PlanVersion: 1,
-		Issue: model.Issue{Title: fixtureDraftTitle, Body: "Make result useful"}, Plan: seededTerminalSpecification()}
+		Issue: model.Issue{Title: fixtureDraftTitle, Body: "Make result useful"}, Plan: seededTerminalSpecification(),
+		Selection: &model.SelectionAuthorization{CandidateID: "draft-selection", CandidateVersion: 1, SelectedAt: "2026-01-01T10:00:00Z"}}
 	mustSeedTerminal(t, w.WriteLocalPlan(ctx, project, &draft))
 	save("execution_plans", draft.ID, draft)
 
