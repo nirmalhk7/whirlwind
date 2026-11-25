@@ -142,7 +142,7 @@ func integrationBrokerCall(t *testing.T, client *http.Client, broker *integratio
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { requireWorkflowSuccess(t, response.Body.Close()) }()
 	if response.StatusCode != http.StatusOK {
 		content, _ := io.ReadAll(response.Body)
 		t.Fatalf("broker response status %d: %s", response.StatusCode, content)

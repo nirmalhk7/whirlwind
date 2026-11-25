@@ -362,7 +362,11 @@ func TestRefreshArchivesLegacyDuplicateAndReusesBoundCheckoutAfterRestart(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer integrity.Close()
+	defer func() {
+		if err := integrity.Close(); err != nil {
+			t.Errorf("close foreign-key check: %v", err)
+		}
+	}()
 	if integrity.Next() || integrity.Err() != nil {
 		t.Fatalf("migration broke SQLite references: %v", integrity.Err())
 	}
