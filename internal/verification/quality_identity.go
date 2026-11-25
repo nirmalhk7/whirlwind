@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"os"
 	"path/filepath"
@@ -337,80 +338,98 @@ func hashQualityTree(root string) (string, error) {
 		return "", err
 	}
 	defer func() { _ = rooted.Close() }()
-	hash := sha256.New()
-	var total int64
-	count := 0
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == root {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() && strings.HasSuffix(entry.Name(), "-installation-debug-files") {
-			return filepath.SkipDir
-		}
-		count++
-		if count > qualityRuntimeFileLimit {
-			return errors.New("Qlty scanner runtime exceeds file-count limit")
-		}
-		writeQualityRecordField(hash, []byte(filepath.ToSlash(relative)))
-		info, err := rooted.Lstat(filepath.ToSlash(relative))
-		if err != nil {
-			return err
-		}
-		var mode [4]byte
-		binary.BigEndian.PutUint32(mode[:], uint32(info.Mode().Perm()&^0222))
-		writeQualityRecordField(hash, mode[:])
-		if info.Mode()&os.ModeSymlink != 0 {
-			target, err := rooted.Readlink(filepath.ToSlash(relative))
-			if err != nil {
-				return err
-			}
-			canonicalTarget, err := rootedQualityLinkTarget(rooted, relative, target)
-			if err != nil {
-				return fmt.Errorf("Qlty scanner runtime symlink %s -> %q is unsafe: %w", filepath.ToSlash(relative), target, err)
-			}
-			writeQualityRecordField(hash, []byte("symlink"))
-			writeQualityRecordField(hash, []byte(filepath.ToSlash(canonicalTarget)))
-			return nil
-		}
-		if info.IsDir() {
-			writeQualityRecordField(hash, []byte("directory"))
-			return nil
-		}
-		if !info.Mode().IsRegular() {
-			return errors.New("Qlty scanner runtime contains a special file")
-		}
-		writeQualityRecordField(hash, []byte("file"))
-		file, err := rooted.Open(filepath.ToSlash(relative))
-		if err != nil {
-			return err
-		}
-		fileHash := sha256.New()
-		written, copyErr := io.Copy(fileHash, io.LimitReader(file, qualityRuntimeByteLimit-total+1))
-		closeErr := file.Close()
-		total += written
-		if total > qualityRuntimeByteLimit {
-			return errors.New("Qlty scanner runtime exceeds byte limit")
-		}
-		if err := errors.Join(copyErr, closeErr); err != nil {
-			return err
-		}
-		var size [8]byte
-		binary.BigEndian.PutUint64(size[:], uint64(written))
-		writeQualityRecordField(hash, size[:])
-		writeQualityRecordField(hash, fileHash.Sum(nil))
-		return nil
-	})
-	if err != nil {
+	tree := qualityTreeHasher{root: rooted, digest: sha256.New()}
+	if err := filepath.WalkDir(root, tree.recordEntry); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
+	return hex.EncodeToString(tree.digest.Sum(nil)), nil
+}
+
+type qualityTreeHasher struct {
+	root   *os.Root
+	digest hash.Hash
+	bytes  int64
+	count  int
+}
+
+func (tree *qualityTreeHasher) recordEntry(path string, entry os.DirEntry, walkErr error) error {
+	root := tree.root.Name()
+	if walkErr != nil || path == root {
+		return walkErr
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil {
+		return err
+	}
+	if entry.IsDir() && strings.HasSuffix(entry.Name(), "-installation-debug-files") {
+		return filepath.SkipDir
+	}
+	tree.count++
+	if tree.count > qualityRuntimeFileLimit {
+		return errors.New("Qlty scanner runtime exceeds file-count limit")
+	}
+	return tree.recordPath(relative)
+}
+
+func (tree *qualityTreeHasher) recordPath(relative string) error {
+	path := filepath.ToSlash(relative)
+	writeQualityRecordField(tree.digest, []byte(path))
+	info, err := tree.root.Lstat(path)
+	if err != nil {
+		return err
+	}
+	var mode [4]byte
+	binary.BigEndian.PutUint32(mode[:], uint32(info.Mode().Perm()&^0222))
+	writeQualityRecordField(tree.digest, mode[:])
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		return tree.recordLink(relative)
+	case info.IsDir():
+		writeQualityRecordField(tree.digest, []byte("directory"))
+		return nil
+	case info.Mode().IsRegular():
+		return tree.recordFile(path)
+	default:
+		return errors.New("Qlty scanner runtime contains a special file")
+	}
+}
+
+func (tree *qualityTreeHasher) recordLink(relative string) error {
+	path := filepath.ToSlash(relative)
+	target, err := tree.root.Readlink(path)
+	if err != nil {
+		return err
+	}
+	canonicalTarget, err := rootedQualityLinkTarget(tree.root, relative, target)
+	if err != nil {
+		return fmt.Errorf("Qlty scanner runtime symlink %s -> %q is unsafe: %w", path, target, err)
+	}
+	writeQualityRecordField(tree.digest, []byte("symlink"))
+	writeQualityRecordField(tree.digest, []byte(filepath.ToSlash(canonicalTarget)))
+	return nil
+}
+
+func (tree *qualityTreeHasher) recordFile(path string) error {
+	writeQualityRecordField(tree.digest, []byte("file"))
+	file, err := tree.root.Open(path)
+	if err != nil {
+		return err
+	}
+	fileHash := sha256.New()
+	written, copyErr := io.Copy(fileHash, io.LimitReader(file, qualityRuntimeByteLimit-tree.bytes+1))
+	closeErr := file.Close()
+	tree.bytes += written
+	if tree.bytes > qualityRuntimeByteLimit {
+		return errors.New("Qlty scanner runtime exceeds byte limit")
+	}
+	if err := errors.Join(copyErr, closeErr); err != nil {
+		return err
+	}
+	var size [8]byte
+	binary.BigEndian.PutUint64(size[:], uint64(written))
+	writeQualityRecordField(tree.digest, size[:])
+	writeQualityRecordField(tree.digest, fileHash.Sum(nil))
+	return nil
 }
 
 func rootedQualityLinkTarget(root *os.Root, linkPath, target string) (string, error) {
