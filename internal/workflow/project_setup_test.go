@@ -388,6 +388,10 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	}
 }
 
+func setupQltyFixtureIdentity(runtimeDir string) *model.QualityIdentity {
+	return &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 macos-arm64 (fixture)", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: runtimeDir, Tools: []model.QualityToolIdentity{{Name: "gitleaks", Version: "1.0", Fingerprint: strings.Repeat("e", 8)}}}
+}
+
 func TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings(t *testing.T) {
 	root := t.TempDir()
 	manifest := verification.JobManifest{
@@ -397,7 +401,7 @@ func TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings(t *testing.T) {
 		Quality:  &model.QualitySnapshot{Root: filepath.Join(root, "quality"), Files: map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n"}, PluginCatalog: []byte("plugins: {}\n")},
 		Commands: []verification.JobCommand{{Name: "build", Command: []string{"/usr/bin/true"}, TimeoutSeconds: 10}, {Name: "quality", Command: []string{"qlty", "check", "--sarif"}, TimeoutSeconds: 10, ReportFormat: "sarif"}},
 	}
-	identity := &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 macos-arm64 (fixture)", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: filepath.Join(root, "runtime"), Tools: []model.QualityToolIdentity{{Name: "gitleaks", Version: "1.0", Fingerprint: strings.Repeat("e", 8)}}}
+	identity := setupQltyFixtureIdentity(filepath.Join(root, "runtime"))
 	zero, one := 0, 1
 	manifestHash := manifest.Digest()
 	report := verification.JobReport{Purpose: manifest.Purpose, ProjectID: manifest.ProjectID, OperationID: manifest.OperationID, ManifestHash: manifestHash, ConfigurationHash: manifest.ConfigurationHash, CandidateCommit: manifest.CandidateCommit, CandidateTree: manifest.CandidateTree, Passed: false, QualityIdentity: identity, Results: []verification.JobResult{
