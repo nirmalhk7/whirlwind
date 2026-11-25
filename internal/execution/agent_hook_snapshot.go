@@ -19,7 +19,7 @@ import (
 
 // freezeHookSnapshot preserves HEAD and the candidate's tracked/nonignored
 // files in a private checkout. Git commands inside checks can inspect the diff.
-func freezeHookSnapshot(ctx context.Context, source, destination string) (string, error) {
+func freezeHookSnapshot(ctx context.Context, source, destination string) (snapshotID string, resultErr error) {
 	head, err := hookGit(ctx, source, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return "", err
@@ -38,7 +38,7 @@ func freezeHookSnapshot(ctx context.Context, source, destination string) (string
 	if err != nil {
 		return "", err
 	}
-	defer target.Close()
+	defer func() { resultErr = errors.Join(resultErr, target.Close()) }()
 	identity, err := hookSnapshotIdentity(ctx, source, target)
 	if err != nil {
 		return "", err
@@ -50,7 +50,7 @@ func freezeHookSnapshot(ctx context.Context, source, destination string) (string
 	return identity, nil
 }
 
-func hookSnapshotIdentity(ctx context.Context, source string, target *os.Root) (string, error) {
+func hookSnapshotIdentity(ctx context.Context, source string, target *os.Root) (snapshotID string, resultErr error) {
 	head, err := hookGit(ctx, source, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return "", err
@@ -65,7 +65,7 @@ func hookSnapshotIdentity(ctx context.Context, source string, target *os.Root) (
 	if err != nil {
 		return "", err
 	}
-	defer root.Close()
+	defer func() { resultErr = errors.Join(resultErr, root.Close()) }()
 	digest := sha256.New()
 	encoder := json.NewEncoder(digest)
 	_ = encoder.Encode(strings.TrimSpace(head))
@@ -90,7 +90,7 @@ func hookSnapshotIdentity(ctx context.Context, source string, target *os.Root) (
 	return hex.EncodeToString(digest.Sum(nil)), nil
 }
 
-func hookSnapshotEntry(source, target *os.Root, name string) (string, error) {
+func hookSnapshotEntry(source, target *os.Root, name string) (fingerprint string, resultErr error) {
 	info, err := source.Lstat(name)
 	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
 		return "", nil
@@ -120,7 +120,7 @@ func hookSnapshotEntry(source, target *os.Root, name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer input.Close()
+	defer func() { resultErr = errors.Join(resultErr, input.Close()) }()
 	actual, err := input.Stat()
 	if err != nil || !os.SameFile(info, actual) || !actual.Mode().IsRegular() {
 		return "", errors.Join(errors.New("file changed while freezing hook snapshot"), err)

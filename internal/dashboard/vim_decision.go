@@ -20,7 +20,7 @@ func (d *Dashboard) editDecision(details string, actions []string) (string, stri
 		d.status.SetText("Whirlwind | cannot open decision: " + err.Error())
 		return "", "", false
 	}
-	defer os.Remove(file.Name())
+	defer d.removeEditorFile(file.Name())
 	_, err = file.WriteString(original)
 	closeErr := file.Close()
 	if err == nil {
@@ -55,6 +55,12 @@ func (d *Dashboard) editDecision(details string, actions []string) (string, stri
 		d.status.SetText("Whirlwind | decision cancelled; saved proposal/plan unchanged")
 	}
 	return action, reason, true
+}
+
+func (d *Dashboard) removeEditorFile(path string) {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		d.status.SetText("Whirlwind | cannot remove private Vim file: " + err.Error())
+	}
 }
 
 func parseVimDecision(document, details string, actions []string) (string, string, error) {

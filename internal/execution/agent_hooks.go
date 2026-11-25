@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -85,7 +86,11 @@ func runAgentHook(ctx context.Context, agent Profile, p model.Policy, event stri
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(root)
+	defer func() {
+		if err := os.RemoveAll(root); err != nil {
+			log.Printf("remove private hook snapshot: %v", err)
+		}
+	}()
 	snapshot := filepath.Join(root, "source")
 	identity, err := freezeHookSnapshot(ctx, agent.CWD, snapshot)
 	if err != nil {

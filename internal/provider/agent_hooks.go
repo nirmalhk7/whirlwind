@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -32,7 +33,11 @@ func (a ProcessAdapter) runWithAgentHooks(ctx context.Context, p model.Provider,
 		if err != nil {
 			return Output{}, err
 		}
-		defer os.RemoveAll(dir)
+		defer func() {
+			if err := os.RemoveAll(dir); err != nil {
+				log.Printf("remove private hook session: %v", err)
+			}
+		}()
 		in.hookRuntimeDir = dir
 	}
 	sessionID := in.SessionID
@@ -92,7 +97,7 @@ func stageHookedFinalization(h Hooks, deferred bool) (Hooks, func(Output) func(c
 		}
 		return func(ctx context.Context) error {
 			if strings.TrimSpace(result.Text) == "" {
-				return errors.New("Finalizer returned no summary for staged delivery")
+				return errors.New("finalizer returned no summary for staged delivery")
 			}
 			_, err := original(ctx)
 			return err
