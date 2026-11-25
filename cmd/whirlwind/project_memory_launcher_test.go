@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"whirlwind/internal/model"
+	"whirlwind/internal/store"
 	"whirlwind/internal/workflow"
 )
 
@@ -19,6 +20,18 @@ func TestProjectMemoryThroughLauncher(t *testing.T) {
 	if os.Getenv("WHIRLWIND_TEST_SEEDED_PTY") != "1" {
 		t.Skip("set WHIRLWIND_TEST_SEEDED_PTY=1 to test the shipped launcher")
 	}
+	f := newProjectMemoryLaunchFixture(t)
+	f.verifyMemoryCommands(t)
+}
+
+type projectMemoryLaunchFixture struct {
+	root, state, commit string
+	git, launcher       func(...string) string
+	db                  *store.Store
+}
+
+func newProjectMemoryLaunchFixture(t *testing.T) projectMemoryLaunchFixture {
+	t.Helper()
 	root := t.TempDir()
 	repoRoot, err := filepath.Abs("../..")
 	mustSeedTerminal(t, err)
@@ -71,13 +84,22 @@ func TestProjectMemoryThroughLauncher(t *testing.T) {
 	launcher("start")
 	t.Cleanup(func() { launcher("stop") })
 	db := openSeededTerminalStore(t, state)
+	return projectMemoryLaunchFixture{root: root, state: state, commit: commit, git: git, launcher: launcher, db: db}
+}
+
+func (f projectMemoryLaunchFixture) verifyMemoryCommands(t *testing.T) {
+	t.Helper()
+	root, launcher, db, commit, git := f.root, f.launcher, f.db, f.commit, f.git
 	ctx := t.Context()
-	projects, err := db.List(ctx, "projects")
-	mustSeedTerminal(t, err)
-	if len(projects) != 1 {
-		t.Fatalf("wanted one registered project, got %v", projects)
-	}
-	id := projects[0].ID
+	var id string
+	waitOfflineFixture(t, f.state, "memory project registration", func() bool {
+		projects, err := db.List(ctx, "projects")
+		if err != nil || len(projects) != 1 {
+			return false
+		}
+		id = projects[0].ID
+		return true
+	})
 	list := func(role string) workflow.ProjectMemoryView {
 		t.Helper()
 		var view workflow.ProjectMemoryView
@@ -88,7 +110,7 @@ func TestProjectMemoryThroughLauncher(t *testing.T) {
 		t.Fatalf("expected memory to be disabled before approval: %+v", view)
 	}
 	policyPath := filepath.Join(root, "reviewed-policy.yaml")
-	write(policyPath, "project_memory: true\nallowed_paths: [README.md]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks: [{name: baseline, command: ['true']}]\n")
+	mustSeedTerminal(t, os.WriteFile(policyPath, []byte("project_memory: true\nallowed_paths: [README.md]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks: [{name: baseline, command: ['true']}]\n"), 0600))
 	preview := launcher("policy", "preview", id, policyPath)
 	fields := regexp.MustCompile(`Version (\d+)\nSHA256 ([a-f0-9]{64})`).FindStringSubmatch(preview)
 	if len(fields) != 3 {
@@ -103,10 +125,7 @@ func TestProjectMemoryThroughLauncher(t *testing.T) {
 	note := "Keep the generated fixture in a temporary directory."
 	launcher("memory", "remember", id, "code", attemptID, note)
 	before := list("code")
-	if !before.Enabled || before.Version != 1 || len(before.Lessons) != 1 || before.Lessons[0].Note != note ||
-		before.Lessons[0].PlanID != planID || before.Lessons[0].PlanVersion != 4 || before.Lessons[0].SourcePolicy != fields[2] || before.Lessons[0].SourceCommit != commit {
-		t.Fatalf("missing lesson or source provenance: %+v", before)
-	}
+	requireMemoryLesson(t, before, model.RoleLesson{Note: note, PlanID: planID, PlanVersion: 4, SourcePolicy: fields[2], SourceCommit: commit})
 	if view := list("plan"); len(view.Lessons) != 0 {
 		t.Fatalf("Coding note appeared in Planner memory: %+v", view)
 	}
@@ -123,4 +142,16 @@ func TestProjectMemoryThroughLauncher(t *testing.T) {
 		t.Fatal("supervisor changed the original checkout")
 	}
 	t.Log("shipped launcher preserved bounded, opted-in Coding memory and provenance across restart")
+}
+
+func requireMemoryLesson(t *testing.T, view workflow.ProjectMemoryView, want model.RoleLesson) {
+	t.Helper()
+	if !view.Enabled || view.Version != 1 || len(view.Lessons) != 1 {
+		t.Fatalf("missing saved lesson: %+v", view)
+	}
+	got := view.Lessons[0]
+	want.AttemptID, want.RecordedAt = got.AttemptID, got.RecordedAt
+	if got != want {
+		t.Fatalf("wrong source provenance: %+v", got)
+	}
 }

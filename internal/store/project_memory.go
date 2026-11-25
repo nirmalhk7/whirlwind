@@ -33,31 +33,41 @@ func (s *Store) ProjectRoleMemory(ctx context.Context, project, role string) (Pr
 }
 
 func (s *Store) SaveProjectRoleMemory(ctx context.Context, project, role string, memory ProjectRoleMemory, preconditions ...Change) error {
+	return s.Transaction(ctx, func(tx *sql.Tx) error {
+		if err := assertMemoryPreconditions(ctx, tx, preconditions); err != nil {
+			return err
+		}
+		return writeProjectRoleMemory(ctx, tx, project, role, memory)
+	})
+}
+
+func assertMemoryPreconditions(ctx context.Context, tx *sql.Tx, preconditions []Change) error {
+	for _, check := range preconditions {
+		if !check.isVersionPrecondition() {
+			return ErrConflict
+		}
+		if err := assertResourceVersionTx(ctx, tx, check.Kind, check.ID, check.Expected); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeProjectRoleMemory(ctx context.Context, tx *sql.Tx, project, role string, memory ProjectRoleMemory) error {
 	raw, err := json.Marshal(memory.Lessons)
 	if err != nil {
 		return err
 	}
-	return s.Transaction(ctx, func(tx *sql.Tx) error {
-		for _, check := range preconditions {
-			if !check.isVersionPrecondition() {
-				return ErrConflict
-			}
-			if err := assertResourceVersionTx(ctx, tx, check.Kind, check.ID, check.Expected); err != nil {
-				return err
-			}
-		}
-		if memory.Version == 0 {
-			result, err := tx.ExecContext(ctx, "INSERT INTO project_role_memory VALUES(?,?,1,?,?,?) ON CONFLICT(project_id,role) DO NOTHING", project, role, memory.PolicyHash, memory.PolicyVersion, string(raw))
-			if err != nil {
-				return err
-			}
-			return requireOneRow(result)
-		}
-		result, err := tx.ExecContext(ctx, "UPDATE project_role_memory SET version=version+1,policy_hash=?,policy_version=?,lessons=? WHERE project_id=? AND role=? AND version=?",
-			memory.PolicyHash, memory.PolicyVersion, string(raw), project, role, memory.Version)
-		if err != nil {
-			return err
-		}
-		return requireOneRow(result)
-	})
+	lessons := string(raw)
+	var result sql.Result
+	if memory.Version == 0 {
+		result, err = tx.ExecContext(ctx, "INSERT INTO project_role_memory VALUES(?,?,1,?,?,?) ON CONFLICT(project_id,role) DO NOTHING", project, role, memory.PolicyHash, memory.PolicyVersion, lessons)
+	} else {
+		result, err = tx.ExecContext(ctx, "UPDATE project_role_memory SET version=version+1,policy_hash=?,policy_version=?,lessons=? WHERE project_id=? AND role=? AND version=?",
+			memory.PolicyHash, memory.PolicyVersion, lessons, project, role, memory.Version)
+	}
+	if err != nil {
+		return err
+	}
+	return requireOneRow(result)
 }

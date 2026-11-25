@@ -50,6 +50,16 @@ func TestProjectMemoryIsBoundedAndScopedInAgentInput(t *testing.T) {
 	_, otherSource := remember(other, "code", 1, "indexing regression other project", 0)
 	remember(project, "review", 1, "indexing regression Reviewer only", 0)
 
+	requireMemoryWriteBoundaries(t, engine, project, source, otherSource, version)
+	run := requireMemoryPromptScope(t, engine, project, task)
+	requireMemoryOptOut(t, run, source, version)
+}
+
+const memoryTestPrompt = "Current approved task"
+
+func requireMemoryWriteBoundaries(t *testing.T, engine *Engine, project model.Project, source, otherSource string, version int) {
+	t.Helper()
+	ctx := t.Context()
 	if _, err := engine.RememberProjectLesson(ctx, project.ID, "code", source, strings.Repeat("a", maxLessonBytes+1), project.PolicyHash, version); err == nil {
 		t.Fatal("oversize note was accepted")
 	}
@@ -73,12 +83,17 @@ func TestProjectMemoryIsBoundedAndScopedInAgentInput(t *testing.T) {
 	if repeated, err := engine.RememberProjectLesson(ctx, project.ID, "code", source, got.Lessons[0].Note, project.PolicyHash, version); repeated != version || err != nil {
 		t.Fatalf("duplicate note advanced memory: version=%d, error=%v", repeated, err)
 	}
+}
+
+func requireMemoryPromptScope(t *testing.T, engine *Engine, project model.Project, task model.ExecutionPlan) *agentRun {
+	t.Helper()
+	ctx := t.Context()
 
 	task.Issue.Title, task.Issue.Body = "Indexing regression", ""
-	run := &agentRun{Engine: engine, ctx: ctx, project: project, task: task, input: provider.Input{Role: "code", Prompt: "Current approved task"}}
+	run := &agentRun{Engine: engine, ctx: ctx, project: project, task: task, input: provider.Input{Role: "code", Prompt: memoryTestPrompt}}
 	requireWorkflowSuccess(t, run.buildContextPack())
 	prompt := run.input.Prompt
-	for _, expected := range []string{"Current approved task", "Fix the indexing regression", "source-policy", "source-commit", "api_key=[redacted]"} {
+	for _, expected := range []string{memoryTestPrompt, "Fix the indexing regression", "source-policy", "source-commit", "api_key=[redacted]"} {
 		if !strings.Contains(prompt, expected) {
 			t.Fatalf("missing %q in prompt: %s", expected, prompt)
 		}
@@ -88,15 +103,22 @@ func TestProjectMemoryIsBoundedAndScopedInAgentInput(t *testing.T) {
 			t.Fatalf("unexpected recall of %q in prompt: %s", forbidden, prompt)
 		}
 	}
-	if strings.Count(prompt, `"note":`) != maxRecallLessons || !strings.HasPrefix(prompt, "Current approved task") {
+	if strings.Count(prompt, `"note":`) != maxRecallLessons || !strings.HasPrefix(prompt, memoryTestPrompt) {
 		t.Fatalf("incorrect bounded advisory input: %s", prompt)
 	}
-	mandatory := "Current approved task"
+	mandatory := memoryTestPrompt
 	pack, err := (ctxengine.Index{}).Pack(ctxengine.PackRequest{Required: mandatory, MaxInputTokens: 256, Advisory: strings.Repeat("x", 512)})
 	requireWorkflowSuccess(t, err)
 	if !strings.HasPrefix(pack.Prompt, mandatory) || strings.Contains(pack.Prompt, "xxxxx") {
 		t.Fatal("advisory took priority over required prompt")
 	}
+
+	return run
+}
+
+func requireMemoryOptOut(t *testing.T, run *agentRun, source string, version int) {
+	t.Helper()
+	ctx, engine, project := t.Context(), run.Engine, run.project
 
 	var copied int
 	requireWorkflowSuccess(t, engine.Store.DB.QueryRowContext(ctx, "SELECT count(*) FROM events WHERE instr(data,?) > 0", "Fix the indexing regression").Scan(&copied))
@@ -111,7 +133,7 @@ func TestProjectMemoryIsBoundedAndScopedInAgentInput(t *testing.T) {
 		t.Fatalf("write survived opt-out: %v", err)
 	}
 	reapproved := setTestMemoryPolicy(t, engine, project, true)
-	got, err = engine.ReadProjectMemory(ctx, reapproved.ID, "code")
+	got, err := engine.ReadProjectMemory(ctx, reapproved.ID, "code")
 	requireWorkflowSuccess(t, err)
 	if !got.Enabled || len(got.Lessons) != 0 {
 		t.Fatalf("earlier approval's notes returned on same-content re-approval: %+v", got)
