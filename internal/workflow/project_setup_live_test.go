@@ -2,6 +2,8 @@ package workflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -35,7 +37,11 @@ func TestProjectSetupNativeAutomaticQltyOnboarding(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repository, "app.py"), []byte("def inspect(value):\n    return eval(value)\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repository, "credentials.txt"), []byte("token = \"ghp_aB3cD4eF5gH6aB3cD4eF5gH6aB3cD4eF5gH6\"\n"), 0600); err != nil {
+	// Generate a synthetic scanner canary only in the disposable repository.
+	// No credential-shaped value belongs in the tracked test source.
+	seed := sha256.Sum256([]byte("whirlwind native onboarding scanner canary"))
+	canary := fmt.Sprintf("token = \"ghp_%x\"\n", seed[:18])
+	if err := os.WriteFile(filepath.Join(repository, "credentials.txt"), []byte(canary), 0600); err != nil {
 		t.Fatal(err)
 	}
 	projectPolicy := model.Policy{
