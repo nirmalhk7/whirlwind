@@ -261,39 +261,7 @@ func TestCopyApprovedQualityTreeVerifiesSourceAndCopy(t *testing.T) {
 			return nil
 		})
 	})
-	if err := os.MkdirAll(filepath.Join(source, "trivy", qualityFixtureScannerPackage), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "trivy", qualityFixtureScannerPackage, "scanner"), []byte("scanner bytes"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "trivy", qualityFixtureScannerMarker), []byte("done"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(source, "bin"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("../trivy/1.2.3-abcdef012345/scanner", filepath.Join(source, "bin", "current")); err != nil {
-		t.Fatal(err)
-	}
-	pythonBin := filepath.Join(source, "python", "3.11.0-abcdef012345", "bin")
-	if err := os.MkdirAll(pythonBin, 0700); err != nil {
-		t.Fatal(err)
-	}
-	python3 := filepath.Join(pythonBin, "python3")
-	if err := os.WriteFile(python3, []byte("python runtime"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	trivyBin := filepath.Join(source, "trivy", qualityFixtureScannerPackage, "bin")
-	if err := os.MkdirAll(trivyBin, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(python3, filepath.Join(trivyBin, "python3")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("python3", filepath.Join(trivyBin, "python")); err != nil {
-		t.Fatal(err)
-	}
+	writeApprovedQualityTreeFixture(t, source)
 	expected, err := hashQualityTree(source)
 	if err != nil {
 		t.Fatal(err)
@@ -345,5 +313,42 @@ func TestCopyApprovedQualityTreeVerifiesSourceAndCopy(t *testing.T) {
 	}
 	if _, err := hashQualityTree(unsafeRoot); err == nil {
 		t.Fatal("runtime tree with external symlink was accepted")
+	}
+}
+
+func writeApprovedQualityTreeFixture(t *testing.T, source string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(source, "trivy", qualityFixtureScannerPackage), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "trivy", qualityFixtureScannerPackage, "scanner"), []byte("scanner bytes"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "trivy", qualityFixtureScannerMarker), []byte("done"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(source, "bin"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../trivy/1.2.3-abcdef012345/scanner", filepath.Join(source, "bin", "current")); err != nil {
+		t.Fatal(err)
+	}
+	pythonBin := filepath.Join(source, "python", "3.11.0-abcdef012345", "bin")
+	if err := os.MkdirAll(pythonBin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	python3 := filepath.Join(pythonBin, "python3")
+	if err := os.WriteFile(python3, []byte("python runtime"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	trivyBin := filepath.Join(source, "trivy", qualityFixtureScannerPackage, "bin")
+	if err := os.MkdirAll(trivyBin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(python3, filepath.Join(trivyBin, "python3")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("python3", filepath.Join(trivyBin, "python")); err != nil {
+		t.Fatal(err)
 	}
 }
