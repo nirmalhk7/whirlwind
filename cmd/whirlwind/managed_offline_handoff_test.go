@@ -38,7 +38,7 @@ type seededOfflineHandoff struct {
 // subprocess and immutable snapshots still own the handoffs.
 func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, fixture seededOfflineHandoff) {
 	t.Helper()
-	data, project, id := fixture.data, fixture.project, fixture.planID
+	data, id := fixture.data, fixture.planID
 	candidate, green, nono, git := fixture.candidate, fixture.green, fixture.nono, fixture.git
 	ctx := t.Context()
 	t.Setenv("WHIRLWIND_NONO_CLI", nono)
