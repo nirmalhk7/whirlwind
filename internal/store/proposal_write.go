@@ -104,6 +104,10 @@ func reconsiderationCandidates(ctx context.Context, query proposalReconsideratio
 	if err != nil {
 		return nil, err
 	}
+	return readReconsiderationRows(rows)
+}
+
+func readReconsiderationRows(rows *sql.Rows) ([]reconsiderationRow, error) {
 	// Close this cursor before looking up the matching predecessor using the
 	// same database connection or transaction.
 	defer func() { _ = rows.Close() }()

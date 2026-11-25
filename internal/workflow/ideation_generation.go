@@ -140,15 +140,11 @@ func (e *Engine) runDirectionRepairs(ctx context.Context, request directionGener
 		}
 		request.accepted = accepted
 		request.attempt = attempt
-		if operationID(ctx) != "" {
-			var err error
-			request.candidateIDs, err = e.reserveDirectionCandidates(ctx, request.runID, accepted)
+		if err := e.reserveRepairCandidates(ctx, &request); err != nil {
 			if exhaustedCandidateAllowance(err) {
 				return accepted, nil
 			}
-			if err != nil {
-				return accepted, err
-			}
+			return accepted, err
 		}
 		directions, nextRejection, done, err := e.runDirectionRepairAttempt(ctx, request, rejected)
 		if err != nil {
@@ -166,6 +162,15 @@ func (e *Engine) runDirectionRepairs(ctx context.Context, request directionGener
 		rejected = nextRejection
 	}
 	return accepted, nil
+}
+
+func (e *Engine) reserveRepairCandidates(ctx context.Context, request *directionGenerationRequest) error {
+	if operationID(ctx) == "" {
+		return nil
+	}
+	var err error
+	request.candidateIDs, err = e.reserveDirectionCandidates(ctx, request.runID, request.accepted)
+	return err
 }
 
 func (e *Engine) runDirectionRepairAttempt(ctx context.Context, request directionGenerationRequest, rejected error) ([]model.Direction, error, bool, error) {

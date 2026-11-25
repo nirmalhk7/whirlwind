@@ -72,6 +72,33 @@ func (s *Store) ProposalComponentCounts(ctx context.Context, project string) (ma
 }
 
 func (s *Store) searchProposalRows(ctx context.Context, query model.ProposalQuery, terms string, limit int, seen map[string]bool) ([]model.Proposal, error) {
+	statement, args := proposalSearchStatement(query, terms, limit)
+	rows, err := s.DB.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var proposals []model.Proposal
+	for rows.Next() {
+		var id string
+		var data []byte
+		if err := rows.Scan(&id, &data); err != nil {
+			return nil, err
+		}
+		if seen[id] {
+			continue
+		}
+		var proposal model.Proposal
+		if err := json.Unmarshal(data, &proposal); err != nil {
+			return nil, err
+		}
+		seen[id] = true
+		proposals = append(proposals, proposal)
+	}
+	return proposals, rows.Err()
+}
+
+func proposalSearchStatement(query model.ProposalQuery, terms string, limit int) (string, []any) {
 	conditions := []string{"p.project_id=?"}
 	args := []any{query.ProjectID}
 	if query.Category != "" {
@@ -104,29 +131,7 @@ func (s *Store) searchProposalRows(ctx context.Context, query model.ProposalQuer
 		order = "bm25(proposals_fts),p.created_at DESC"
 	}
 	args = append(args, limit)
-	rows, err := s.DB.QueryContext(ctx, "SELECT p.id,p.data FROM "+from+" WHERE "+strings.Join(conditions, " AND ")+" ORDER BY "+order+" LIMIT ?", args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var proposals []model.Proposal
-	for rows.Next() {
-		var id string
-		var data []byte
-		if err := rows.Scan(&id, &data); err != nil {
-			return nil, err
-		}
-		if seen[id] {
-			continue
-		}
-		var proposal model.Proposal
-		if err := json.Unmarshal(data, &proposal); err != nil {
-			return nil, err
-		}
-		seen[id] = true
-		proposals = append(proposals, proposal)
-	}
-	return proposals, rows.Err()
+	return "SELECT p.id,p.data FROM " + from + " WHERE " + strings.Join(conditions, " AND ") + " ORDER BY " + order + " LIMIT ?", args
 }
 
 func ftsQuery(input string) string {

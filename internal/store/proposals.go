@@ -99,27 +99,9 @@ func (s *Store) PendingProposalReconsiderations(ctx context.Context, project str
 	if limit < 1 || limit > 12 {
 		return nil, errors.New("proposal reconsideration limit must be between 1 and 12")
 	}
-	rows, err := s.DB.QueryContext(ctx, "SELECT version,data FROM resources WHERE kind='proposal_reconsiderations' AND json_extract(data,'$.project_id')=? AND json_extract(data,'$.status')='pending' ORDER BY rowid LIMIT ?", project, limit)
+	candidates, err := s.pendingReconsiderationRows(ctx, project, limit)
 	if err != nil {
 		return nil, err
-	}
-	type row struct {
-		version int
-		data    []byte
-	}
-	var candidates []row
-	for rows.Next() {
-		var candidate row
-		if err := rows.Scan(&candidate.version, &candidate.data); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		candidates = append(candidates, candidate)
-	}
-	rowErr := rows.Err()
-	_ = rows.Close()
-	if rowErr != nil {
-		return nil, rowErr
 	}
 	requests := make([]model.ProposalReconsideration, 0, len(candidates))
 	for _, candidate := range candidates {
@@ -127,7 +109,7 @@ func (s *Store) PendingProposalReconsiderations(ctx context.Context, project str
 		if err := json.Unmarshal(candidate.data, &request); err != nil {
 			return nil, err
 		}
-		if request.ProjectID != project || request.Status != "pending" || request.ID == "" || request.PredecessorID == "" || strings.TrimSpace(request.Reason) == "" {
+		if !validPendingReconsiderationView(request, project) {
 			continue
 		}
 		if _, err := s.PendingProposalReconsideration(ctx, project, request.PredecessorID, request.Reason); err != nil {
@@ -139,4 +121,16 @@ func (s *Store) PendingProposalReconsiderations(ctx context.Context, project str
 		requests = append(requests, request)
 	}
 	return requests, nil
+}
+
+func (s *Store) pendingReconsiderationRows(ctx context.Context, project string, limit int) ([]reconsiderationRow, error) {
+	rows, err := s.DB.QueryContext(ctx, "SELECT id,version,data FROM resources WHERE kind='proposal_reconsiderations' AND json_extract(data,'$.project_id')=? AND json_extract(data,'$.status')='pending' ORDER BY rowid LIMIT ?", project, limit)
+	if err != nil {
+		return nil, err
+	}
+	return readReconsiderationRows(rows)
+}
+
+func validPendingReconsiderationView(request model.ProposalReconsideration, project string) bool {
+	return request.ProjectID == project && request.Status == "pending" && request.ID != "" && request.PredecessorID != "" && strings.TrimSpace(request.Reason) != ""
 }
