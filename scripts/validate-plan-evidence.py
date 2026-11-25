@@ -14,6 +14,7 @@ SHA = re.compile(r"[a-f0-9]{40}")
 PR = re.compile(r"https://github\.com/nirmalhk7/whirlwind/pull/[1-9][0-9]*")
 ISSUE = re.compile(r"https://github\.com/nirmalhk7/whirlwind/issues/[1-9][0-9]*")
 SCOPES = {"applicable", "partly_deferred", "partly_waived", "deferred"}
+PR_EVIDENCE_KINDS = {"review_pr_fixture_pass", "merged_pr_fixture_pass", "superseded_pr_fixture_pass"}
 
 
 def require(condition, message):
@@ -46,14 +47,22 @@ def check_evidence(catalog, baseline):
             for name in names:
                 require(re.fullmatch(r"Test[A-Za-z0-9_]+", name), f"{key}: invalid Go test name")
                 main_tests.add(name)
-        elif kind == "review_pr_fixture_pass":
-            require(PR.fullmatch(record["pr"]) and ISSUE.fullmatch(record["issue"]), f"{key}: missing PR or issue")
-            require(SHA.fullmatch(record["revision"]) and record["revision"] != baseline, f"{key}: invalid PR head")
+        elif kind in PR_EVIDENCE_KINDS:
+            check_pr_evidence(key, record, baseline)
         else:
             require(kind == "historical_only", f"{key}: unknown evidence kind")
             source = (REPO / record["source"]).resolve()
             require(source.is_relative_to(REPO) and source.is_file(), f"{key}: missing archived report")
     return main_tests
+
+
+def check_pr_evidence(key, record, baseline):
+    require(PR.fullmatch(record["pr"]) and ISSUE.fullmatch(record["issue"]), f"{key}: missing PR or issue")
+    require(SHA.fullmatch(record["revision"]) and record["revision"] != baseline, f"{key}: invalid tested PR head")
+    if record["kind"] == "merged_pr_fixture_pass":
+        require(SHA.fullmatch(record.get("merge_revision", "")), f"{key}: missing integration revision")
+    if record["kind"] == "superseded_pr_fixture_pass":
+        require(SHA.fullmatch(record.get("replacement_revision", "")), f"{key}: missing replacement revision")
 
 
 def validate(archived, current):

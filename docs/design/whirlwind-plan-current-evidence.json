@@ -2,7 +2,7 @@
   "schema_version": 1,
   "source_sequence": 3035,
   "baseline_revision": "879337655d3bc8e5369e6990b804931cf1e7d4ad",
-  "platform": "Linux portable checks; native supervision and scanning require supported macOS and nono 0.81.0",
+  "platform": "Linux inspection, portable tests and opt-in offline verification. Native supervision and scanning require supported macOS and nono 0.81.0.",
   "release_status": "not_accepted",
   "evidence": {
     "baseline_schema": {
@@ -139,143 +139,160 @@
       "commands": [
         "node --test --test-name-pattern='Linux inspection' bridges/nono/launch.test.mjs"
       ],
-      "limit": "Linux is inspection-only; no Linux-execution acceptance requirement."
+      "limit": "Exercises the native-agent refusal. Managed offline Docker verification is a separate supported path."
     },
     "pr_34": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/34",
       "revision": "a4ae71ed7a3c70eea16165d54233ebd511b20d47",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/31",
       "summary": "Reapproval invalidates stale scanner qualification and enqueues one fresh setup check.",
-      "limit": "No native scanner requalification result."
+      "limit": "No native scanner requalification result.",
+      "merge_revision": "043a8c7787b035b212e9b9b3c5230251f6247cb8"
     },
     "pr_35": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/35",
       "revision": "bc35fff2bd1e6522ab4eabef2ad81ec271a0f216",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/27",
       "summary": "A real seeded 80×24 dashboard renders two full Runs rows and usable shortcuts.",
-      "limit": "Only terminal rendering/inspection covered."
+      "limit": "Only terminal rendering/inspection covered.",
+      "merge_revision": "7d75858985293ad2b7fa856efdddba7c56706a86"
     },
     "pr_36": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/36",
       "revision": "593371806bbcc0397f1d02649ebc7491679a287d",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/19",
       "summary": "Project setup failure is durably visible in Projects, Runs and Inbox; tested through a temporary Basera fixture.",
-      "limit": "No real live onboarding or authenticated provider run."
+      "limit": "No real live onboarding or authenticated provider run.",
+      "merge_revision": "2fd6d13928d7be00794fb2e4c947209e99eda844"
     },
     "pr_37": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/37",
       "revision": "4e963ac2059fddf28aa5cdc14ab3487f82d452af",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/26",
       "summary": "Real PTY verifies Escape and Ctrl-C exit run log mode without quitting the dashboard.",
-      "limit": "No broader process/transport acceptance."
+      "limit": "No broader process/transport acceptance.",
+      "merge_revision": "244a963fad3892339bb13bb80e17aeb05c19733f"
     },
     "pr_38": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/38",
       "revision": "c9b24e62d69ea115cc7592ae98ce7f82a21d2500",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/23",
       "summary": "Agent inspection distinguishes ordered model/thinking choices, connection freshness and project outcomes.",
-      "limit": "Does not establish authenticated inference or model selection."
+      "limit": "Does not establish authenticated inference or model selection.",
+      "merge_revision": "361aed2ac13fd9dff2ecbee0d0bf335b85d883b2"
     },
     "pr_39": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "superseded_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/39",
       "revision": "2b6aa61e8e6c744665a64dd99124b08497830bfb",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/21",
       "summary": "Initial and manual ideation on a local-only pinned Basera checkout use local evidence without GitHub.",
-      "limit": "No native provider or real reconciliation tooling."
+      "limit": "No native provider or real reconciliation tooling.",
+      "replacement_revision": "022b2d93416ccca53267af3bd924c45b5c1398ff"
     },
     "pr_40": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "superseded_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/40",
       "revision": "b2cdba9914ccfe785b732a781ecd83bb63bbe0ea",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/22",
       "summary": "Initial ideation waits for successful setup, opt-out works, and manual ideation remains available.",
-      "limit": "Does not certify full automatic onboarding."
+      "limit": "Does not certify full automatic onboarding.",
+      "replacement_revision": "46c3a036f383fe1d85ab2c55ac607af99cf0ff13"
     },
     "pr_41": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/41",
       "revision": "694e2276824054011c52693b1854fea4e71d4666",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/20",
       "summary": "Origin metadata changes keep the canonical checkout identity, history and binding scope.",
-      "limit": "No live remote write or GitHub deployment."
+      "limit": "No live remote write or GitHub deployment.",
+      "merge_revision": "6a0e3b417c107cb97646ea95ba795cebcbee4082"
     },
     "pr_42": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/42",
       "revision": "1361da816ee9b0ceb11676dd8fc4f662fd48f9be",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/28",
       "summary": "Dashboard keeps the exact dispatch blocker visible until recovery verifies it can clear.",
-      "limit": "Does not establish Mac process/sandbox or authenticated-provider recovery."
+      "limit": "Does not establish Mac process/sandbox or authenticated-provider recovery.",
+      "merge_revision": "fe22ce09da1e1f4a7ad421413ec0e2695e25ae56"
     },
     "pr_43": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/43",
       "revision": "4fa4b24ffc87107ca738444b1629ccee889a9bfc",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/24",
       "summary": "Planner status reflects actual Markdown publication and retained failure/restart state, not provider exit.",
-      "limit": "Does not qualify the native planner/provider suite."
+      "limit": "Does not qualify the native planner/provider suite.",
+      "merge_revision": "5b015c00d7f3418d1942c244cbcf4d6a4fa623d1"
     },
     "pr_44": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/44",
       "revision": "1909fd9aee617424762be99158d622fa50c6aba4",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/5",
       "summary": "Only completed verifier-owned scratch staging is released; saved reports, runtime and interrupted recovery are retained.",
-      "limit": "Darwin binary was cross-built, not run natively."
+      "limit": "Darwin binary was cross-built, not run natively.",
+      "merge_revision": "b715ff354cd6677302821b56b7fdbb44547e3d3c"
     },
     "pr_45": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "superseded_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/45",
       "revision": "cb5d47bd4a890741e5b0364e82d34763b96f7e41",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/11",
       "summary": "Cancellation fences queued/capacity-blocked work and both commit orders against Planner completion.",
-      "limit": "Native coding/reviewer workflow is separate."
+      "limit": "Native coding/reviewer workflow is separate.",
+      "replacement_revision": "8e159bc15b99a4b22d321cb77c0267e926110fb1"
     },
     "pr_46": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/46",
       "revision": "5785129f585c43aca672aed55c5d45363c4b5ad1",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/33",
       "summary": "Invalid Go regression evidence never claims pass and retains the concrete reason and raw result.",
-      "limit": "Original native whole-workflow fixture is still unverified."
+      "limit": "Original native whole-workflow fixture is still unverified.",
+      "merge_revision": "63fd88db2c2712f3458db928d01680b24940193b"
     },
     "pr_47": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/47",
       "revision": "df54361bbb4f28e73f2edfb161b902d71bbf4630",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/32",
       "summary": "Finalizer stops and names missing scanner/verifier prerequisites while keeping stale or wrong proof blocked.",
-      "limit": "Does not qualify installed native scanner identity or the native exact delivery."
+      "limit": "Does not qualify installed native scanner identity or the native exact delivery.",
+      "merge_revision": "2f9f8e9827019c8ba24d698a039acbfd0295c286"
     },
     "pr_48": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/48",
       "revision": "2dee2f2c4364ecfce159ccaf887ae031e15349e9",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/13",
       "summary": "Operator documentation distinguishes support, scope, and historical evidence.",
-      "limit": "Documentation and portable cross-checks; no native acceptance claim."
+      "limit": "Documentation and portable cross-checks; no native acceptance claim.",
+      "merge_revision": "a371a7ce7b9d3d56525668cc1a0dfd54f184779c"
     },
     "pr_49": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/49",
       "revision": "ca306767cc05d26b8ce7fdae388641c0f9a8a7c0",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/12",
       "summary": "Two seeded PTYs exercise versions, separate approvals, stale edits, actual Vim save, cancellation, reopened clarification, blocked refresh, and stored delivery.",
-      "limit": "Production dispatcher is in-process; the separate Unix-socket launcher cannot run on this host."
+      "limit": "Production dispatcher is in-process; the separate Unix-socket launcher cannot run on this host.",
+      "merge_revision": "08849ca05357219f8032f4e72dad33c7109ce404"
     },
     "pr_50": {
-      "kind": "review_pr_fixture_pass",
+      "kind": "merged_pr_fixture_pass",
       "pr": "https://github.com/nirmalhk7/whirlwind/pull/50",
       "revision": "f50512f51668913aaa92f216c66fb527a1edc737",
       "issue": "https://github.com/nirmalhk7/whirlwind/issues/10",
       "summary": "Two independently accepted local candidates stay isolated through pause, Git-ref checkpoint recovery, restart and replay.",
-      "limit": "Uses deterministic verifier and Finalizer inputs, not a full native two-plan session."
+      "limit": "Uses deterministic verifier and Finalizer inputs, not a full native two-plan session.",
+      "merge_revision": "6d7392ecabaaf653ed08200325a0b0c6ac48290a"
     },
     "pr_51": {
       "kind": "review_pr_fixture_pass",

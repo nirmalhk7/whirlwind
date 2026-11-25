@@ -7,13 +7,15 @@ Page capture at sequence 3035 and older checkpoint records. Its old
 All 141 requirement rows retain their original block ID and hash; section
 titles are not acceptance criteria.
 
-Evidence entries are named fixtures passed on the exact baseline, passing
-checks on **unmerged** PR heads, or historical context only. An individual
-PR report never qualifies `main`, another PR, or the final product. The
-linked PR has that branch's exact commands and coverage limits. Every
-in-scope row names what still needs to happen and its issue numbers.
-Deferred rows assert no implementation; partially deferred or waived rows
-describe what is excluded. Linux remains inspection-only.
+Evidence records name their tested revision. PR records distinguish open,
+merged, and superseded work. Merged and superseded records also identify
+the integration or replacement commit. The linked PR describes the tests
+and their coverage limits. Every applicable row names its remaining work
+and issue numbers. Deferred rows make no implementation claim.
+
+Linux supports inspection, portable tests, and opt-in isolated offline
+verification. Native agent supervision and native Qlty verification still
+require the supported macOS and nono runtime.
 
 Check ledger structure and, optionally, the named Go outcomes:
 
