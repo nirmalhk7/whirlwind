@@ -11,20 +11,36 @@ import (
 	"testing"
 )
 
+const (
+	fixtureOutputFlag       = "--output"
+	fixtureDetachedFlag     = "--detach"
+	fixtureDriverConfigFlag = "--driver-config-json"
+	fixtureImageFlag        = "--from"
+	fixtureNameFlag         = "--name"
+	fixtureNoProvidersFlag  = "--no-auto-providers"
+	fixtureNoKeepFlag       = "--no-keep"
+	fixturePolicyFlag       = "--policy"
+	fixturePolicyPath       = "/tmp/policy.json"
+	fixtureAttemptName      = "attempt-test"
+	fixtureBaseImage        = "linux-test-image"
+	fixtureShell            = "/bin/sh"
+	fixtureInertInit        = "exec sleep infinity"
+)
+
 func TestPinnedGatewaySchema(t *testing.T) {
 	fixture := Install(t)
 	var gateways []map[string]any
-	decodeCLI(t, fixture, &gateways, "gateway", "list", "--output", "json")
+	decodeCLI(t, fixture, &gateways, "gateway", "list", fixtureOutputFlag, "json")
 	if len(gateways) != 1 || gateways[0]["active"] != true || gateways[0]["is_remote"] != false || gateways[0]["endpoint"] != "http://127.0.0.1:8080" {
 		t.Fatalf("gateway list is not a healthy local v0.1.7-shaped response: %#v", gateways)
 	}
 	var status map[string]any
-	decodeCLI(t, fixture, &status, "status", "--output", "json")
+	decodeCLI(t, fixture, &status, "status", fixtureOutputFlag, "json")
 	if status["status"] != "connected" || status["authentication"].(map[string]any)["status"] != "not_required" {
 		t.Fatalf("gateway status schema mismatch: %#v", status)
 	}
 	var info map[string]any
-	decodeCLI(t, fixture, &info, "gateway", "info", "--output", "json")
+	decodeCLI(t, fixture, &info, "gateway", "info", fixtureOutputFlag, "json")
 	drivers := info["compute_drivers"].([]any)
 	if drivers[0].(map[string]any)["name"] != "docker" {
 		t.Fatalf("gateway driver schema mismatch: %#v", info)
@@ -35,12 +51,12 @@ func TestPinnedGatewayFixtureExposesAuthenticationAndInfoHealthIndependently(t *
 	fixture := Install(t)
 	fixture.SetGatewayHealth(t, "connected", "unverified", "unhealthy")
 	var status map[string]any
-	decodeCLI(t, fixture, &status, "status", "--output", "json")
+	decodeCLI(t, fixture, &status, "status", fixtureOutputFlag, "json")
 	if status["status"] != "connected" || status["authentication"].(map[string]any)["status"] != "unverified" {
 		t.Fatalf("gateway health/authentication fields collapsed: %#v", status)
 	}
 	var info map[string]any
-	decodeCLI(t, fixture, &info, "gateway", "info", "--output", "json")
+	decodeCLI(t, fixture, &info, "gateway", "info", fixtureOutputFlag, "json")
 	if info["status"] != "unhealthy" {
 		t.Fatalf("gateway info health field was not independently controlled: %#v", info)
 	}
@@ -49,18 +65,18 @@ func TestPinnedGatewayFixtureExposesAuthenticationAndInfoHealthIndependently(t *
 func TestSandboxLifecycleSchemaAndCallLog(t *testing.T) {
 	fixture := Install(t)
 	var created map[string]any
-	create := []string{"sandbox", "create", "--name", "attempt-test", "--from", "linux-test-image", "--policy", "/tmp/policy.json", "--driver-config-json", `{}`, "--label", "whirlwind.io/execution=attempt-test", "--detach", "--no-keep", "--no-auto-providers"}
+	create := []string{"sandbox", "create", fixtureNameFlag, fixtureAttemptName, fixtureImageFlag, fixtureBaseImage, fixturePolicyFlag, fixturePolicyPath, fixtureDriverConfigFlag, `{}`, "--label", "whirlwind.io/execution=attempt-test", fixtureDetachedFlag, fixtureNoKeepFlag, fixtureNoProvidersFlag}
 	create = append(create, pinnedAuthority()...)
-	create = append(create, "--", "/bin/sh", "-c", "exec sleep infinity")
+	create = append(create, "--", fixtureShell, "-c", fixtureInertInit)
 	decodeCLI(t, fixture, &created, create...)
-	if created["id"] != "test-sandbox-attempt-test" || created["name"] != "attempt-test" || created["workspace"] != "whirlwind-test-workspace" || created["phase"] != "Ready" || created["labels"].(map[string]any)["whirlwind.io/execution"] != "attempt-test" {
+	if created["id"] != "test-sandbox-attempt-test" || created["name"] != fixtureAttemptName || created["workspace"] != "whirlwind-test-workspace" || created["phase"] != "Ready" || created["labels"].(map[string]any)["whirlwind.io/execution"] != fixtureAttemptName {
 		t.Fatalf("sandbox create schema mismatch: %#v", created)
 	}
 	if !fixture.HasInertInit(t) {
 		t.Fatal("fake CLI did not verify the detached inert init command")
 	}
 	var stopped map[string]any
-	decodeCLI(t, fixture, &stopped, append([]string{"sandbox", "stop", "attempt-test"}, pinnedAuthority()...)...)
+	decodeCLI(t, fixture, &stopped, append([]string{"sandbox", "stop", fixtureAttemptName}, pinnedAuthority()...)...)
 	if stopped["id"] != created["id"] || stopped["phase"] != "Stopped" {
 		t.Fatalf("sandbox stop did not preserve identity and report stopped phase: %#v", stopped)
 	}
@@ -68,7 +84,7 @@ func TestSandboxLifecycleSchemaAndCallLog(t *testing.T) {
 		Sandboxes []map[string]any `json:"sandboxes"`
 		NextPage  string           `json:"next_page_token"`
 	}
-	decodeCLI(t, fixture, &list, append([]string{"sandbox", "list", "--output", "json"}, pinnedAuthority()...)...)
+	decodeCLI(t, fixture, &list, append([]string{"sandbox", "list", fixtureOutputFlag, "json"}, pinnedAuthority()...)...)
 	if len(list.Sandboxes) != 1 || list.Sandboxes[0]["id"] != created["id"] || list.NextPage != "" {
 		t.Fatalf("sandbox list omitted lifecycle identity: %#v", list)
 	}
@@ -80,9 +96,9 @@ func TestSandboxLifecycleSchemaAndCallLog(t *testing.T) {
 
 func TestSandboxCreateRejectsNonInertDetachedInit(t *testing.T) {
 	fixture := Install(t)
-	args := []string{"sandbox", "create", "--name", "attempt-test", "--from", "linux-test-image", "--policy", "/tmp/policy.json", "--driver-config-json", `{}`, "--detach", "--no-keep", "--no-auto-providers"}
+	args := []string{"sandbox", "create", fixtureNameFlag, fixtureAttemptName, fixtureImageFlag, fixtureBaseImage, fixturePolicyFlag, fixturePolicyPath, fixtureDriverConfigFlag, `{}`, fixtureDetachedFlag, fixtureNoKeepFlag, fixtureNoProvidersFlag}
 	args = append(args, pinnedAuthority()...)
-	args = append(args, "--", "/bin/sh", "-c", "echo unsafe")
+	args = append(args, "--", fixtureShell, "-c", "echo unsafe")
 	if _, err := fixture.RunCLI(t, args...); err == nil {
 		t.Fatal("fake CLI accepted a detached init that could perform work before ACP exec")
 	}
@@ -90,9 +106,9 @@ func TestSandboxCreateRejectsNonInertDetachedInit(t *testing.T) {
 
 func TestSandboxCreateRejectsOutputJSONWithNoKeep(t *testing.T) {
 	fixture := Install(t)
-	args := []string{"sandbox", "create", "--name", "attempt-test", "--from", "linux-test-image", "--policy", "/tmp/policy.json", "--driver-config-json", `{}`, "--detach", "--no-keep", "--no-auto-providers", "--output", "json"}
+	args := []string{"sandbox", "create", fixtureNameFlag, fixtureAttemptName, fixtureImageFlag, fixtureBaseImage, fixturePolicyFlag, fixturePolicyPath, fixtureDriverConfigFlag, `{}`, fixtureDetachedFlag, fixtureNoKeepFlag, fixtureNoProvidersFlag, fixtureOutputFlag, "json"}
 	args = append(args, pinnedAuthority()...)
-	args = append(args, "--", "/bin/sh", "-c", "exec sleep infinity")
+	args = append(args, "--", fixtureShell, "-c", fixtureInertInit)
 	if _, err := fixture.RunCLI(t, args...); err == nil {
 		t.Fatal("fake CLI accepted the release-incompatible --no-keep and --output json combination")
 	}
@@ -100,13 +116,13 @@ func TestSandboxCreateRejectsOutputJSONWithNoKeep(t *testing.T) {
 
 func TestSandboxStopRejectsStructuredOutput(t *testing.T) {
 	fixture := Install(t)
-	seed := []string{"sandbox", "create", "--name", "attempt-test", "--from", "linux-test-image", "--policy", "/tmp/policy.json", "--driver-config-json", `{}`, "--label", "whirlwind.io/execution=attempt-test", "--detach", "--no-auto-providers"}
+	seed := []string{"sandbox", "create", fixtureNameFlag, fixtureAttemptName, fixtureImageFlag, fixtureBaseImage, fixturePolicyFlag, fixturePolicyPath, fixtureDriverConfigFlag, `{}`, "--label", "whirlwind.io/execution=attempt-test", fixtureDetachedFlag, fixtureNoProvidersFlag}
 	seed = append(seed, pinnedAuthority()...)
-	seed = append(seed, "--", "/bin/sh", "-c", "exec sleep infinity")
+	seed = append(seed, "--", fixtureShell, "-c", fixtureInertInit)
 	if _, err := fixture.RunCLI(t, seed...); err != nil {
 		t.Fatal(err)
 	}
-	stop := append([]string{"sandbox", "stop", "attempt-test", "--output", "json"}, pinnedAuthority()...)
+	stop := append([]string{"sandbox", "stop", fixtureAttemptName, fixtureOutputFlag, "json"}, pinnedAuthority()...)
 	if _, err := fixture.RunCLI(t, stop...); err == nil {
 		t.Fatal("fake CLI accepted unsupported structured output on sandbox stop")
 	}
@@ -114,7 +130,7 @@ func TestSandboxStopRejectsStructuredOutput(t *testing.T) {
 
 func TestSandboxCommandsRequirePinnedGatewayAndWorkspace(t *testing.T) {
 	fixture := Install(t)
-	if _, err := fixture.RunCLI(t, "sandbox", "list", "--output", "json"); err == nil {
+	if _, err := fixture.RunCLI(t, "sandbox", "list", fixtureOutputFlag, "json"); err == nil {
 		t.Fatal("sandbox list succeeded without explicit gateway, endpoint, and workspace")
 	}
 }
@@ -135,12 +151,12 @@ func TestFixtureRecordsOnlyCustomXDGPathForLifecycleCalls(t *testing.T) {
 func TestFixtureRequiresDocumentedSandboxListSelectorFlag(t *testing.T) {
 	fixture := Install(t)
 	wrong := append([]string{"sandbox", "list"}, pinnedAuthority()...)
-	wrong = append(wrong, "--output", "json", "--label-selector", "whirlwind.io/execution=test")
+	wrong = append(wrong, fixtureOutputFlag, "json", "--label-selector", "whirlwind.io/execution=test")
 	if _, err := fixture.RunCLI(t, wrong...); err == nil {
 		t.Fatal("fake OpenShell accepted a selector flag absent from the pinned CLI")
 	}
 	right := append([]string{"sandbox", "list"}, pinnedAuthority()...)
-	right = append(right, "--output", "json", "--selector", "whirlwind.io/execution=test")
+	right = append(right, fixtureOutputFlag, "json", "--selector", "whirlwind.io/execution=test")
 	if _, err := fixture.RunCLI(t, right...); err != nil {
 		t.Fatalf("fake OpenShell rejected the documented selector flag: %v", err)
 	}
@@ -151,14 +167,14 @@ func TestFixtureExecutesFinalPayloadOnlyWhenExplicitlyEnabled(t *testing.T) {
 	input := strings.NewReader("export HTTP_PROXY='http://proxy.invalid:8080'\n")
 	seed := []string{"sandbox", "exec"}
 	seed = append(seed, pinnedAuthority()...)
-	seed = append(seed, "--", "/bin/sh", "-c", "umask 077; cat > \"$1\"", "whirlwind-env", "/tmp/ww-attempt.env")
+	seed = append(seed, "--", fixtureShell, "-c", "umask 077; cat > \"$1\"", "whirlwind-env", "/tmp/ww-attempt.env")
 	if _, err := fixture.RunCLIWithInput(t, input, seed...); err != nil {
 		t.Fatal(err)
 	}
 	runPayload := func() ([]byte, error) {
 		args := []string{"sandbox", "exec"}
 		args = append(args, pinnedAuthority()...)
-		args = append(args, "--", "/bin/sh", "-c", `set -a; . "$1" || exit; rm -f "$1"; shift; exec "$@"`, "whirlwind-env", "/tmp/ww-attempt.env", "/usr/bin/printf", "payload-ran")
+		args = append(args, "--", fixtureShell, "-c", `set -a; . "$1" || exit; rm -f "$1"; shift; exec "$@"`, "whirlwind-env", "/tmp/ww-attempt.env", "/usr/bin/printf", "payload-ran")
 		return fixture.RunCLI(t, args...)
 	}
 	if _, err := runPayload(); err == nil {
@@ -181,7 +197,7 @@ func TestFixtureRecordsOnlyEnvironmentSeedKeyNames(t *testing.T) {
 	input := "export HTTP_PROXY='http://user:" + token + "@host.openshell.internal:1234'\nexport http_proxy='http://user:" + token + "@host.openshell.internal:1234'\n"
 	args := []string{"sandbox", "exec"}
 	args = append(args, pinnedAuthority()...)
-	args = append(args, "--", "/bin/sh", "-c", "umask 077; cat > /tmp/ww-test.env")
+	args = append(args, "--", fixtureShell, "-c", "umask 077; cat > /tmp/ww-test.env")
 	if _, err := fixture.RunCLIWithInput(t, strings.NewReader(input), args...); err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +242,7 @@ func TestFixtureRecordsPerExecutionGuestHomeScopeWithoutValues(t *testing.T) {
 			fixture := Install(t)
 			args := []string{"sandbox", "exec"}
 			args = append(args, pinnedAuthority()...)
-			args = append(args, "--", "/bin/sh", "-c", "umask 077; cat > /tmp/ww-attempt.env")
+			args = append(args, "--", fixtureShell, "-c", "umask 077; cat > /tmp/ww-attempt.env")
 			if _, err := fixture.RunCLIWithInput(t, strings.NewReader(testCase.env), args...); err != nil {
 				t.Fatal(err)
 			}

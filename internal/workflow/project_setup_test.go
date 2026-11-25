@@ -18,6 +18,16 @@ import (
 	"whirlwind/internal/verification"
 )
 
+const (
+	setupFixturePolicyFile     = ".whirlwind.yaml"
+	setupFixtureCommitSubject  = "Confirm project verification commands"
+	setupFixtureDisableHooks   = "core.hooksPath=/dev/null"
+	setupFixtureCommitError    = "commit policy: %v %s"
+	setupFixtureGitleaksConfig = ".gitleaks.toml"
+	setupFixtureQltyConfig     = ".qlty/qlty.toml"
+	setupFixtureCatalog        = "prepare-catalog"
+)
+
 type setupExecutor interface {
 	runProjectSetup(context.Context, string) error
 	dispatchProjectSetup(context.Context)
@@ -41,12 +51,12 @@ func TestProjectSetupRunsHumanCommandsBeforeReadiness(t *testing.T) {
 				command = "/usr/bin/false"
 			}
 			configuration := "checks:\n  - name: first\n    command: [" + command + "]\n    timeout_seconds: 10\n  - name: later\n    command: [/usr/bin/true]\n    timeout_seconds: 10\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\n"
-			if err := os.WriteFile(filepath.Join(repository, ".whirlwind.yaml"), []byte(configuration), 0600); err != nil {
+			if err := os.WriteFile(filepath.Join(repository, setupFixturePolicyFile), []byte(configuration), 0600); err != nil {
 				t.Fatal(err)
 			}
-			for _, args := range [][]string{{"add", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Confirm project verification commands"}} {
+			for _, args := range [][]string{{"add", setupFixturePolicyFile}, {"-c", setupFixtureDisableHooks, "commit", "-m", setupFixtureCommitSubject}} {
 				if out, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
-					t.Fatalf("commit policy: %v %s", err, out)
+					t.Fatalf(setupFixtureCommitError, err, out)
 				}
 			}
 			project, err := e.Project(context.Background(), "p")
@@ -104,12 +114,12 @@ func TestProjectSetupPersistsLiveAndCompletedCheckProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	configuration := "checks:\n  - name: visible-wait\n    command: [" + sleep + ", '3']\n    timeout_seconds: 10\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\n"
-	if err := os.WriteFile(filepath.Join(repository, ".whirlwind.yaml"), []byte(configuration), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repository, setupFixturePolicyFile), []byte(configuration), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"add", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Confirm project verification commands"}} {
+	for _, args := range [][]string{{"add", setupFixturePolicyFile}, {"-c", setupFixtureDisableHooks, "commit", "-m", setupFixtureCommitSubject}} {
 		if out, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("commit policy: %v %s", err, out)
+			t.Fatalf(setupFixtureCommitError, err, out)
 		}
 	}
 	ctx := context.Background()
@@ -174,15 +184,15 @@ func TestProjectSetupPersistsLiveAndCompletedCheckProgress(t *testing.T) {
 func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t *testing.T) {
 	e, _, repository := testEngine(t)
 	installSetupRunner(t)
-	policyPath := filepath.Join(repository, ".whirlwind.yaml")
+	policyPath := filepath.Join(repository, setupFixturePolicyFile)
 	qualityRoot := filepath.Join(t.TempDir(), "external-qlty")
 	configuration := "checks:\n  - name: build\n    command: [/usr/bin/true]\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\nquality:\n  root: " + qualityRoot + "\n"
 	if err := os.WriteFile(policyPath, []byte(configuration), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"add", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Confirm project verification commands"}} {
+	for _, args := range [][]string{{"add", setupFixturePolicyFile}, {"-c", setupFixtureDisableHooks, "commit", "-m", setupFixtureCommitSubject}} {
 		if output, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("commit policy: %v %s", err, output)
+			t.Fatalf(setupFixtureCommitError, err, output)
 		}
 	}
 	project, err := e.Project(context.Background(), "p")
@@ -200,7 +210,7 @@ func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t
 	if err := os.MkdirAll(filepath.Join(qualityRoot, "config", ".qlty"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	for path, content := range map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n", ".gitleaks.toml": "[extend]\nuseDefault = true\n"} {
+	for path, content := range map[string]string{setupFixtureQltyConfig: "config_version = \"0\"\n", setupFixtureGitleaksConfig: "[extend]\nuseDefault = true\n"} {
 		full := filepath.Join(qualityRoot, "config", path)
 		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
 			t.Fatal(err)
@@ -211,7 +221,7 @@ func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t
 	}
 	snapshot, err := externalQualitySnapshot(project)
 	requireWorkflowSuccess(t, err)
-	secretConfig := filepath.Join(qualityRoot, "config", ".gitleaks.toml")
+	secretConfig := filepath.Join(qualityRoot, "config", setupFixtureGitleaksConfig)
 	if err := os.WriteFile(secretConfig, []byte("# changed after preparation\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +229,7 @@ func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t
 	if staleErr == nil {
 		t.Fatal("changed external rules were accepted after preparation")
 	}
-	if err := os.WriteFile(secretConfig, []byte(snapshot.Files[".gitleaks.toml"]), 0600); err != nil {
+	if err := os.WriteFile(secretConfig, []byte(snapshot.Files[setupFixtureGitleaksConfig]), 0600); err != nil {
 		t.Fatal(err)
 	}
 	catalog := []byte("plugins:\n  definitions:\n    gitleaks:\n      known_good_version: 4.5.6\n")
@@ -235,10 +245,10 @@ func TestAutomaticProjectSetupBuildsCatalogAndQualificationWithoutNetworkGrant(t
 	if err := os.WriteFile(filepath.Join(priorRoot, "streams", "000.stderr"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	prior := projectSetupEvidence{Onboarding: true, Phase: "catalog", Manifest: verification.JobManifest{Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: "prepare-catalog", Root: priorRoot}}
+	prior := projectSetupEvidence{Onboarding: true, Phase: "catalog", Manifest: verification.JobManifest{Purpose: verification.ProjectSetupPurpose, ProjectID: project.ID, OperationID: setupFixtureCatalog, Root: priorRoot}}
 	priorOperation := model.Operation{Kind: "project_setup", Subject: project.ID, Stage: "complete", Input: prior}
-	requireWorkflowSuccess(t, e.Store.Put(context.Background(), "operations", "prepare-catalog", priorOperation, 0))
-	qualify, err := e.projectSetupManifest(context.Background(), project, "qualify", projectSetupEvidence{Onboarding: true, Phase: "qualify", QualityRoot: snapshot.Root, SnapshotHash: evidenceDigest(snapshot), PreviousOperationID: "prepare-catalog", PluginCatalogHash: catalogHash})
+	requireWorkflowSuccess(t, e.Store.Put(context.Background(), "operations", setupFixtureCatalog, priorOperation, 0))
+	qualify, err := e.projectSetupManifest(context.Background(), project, "qualify", projectSetupEvidence{Onboarding: true, Phase: "qualify", QualityRoot: snapshot.Root, SnapshotHash: evidenceDigest(snapshot), PreviousOperationID: setupFixtureCatalog, PluginCatalogHash: catalogHash})
 	requireWorkflowSuccess(t, err)
 	if qualify.Quality == nil || qualify.Quality.Identity != nil || len(qualify.Commands) != 2 || qualify.Commands[1].ReportFormat != "sarif" || !slices.Equal(qualify.Commands[1].Command, []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}) {
 		t.Fatalf("qualification lacks learn-mode frozen configuration and native SARIF scan: %+v", qualify)
@@ -250,12 +260,12 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	installSetupRunner(t)
 	qualityRoot := filepath.Join(t.TempDir(), "external-qlty")
 	configuration := "checks:\n  - name: build\n    command: [/usr/bin/true]\nallowed_paths: ['**']\nrisk_rules:\n  - level: low\n    paths: ['**']\nquality:\n  root: " + qualityRoot + "\n"
-	if err := os.WriteFile(filepath.Join(repository, ".whirlwind.yaml"), []byte(configuration), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(repository, setupFixturePolicyFile), []byte(configuration), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"add", ".whirlwind.yaml"}, {"-c", "core.hooksPath=/dev/null", "commit", "-m", "Confirm project verification commands"}} {
+	for _, args := range [][]string{{"add", setupFixturePolicyFile}, {"-c", setupFixtureDisableHooks, "commit", "-m", setupFixtureCommitSubject}} {
 		if output, err := exec.Command("git", append([]string{"-C", repository}, args...)...).CombinedOutput(); err != nil {
-			t.Fatalf("commit policy: %v %s", err, output)
+			t.Fatalf(setupFixtureCommitError, err, output)
 		}
 	}
 	ctx := context.Background()
@@ -321,7 +331,7 @@ func TestProjectSetupPreparationDurablyQueuesQualification(t *testing.T) {
 	if savedProject.Status != "draft" {
 		t.Fatalf("project became ready before scanner qualification: %s", savedProject.Status)
 	}
-	for _, path := range []string{".qlty/qlty.toml", ".gitleaks.toml"} {
+	for _, path := range []string{setupFixtureQltyConfig, setupFixtureGitleaksConfig} {
 		if _, err := os.Stat(filepath.Join(qualityRoot, "config", path)); err != nil {
 			t.Fatalf("default file not published outside source: %s: %v", path, err)
 		}
@@ -394,7 +404,7 @@ func TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings(t *testing.T) {
 		Version: 1, Purpose: verification.ProjectSetupPurpose, ProjectID: "project", OperationID: "setup", JobID: "setup",
 		ConfigurationHash: "configuration", CandidateCommit: strings.Repeat("a", 40), CandidateTree: strings.Repeat("b", 40), BaseCommit: strings.Repeat("a", 40),
 		Repository: filepath.Join(root, "source"), Root: filepath.Join(root, "quality", "jobs", "setup"), Launcher: filepath.Join(root, "nono"),
-		Quality:  &model.QualitySnapshot{Root: filepath.Join(root, "quality"), Files: map[string]string{".qlty/qlty.toml": "config_version = \"0\"\n"}, PluginCatalog: []byte("plugins: {}\n")},
+		Quality:  &model.QualitySnapshot{Root: filepath.Join(root, "quality"), Files: map[string]string{setupFixtureQltyConfig: "config_version = \"0\"\n"}, PluginCatalog: []byte("plugins: {}\n")},
 		Commands: []verification.JobCommand{{Name: "build", Command: []string{"/usr/bin/true"}, TimeoutSeconds: 10}, {Name: "quality", Command: []string{"qlty", "check", "--sarif"}, TimeoutSeconds: 10, ReportFormat: "sarif"}},
 	}
 	identity := &model.QualityIdentity{Version: 1, QltyVersion: "0.668.0 macos-arm64 (fixture)", QltyBinarySHA256: strings.Repeat("a", 64), ConfigurationHash: strings.Repeat("b", 64), ToolRuntimeHash: strings.Repeat("c", 64), PluginCatalogHash: strings.Repeat("d", 64), ToolRuntimePath: filepath.Join(root, "runtime"), Tools: []model.QualityToolIdentity{{Name: "gitleaks", Version: "1.0", Fingerprint: strings.Repeat("e", 8)}}}
