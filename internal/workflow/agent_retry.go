@@ -44,23 +44,29 @@ func (a *agentRun) executeChoiceAttempts(source model.Provider, choice model.Age
 	if restarts > 3 {
 		return provider.Output{}, true, fmt.Errorf("%s/%s: restart budget exhausted after 3 restarts", source.ID, choice.Model)
 	}
-	if retryAt != "" {
-		if err = a.waitForPersistedEntryRetry(source, choice, retryAt); err != nil {
-			return provider.Output{}, false, err
-		}
+	if err := a.resumeChoiceRetry(source, choice, retryAt); err != nil {
+		return provider.Output{}, false, err
 	}
+	return a.runRemainingChoiceAttempts(source, choice, restarts)
+}
+
+func (a *agentRun) resumeChoiceRetry(source model.Provider, choice model.AgentChoice, retryAt string) error {
+	if retryAt == "" {
+		return nil
+	}
+	return a.waitForPersistedEntryRetry(source, choice, retryAt)
+}
+
+func (a *agentRun) runRemainingChoiceAttempts(source model.Provider, choice model.AgentChoice, restarts int) (provider.Output, bool, error) {
 	for restarts <= 3 {
 		a.recoveryRestartCount = restarts
 		output, kind, execution, err := a.runChoiceAttempt(source)
 		if execution != nil && attemptDeadlineExpired(execution.state, err) {
 			return output, true, err
 		}
-		if err != nil && a.input.Purpose == "integration:create_pr" {
-			// A failed transport may already have created the remote PR. Return
-			// to the persisted publication stage, which performs lookup first.
-			return output, false, err
-		}
-		if kind == provider.FailureUnknown {
+		// A failed publication transport may already have created the remote
+		// PR. Return to the persisted publication stage for lookup.
+		if kind == provider.FailureUnknown || err != nil && a.input.Purpose == "integration:create_pr" {
 			return output, false, err
 		}
 		if kind != provider.FailureTransient && kind != provider.FailureRateLimit || restarts == 3 {
