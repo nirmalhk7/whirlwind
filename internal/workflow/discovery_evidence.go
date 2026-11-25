@@ -323,24 +323,3 @@ func (e *Engine) saveDiscoverySnapshot(ctx context.Context, project string, snap
 	}
 	return e.Store.Put(ctx, "discovery_scans", project, snapshot, record.Version)
 }
-
-func unchangedCandidateEvidence(history []model.Direction, evidence []model.EvidenceRef) []model.Direction {
-	current := map[string]string{}
-	for _, ref := range evidence {
-		current[ref.Kind+":"+ref.Ref] = ref.Revision
-	}
-	unchanged := []model.Direction{}
-	for _, candidate := range history {
-		if len(candidate.Evidence) == 0 {
-			unchanged = append(unchanged, candidate)
-			continue
-		}
-		for _, ref := range candidate.Evidence {
-			if revision, exists := current[ref.Kind+":"+ref.Ref]; !exists || revision == ref.Revision {
-				unchanged = append(unchanged, candidate)
-				break
-			}
-		}
-	}
-	return unchanged
-}

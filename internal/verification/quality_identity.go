@@ -55,10 +55,6 @@ func hashQltyExecutableAt(executable, pathValue, cwd string) (string, error) {
 	return hash, err
 }
 
-func lookPathIn(executable, pathValue string) (string, error) {
-	return lookPathInCWD(executable, pathValue, "")
-}
-
 func lookPathInCWD(executable, pathValue, cwd string) (string, error) {
 	if strings.ContainsRune(executable, filepath.Separator) {
 		if !filepath.IsAbs(executable) && cwd != "" {
