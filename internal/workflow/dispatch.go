@@ -20,6 +20,15 @@ func (e *Engine) dispatch(ctx context.Context) {
 		return
 	}
 	counts := e.runningCounts(records)
+	projects, queues := dispatchQueues(records)
+	projects, err = e.rotateDispatchProjects(ctx, projects)
+	if err != nil {
+		return
+	}
+	e.dispatchProjectQueues(ctx, projects, queues, counts)
+}
+
+func dispatchQueues(records []model.Record) ([]string, map[string][]model.ExecutionPlan) {
 	sort.SliceStable(records, func(i, j int) bool { return records[i].CreatedOrder < records[j].CreatedOrder })
 	queues := map[string][]model.ExecutionPlan{}
 	var projects []string
@@ -33,19 +42,29 @@ func (e *Engine) dispatch(ctx context.Context) {
 		}
 	}
 	sort.Strings(projects)
-	if cursor, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans"); err == nil {
-		last, err := store.Decode[dispatchCursor](cursor)
-		if err != nil {
-			return
-		}
-		n := sort.SearchStrings(projects, last.ProjectID)
-		if n < len(projects) && projects[n] == last.ProjectID {
-			n++
-		}
-		projects = append(append([]string{}, projects[n:]...), projects[:n]...)
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return
+	return projects, queues
+}
+
+func (e *Engine) rotateDispatchProjects(ctx context.Context, projects []string) ([]string, error) {
+	cursor, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans")
+	if errors.Is(err, store.ErrNotFound) {
+		return projects, nil
 	}
+	if err != nil {
+		return nil, err
+	}
+	last, err := store.Decode[dispatchCursor](cursor)
+	if err != nil {
+		return nil, err
+	}
+	n := sort.SearchStrings(projects, last.ProjectID)
+	if n < len(projects) && projects[n] == last.ProjectID {
+		n++
+	}
+	return append(append([]string{}, projects[n:]...), projects[:n]...), nil
+}
+
+func (e *Engine) dispatchProjectQueues(ctx context.Context, projects []string, queues map[string][]model.ExecutionPlan, counts map[string]int) {
 	for {
 		remaining := false
 		for _, project := range projects {
@@ -111,13 +130,7 @@ func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, cou
 	if _, busy := e.running[task.ID]; busy {
 		return
 	}
-	expected := 0
-	if current, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans"); err == nil {
-		expected = current.Version
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return
-	}
-	if err := e.Store.Put(ctx, "dispatch_cursors", "execution_plans", dispatchCursor{ProjectID: task.ProjectID}, expected); err != nil {
+	if err := e.advanceDispatchCursor(ctx, task.ProjectID); err != nil {
 		return
 	}
 	run, cancel := context.WithCancel(ctx)
@@ -130,6 +143,16 @@ func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, cou
 		}
 	})
 }
+func (e *Engine) advanceDispatchCursor(ctx context.Context, projectID string) error {
+	expected := 0
+	if current, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans"); err == nil {
+		expected = current.Version
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return e.Store.Put(ctx, "dispatch_cursors", "execution_plans", dispatchCursor{ProjectID: projectID}, expected)
+}
+
 func stepFailed(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false

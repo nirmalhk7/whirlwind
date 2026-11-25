@@ -67,7 +67,7 @@ func (d *Dashboard) viewSavedMessage(index int) {
 		d.status.SetText("Whirlwind | cannot open message: " + err.Error())
 		return
 	}
-	defer os.Remove(file.Name())
+	defer d.removeEditorFile(file.Name())
 	_, err = file.WriteString(d.inboxMessages[index])
 	closeErr := file.Close()
 	if err == nil {

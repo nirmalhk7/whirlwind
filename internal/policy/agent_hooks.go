@@ -44,37 +44,42 @@ func resolveHookChecks(configured []model.Check) ([]model.Check, error) {
 		}
 		byName[check.Name] = check
 	}
-	var checks []model.Check
-	visiting, resolved := map[string]bool{}, map[string]bool{}
-	var visit func(string) error
-	visit = func(id string) error {
-		if visiting[id] {
-			return fmt.Errorf("agent hook check dependency cycle at %q", id)
-		}
-		if resolved[id] {
-			return nil
-		}
-		check, exists := byName[id]
-		if !exists {
-			return fmt.Errorf("unknown hook check %q", id)
-		}
-		visiting[id] = true
-		for _, dependency := range check.DependsOn {
-			if err := visit(dependency); err != nil {
-				return err
-			}
-		}
-		delete(visiting, id)
-		resolved[id] = true
-		checks = append(checks, check)
-		return nil
-	}
+	order := hookDependencyOrder{byName: byName, visiting: map[string]bool{}, resolved: map[string]bool{}}
 	for _, check := range configured {
-		if err := visit(check.Name); err != nil {
+		if err := order.visit(check.Name); err != nil {
 			return nil, err
 		}
 	}
-	return checks, nil
+	return order.checks, nil
+}
+
+type hookDependencyOrder struct {
+	byName             map[string]model.Check
+	visiting, resolved map[string]bool
+	checks             []model.Check
+}
+
+func (order *hookDependencyOrder) visit(id string) error {
+	if order.visiting[id] {
+		return fmt.Errorf("agent hook check dependency cycle at %q", id)
+	}
+	if order.resolved[id] {
+		return nil
+	}
+	check, exists := order.byName[id]
+	if !exists {
+		return fmt.Errorf("unknown hook check %q", id)
+	}
+	order.visiting[id] = true
+	for _, dependency := range check.DependsOn {
+		if err := order.visit(dependency); err != nil {
+			return err
+		}
+	}
+	delete(order.visiting, id)
+	order.resolved[id] = true
+	order.checks = append(order.checks, check)
+	return nil
 }
 
 // CommittedCheck resolves an exact check ID across project and risk checks.

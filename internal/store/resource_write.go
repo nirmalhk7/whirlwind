@@ -53,7 +53,8 @@ func previousTaskData(ctx context.Context, tx *sql.Tx, kind, id string) ([]byte,
 }
 
 func notifyResourceChange(ctx context.Context, tx *sql.Tx, kind, id string, value any, before, data []byte) error {
-	if kind == "projects" || kind == "project_status" {
+	switch kind {
+	case "projects", "project_status":
 		_, err := tx.ExecContext(ctx, `UPDATE projects SET status=CASE WHEN EXISTS (
 		 SELECT 1 FROM resources r,json_each(r.data) health
 		 WHERE r.kind='project_status' AND
@@ -61,17 +62,13 @@ func notifyResourceChange(ctx context.Context, tx *sql.Tx, kind, id string, valu
 		 AND json_extract(health.value,'$.status') IN ('ERR','error')
 		) THEN 'error' WHEN status='complete' THEN status ELSE COALESCE((SELECT json_extract(r.data,'$.status') FROM resources r WHERE r.kind='projects' AND r.id=projects.project_id),'draft') END`)
 		return err
-	}
-	if kind == "sessions" {
+	case "sessions":
 		return syncPlannerAttemptTx(ctx, tx, id, before, data)
-	}
-	if kind == "operations" {
+	case "operations":
 		return syncIdeationRunTx(ctx, tx, id, data)
-	}
-	if kind == "ideas" {
+	case "ideas":
 		return syncIdeaTx(ctx, tx, id, data)
-	}
-	if kind == "execution_plans" {
+	case "execution_plans":
 		if err := syncExecutionPlanTx(ctx, tx, id, data); err != nil {
 			return err
 		}
@@ -79,30 +76,35 @@ func notifyResourceChange(ctx context.Context, tx *sql.Tx, kind, id string, valu
 			return err
 		}
 		return notifyTaskTransition(ctx, tx, before, data)
-	}
-	if kind == "plan_versions" {
+	case "plan_versions":
 		return syncPlanVersionTx(ctx, tx, id, data)
+	case "directions":
+		return syncDirectionOwnership(ctx, tx, id, value)
+	default:
+		return nil
 	}
-	if kind == "directions" {
-		if direction, ok := value.(model.Direction); ok && direction.ProjectID != "" {
-			if direction.ID == "" {
-				direction.ID = id
-			}
-			var canonicalProject string
-			err := tx.QueryRowContext(ctx, "SELECT project_id FROM ideas WHERE idea_id=?", direction.ID).Scan(&canonicalProject)
-			if err == nil {
-				if canonicalProject != direction.ProjectID {
-					return ErrConflict
-				}
-				return nil
-			}
-			if err != sql.ErrNoRows {
-				return err
-			}
-			return syncProposalTx(ctx, tx, direction)
-		}
+}
+
+func syncDirectionOwnership(ctx context.Context, tx *sql.Tx, id string, value any) error {
+	direction, ok := value.(model.Direction)
+	if !ok || direction.ProjectID == "" {
+		return nil
 	}
-	return nil
+	if direction.ID == "" {
+		direction.ID = id
+	}
+	var canonicalProject string
+	err := tx.QueryRowContext(ctx, "SELECT project_id FROM ideas WHERE idea_id=?", direction.ID).Scan(&canonicalProject)
+	switch {
+	case err == sql.ErrNoRows:
+		return syncProposalTx(ctx, tx, direction)
+	case err != nil:
+		return err
+	case canonicalProject != direction.ProjectID:
+		return ErrConflict
+	default:
+		return nil
+	}
 }
 
 func putRemoval(ctx context.Context, tx *sql.Tx, kind, id string, value any, expected int) (bool, error) {

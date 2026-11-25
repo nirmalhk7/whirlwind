@@ -44,7 +44,9 @@ func TestPlannerCancelWhileDispatchCapacityIsUnavailable(t *testing.T) {
 	var launches atomic.Int32
 	e.Adapter = func(model.Provider) provider.Adapter { return markdownPlannerAdapter(t, &launches) }
 	e.mu.Lock()
-	e.running["capacity-fixture"] = func() {}
+	e.running["capacity-fixture"] = func() {
+		// This entry occupies a slot without starting a worker.
+	}
 	e.mu.Unlock()
 	e.dispatch(ctx)
 	e.background.Wait()

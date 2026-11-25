@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const (
+	dailyFixtureFirstLocalSlot  = "2026-11-23T16:00:00Z"
+	dailyFixtureSecondLocalSlot = "2026-11-23T17:00:00Z"
+)
+
 func TestDisabledIdeationDoesNotCollectSources(t *testing.T) {
 	e, _, _ := testEngine(t)
 	ctx := context.Background()
@@ -56,9 +61,9 @@ func TestCrontabIdeationSelectsLatestMatchingMinute(t *testing.T) {
 	}
 	for _, test := range []struct{ now, want string }{
 		{"2026-11-23T15:59:59Z", "2026-11-20T17:00:00Z"},
-		{"2026-11-23T16:00:00Z", "2026-11-23T16:00:00Z"},
-		{"2026-11-23T16:59:59Z", "2026-11-23T16:00:00Z"},
-		{"2026-11-23T17:00:00Z", "2026-11-23T17:00:00Z"},
+		{dailyFixtureFirstLocalSlot, dailyFixtureFirstLocalSlot},
+		{"2026-11-23T16:59:59Z", dailyFixtureFirstLocalSlot},
+		{dailyFixtureSecondLocalSlot, dailyFixtureSecondLocalSlot},
 		{"2026-11-28T18:00:00Z", "2026-11-27T17:00:00Z"},
 	} {
 		now, err := time.Parse(time.RFC3339, test.now)
@@ -91,14 +96,14 @@ func TestCrontabDispatchDeduplicatesByOccurrence(t *testing.T) {
 	e.GitHub = disconnectedGitHub{}
 	ctx := context.Background()
 	schedule := IdeationSchedule{Cron: "CRON_TZ=America/Denver 0 9,10 * * MON-FRI"}
-	for _, when := range []string{"2026-11-23T16:00:00Z", "2026-11-23T16:00:02Z", "2026-11-23T17:00:00Z"} {
+	for _, when := range []string{dailyFixtureFirstLocalSlot, "2026-11-23T16:00:02Z", dailyFixtureSecondLocalSlot} {
 		now, err := time.Parse(time.RFC3339, when)
 		if err != nil {
 			t.Fatal(err)
 		}
 		e.runIdeationSchedule(ctx, schedule, now)
 	}
-	for _, when := range []string{"2026-11-23T16:00:00Z", "2026-11-23T17:00:00Z"} {
+	for _, when := range []string{dailyFixtureFirstLocalSlot, dailyFixtureSecondLocalSlot} {
 		record, err := e.Store.Get(ctx, "schedules", task.ProjectID+":"+when)
 		if err != nil || record.Version != 1 {
 			t.Fatalf("%s: expected a single recorded outcome, got version %d (%v)", when, record.Version, err)

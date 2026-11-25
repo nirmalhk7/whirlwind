@@ -56,6 +56,15 @@ func writeRoleQueues(text *strings.Builder, snapshot control.Snapshot, names map
 		text.WriteString("No configured role queues.\n")
 		return
 	}
+	roles, byRole := orderedRoleQueues(configs)
+	for _, role := range roles {
+		if config, ok := byRole[role]; ok {
+			writeRoleQueue(text, config, names)
+		}
+	}
+}
+
+func orderedRoleQueues(configs []model.AgentConfig) ([]string, map[string]model.AgentConfig) {
 	roles := model.AgentRoles()
 	byRole := make(map[string]model.AgentConfig, len(configs))
 	var extra []string
@@ -66,38 +75,42 @@ func writeRoleQueues(text *strings.Builder, snapshot control.Snapshot, names map
 		}
 	}
 	sort.Strings(extra)
-	for _, role := range append(roles, extra...) {
-		config, ok := byRole[role]
-		if !ok {
-			continue
-		}
-		label := agentInspectionRoleLabel(role)
-		if config.InheritedFrom != "" {
-			label += " (inherits " + agentInspectionRoleLabel(config.InheritedFrom) + ")"
-		}
-		fmt.Fprintf(text, "%s:\n", label)
-		if len(config.Chain) == 0 {
-			text.WriteString("  No configured choices.\n")
-		}
-		for i, choice := range config.Chain {
-			provider := names[choice.Provider]
-			if provider == "" {
-				provider = choice.Provider + " (not configured)"
-			}
-			modelName := choice.Model
-			if modelName == "" {
-				modelName = "provider default"
-			}
-			reasoning := "provider default"
-			if choice.Thinking != nil && choice.Thinking.Value != "" {
-				reasoning = choice.Thinking.Value
-				if choice.Thinking.ConfigID != "" {
-					reasoning += " (" + choice.Thinking.ConfigID + ")"
-				}
-			}
-			fmt.Fprintf(text, "  %d. %s / %s / reasoning: %s\n", i+1, provider, modelName, reasoning)
+	return append(roles, extra...), byRole
+}
+
+func writeRoleQueue(text *strings.Builder, config model.AgentConfig, names map[string]string) {
+	label := agentInspectionRoleLabel(config.Role)
+	if config.InheritedFrom != "" {
+		label += " (inherits " + agentInspectionRoleLabel(config.InheritedFrom) + ")"
+	}
+	fmt.Fprintf(text, "%s:\n", label)
+	if len(config.Chain) == 0 {
+		text.WriteString("  No configured choices.\n")
+	}
+	for i, choice := range config.Chain {
+		provider, modelName, reasoning := roleQueueChoiceLabels(choice, names)
+		fmt.Fprintf(text, "  %d. %s / %s / reasoning: %s\n", i+1, provider, modelName, reasoning)
+	}
+}
+
+func roleQueueChoiceLabels(choice model.AgentChoice, names map[string]string) (provider, modelName, reasoning string) {
+	const defaultLabel = "provider default"
+	provider = names[choice.Provider]
+	if provider == "" {
+		provider = choice.Provider + " (not configured)"
+	}
+	modelName = choice.Model
+	if modelName == "" {
+		modelName = defaultLabel
+	}
+	reasoning = defaultLabel
+	if choice.Thinking != nil && choice.Thinking.Value != "" {
+		reasoning = choice.Thinking.Value
+		if choice.Thinking.ConfigID != "" {
+			reasoning += " (" + choice.Thinking.ConfigID + ")"
 		}
 	}
+	return provider, modelName, reasoning
 }
 
 func agentInspectionRoleLabel(role string) string {

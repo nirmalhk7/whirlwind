@@ -120,7 +120,7 @@ func (a *agentRun) refreshSnapshot(record model.Record, p model.Provider, reader
 }
 
 func (a *agentRun) quotaSupervisorDir() string {
-	return filepath.Join(a.Engine.Root, "supervisor", "standalone")
+	return filepath.Join(a.Root, "supervisor", "standalone")
 }
 
 func quotaSnapshotSummary(snapshot *model.QuotaSnapshot) (string, string) {

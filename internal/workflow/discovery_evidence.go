@@ -220,31 +220,16 @@ func (e *Engine) currentApprovedPlans(ctx context.Context, projectID, terms stri
 		if err != nil {
 			return nil, err
 		}
-		if task.ProjectID != projectID || task.PlanDocument == nil || task.PlanDocument.ApprovedHash == "" || task.PlanDocument.ApprovedHash != task.PlanDocument.Hash {
+		if task.ProjectID != projectID {
 			continue
 		}
-		version := task.PlanVersion
-		if task.PlanDocument.PlanVersion > 0 {
-			if task.PlanDocument.PlanVersion != version {
-				continue
-			}
-			version = task.PlanDocument.PlanVersion
-		}
-		if version < 1 {
-			continue
-		}
-		approved, err := e.Store.Get(ctx, "plan_versions", fmt.Sprintf("%s:%d", task.ID, version))
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
+		plan, err := e.loadApprovedPlanContext(ctx, task)
 		if err != nil {
 			return nil, err
 		}
-		plan, err := store.Decode[model.PlanSpecification](approved)
-		if err != nil {
-			return nil, err
+		if plan != nil {
+			plans = append(plans, *plan)
 		}
-		plans = append(plans, approvedPlanContext{TaskID: task.ID, PlanVersion: version, Hash: task.PlanDocument.ApprovedHash, Objective: plan.Objective, Outcomes: approvedPlanOutcomes(plan), Scope: approvedPlanScope(plan)})
 	}
 	sort.SliceStable(plans, func(i, j int) bool {
 		left, right := approvedPlanRelevance(plans[i], terms), approvedPlanRelevance(plans[j], terms)
@@ -253,6 +238,33 @@ func (e *Engine) currentApprovedPlans(ctx context.Context, projectID, terms stri
 		}
 		return plans[i].TaskID < plans[j].TaskID
 	})
+	return boundApprovedPlanContexts(plans, maxBytes, limit), nil
+}
+
+func (e *Engine) loadApprovedPlanContext(ctx context.Context, task model.ExecutionPlan) (*approvedPlanContext, error) {
+	document := task.PlanDocument
+	if document == nil || document.ApprovedHash == "" || document.ApprovedHash != document.Hash {
+		return nil, nil
+	}
+	version := task.PlanVersion
+	if version < 1 || document.PlanVersion > 0 && document.PlanVersion != version {
+		return nil, nil
+	}
+	approved, err := e.Store.Get(ctx, "plan_versions", fmt.Sprintf("%s:%d", task.ID, version))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	plan, err := store.Decode[model.PlanSpecification](approved)
+	if err != nil {
+		return nil, err
+	}
+	return &approvedPlanContext{TaskID: task.ID, PlanVersion: version, Hash: document.ApprovedHash, Objective: plan.Objective, Outcomes: approvedPlanOutcomes(plan), Scope: approvedPlanScope(plan)}, nil
+}
+
+func boundApprovedPlanContexts(plans []approvedPlanContext, maxBytes, limit int) []approvedPlanContext {
 	bounded := make([]approvedPlanContext, 0, min(len(plans), limit))
 	for _, plan := range plans {
 		if len(bounded) >= limit {
@@ -264,7 +276,7 @@ func (e *Engine) currentApprovedPlans(ctx context.Context, projectID, terms stri
 		}
 		bounded = append(bounded, plan)
 	}
-	return bounded, nil
+	return bounded
 }
 
 func approvedPlanOutcomes(plan model.PlanSpecification) []string {
@@ -322,25 +334,4 @@ func (e *Engine) saveDiscoverySnapshot(ctx context.Context, project string, snap
 		return err
 	}
 	return e.Store.Put(ctx, "discovery_scans", project, snapshot, record.Version)
-}
-
-func unchangedCandidateEvidence(history []model.Direction, evidence []model.EvidenceRef) []model.Direction {
-	current := map[string]string{}
-	for _, ref := range evidence {
-		current[ref.Kind+":"+ref.Ref] = ref.Revision
-	}
-	unchanged := []model.Direction{}
-	for _, candidate := range history {
-		if len(candidate.Evidence) == 0 {
-			unchanged = append(unchanged, candidate)
-			continue
-		}
-		for _, ref := range candidate.Evidence {
-			if revision, exists := current[ref.Kind+":"+ref.Ref]; !exists || revision == ref.Revision {
-				unchanged = append(unchanged, candidate)
-				break
-			}
-		}
-	}
-	return unchanged
 }

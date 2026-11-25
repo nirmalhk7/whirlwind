@@ -12,6 +12,10 @@ import (
 	"whirlwind/internal/testutil/openshell"
 )
 
+const (
+	isolationFixtureAttempt = "attempt-456"
+)
+
 func TestReconcileOpenShellRuntimeStopsAndDeletesPersistedResource(t *testing.T) {
 	fixture := openshell.Install(t)
 	profile := openShellFixtureProfile(t)
@@ -92,7 +96,7 @@ func openShellFixtureProfile(t *testing.T) Profile {
 	t.Helper()
 	root := t.TempDir()
 	lifecycle := filepath.Join(root, "supervisor", "openshell.json")
-	profile := Profile{ExecutionID: "attempt-456", ExecutionGeneration: 2, SandboxName: OpenShellSandboxName("attempt-456"), LifecycleFile: lifecycle, GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test", ExecutionLabelValue: OpenShellExecutionLabel("attempt-456", 2)}
+	profile := Profile{ExecutionID: isolationFixtureAttempt, ExecutionGeneration: 2, SandboxName: OpenShellSandboxName(isolationFixtureAttempt), LifecycleFile: lifecycle, GatewayName: "whirlwind-test-local", GatewayEndpoint: "http://127.0.0.1:8080", Workspace: "whirlwind-test", ExecutionLabelValue: OpenShellExecutionLabel(isolationFixtureAttempt, 2)}
 	return profile
 }
 

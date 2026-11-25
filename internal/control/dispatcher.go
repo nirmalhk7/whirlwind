@@ -14,9 +14,12 @@ import (
 )
 
 const (
-	inspectOperationPrefix   = "inspect."
-	stateDatabaseUnavailable = "supervisor state database unavailable"
-	maxInspectionPageBytes   = 512 << 10
+	inspectOperationPrefix    = "inspect."
+	stateDatabaseUnavailable  = "supervisor state database unavailable"
+	maxInspectionPageBytes    = 512 << 10
+	inspectionPageHeadroom    = 1024
+	initialInspectionPageSize = 128
+	inspectionRecordTooLarge  = "inspection record exceeds safe local page size"
 )
 
 var inspectableKinds = map[string]bool{
@@ -88,7 +91,6 @@ func (d SupervisorDispatcher) records(ctx context.Context, request Request) (pag
 		return RecordPage{}, errors.New("inspection page limit must be between 1 and 100")
 	}
 	page = RecordPage{Kind: kind, ProjectID: request.ProjectID, Cursor: request.EventCursor, Records: make([]model.Record, 0, limit)}
-	pageBytes := 128
 	query := "SELECT rowid,id,version,data,updated_at FROM resources WHERE kind=? AND rowid>? AND (?='' OR CASE WHEN kind='operations' THEN json_extract(data,'$.subject') ELSE json_extract(data,'$.project_id') END=?) ORDER BY rowid LIMIT ?"
 	rows, err := d.DB.QueryContext(ctx, query, kind, request.EventCursor, request.ProjectID, request.ProjectID, limit+1)
 	if err != nil {
@@ -99,30 +101,35 @@ func (d SupervisorDispatcher) records(ctx context.Context, request Request) (pag
 			resultErr = closeErr
 		}
 	}()
+	if err := readInspectionPage(rows, &page, limit); err != nil {
+		return page, err
+	}
+	if err := rows.Close(); err != nil {
+		return page, err
+	}
+	if kind == "operations" {
+		if err := d.enrichInspectionPage(ctx, &page); err != nil {
+			return page, err
+		}
+	}
+	return page, nil
+}
+
+func readInspectionPage(rows *sql.Rows, page *RecordPage, limit int) error {
+	pageBytes := initialInspectionPageSize
 	for rows.Next() {
-		var record model.Record
-		var data []byte
-		if err := rows.Scan(&record.CreatedOrder, &record.ID, &record.Version, &data, &record.UpdatedAt); err != nil {
-			return page, err
-		}
-		record.Data = data
-		encoded, err := json.Marshal(record)
+		record, err := scanInspectionRecord(rows)
 		if err != nil {
-			return page, err
+			return err
 		}
-		rowBytes := len(encoded) + 1
-		if rowBytes+1024 > maxInspectionPageBytes {
-			if len(page.Records) == 0 {
-				return page, errors.New("inspection record exceeds safe local page size")
-			}
-			page.HasMore = true
-			break
+		rowBytes, err := inspectionRecordSize(record)
+		if err != nil {
+			return err
 		}
-		if len(page.Records) == limit {
-			page.HasMore = true
-			break
+		if len(page.Records) == 0 && rowBytes+inspectionPageHeadroom > maxInspectionPageBytes {
+			return errors.New(inspectionRecordTooLarge)
 		}
-		if pageBytes+rowBytes > maxInspectionPageBytes-1024 {
+		if len(page.Records) == limit || pageBytes+rowBytes > maxInspectionPageBytes-inspectionPageHeadroom {
 			page.HasMore = true
 			break
 		}
@@ -130,37 +137,51 @@ func (d SupervisorDispatcher) records(ctx context.Context, request Request) (pag
 		page.NextCursor = record.CreatedOrder
 		pageBytes += rowBytes
 	}
-	if err := rows.Err(); err != nil {
-		return page, err
+	return rows.Err()
+}
+
+func scanInspectionRecord(rows *sql.Rows) (model.Record, error) {
+	var record model.Record
+	var data []byte
+	err := rows.Scan(&record.CreatedOrder, &record.ID, &record.Version, &data, &record.UpdatedAt)
+	record.Data = data
+	return record, err
+}
+
+func inspectionRecordSize(record model.Record) (int, error) {
+	encoded, err := json.Marshal(record)
+	return len(encoded) + 1, err
+}
+
+func (d SupervisorDispatcher) enrichInspectionPage(ctx context.Context, page *RecordPage) error {
+	if err := enrichIdeationProgress(ctx, page.Records, func(ctx context.Context, run string) ([]model.IdeationDirectionProgress, error) {
+		return store.ReadIdeationProgress(ctx, d.DB, run)
+	}); err != nil {
+		return err
 	}
-	if err := rows.Close(); err != nil {
-		return page, err
-	}
-	if kind == "operations" {
-		if err := enrichIdeationProgress(ctx, page.Records, func(ctx context.Context, run string) ([]model.IdeationDirectionProgress, error) {
-			return store.ReadIdeationProgress(ctx, d.DB, run)
-		}); err != nil {
-			return page, err
+	// Progress can increase the encoded size after the original page is read.
+	return trimEnrichedInspectionPage(page)
+}
+
+func trimEnrichedInspectionPage(page *RecordPage) error {
+	pageBytes := initialInspectionPageSize
+	for index, record := range page.Records {
+		rowBytes, err := inspectionRecordSize(record)
+		if err != nil {
+			return err
 		}
-		pageBytes = 128
-		for n, record := range page.Records {
-			encoded, err := json.Marshal(record)
-			if err != nil {
-				return page, err
+		if pageBytes+rowBytes > maxInspectionPageBytes-inspectionPageHeadroom {
+			if index == 0 {
+				return errors.New(inspectionRecordTooLarge)
 			}
-			if pageBytes+len(encoded)+1 > maxInspectionPageBytes-1024 {
-				if n == 0 {
-					return page, errors.New("inspection record exceeds safe local page size")
-				}
-				page.Records = page.Records[:n]
-				page.NextCursor = page.Records[n-1].CreatedOrder
-				page.HasMore = true
-				break
-			}
-			pageBytes += len(encoded) + 1
+			page.Records = page.Records[:index]
+			page.NextCursor = page.Records[index-1].CreatedOrder
+			page.HasMore = true
+			break
 		}
+		pageBytes += rowBytes
 	}
-	return page, nil
+	return nil
 }
 
 func (d SupervisorDispatcher) events(ctx context.Context, request Request) (events []model.Event, resultErr error) {
@@ -174,7 +195,6 @@ func (d SupervisorDispatcher) events(ctx context.Context, request Request) (even
 	if limit < 1 || limit > 500 {
 		return nil, errors.New("event page limit must be between 1 and 500")
 	}
-	pageBytes := 128
 	rows, err := d.DB.QueryContext(ctx, "SELECT id,kind,resource_id,data,created_at FROM events WHERE id>? ORDER BY id LIMIT ?", request.EventCursor, limit+1)
 	if err != nil {
 		return nil, err
@@ -184,25 +204,26 @@ func (d SupervisorDispatcher) events(ctx context.Context, request Request) (even
 			resultErr = closeErr
 		}
 	}()
+	return readInspectionEvents(rows, limit)
+}
+
+func readInspectionEvents(rows *sql.Rows, limit int) ([]model.Event, error) {
+	var events []model.Event
+	pageBytes := initialInspectionPageSize
 	for rows.Next() {
-		var event model.Event
-		var data []byte
-		if err := rows.Scan(&event.ID, &event.Kind, &event.ResourceID, &data, &event.CreatedAt); err != nil {
+		event, err := scanInspectionEvent(rows)
+		if err != nil {
 			return nil, err
 		}
-		event.Data = data
 		encoded, err := json.Marshal(event)
 		if err != nil {
 			return nil, err
 		}
 		rowBytes := len(encoded) + 1
-		if rowBytes+1024 > maxInspectionPageBytes {
-			if len(events) == 0 {
-				return nil, errors.New("inspection event exceeds safe local page size")
-			}
-			break
+		if len(events) == 0 && rowBytes+inspectionPageHeadroom > maxInspectionPageBytes {
+			return nil, errors.New("inspection event exceeds safe local page size")
 		}
-		if len(events) == limit || pageBytes+rowBytes > maxInspectionPageBytes-1024 {
+		if len(events) == limit || pageBytes+rowBytes > maxInspectionPageBytes-inspectionPageHeadroom {
 			break
 		}
 		events = append(events, event)
@@ -211,9 +232,17 @@ func (d SupervisorDispatcher) events(ctx context.Context, request Request) (even
 	return events, rows.Err()
 }
 
+func scanInspectionEvent(rows *sql.Rows) (model.Event, error) {
+	var event model.Event
+	var data []byte
+	err := rows.Scan(&event.ID, &event.Kind, &event.ResourceID, &data, &event.CreatedAt)
+	event.Data = data
+	return event, err
+}
+
 func (d SupervisorDispatcher) snapshot(ctx context.Context, request Request) (Snapshot, error) {
 	if d.DB == nil {
-		return nil, errors.New("supervisor state database unavailable")
+		return nil, errors.New(stateDatabaseUnavailable)
 	}
 	snapshot := Snapshot{}
 	for _, kind := range []string{"projects", "execution_plans", "ideas", "operations", "directions", "sessions", "questions", "permissions", "verification", "reviews", "inbox", "plan_versions", "agents", "providers", "project_status", "settings"} {

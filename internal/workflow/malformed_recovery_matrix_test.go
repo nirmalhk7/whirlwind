@@ -102,7 +102,9 @@ func TestMalformedPlannerRecoveryBudgetSurvivesSupervisorReopen(t *testing.T) {
 	if len(resumedBackoff) != 3 || resumedBackoff[0] <= 0 || resumedBackoff[0] > time.Second || resumedBackoff[1] != 2*time.Second || resumedBackoff[2] != 4*time.Second {
 		t.Fatalf("malformed-output resumed backoff=%v, want persisted 1s remainder then 2s and 4s", resumedBackoff)
 	}
-	assertRuntimeMatrixAttempts(t, reopened, "plan", firstChoice, fallbackChoice, priorOwner, restarted.Owner())
+	assertRuntimeMatrixAttempts(t, reopened, "plan", runtimeAttemptExpectations{
+		first: firstChoice, fallback: fallbackChoice, priorOwner: priorOwner, currentOwner: restarted.Owner(),
+	})
 	assertMalformedPlannerEpisode(t, restarted, currentTask, firstChoice, 4)
 }
 

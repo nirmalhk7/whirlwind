@@ -9,31 +9,27 @@ import (
 	"time"
 )
 
+const (
+	standaloneFixtureSecondAttempt = "attempt-two"
+)
+
 func TestStandaloneRegistryKeepsRuntimeUntilVerifiedCleanup(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "supervisor", "standalone")
 	first := standaloneRegistryProfile(root, "attempt-one")
-	second := standaloneRegistryProfile(root, "attempt-two")
-	if err := RegisterStandaloneRuntime(first); err != nil {
-		t.Fatal(err)
-	}
-	if err := RegisterStandaloneRuntime(second); err != nil {
-		t.Fatal(err)
-	}
+	second := standaloneRegistryProfile(root, standaloneFixtureSecondAttempt)
+	requireExecutionSuccess(t, RegisterStandaloneRuntime(first))
+	requireExecutionSuccess(t, RegisterStandaloneRuntime(second))
 	entries, err := ReadStandaloneRuntimes(root)
-	if err != nil || len(entries) != 2 || entries[0].ExecutionID != "attempt-one" || entries[1].ExecutionID != "attempt-two" {
+	if err != nil || len(entries) != 2 || entries[0].ExecutionID != "attempt-one" || entries[1].ExecutionID != standaloneFixtureSecondAttempt {
 		t.Fatalf("standalone registry entries: %+v %v", entries, err)
 	}
 	if entries[0].OwnerPID != os.Getpid() || entries[0].OwnerStarted == "" || entries[0].CWD == "" || entries[0].DeadlineAt == "" {
 		t.Fatalf("registry omitted supervisor ownership or recovery bounds: %+v", entries[0])
 	}
 	data, err := os.ReadFile(StandaloneRegistryPath(root))
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, err)
 	var fields map[string]any
-	if err := json.Unmarshal(data, &fields); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, json.Unmarshal(data, &fields))
 	if strings.Contains(string(data), "secret") || fields["version"] != float64(standaloneRegistryVersion) {
 		t.Fatalf("registry version/secret contract: %s", data)
 	}
@@ -41,18 +37,14 @@ func TestStandaloneRegistryKeepsRuntimeUntilVerifiedCleanup(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatalf("registry mode is not private: %v %v", info, err)
 	}
-	if err := MarkStandaloneCleanupPending(first); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, MarkStandaloneCleanupPending(first))
 	entries, err = ReadStandaloneRuntimes(root)
 	if err != nil || len(entries) != 2 || entries[0].State != "cleanup_pending" {
 		t.Fatalf("failed cleanup locator was lost: %+v %v", entries, err)
 	}
-	if err := CompleteStandaloneRuntime(first); err != nil {
-		t.Fatal(err)
-	}
+	requireExecutionSuccess(t, CompleteStandaloneRuntime(first))
 	entries, err = ReadStandaloneRuntimes(root)
-	if err != nil || len(entries) != 1 || entries[0].ExecutionID != "attempt-two" {
+	if err != nil || len(entries) != 1 || entries[0].ExecutionID != standaloneFixtureSecondAttempt {
 		t.Fatalf("completion removed unrelated locator: %+v %v", entries, err)
 	}
 }
