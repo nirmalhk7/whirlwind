@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -258,23 +257,9 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	}
 	task = editedTask
 	t.Logf("socket archived idea=%s without plan; saved revised plan=%s hash=%s while stage=%s", rejectedIdea.ID, task.ID, task.PlanDocument.Hash, task.Stage)
-	_, approvalErr := client.Call(ctx, control.Request{RequestID: "plan.approve", IdempotencyKey: "plan.approve", Operation: "plan.approve",
+	call(control.Request{Operation: "plan.approve",
 		ProjectID: project.ID, PlanID: task.ID, ExpectedVersion: draft.Version, ContentHash: task.PlanDocument.Hash})
 	launcher("stop")
-	approvalPath := "supervisor socket"
-	if approvalErr != nil {
-		if approvalErr.Error() != "providers need IDs and names" {
-			t.Fatalf("unexpected settings-backed plan approval error: %v", approvalErr)
-		}
-		unchanged, err := db.Get(ctx, "execution_plans", task.ID)
-		mustSeedTerminal(t, err)
-		if unchanged.Version != draft.Version || !bytes.Equal(unchanged.Data, draft.Data) {
-			t.Fatal("failed socket approval changed the plan")
-		}
-		t.Logf("real supervisor plan.approve blocked, leaving the draft unchanged: %s", approvalErr)
-		mustSeedTerminal(t, engine.ReviewLocalPlan(ctx, task.ID, draft.Version, "approve", task.PlanDocument.Hash, ""))
-		approvalPath = "controlled approval in stopped fixture"
-	}
 	approvedRecord, err := db.Get(ctx, "execution_plans", task.ID)
 	mustSeedTerminal(t, err)
 	task, err = store.Decode[model.ExecutionPlan](approvedRecord)
@@ -282,7 +267,7 @@ func TestIsolatedWorkflowAcceptance(t *testing.T) {
 	if task.Stage != "coding" || task.PlanDocument.ApprovedHash != task.PlanDocument.Hash {
 		t.Fatalf("unexpected plan approval stage=%s document=%+v", task.Stage, task.PlanDocument)
 	}
-	t.Logf("seeded Ideation run=%s idea=%s Planner=%s; idea approved by socket; plan=%s version=%d hash=%s via %s", seededRun, ideaID, plannerID, task.ID, task.PlanVersion, task.PlanDocument.ApprovedHash, approvalPath)
+	t.Logf("seeded Ideation run=%s idea=%s Planner=%s; idea approved by socket; plan=%s version=%d hash=%s via supervisor socket", seededRun, ideaID, plannerID, task.ID, task.PlanVersion, task.PlanDocument.ApprovedHash)
 
 	write(filepath.Join(candidate, "regression_test.go"), "package acceptance\nimport (\"os\"; \"strings\"; \"testing\")\nfunc TestResultReady(t *testing.T) { got, err := os.ReadFile(\"result.txt\"); if err != nil || !strings.HasPrefix(string(got), \"ready\\n\") { t.Fatal(\"result is not ready\") } }\n")
 	git(candidate, "add", "regression_test.go")
