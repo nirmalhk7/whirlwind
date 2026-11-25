@@ -37,8 +37,9 @@ project and role. Whirlwind records the source attempt, plan revision,
 operation, policy and checkout commit where available. SQLite keeps up to
 12 notes per role. Agent input can receive up to three relevant notes
 within a total 2 KiB advisory budget, using local word matching and recency.
-The configured role provider receives any notes included in its input.
-Choose notes suitable for that provider and keep credentials out of them.
+A task without matching notes receives no memory advisory. The configured
+role provider receives any notes included in its input. Choose notes suitable
+for that provider and keep credentials out of them.
 
 Recall requires the exact approved opt-in policy. A new approval starts
 fresh recall. Use `memory clear` to remove a role's saved notes even when

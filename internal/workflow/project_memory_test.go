@@ -42,6 +42,9 @@ func TestProjectMemoryIsBoundedAndScopedInAgentInput(t *testing.T) {
 	var source string
 	for n := range maxRoleLessons + 2 {
 		note := fmt.Sprintf("unrelated observation %02d", n)
+		if n >= 4 && n <= 6 {
+			note = fmt.Sprintf("indexing tip %02d", n)
+		}
 		if n == 3 {
 			note = "Fix the indexing regression by using the repository fixture. api_key=synthetic-test-token"
 		}
@@ -55,7 +58,27 @@ func TestProjectMemoryIsBoundedAndScopedInAgentInput(t *testing.T) {
 	requireMemoryOptOut(t, run, source, version)
 }
 
-const memoryTestPrompt = "Current approved task"
+const (
+	memoryTestPrompt = "Current approved task"
+	memoryTestIssue  = "Indexing regression"
+)
+
+func TestRenderProjectMemoryOmitsUnmatchedNotes(t *testing.T) {
+	const unmatchedNote = "Use small typography samples"
+	notes := []model.RoleLesson{{Note: unmatchedNote}}
+	prompt, err := renderProjectMemory(notes, memoryTestIssue)
+	requireWorkflowSuccess(t, err)
+	if prompt != "" {
+		t.Fatalf("unmatched lesson appeared in advisory input: %s", prompt)
+	}
+
+	notes = append(notes, model.RoleLesson{Note: "Use the indexing fixture"})
+	prompt, err = renderProjectMemory(notes, memoryTestIssue)
+	requireWorkflowSuccess(t, err)
+	if !strings.Contains(prompt, "Use the indexing fixture") || strings.Contains(prompt, unmatchedNote) {
+		t.Fatalf("mixed recall did not isolate the relevant lesson: %s", prompt)
+	}
+}
 
 func requireMemoryWriteBoundaries(t *testing.T, engine *Engine, project model.Project, source, otherSource string, version int) {
 	t.Helper()
@@ -89,7 +112,7 @@ func requireMemoryPromptScope(t *testing.T, engine *Engine, project model.Projec
 	t.Helper()
 	ctx := t.Context()
 
-	task.Issue.Title, task.Issue.Body = "Indexing regression", ""
+	task.Issue.Title, task.Issue.Body = memoryTestIssue, ""
 	run := &agentRun{Engine: engine, ctx: ctx, project: project, task: task, input: provider.Input{Role: "code", Prompt: memoryTestPrompt}}
 	requireWorkflowSuccess(t, run.buildContextPack())
 	prompt := run.input.Prompt

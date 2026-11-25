@@ -52,7 +52,7 @@ func renderProjectMemory(lessons []model.RoleLesson, text string) (string, error
 	var out []model.RoleLesson
 	var result string
 	for _, lesson := range lessons {
-		if len(out) == maxRecallLessons {
+		if len(out) == maxRecallLessons || memoryScore(query, lesson.Note) == 0 {
 			break
 		}
 		next := append(out, lesson)
