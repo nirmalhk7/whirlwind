@@ -172,19 +172,7 @@ func TestAcceptedCandidateCompletesAsExactLocalDelivery(t *testing.T) {
 	ctx := context.Background()
 	e, task, project, record := acceptedDeliveryFixture(t)
 	step := &taskStep{Engine: e, ctx: ctx, project: project, task: task, record: record}
-	for range 3 {
-		finished, err := step.submitting()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if finished {
-			break
-		}
-		if err := e.Store.Put(ctx, "execution_plans", task.ID, step.task, step.record.Version); err != nil {
-			t.Fatal(err)
-		}
-		step.record.Version++
-	}
+	advanceLocalDeliveryFixture(t, ctx, e, task, step)
 	if step.task.Stage != "complete" || step.task.Delivery == nil || step.task.Delivery.Stage != "complete" {
 		t.Fatalf("local delivery did not complete: stage=%s delivery=%+v", step.task.Stage, step.task.Delivery)
 	}
@@ -223,19 +211,7 @@ func TestAcceptedDeliveryShowsEveryUnmetRequirementToFinalizer(t *testing.T) {
 	}
 	e, task, project, record := acceptedDeliveryFixtureWith(t, requirements, judgments, &prompt)
 	step := &taskStep{Engine: e, ctx: ctx, project: project, task: task, record: record}
-	for range 3 {
-		finished, err := step.submitting()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if finished {
-			break
-		}
-		if err := e.Store.Put(ctx, "execution_plans", task.ID, step.task, step.record.Version); err != nil {
-			t.Fatal(err)
-		}
-		step.record.Version++
-	}
+	advanceLocalDeliveryFixture(t, ctx, e, task, step)
 	delivery := step.task.Delivery
 	if step.task.Stage != "complete" || delivery == nil || delivery.Adherence == nil {
 		t.Fatalf("accepted local delivery did not complete: stage=%s delivery=%+v", step.task.Stage, delivery)
@@ -248,6 +224,23 @@ func TestAcceptedDeliveryShowsEveryUnmetRequirementToFinalizer(t *testing.T) {
 	}
 	if !strings.Contains(prompt, delivery.UnmetRequirements[0]) || strings.Contains(prompt, "there should be none") {
 		t.Fatalf("finalizer was not given the truthful unmet requirement: %q", prompt)
+	}
+}
+
+func advanceLocalDeliveryFixture(t *testing.T, ctx context.Context, e *Engine, task model.ExecutionPlan, step *taskStep) {
+	t.Helper()
+	for range 3 {
+		finished, err := step.submitting()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if finished {
+			break
+		}
+		if err := e.Store.Put(ctx, "execution_plans", task.ID, step.task, step.record.Version); err != nil {
+			t.Fatal(err)
+		}
+		step.record.Version++
 	}
 }
 

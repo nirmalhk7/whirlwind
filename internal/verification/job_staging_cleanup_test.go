@@ -106,25 +106,7 @@ func TestVerificationRecoversOnlyOwnedUnpublishedCheckouts(t *testing.T) {
 				m.Commands[0].Mode = "autofix"
 				relative = autofixCheckoutDir(0)
 			}
-			interrupted := errors.New("stop after git clone --no-checkout")
-			var draft string
-			func() {
-				r := stagingJobOpen(t, m)
-				defer r.close()
-				_, err := r.cloneDisposableCheckout(t.Context(), relative, func(stage string) error {
-					draft = stage
-					if _, err := os.Stat(filepath.Join(stage, ".git", "HEAD")); err != nil {
-						t.Fatalf("fixture did not clone with real Git: %v", err)
-					}
-					if _, err := os.Lstat(filepath.Join(stage, stagingSourceFile)); !os.IsNotExist(err) {
-						t.Fatalf("fixture already populated the checkout: %v", err)
-					}
-					return interrupted
-				})
-				if !errors.Is(err, interrupted) {
-					t.Fatalf("expected interrupted Git preparation, got %v", err)
-				}
-			}()
+			draft := interruptStagingClone(t, m, relative)
 			if scenario == stagingReplacementScenario {
 				requireVerificationSuccess(t, os.Rename(draft, draft+".original"))
 				requireVerificationSuccess(t, os.Mkdir(draft, 0700))
@@ -140,26 +122,58 @@ func TestVerificationRecoversOnlyOwnedUnpublishedCheckouts(t *testing.T) {
 				stage, err = r.prepareCheckout(t.Context())
 			}
 			if scenario == stagingReplacementScenario {
-				if err == nil || !strings.Contains(err.Error(), "unrecognized verification staging owner") {
-					t.Fatalf("retry accepted a replacement directory: %v", err)
-				}
-				content, err := os.ReadFile(filepath.Join(draft, "untouched"))
-				requireVerificationSuccess(t, err)
-				if string(content) != "replacement" {
-					t.Fatalf("changed replacement directory: %q", content)
-				}
+				assertReplacementCheckoutPreserved(t, draft, err)
 				return
 			}
 			requireVerificationSuccess(t, err)
-			content, err := os.ReadFile(filepath.Join(stage, stagingSourceFile))
-			requireVerificationSuccess(t, err)
-			if string(content) != stagingSourceText {
-				t.Fatalf("retry did not restore frozen source: %q", content)
-			}
-			if _, err := os.Lstat(draft); !os.IsNotExist(err) {
-				t.Fatalf("retry kept the abandoned clone: %v", err)
-			}
+			assertRecoveredStagingSource(t, stage, draft)
 		})
+	}
+}
+
+func interruptStagingClone(t *testing.T, manifest JobManifest, relative string) string {
+	t.Helper()
+	interrupted := errors.New("stop after git clone --no-checkout")
+	r := stagingJobOpen(t, manifest)
+	defer r.close()
+	var draft string
+	_, err := r.cloneDisposableCheckout(t.Context(), relative, func(stage string) error {
+		draft = stage
+		if _, err := os.Stat(filepath.Join(stage, ".git", "HEAD")); err != nil {
+			t.Fatalf("fixture did not clone with real Git: %v", err)
+		}
+		if _, err := os.Lstat(filepath.Join(stage, stagingSourceFile)); !os.IsNotExist(err) {
+			t.Fatalf("fixture already populated the checkout: %v", err)
+		}
+		return interrupted
+	})
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("expected interrupted Git preparation, got %v", err)
+	}
+	return draft
+}
+
+func assertReplacementCheckoutPreserved(t *testing.T, draft string, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "unrecognized verification staging owner") {
+		t.Fatalf("retry accepted a replacement directory: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(draft, "untouched"))
+	requireVerificationSuccess(t, err)
+	if string(content) != "replacement" {
+		t.Fatalf("changed replacement directory: %q", content)
+	}
+}
+
+func assertRecoveredStagingSource(t *testing.T, stage, draft string) {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join(stage, stagingSourceFile))
+	requireVerificationSuccess(t, err)
+	if string(content) != stagingSourceText {
+		t.Fatalf("retry did not restore frozen source: %q", content)
+	}
+	if _, err := os.Lstat(draft); !os.IsNotExist(err) {
+		t.Fatalf("retry kept the abandoned clone: %v", err)
 	}
 }
 
@@ -258,13 +272,7 @@ func TestCompletedVerificationReleasesStagingAndRetainsEvidence(t *testing.T) {
 	}
 	run()
 	for i := 0; i < 2; i++ {
-		for _, path := range []string{verificationCheckoutDir, autofixCheckoutDir(1)} {
-			for _, name := range []string{path, checkoutOwnershipFile(path)} {
-				if _, err := os.Lstat(filepath.Join(m.Root, name)); !os.IsNotExist(err) {
-					t.Errorf("completed disposable staging still exists: %s: %v", name, err)
-				}
-			}
-		}
+		assertCompletedStagingRemoved(t, m.Root)
 		saved, err := readJobReport(m)
 		requireVerificationSuccess(t, err)
 		patch, err := ReadAutofixPatch(m, 1, saved.Results[1])
@@ -291,6 +299,17 @@ func TestCompletedVerificationReleasesStagingAndRetainsEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		run()
+	}
+}
+
+func assertCompletedStagingRemoved(t *testing.T, root string) {
+	t.Helper()
+	for _, path := range []string{verificationCheckoutDir, autofixCheckoutDir(1)} {
+		for _, name := range []string{path, checkoutOwnershipFile(path)} {
+			if _, err := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(err) {
+				t.Errorf("completed disposable staging still exists: %s: %v", name, err)
+			}
+		}
 	}
 }
 
