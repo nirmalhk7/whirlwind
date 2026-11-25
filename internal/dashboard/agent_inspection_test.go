@@ -7,6 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 	"whirlwind/internal/workflow"
@@ -39,9 +40,9 @@ func TestAgentInspectionSeparatesOrderedQueuesChecksAndOutcomes(t *testing.T) {
 			}}),
 		},
 		"provider_status": {
-			record("sol", workflow.ProviderStatus{ID: "sol", Status: "working", CheckedAt: observed.Format(time.RFC3339)}),
-			record("cursor", workflow.ProviderStatus{ID: "cursor", Status: "failed", CheckedAt: stale.Format(time.RFC3339)}),
-			record("claude", workflow.ProviderStatus{ID: "claude", Status: "paused", CheckedAt: observed.Format(time.RFC3339)}),
+			record("sol", model.ProviderStatus{ID: "sol", Status: "working", CheckedAt: observed.Format(time.RFC3339)}),
+			record("cursor", model.ProviderStatus{ID: "cursor", Status: "failed", CheckedAt: stale.Format(time.RFC3339)}),
+			record("claude", model.ProviderStatus{ID: "claude", Status: "paused", CheckedAt: observed.Format(time.RFC3339)}),
 		},
 		"settings": {record("global", workflow.Settings{ProviderStatusCheckSeconds: 60})},
 		"sessions": {
@@ -83,7 +84,7 @@ func TestAgentInspectionSeparatesOrderedQueuesChecksAndOutcomes(t *testing.T) {
 		t.Fatal("inspection misattributed an old or another project's attempt")
 	}
 	view.ScrollTo(8, 0)
-	snapshot["provider_status"][0] = record("sol", workflow.ProviderStatus{ID: "sol", Status: "failed", CheckedAt: stale.Format(time.RFC3339)})
+	snapshot["provider_status"][0] = record("sol", model.ProviderStatus{ID: "sol", Status: "failed", CheckedAt: stale.Format(time.RFC3339)})
 	d.Present(snapshot)
 	if d.modal != view || !strings.Contains(view.GetText(false), "Sol: down · checked "+stale.Format(inspectionFixtureTimestampLayout)+" (stale)") {
 		t.Fatal("the open view did not refresh the connection observation")

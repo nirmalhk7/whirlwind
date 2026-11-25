@@ -71,6 +71,7 @@ def see(session, marker, start=0, *, raw=False):
         if raw:
             return marker in session.output[start:]
         return marker.decode("ascii") in terminal_text(session.output)
+
     checked_wait(session, rendered, marker)
     return len(session.output)
 
@@ -140,14 +141,20 @@ def initial_session(session, data):
     see(session, b"Terminal Fixture")
     (data / "block-snapshot").touch()
     try:
-        checked_wait(session, lambda: (data / "block-snapshot-entered").exists(), "blocked background snapshot")
+        checked_wait(
+            session,
+            lambda: (data / "block-snapshot-entered").exists(),
+            "blocked background snapshot",
+        )
         step(session, b"?", b"Keyboard instructions")
         close_modal(session)
     finally:
         (data / "block-snapshot-release").touch()
     send(session, b"\t\t\t")
     idea(session)
-    decision(session, data, "idea.update", 1, b"STALE" + b"\t" * 4 + ENTER, error="version conflict")
+    decision(
+        session, data, "idea.update", 1, b"STALE" + b"\t" * 4 + ENTER, error="version conflict"
+    )
     see(session, b"version conflict")
     see(session, b"Draft advanced elsewhere")
     idea(session)
@@ -165,7 +172,13 @@ def initial_session(session, data):
     select_plan(session, 1, b"State: plan_approval")
     step(session, b"r", b"F6 plan/controls")
     see(session, b"whirlwind-plan-", send(session, F6 + b"v"), raw=True)
-    decision(session, data, "plan.document.save", 1, b":%s/Verify fixture output/Verify revised fixture output/g\r:wq\r")
+    decision(
+        session,
+        data,
+        "plan.document.save",
+        1,
+        b":%s/Verify fixture output/Verify revised fixture output/g\r:wq\r",
+    )
     see(session, b"decision saved by supervisor")
     see(session, b"sandbox recovery status unverified")
     step(session, b"r", b"Verify revised fixture output")
@@ -197,9 +210,15 @@ def reopened_session(session, data):
 def fixture_environment(data):
     home = data / "home"
     home.mkdir(mode=0o700)
-    env = {"PATH": os.environ["PATH"], "HOME": str(home), "TMPDIR": str(data),
-           "TERM": "xterm-256color", "LANG": "C", "VIMINIT": "set nocompatible",
-           "WHIRLWIND_DATA_DIR": str(data)}
+    env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(home),
+        "TMPDIR": str(data),
+        "TERM": "xterm-256color",
+        "LANG": "C",
+        "VIMINIT": "set nocompatible",
+        "WHIRLWIND_DATA_DIR": str(data),
+    }
     for name in ("GOCACHE", "GOMODCACHE", "GOFLAGS"):
         if name in os.environ:
             env[name] = os.environ[name]
@@ -210,7 +229,9 @@ def fixture_environment(data):
         # Some Linux images expose Vim Tiny only as vi. Keep the real editor
         # and its PTY; skip only its unavailable syntax highlighting command.
         shim = data / "vim"
-        shim.write_text('#!/bin/sh\nexec "$WHIRLWIND_FIXTURE_VI" -n -c "setlocal filetype=markdown" -- "$7"\n')
+        shim.write_text(
+            '#!/bin/sh\nexec "$WHIRLWIND_FIXTURE_VI" -n -c "setlocal filetype=markdown" -- "$7"\n'
+        )
         shim.chmod(0o700)
         env["WHIRLWIND_FIXTURE_VI"] = vi
         env["PATH"] = f"{data}{os.pathsep}{env['PATH']}"
@@ -226,7 +247,9 @@ def main():
             drive(session, data)
         finally:
             session.close()
-    print("PASS: the shipped dashboard sent versioned mutations over the private Unix socket, rejected a stale decision, reopened pending clarification, and inspected local delivery.")
+    print(
+        "PASS: the shipped dashboard sent versioned mutations over the private Unix socket, rejected a stale decision, reopened pending clarification, and inspected local delivery."
+    )
 
 
 if __name__ == "__main__":

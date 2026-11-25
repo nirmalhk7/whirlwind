@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"go.yaml.in/yaml/v3"
+
 	"whirlwind/internal/model"
 )
 

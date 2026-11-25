@@ -10,6 +10,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 )

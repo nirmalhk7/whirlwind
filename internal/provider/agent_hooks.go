@@ -11,11 +11,10 @@ import (
 
 	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
 )
 
 func (a ProcessAdapter) runWithAgentHooks(ctx context.Context, p model.Provider, in Input, h Hooks) (Output, error) {
-	checks, err := policy.ResolveAgentHooks(in.AgentHooks)
+	checks, err := model.ResolveAgentHooks(in.AgentHooks)
 	if err != nil {
 		return Output{}, errors.Join(execution.ErrAgentHookBlocked, err)
 	}

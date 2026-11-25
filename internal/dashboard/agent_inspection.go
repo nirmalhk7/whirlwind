@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
-	"whirlwind/internal/workflow"
 )
 
 func (d *Dashboard) showAgentInspection() {
@@ -130,12 +130,12 @@ func writeAgentConnectionChecks(text *strings.Builder, snapshot control.Snapshot
 		text.WriteString("No configured providers.\n")
 		return
 	}
-	checks, err := decodeRecords[workflow.ProviderStatus](snapshot["provider_status"])
+	checks, err := decodeRecords[model.ProviderStatus](snapshot["provider_status"])
 	if err != nil {
 		text.WriteString("Cannot read connection checks: " + err.Error() + "\n")
 		return
 	}
-	byProvider := make(map[string]workflow.ProviderStatus, len(checks))
+	byProvider := make(map[string]model.ProviderStatus, len(checks))
 	for _, check := range checks {
 		byProvider[check.ID] = check
 	}
@@ -146,21 +146,23 @@ func writeAgentConnectionChecks(text *strings.Builder, snapshot control.Snapshot
 }
 
 func agentCheckInterval(snapshot control.Snapshot) time.Duration {
-	settings := workflow.DefaultSettings()
+	seconds := model.DefaultProviderStatusCheckSeconds
 	for _, record := range snapshot["settings"] {
 		if record.ID != "global" {
 			continue
 		}
-		var saved workflow.Settings
+		var saved struct {
+			ProviderStatusCheckSeconds int `json:"provider_status_check_seconds"`
+		}
 		if json.Unmarshal(record.Data, &saved) == nil && saved.ProviderStatusCheckSeconds > 0 && saved.ProviderStatusCheckSeconds <= 86400 {
-			settings.ProviderStatusCheckSeconds = saved.ProviderStatusCheckSeconds
+			seconds = saved.ProviderStatusCheckSeconds
 		}
 		break
 	}
-	return time.Duration(settings.ProviderStatusCheckSeconds) * time.Second
+	return time.Duration(seconds) * time.Second
 }
 
-func describeAgentCheck(check workflow.ProviderStatus, now time.Time, interval time.Duration) string {
+func describeAgentCheck(check model.ProviderStatus, now time.Time, interval time.Duration) string {
 	label := "up"
 	switch check.Status {
 	case "working":

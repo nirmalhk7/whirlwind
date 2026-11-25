@@ -11,6 +11,8 @@ import (
 	_ "time/tzdata"
 
 	"github.com/robfig/cron/v3"
+
+	"whirlwind/internal/model"
 )
 
 type IdeationSchedule struct {
@@ -31,7 +33,7 @@ func (s IdeationSchedule) OnRegistrationEnabled() bool {
 }
 
 func DefaultSettings() Settings {
-	return Settings{GlobalSlots: 4, ProjectSlots: 2, ReconciliationSeconds: 300, ProviderStatusCheckSeconds: 30, Ideation: IdeationSchedule{MaxAttemptsPerDirection: 5, Cron: "CRON_TZ=America/Denver 0 10 * * *", HistoryTokenBudget: 4000, HistoryRunTokenBudget: 12000, HistoryRecordLimit: 12, NoveltyRepairAttempts: 3}}
+	return Settings{GlobalSlots: 4, ProjectSlots: 2, ReconciliationSeconds: 300, ProviderStatusCheckSeconds: model.DefaultProviderStatusCheckSeconds, Ideation: IdeationSchedule{MaxAttemptsPerDirection: 5, Cron: "CRON_TZ=America/Denver 0 10 * * *", HistoryTokenBudget: 4000, HistoryRunTokenBudget: 12000, HistoryRecordLimit: 12, NoveltyRepairAttempts: 3}}
 }
 
 // UnmarshalJSON accepts older persisted daily settings and writes them back as cron.

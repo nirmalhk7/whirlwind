@@ -1,4 +1,5 @@
 """Exercise saved tail output, close keys, and tty state restoration."""
+
 import errno
 import os
 import pty
@@ -55,7 +56,9 @@ def run_session(close_key):
         assert read_until(b"TAIL_VIEW_RETURNED", 2), f"{close_key!r} did not return: {output!r}"
         assert b"Esc or Ctrl-C" in output, "tail view did not explain how to return"
         _, exit_status = os.waitpid(pid, 0)
-        assert os.waitstatus_to_exitcode(exit_status) == 0, f"log viewer/tty state exit={exit_status}: {output!r}"
+        assert (
+            os.waitstatus_to_exitcode(exit_status) == 0
+        ), f"log viewer/tty state exit={exit_status}: {output!r}"
     finally:
         if exit_status is None:
             # First allow even the pre-fix foreground tail to restore the tty.

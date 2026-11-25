@@ -6,7 +6,7 @@ import (
 	"unicode"
 
 	"whirlwind/internal/model"
-	"whirlwind/internal/redaction"
+	"whirlwind/internal/store"
 )
 
 func (e *Engine) DispatchHealth() model.DispatchHealth {
@@ -33,7 +33,7 @@ func dispatchRecoveryReason(err error) string {
 			return ' '
 		}
 		return r
-	}, redaction.RedactText(err.Error()))
+	}, store.RedactText(err.Error()))
 	text = strings.Join(strings.Fields(text), " ")
 	if text == "" {
 		return "Sandbox recovery could not be verified"

@@ -4,11 +4,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"go.yaml.in/yaml/v3"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 
 	"whirlwind/internal/model"
 )

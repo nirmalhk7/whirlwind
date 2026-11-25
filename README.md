@@ -112,6 +112,8 @@ qlty smells --all
 qlty check --all
 ```
 
+See [development setup](docs/development.md) for the pinned formatters and source checks.
+
 On macOS with the pinned runtime, the native suites can exercise real nono filesystem, network and ACP terminal boundaries. Linux launcher tests cover refusal of the native path. The [offline verifier checks](docs/offline-docker-verifier.md#reproduce-on-the-cloud-runner) exercise the separate Linux backend with a pinned local image. Controlled OpenShell fixtures cover legacy recovery. See [nono setup](docs/nono-setup.md) for native boundary checks.
 
 Settings-driven live provider outcomes and reproduction are recorded in [configured ACP acceptance](docs/acp-configured-acceptance.md). Skipped or incomplete checks do not certify authenticated inference.

@@ -3,11 +3,12 @@ package dashboard
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/rivo/tview"
 	"os"
 	"os/exec"
 	"sort"
 	"strings"
+
+	"github.com/rivo/tview"
 )
 
 // Preserve full multiline strings and literal terminal markup in the editor.

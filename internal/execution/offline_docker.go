@@ -31,20 +31,10 @@ const offlineDockerSocket = "/var/run/docker.sock"
 const offlineDockerLabel = "io.whirlwind.offline-verifier"
 const offlineDockerScratch = "rw,exec,nodev,nosuid,size=256m"
 
-var offlineImageRef = regexp.MustCompile(`^[a-z0-9][a-z0-9._:/-]*@sha256:[0-9a-f]{64}$`)
 var dockerID = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var dockerImageID = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-func IsOfflineDockerImage(reference string) bool { return offlineImageRef.MatchString(reference) }
-
 func IsOfflineDockerImageID(id string) bool { return dockerImageID.MatchString(id) }
-
-func ValidateOfflineDockerCheck(check model.Check) error {
-	if len(check.Command) == 0 || check.Mode == "autofix" || len(check.OutputPaths) != 0 || len(check.Environment) != 0 || check.ReportFormat == "sarif" || filepath.Base(check.Command[0]) == "qlty" || (check.Required != nil && !*check.Required) {
-		return fmt.Errorf("offline Docker check %s requires a mandatory read-only command without host environment, scanner, or output grants", check.Name)
-	}
-	return nil
-}
 
 func IsOfflineDockerIdentity(id, imageID string) bool {
 	return dockerID.MatchString(id) && dockerImageID.MatchString(imageID)
@@ -57,7 +47,7 @@ type OfflineDocker struct {
 }
 
 func OpenOfflineDocker(ctx context.Context, config, image string) (*OfflineDocker, error) {
-	if !IsOfflineDockerImage(image) || os.Geteuid() == 0 {
+	if !model.IsOfflineDockerImage(image) || os.Geteuid() == 0 {
 		return nil, errors.New("offline verifier requires a digest-pinned image and a non-root operator")
 	}
 	if info, err := os.Stat(offlineDockerSocket); err != nil || info.Mode()&os.ModeSocket == 0 {

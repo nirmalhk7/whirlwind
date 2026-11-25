@@ -2,42 +2,14 @@ package workflow
 
 import (
 	"context"
-	"errors"
 	"log"
-	"sync"
-	"sync/atomic"
 	"time"
+
 	"whirlwind/internal/github"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
 )
-
-type Engine struct {
-	dispatchHealth           atomic.Pointer[model.DispatchHealth]
-	Store                    *store.Store
-	GitHub                   github.Client
-	Root                     string
-	PlansRoot                string
-	Adapter                  func(model.Provider) provider.Adapter
-	owner                    string
-	mu                       sync.Mutex
-	runners                  map[string]context.CancelFunc
-	projectRunners           map[string]projectRunner
-	running                  map[string]context.CancelFunc
-	active                   map[string]int
-	gitMu                    sync.Mutex
-	background               sync.WaitGroup
-	runnerWait               sync.WaitGroup
-	closing                  bool
-	wake                     chan struct{}
-	rolePops                 chan rolePop
-	providerStatuses         providerStatusCache
-	retryWait                func(context.Context, time.Duration) error
-	attemptTimeout           time.Duration
-	integrationBrokerFactory func(context.Context, model.Project, []model.IntegrationSource) (*integrationMCPBroker, error)
-	integrationPromptSource  func(string) (string, error)
-}
 
 // New constructs the workflow engine with default process adapters, a unique lease owner, and execution tracking.
 func New(s *store.Store, g github.Client, root string) *Engine {
@@ -122,43 +94,6 @@ func (e *Engine) Stop(id string) {
 		c()
 	}
 	e.mu.Unlock()
-}
-
-// fail pauses a failed task at its resumable stage and creates an Inbox recovery notification.
-func (e *Engine) fail(ctx context.Context, id string, failure error) {
-	if err := e.pauseFailure(ctx, id, failure); err != nil && !errors.Is(err, store.ErrConflict) {
-		log.Printf("persist task recovery %s: %v", id, err)
-	}
-}
-
-func (e *Engine) pauseFailure(ctx context.Context, id string, failure error) error {
-	r, err := e.Store.Get(ctx, "execution_plans", id)
-	if err != nil {
-		return err
-	}
-	task, err := store.Decode[model.ExecutionPlan](r)
-	if err != nil || task.Stage == "paused" || task.Stage == "plan_approval" || task.Cancelled() {
-		return err
-	}
-
-	var wait *AdmissionWait
-	if errors.As(failure, &wait) {
-		if task.Stage == "waiting_quota" {
-			return nil
-		}
-		task.Wait = &model.ExecutionPlanWait{Kind: wait.Kind, Reason: wait.Reason, Provider: wait.Provider, Pool: wait.Pool, Role: wait.Role, ResumeStage: task.Stage, NextCheckAt: wait.NextCheck.UTC().Format(time.RFC3339Nano), PlanVersion: task.PlanVersion}
-		if project, err := e.Project(ctx, task.ProjectID); err == nil {
-			task.Wait.PolicyHash = project.PolicyHash
-		}
-		task.ResumeStage, task.Stage, task.Error = task.Stage, "waiting_quota", failure.Error()
-		if wait.Kind == "setup" || wait.Kind == "policy" || wait.Kind == "authentication" {
-			task.Stage = "paused"
-		}
-	} else {
-		task.ResumeStage, task.Stage, task.Error = task.Stage, "paused", failure.Error()
-	}
-	// Store.Put commits the structured transition notification in the same transaction.
-	return e.Store.Put(ctx, "execution_plans", id, task, r.Version)
 }
 
 // Project loads and decodes the registered project used by a task.

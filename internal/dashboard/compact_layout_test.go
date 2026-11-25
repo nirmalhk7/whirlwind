@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
-	"whirlwind/internal/workflow"
 )
 
 func TestCompactFooterPreservesRunAndAgentRows(t *testing.T) {
@@ -21,8 +21,8 @@ func TestCompactFooterPreservesRunAndAgentRows(t *testing.T) {
 			record("c", model.Provider{ID: "c", Name: "Charlie"}),
 		},
 		"provider_status": {
-			record("a", workflow.ProviderStatus{ID: "a", Status: "working"}),
-			record("b", workflow.ProviderStatus{ID: "b", Status: "failed"}),
+			record("a", model.ProviderStatus{ID: "a", Status: "working"}),
+			record("b", model.ProviderStatus{ID: "b", Status: "failed"}),
 		},
 		"sessions": {
 			record("3", model.Attempt{AttemptID: "3", ProjectID: "p", Role: "code", Provider: "a", Model: "model-one", Status: "running"}),

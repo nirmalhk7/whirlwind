@@ -17,14 +17,14 @@ import (
 )
 
 func (m JobManifest) validateOfflineDocker() error {
-	if !execution.IsOfflineDockerImage(m.OfflineDockerImage) || m.Launcher != "" || m.Quality != nil || m.Sandbox != nil {
+	if !model.IsOfflineDockerImage(m.OfflineDockerImage) || m.Launcher != "" || m.Quality != nil || m.Sandbox != nil {
 		return errors.New("offline Docker verification requires a digest-pinned image and an approved check manifest without native scanner or sandbox settings")
 	}
 	if err := m.validateOfflineAuthority(); err != nil {
 		return err
 	}
 	for _, check := range m.Commands {
-		if err := execution.ValidateOfflineDockerCheck(model.Check{Name: check.Name, Mode: check.Mode, Command: check.Command, OutputPaths: check.OutputPaths, Environment: check.Environment, ReportFormat: check.ReportFormat, Required: check.Required}); err != nil {
+		if err := model.ValidateOfflineDockerCheck(model.Check{Name: check.Name, Mode: check.Mode, Command: check.Command, OutputPaths: check.OutputPaths, Environment: check.Environment, ReportFormat: check.ReportFormat, Required: check.Required}); err != nil {
 			return err
 		}
 	}

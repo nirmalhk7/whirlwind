@@ -2,6 +2,7 @@ package verification
 
 import (
 	"testing"
+
 	"whirlwind/internal/model"
 )
 

@@ -47,7 +47,9 @@ function fixture(t) {
   writeFileSync(log, "");
   writeFileSync(join(directory, "gh"), github, { mode: 0o755 });
   for (const archive of archives) {
-    const result = spawnSync("tar", ["-czf", archive, "--files-from", "/dev/null"], { cwd: directory });
+    const result = spawnSync("tar", ["-czf", archive, "--files-from", "/dev/null"], {
+      cwd: directory,
+    });
     assert.equal(result.status, 0, result.stderr?.toString());
   }
   const draft = {
@@ -56,56 +58,67 @@ function fixture(t) {
     html_url: "https://github.com/nirmalhk7/whirlwind/releases/edit/123",
     draft: true,
     prerelease: false,
-    assets: [...archives, "SHA256SUMS"].map(name => ({ name, state: "uploaded" })),
+    assets: [...archives, "SHA256SUMS"].map((name) => ({ name, state: "uploaded" })),
   };
   return {
     directory,
     draft,
     calls: () => readFileSync(log, "utf8").trim().split("\n").filter(Boolean),
     output: () => readFileSync(output, "utf8"),
-    run: (overrides = {}, command = "publish") => spawnSync("bash", [script, command], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        GH_TOKEN: "",
-        PATH: directory + delimiter + process.env.PATH,
-        RELEASE_VERSION: "v0.2.0",
-        RELEASE_ASSETS: directory,
-        GITHUB_SERVER_URL: "https://github.com",
-        GITHUB_REPOSITORY: "nirmalhk7/whirlwind",
-        GITHUB_REF: "refs/heads/main",
-        GITHUB_EVENT_NAME: "workflow_dispatch",
-        GITHUB_SHA: sha,
-        GITHUB_OUTPUT: output,
-        STUB_LOG: log,
-        STUB_TAGS: "v0.1.0",
-        STUB_RELEASES: "v0.1.0",
-        STUB_MAIN: sha,
-        STUB_MAIN_AFTER_UPLOAD: sha,
-        STUB_TAG_SHA: sha,
-        STUB_CREATE_TAG_EXIT: "0",
-        STUB_DRAFT: JSON.stringify([draft]),
-        ...overrides,
-      },
-    }),
+    run: (overrides = {}, command = "publish") =>
+      spawnSync("bash", [script, command], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GH_TOKEN: "",
+          PATH: directory + delimiter + process.env.PATH,
+          RELEASE_VERSION: "v0.2.0",
+          RELEASE_ASSETS: directory,
+          GITHUB_SERVER_URL: "https://github.com",
+          GITHUB_REPOSITORY: "nirmalhk7/whirlwind",
+          GITHUB_REF: "refs/heads/main",
+          GITHUB_EVENT_NAME: "workflow_dispatch",
+          GITHUB_SHA: sha,
+          GITHUB_OUTPUT: output,
+          STUB_LOG: log,
+          STUB_TAGS: "v0.1.0",
+          STUB_RELEASES: "v0.1.0",
+          STUB_MAIN: sha,
+          STUB_MAIN_AFTER_UPLOAD: sha,
+          STUB_TAG_SHA: sha,
+          STUB_CREATE_TAG_EXIT: "0",
+          STUB_DRAFT: JSON.stringify([draft]),
+          ...overrides,
+        },
+      }),
   };
 }
 
-test("accepts stable SemVer and rejects noncanonical or unsafe inputs", t => {
+test("accepts stable SemVer and rejects noncanonical or unsafe inputs", (t) => {
   const f = fixture(t);
   for (const version of ["v0.0.0", "v1.2.3", "v100.99.999"]) {
     assert.equal(f.run({ RELEASE_VERSION: version }, "plan").status, 0, version);
   }
   assert.equal(f.output(), "publish=true\n".repeat(3));
-  for (const version of ["", "1.2.3", "v01.2.3", "v1.02.3", "v1.2.03", "v1.2", "v1.2.3-rc.1",
-    "v1.2.3+build", "v1.2.3\n", "v1.2.3; uname"]) {
+  for (const version of [
+    "",
+    "1.2.3",
+    "v01.2.3",
+    "v1.02.3",
+    "v1.2.03",
+    "v1.2",
+    "v1.2.3-rc.1",
+    "v1.2.3+build",
+    "v1.2.3\n",
+    "v1.2.3; uname",
+  ]) {
     assert.match(f.run({ RELEASE_VERSION: version }, "plan").stderr, /stable SemVer/);
   }
   assert.equal(f.output(), "publish=true\n".repeat(3));
   assert.deepEqual(f.calls(), []);
 });
 
-test("rejects every non-main-dispatch context before making an API call", t => {
+test("rejects every non-main-dispatch context before making an API call", (t) => {
   const f = fixture(t);
   for (const context of [
     { GITHUB_EVENT_NAME: "push" },
@@ -126,7 +139,7 @@ test("rejects every non-main-dispatch context before making an API call", t => {
   assert.deepEqual(f.calls(), []);
 });
 
-test("rejects an invalid version or commit and a missing archive without API calls", t => {
+test("rejects an invalid version or commit and a missing archive without API calls", (t) => {
   const f = fixture(t);
   assert.match(f.run({ RELEASE_VERSION: "v0.2.0-rc.1" }).stderr, /stable SemVer/);
   assert.match(f.run({ GITHUB_SHA: "main" }).stderr, /commit SHA is invalid/);
@@ -135,7 +148,7 @@ test("rejects an invalid version or commit and a missing archive without API cal
   assert.deepEqual(f.calls(), []);
 });
 
-test("rejects duplicate tags, duplicate draft versions, older versions, and stale main before writes", t => {
+test("rejects duplicate tags, duplicate draft versions, older versions, and stale main before writes", (t) => {
   const f = fixture(t);
   for (const [overrides, error] of [
     [{ STUB_TAGS: "v0.2.0" }, /already has a tag or release/],
@@ -149,47 +162,56 @@ test("rejects duplicate tags, duplicate draft versions, older versions, and stal
     assert.match(result.stderr, error);
   }
   assert.ok(f.calls().length);
-  assert.ok(f.calls().every(call => !/--method|release create/.test(call)));
+  assert.ok(f.calls().every((call) => !/--method|release create/.test(call)));
 });
 
-test("a concurrent tag creation blocks draft creation", t => {
+test("a concurrent tag creation blocks draft creation", (t) => {
   const f = fixture(t);
   assert.equal(f.run({ STUB_CREATE_TAG_EXIT: "22" }).status, 22);
   assert.match(f.calls().at(-1), /--method POST/);
-  assert.ok(f.calls().every(call => !call.startsWith("release create")));
+  assert.ok(f.calls().every((call) => !call.startsWith("release create")));
 });
 
-test("refuses to publish after main or the tag changes or draft assets are missing", t => {
+test("refuses to publish after main or the tag changes or draft assets are missing", (t) => {
   const f = fixture(t);
   for (const [overrides, error] of [
     [{ STUB_MAIN_AFTER_UPLOAD: otherSHA }, /main has moved/],
     [{ STUB_TAG_SHA: otherSHA }, /no longer points/],
-    [{ STUB_DRAFT: JSON.stringify([{ ...f.draft, assets: [] }]) }, /Could not verify the new draft/],
-    [{ STUB_DRAFT: JSON.stringify([{ ...f.draft, draft: false }]) }, /Could not verify the new draft/],
+    [
+      { STUB_DRAFT: JSON.stringify([{ ...f.draft, assets: [] }]) },
+      /Could not verify the new draft/,
+    ],
+    [
+      { STUB_DRAFT: JSON.stringify([{ ...f.draft, draft: false }]) },
+      /Could not verify the new draft/,
+    ],
   ]) {
     const result = f.run(overrides);
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, error);
   }
-  assert.ok(f.calls().some(call => call.startsWith("release create")));
-  assert.ok(f.calls().every(call => !call.includes("--method PATCH")));
+  assert.ok(f.calls().some((call) => call.startsWith("release create")));
+  assert.ok(f.calls().every((call) => !call.includes("--method PATCH")));
 });
 
-test("creates the exact tag, stages all assets and publishes only the verified draft", t => {
+test("creates the exact tag, stages all assets and publishes only the verified draft", (t) => {
   const f = fixture(t);
   const result = f.run({ STUB_TAGS: "v0.1.10\nv0.2.0-rc.1" });
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(f.calls().map(call => call.replace(/\s--jq .*$/, "")), [
-    "api --hostname github.com --paginate repos/nirmalhk7/whirlwind/tags?per_page=100",
-    "api --hostname github.com --paginate repos/nirmalhk7/whirlwind/releases?per_page=100",
-    "api --hostname github.com repos/nirmalhk7/whirlwind/git/ref/heads/main",
-    `api --hostname github.com --method POST repos/nirmalhk7/whirlwind/git/refs --raw-field ref=refs/tags/v0.2.0 --raw-field sha=${sha} --silent`,
-    `release create v0.2.0 ${archives.join(" ")} SHA256SUMS --repo github.com/nirmalhk7/whirlwind --verify-tag --draft --generate-notes --target ${sha} --title v0.2.0`,
-    "api --hostname github.com --paginate repos/nirmalhk7/whirlwind/releases?per_page=100",
-    "api --hostname github.com repos/nirmalhk7/whirlwind/git/ref/heads/main",
-    "api --hostname github.com repos/nirmalhk7/whirlwind/git/ref/tags/v0.2.0",
-    `api --hostname github.com --method PATCH repos/nirmalhk7/whirlwind/releases/123 --raw-field tag_name=v0.2.0 --raw-field target_commitish=${sha} --field draft=false`,
-  ]);
+  assert.deepEqual(
+    f.calls().map((call) => call.replace(/\s--jq .*$/, "")),
+    [
+      "api --hostname github.com --paginate repos/nirmalhk7/whirlwind/tags?per_page=100",
+      "api --hostname github.com --paginate repos/nirmalhk7/whirlwind/releases?per_page=100",
+      "api --hostname github.com repos/nirmalhk7/whirlwind/git/ref/heads/main",
+      `api --hostname github.com --method POST repos/nirmalhk7/whirlwind/git/refs --raw-field ref=refs/tags/v0.2.0 --raw-field sha=${sha} --silent`,
+      `release create v0.2.0 ${archives.join(" ")} SHA256SUMS --repo github.com/nirmalhk7/whirlwind --verify-tag --draft --generate-notes --target ${sha} --title v0.2.0`,
+      "api --hostname github.com --paginate repos/nirmalhk7/whirlwind/releases?per_page=100",
+      "api --hostname github.com repos/nirmalhk7/whirlwind/git/ref/heads/main",
+      "api --hostname github.com repos/nirmalhk7/whirlwind/git/ref/tags/v0.2.0",
+      `api --hostname github.com --method PATCH repos/nirmalhk7/whirlwind/releases/123 --raw-field tag_name=v0.2.0 --raw-field target_commitish=${sha} --field draft=false`,
+    ],
+  );
   const checksums = spawnSync("sha256sum", ["--check", "SHA256SUMS"], { cwd: f.directory });
   assert.equal(checksums.status, 0, checksums.stderr?.toString());
 });

@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
 	"whirlwind/internal/workflow"
@@ -153,7 +152,7 @@ func validateDocumentPolicies(doc Document) error {
 			return err
 		}
 	}
-	return policy.ValidateAgentHooks(doc.AgentHooks)
+	return model.ValidateAgentHooks(doc.AgentHooks)
 }
 func (s *Source) Refresh(ctx context.Context) error {
 	s.mu.Lock()

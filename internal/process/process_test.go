@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
 	"whirlwind/internal/redaction"
 )
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
 	"whirlwind/internal/model"
 )
 
@@ -173,6 +174,27 @@ func TestCompareBaselineAcceptsUnchangedQltySmellsExitZeroAdvisory(t *testing.T)
 	}
 	if err := ValidateQltyResult(compared.Results[0]); err != nil {
 		t.Fatalf("validated exit-zero baseline advisory rejected: %v", err)
+	}
+}
+
+func TestCompareBaselineQltySmellsRequiresMatchingRuntimeIdentity(t *testing.T) {
+	output := regressionSARIF("complexity", "warning", "stable", complexityFinding, 10, 12)
+	for _, name := range []string{"missing baseline", "missing candidate", "different runtime"} {
+		t.Run(name, func(t *testing.T) {
+			base, head := regressionQltySmells(output, 0), regressionQltySmells(output, 0)
+			switch name {
+			case "missing baseline":
+				base.QualityIdentity = nil
+			case "missing candidate":
+				head.QualityIdentity = nil
+			case "different runtime":
+				head.QualityIdentity.QltyBinarySHA256 = strings.Repeat("e", 64)
+			}
+			compared := CompareBaseline(Report{Results: []Result{base}}, Report{Results: []Result{head}})
+			if compared.Passed || AcceptedQltyBaselineAdvisory(compared.Results[0]) || !strings.Contains(compared.Results[0].Error, "runtime identity") {
+				t.Fatalf("unqualified smells accepted as baseline debt: %+v", compared)
+			}
+		})
 	}
 }
 

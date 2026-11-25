@@ -3,11 +3,13 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+
 	"whirlwind/internal/control"
 	"whirlwind/internal/model"
 )

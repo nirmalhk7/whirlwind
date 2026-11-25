@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+
 	"whirlwind/internal/model"
 	"whirlwind/prompts/agents"
 )
 
-var directionCategories = []string{"expand", "optimize", "harden", "simplify"}
+var directionCategories = model.DirectionCategories()
 
 func missingDirectionCategories(directions []model.Direction) []string {
 	present := map[string]bool{}
