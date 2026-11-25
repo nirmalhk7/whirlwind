@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	ledgerReferenceDay     = "2026-11-06"
 	ledgerComponentA       = "src/a.go"
 	ledgerIndexedComponent = "internal/context/index.go"
 	ledgerAuthComponent    = "internal/auth"
@@ -43,7 +44,7 @@ func TestConcurrentDirectionPublicationRejectsFingerprintDuplicate(t *testing.T)
 		go func(i int) {
 			defer wait.Done()
 			<-start
-			direction := model.Direction{ID: fmt.Sprintf("title-%d", i), ProjectID: "p", Day: "2026-11-06", Category: []string{"expand", "optimize"}[i], Title: fmt.Sprintf("Different title %d", i), Description: "Same underlying proposal", Fingerprint: "same-normalized-proposal"}
+			direction := model.Direction{ID: fmt.Sprintf("title-%d", i), ProjectID: "p", Day: ledgerReferenceDay, Category: []string{"expand", "optimize"}[i], Title: fmt.Sprintf("Different title %d", i), Description: "Same underlying proposal", Fingerprint: "same-normalized-proposal"}
 			errorsSeen[i] = database.SaveDirections(ctx, "p", direction.Day, []model.Direction{direction})
 		}(i)
 	}
@@ -114,7 +115,7 @@ func TestRejectedDuplicateFingerprintPersistsReasonAndStaysBlocked(t *testing.T)
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
 	fingerprint := model.ProposalFingerprint("p", "Expired auth retries fail", "Persist scoped credential refresh", []string{ledgerAuthComponent})
-	original := model.Direction{ID: "original", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Auth recovery", Description: "Restore expired auth safely", Problem: "Expired auth retries fail", Mechanism: "Persist scoped credential refresh", Components: []string{ledgerAuthComponent}, Fingerprint: fingerprint, RepositoryRevision: "rev1"}
+	original := model.Direction{ID: "original", ProjectID: "p", Day: ledgerReferenceDay, Category: "harden", Title: "Auth recovery", Description: "Restore expired auth safely", Problem: "Expired auth retries fail", Mechanism: "Persist scoped credential refresh", Components: []string{ledgerAuthComponent}, Fingerprint: fingerprint, RepositoryRevision: "rev1"}
 	if err := database.SaveDirections(ctx, "p", original.Day, []model.Direction{original}); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +148,7 @@ func TestRevisitAdvancesFingerprintOwnerAndPreventsDuplicateRevisit(t *testing.T
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
 	fingerprint := model.ProposalFingerprint("p", "Old evidence shows stale data", "Refresh the indexed project map", []string{"internal/context"})
-	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "optimize", Title: "Refresh project map", Description: "Update stale entries", Problem: "Old evidence shows stale data", Mechanism: "Refresh the indexed project map", Components: []string{"internal/context"}, Fingerprint: fingerprint, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: ledgerIndexedComponent, Revision: "rev1"}}}
+	old := model.Direction{ID: "old", ProjectID: "p", Day: ledgerReferenceDay, Category: "optimize", Title: "Refresh project map", Description: "Update stale entries", Problem: "Old evidence shows stale data", Mechanism: "Refresh the indexed project map", Components: []string{"internal/context"}, Fingerprint: fingerprint, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: ledgerIndexedComponent, Revision: "rev1"}}}
 	if err := database.SaveDirections(ctx, "p", old.Day, []model.Direction{old}); err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestRevisitAdvancesFingerprintOwnerAndPreventsDuplicateRevisit(t *testing.T
 func TestHumanReconsiderationAllowsOneSameEvidenceRevisit(t *testing.T) {
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
-	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Recover expired sessions", Problem: "Expired sessions lose unsaved work", Mechanism: "Refresh the authorized session before retrying", Components: []string{ledgerAuthComponent}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}}
+	old := model.Direction{ID: "old", ProjectID: "p", Day: ledgerReferenceDay, Category: "harden", Title: "Recover expired sessions", Problem: "Expired sessions lose unsaved work", Mechanism: "Refresh the authorized session before retrying", Components: []string{ledgerAuthComponent}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}}
 	if err := database.SaveDirections(ctx, "p", old.Day, []model.Direction{old}); err != nil {
 		t.Fatal(err)
 	}
@@ -198,17 +199,7 @@ func TestHumanReconsiderationAllowsOneSameEvidenceRevisit(t *testing.T) {
 	if pending, err := database.PendingProposalReconsideration(ctx, "p", old.ID, old.RevisitReason); err != nil || pending.Status != "pending" {
 		t.Fatalf("human request was not recognized before publication: %+v %v", pending, err)
 	}
-	tx, err := database.DB.Begin()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pending, _, err := pendingProposalReconsideration(ctx, tx, "p", old.ID, old.RevisitReason); err != nil || pending.Status != "pending" {
-		_ = tx.Rollback()
-		t.Fatalf("transactional human request was not recognized before publication: %+v %v", pending, err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatal(err)
-	}
+	assertPendingReconsiderationInTransaction(t, ctx, database, old)
 	revisit := old
 	revisit.ID, revisit.Day, revisit.Title = "revisit-1", "2026-11-07", "Preserve offline drafts during session recovery"
 	revisit.Status, revisit.Selected, revisit.TaskID = "proposed", false, ""
@@ -242,10 +233,25 @@ func TestHumanReconsiderationAllowsOneSameEvidenceRevisit(t *testing.T) {
 	}
 }
 
+func assertPendingReconsiderationInTransaction(t *testing.T, ctx context.Context, database *Store, direction model.Direction) {
+	t.Helper()
+	tx, err := database.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, _, err := pendingProposalReconsideration(ctx, tx, direction.ProjectID, direction.ID, direction.RevisitReason)
+	if rollbackErr := tx.Rollback(); rollbackErr != nil {
+		t.Fatal(rollbackErr)
+	}
+	if err != nil || pending.Status != "pending" {
+		t.Fatalf("transactional human request was not recognized before publication: %+v %v", pending, err)
+	}
+}
+
 func TestGeneratedDirectionStatusCannotAuthorizeReconsideration(t *testing.T) {
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
-	old := model.Direction{ID: "old", ProjectID: "p", Day: "2026-11-06", Category: "harden", Title: "Recover expired sessions", Problem: "Expired sessions lose unsaved work", Mechanism: "Refresh the authorized session before retrying", Components: []string{ledgerAuthComponent}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}}
+	old := model.Direction{ID: "old", ProjectID: "p", Day: ledgerReferenceDay, Category: "harden", Title: "Recover expired sessions", Problem: "Expired sessions lose unsaved work", Mechanism: "Refresh the authorized session before retrying", Components: []string{ledgerAuthComponent}, RepositoryRevision: "rev1", Evidence: []model.EvidenceRef{{Kind: "code", Ref: "internal/auth/session.go", Revision: "rev1"}}}
 	if err := database.SaveDirections(ctx, "p", old.Day, []model.Direction{old}); err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +269,7 @@ func TestGeneratedDirectionStatusCannotAuthorizeReconsideration(t *testing.T) {
 func TestRemoveDirectionRetainsProposalOutcomeInLedger(t *testing.T) {
 	ctx := context.Background()
 	database := openProposalLedgerFixture(t)
-	direction := model.Direction{ID: "remove-me", ProjectID: "p", Day: "2026-11-06", Category: "simplify", Title: "Remove a route", Description: "Simplify duplicate routing", Problem: "Routing implementation is duplicated", Mechanism: "Consolidate the common route table", Components: []string{"internal/http"}, RepositoryRevision: "rev1"}
+	direction := model.Direction{ID: "remove-me", ProjectID: "p", Day: ledgerReferenceDay, Category: "simplify", Title: "Remove a route", Description: "Simplify duplicate routing", Problem: "Routing implementation is duplicated", Mechanism: "Consolidate the common route table", Components: []string{"internal/http"}, RepositoryRevision: "rev1"}
 	if err := database.SaveDirections(ctx, "p", direction.Day, []model.Direction{direction}); err != nil {
 		t.Fatal(err)
 	}
