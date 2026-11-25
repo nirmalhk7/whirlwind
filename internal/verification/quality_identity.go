@@ -92,10 +92,6 @@ func captureQualityIdentityWithCatalog(output, runtimeDir, executable string, sn
 }
 
 func captureQualityIdentityWithCatalogPath(output, runtimeDir, executable string, snapshot *model.QualitySnapshot, expectedBinarySHA256, observedCatalogHash, pathValue string) (*model.QualityIdentity, error) {
-	return captureQualityIdentityWithCatalogAt(output, runtimeDir, executable, snapshot, expectedBinarySHA256, observedCatalogHash, pathValue, "")
-}
-
-func captureQualityIdentityWithCatalogAt(output, runtimeDir, executable string, snapshot *model.QualitySnapshot, expectedBinarySHA256, observedCatalogHash, pathValue, cwd string) (*model.QualityIdentity, error) {
 	if snapshot == nil || len(output) == 0 || len(output) > 1<<20 || runtimeDir == "" {
 		return nil, errors.New("missing frozen configuration, SARIF, or isolated runtime directory")
 	}
@@ -106,7 +102,7 @@ func captureQualityIdentityWithCatalogAt(output, runtimeDir, executable string, 
 	if err != nil {
 		return nil, err
 	}
-	qltyHash, err := hashQltyExecutableAt(executable, pathValue, cwd)
+	qltyHash, err := hashQltyExecutableInPath(executable, pathValue)
 	if err != nil {
 		return nil, fmt.Errorf("hash Qlty binary: %w", err)
 	}

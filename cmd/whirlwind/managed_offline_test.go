@@ -132,7 +132,9 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 	})
 	launcher("stop")
 	if nono := os.Getenv("WHIRLWIND_TEST_SEEDED_NONO"); nono != "" {
-		exerciseSeededOfflineHandoffs(t, db, data, project, task.ID, candidate, green, nono, git)
+		exerciseSeededOfflineHandoffs(t, db, seededOfflineHandoff{
+			data: data, project: project, planID: task.ID, candidate: candidate, green: green, nono: nono, git: git,
+		})
 	}
 	if signature() != initial || git(source, managedFixtureRevParse, "HEAD") != base {
 		t.Fatal("supervisor changed the original checkout")

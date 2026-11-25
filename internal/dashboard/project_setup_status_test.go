@@ -65,7 +65,9 @@ func TestFailedProjectSetupIsVisibleAndRecoverableFromMainDashboard(t *testing.T
 	}
 
 	d.SetFocus(d.inbox)
-	d.inbox.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	d.inbox.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {
+		// This fixture drives list selection without a tview focus dispatcher.
+	})
 	viewer, ok := d.modal.(*tview.TextView)
 	if !ok {
 		t.Fatal("Enter on the Inbox setup notice did not open the setup run")

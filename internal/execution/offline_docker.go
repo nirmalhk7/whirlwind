@@ -127,7 +127,7 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 	}
 	id = strings.TrimSpace(string(created))
 	if !dockerID.MatchString(id) {
-		return "", nil, false, errors.New("Docker create returned no full container identity")
+		return "", nil, false, errors.New("container creation returned no full Docker identity")
 	}
 	createConfirmed = true
 	inspection, cancelInspection := context.WithTimeout(ctx, 15*time.Second)
@@ -163,7 +163,7 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 	}
 	var exited *exec.ExitError
 	if (state.ExitCode == 0 && startErr != nil) || (state.ExitCode != 0 && (!errors.As(startErr, &exited) || exited.ExitCode() != state.ExitCode)) {
-		return id, nil, false, errors.New("Docker attach outcome disagrees with the container exit status")
+		return id, nil, false, errors.New("container exit status disagrees with the Docker attach outcome")
 	}
 	return id, &state.ExitCode, false, nil
 }

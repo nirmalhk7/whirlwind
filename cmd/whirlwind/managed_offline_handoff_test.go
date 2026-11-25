@@ -23,11 +23,19 @@ func (a seededOfflineAdapter) Run(ctx context.Context, input provider.Input, hoo
 	return a(ctx, input, hooks)
 }
 
+type seededOfflineHandoff struct {
+	data, planID, candidate, green, nono string
+	project                              model.Project
+	git                                  func(string, ...string) string
+}
+
 // The supervisor has stopped before this phase. The harness returns only
 // deterministic Reviewer outputs. The production engine, store, verifier
 // subprocess and immutable snapshots still own the handoffs.
-func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, data string, project model.Project, id, candidate, green, nono string, git func(string, ...string) string) {
+func exerciseSeededOfflineHandoffs(t *testing.T, db *store.Store, fixture seededOfflineHandoff) {
 	t.Helper()
+	data, project, id := fixture.data, fixture.project, fixture.planID
+	candidate, green, nono, git := fixture.candidate, fixture.green, fixture.nono, fixture.git
 	ctx := t.Context()
 	t.Setenv("WHIRLWIND_NONO_CLI", nono)
 	t.Setenv("WHIRLWIND_VERIFY_BIN", filepath.Join(data, "runtime", "whirlwind-verify"))

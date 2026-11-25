@@ -142,7 +142,9 @@ func TestInboxTaskInspectionRemainsSelectedAcrossRunRefresh(t *testing.T) {
 	d.input(tcell.NewEventKey(tcell.KeyRune, 't', tcell.ModNone))
 	chooser := d.modal.(*tview.List)
 	chooser.SetCurrentItem(1)
-	chooser.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	chooser.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {
+		// This fixture drives list selection without a tview focus dispatcher.
+	})
 	d.Present(snapshot)
 	task, _, ok := d.selectedPlanRecord()
 	if !ok || task.ID != "second" {

@@ -225,18 +225,30 @@ func (a *agentRun) clearPersistedRetryCooldown(source model.Provider, choice mod
 	if cooldown.AttemptID != owner {
 		return nil
 	}
-	cooldown.Until = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
-	return a.commitPersistedRetryCooldownClear(ctx, source, choice, episodeID, owner, episodeRecord, episode, cooldownRecord, cooldown)
+	return a.commitPersistedRetryCooldownClear(ctx, source, choice, owner, retryCooldownSnapshot{
+		episodeID: episodeID, episodeVersion: episodeRecord.Version, episode: episode,
+		cooldownVersion: cooldownRecord.Version, cooldown: cooldown,
+	})
 }
 
-func (a *agentRun) commitPersistedRetryCooldownClear(ctx context.Context, source model.Provider, choice model.AgentChoice, episodeID, owner string, episodeRecord model.Record, episode model.RecoveryEpisode, cooldownRecord model.Record, cooldown model.ProviderCooldown) error {
-	if !recoveryChoiceMatchesEpisode(a, choice, episodeID, episode) || episode.LastAttemptID != owner || episode.Status != "failed" || !retryableEpisodeFailure(episode) || cooldown.AttemptID != owner {
+// The episode and cooldown must both still match the versions that authorized
+// the wait. Persisting them together preserves the optimistic ownership check.
+type retryCooldownSnapshot struct {
+	episodeID                       string
+	episodeVersion, cooldownVersion int
+	episode                         model.RecoveryEpisode
+	cooldown                        model.ProviderCooldown
+}
+
+func (a *agentRun) commitPersistedRetryCooldownClear(ctx context.Context, source model.Provider, choice model.AgentChoice, owner string, saved retryCooldownSnapshot) error {
+	episode, cooldown := saved.episode, saved.cooldown
+	if !recoveryChoiceMatchesEpisode(a, choice, saved.episodeID, episode) || episode.LastAttemptID != owner || episode.Status != "failed" || !retryableEpisodeFailure(episode) || cooldown.AttemptID != owner {
 		return nil
 	}
 	cooldown.Until = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
 	return a.Store.Write(ctx, []store.Change{
-		{Kind: "recovery_episodes", ID: episodeID, Value: episode, Expected: episodeRecord.Version},
-		{Kind: "provider_cooldowns", ID: providerPool(source), Value: cooldown, Expected: cooldownRecord.Version},
+		{Kind: "recovery_episodes", ID: saved.episodeID, Value: episode, Expected: saved.episodeVersion},
+		{Kind: "provider_cooldowns", ID: providerPool(source), Value: cooldown, Expected: saved.cooldownVersion},
 	}, nil)
 }
 

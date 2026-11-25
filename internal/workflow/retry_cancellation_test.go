@@ -412,7 +412,10 @@ func TestRetryCooldownClearRejectsStaleCapturedEpisodeVersion(t *testing.T) {
 	if err := run.Store.Put(run.ctx, "recovery_episodes", episode.EntryID, concurrentEpisode, episodeRecord.Version); err != nil {
 		t.Fatal(err)
 	}
-	err = run.commitPersistedRetryCooldownClear(run.ctx, source, choice, episode.EntryID, episode.LastAttemptID, episodeRecord, capturedEpisode, cooldownRecord, capturedCooldown)
+	err = run.commitPersistedRetryCooldownClear(run.ctx, source, choice, episode.LastAttemptID, retryCooldownSnapshot{
+		episodeID: episode.EntryID, episodeVersion: episodeRecord.Version, episode: capturedEpisode,
+		cooldownVersion: cooldownRecord.Version, cooldown: capturedCooldown,
+	})
 	if !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale episode version clear error=%v, want store conflict", err)
 	}

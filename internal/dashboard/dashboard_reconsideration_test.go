@@ -64,7 +64,9 @@ func openDirectionHistory(t *testing.T, d *Dashboard) *tview.List {
 
 func selectHistoryRow(t *testing.T, list *tview.List) {
 	t.Helper()
-	list.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {})
+	list.InputHandler()(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone), func(tview.Primitive) {
+		// This fixture drives list selection without a tview focus dispatcher.
+	})
 }
 
 func reconsiderationForm(t *testing.T, d *Dashboard, list *tview.List) *tview.Form {
