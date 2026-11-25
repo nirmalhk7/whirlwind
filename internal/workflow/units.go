@@ -78,31 +78,36 @@ func (r *unitRun) prepareWorktree() error {
 func (r *unitRun) restoreCheckpoint() (bool, error) {
 	key := unitKey(r.task.ID, r.task.PlanVersion, r.unit.ID)
 	record, load := r.Store.Get(r.ctx, "units", key)
-	if load == nil {
-		previous, err := store.Decode[model.Unit](record)
-		if err != nil {
-			return false, fmt.Errorf("decode durable unit checkpoint: %w", err)
+	if errors.Is(load, store.ErrNotFound) {
+		r.clearRuntimeFields()
+		return false, nil
+	}
+	if load != nil {
+		return false, fmt.Errorf("load durable unit checkpoint: %w", load)
+	}
+	return r.restoreStoredCheckpoint(record)
+}
+
+func (r *unitRun) restoreStoredCheckpoint(record model.Record) (bool, error) {
+	previous, err := store.Decode[model.Unit](record)
+	if err != nil {
+		return false, fmt.Errorf("decode durable unit checkpoint: %w", err)
+	}
+	if err := r.validateCheckpointIdentity(previous); err != nil {
+		return false, err
+	}
+	r.restoreRuntimeFields(previous)
+	if previous.Commit != "" {
+		if previous.Stage != "complete" && previous.Stage != "integrated" {
+			return false, errors.New("unit checkpoint has a commit in an invalid stage")
 		}
-		if err := r.validateCheckpointIdentity(previous); err != nil {
+		if err := r.validateCheckpointCommit(previous); err != nil {
 			return false, err
 		}
-		r.restoreRuntimeFields(previous)
-		if previous.Commit != "" {
-			if previous.Stage != "complete" && previous.Stage != "integrated" {
-				return false, errors.New("unit checkpoint has a commit in an invalid stage")
-			}
-			if err := r.validateCheckpointCommit(previous); err != nil {
-				return false, err
-			}
-			return true, nil
-		}
-		if previous.Stage == "complete" || previous.Stage == "integrated" {
-			return false, errors.New("completed unit checkpoint is missing its commit")
-		}
-	} else if !errors.Is(load, store.ErrNotFound) {
-		return false, fmt.Errorf("load durable unit checkpoint: %w", load)
-	} else {
-		r.clearRuntimeFields()
+		return true, nil
+	}
+	if previous.Stage == "complete" || previous.Stage == "integrated" {
+		return false, errors.New("completed unit checkpoint is missing its commit")
 	}
 	return false, nil
 }
