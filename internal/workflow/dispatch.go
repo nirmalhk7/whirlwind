@@ -87,16 +87,9 @@ func (e *Engine) runningCounts(records []model.Record) map[string]int {
 	return counts
 }
 func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, counts map[string]int, expected int) (bool, error) {
-	record, err := e.Store.Get(ctx, "projects", task.ProjectID)
+	project, err := e.dispatchProject(ctx, task.ProjectID)
 	if err != nil {
 		return false, err
-	}
-	project, err := store.Decode[model.Project](record)
-	if err != nil {
-		return false, err
-	}
-	if project.Paused {
-		return false, ErrProjectPaused
 	}
 	limit := project.Policy.ProjectSlots
 	if limit <= 0 {
@@ -107,20 +100,10 @@ func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, cou
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	settings := e.settings(ctx)
-	if e.closing || settings.Stopped || settings.GlobalSlots <= 0 || len(e.running) >= settings.GlobalSlots {
+	if !e.hasDispatchCapacity(ctx, task.ID) {
 		return false, nil
 	}
-	if _, busy := e.running[task.ID]; busy {
-		return false, nil
-	}
-	cursorVersion := 0
-	if current, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans"); err == nil {
-		cursorVersion = current.Version
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return false, err
-	}
-	if err := e.Store.Put(ctx, "dispatch_cursors", "execution_plans", dispatchCursor{ProjectID: task.ProjectID}, cursorVersion); err != nil {
+	if err := e.saveDispatchCursor(ctx, task.ProjectID); err != nil {
 		return false, err
 	}
 	run, cancel := context.WithCancel(ctx)
@@ -134,6 +117,37 @@ func (e *Engine) dispatchTask(ctx context.Context, task model.ExecutionPlan, cou
 	})
 	return true, nil
 }
+
+func (e *Engine) dispatchProject(ctx context.Context, id string) (model.Project, error) {
+	record, err := e.Store.Get(ctx, "projects", id)
+	if err != nil {
+		return model.Project{}, err
+	}
+	project, err := store.Decode[model.Project](record)
+	if err == nil && project.Paused {
+		return model.Project{}, ErrProjectPaused
+	}
+	return project, err
+}
+
+// hasDispatchCapacity is called with e.mu held.
+func (e *Engine) hasDispatchCapacity(ctx context.Context, id string) bool {
+	settings := e.settings(ctx)
+	if e.closing || settings.Stopped {
+		return false
+	}
+	_, busy := e.running[id]
+	return !busy && len(e.running) < settings.GlobalSlots
+}
+
+func (e *Engine) saveDispatchCursor(ctx context.Context, projectID string) error {
+	current, err := e.Store.Get(ctx, "dispatch_cursors", "execution_plans")
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return e.Store.Put(ctx, "dispatch_cursors", "execution_plans", dispatchCursor{ProjectID: projectID}, current.Version)
+}
+
 func stepFailed(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false

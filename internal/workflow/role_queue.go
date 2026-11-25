@@ -40,29 +40,45 @@ type RoleWork struct {
 // PushRoleWork wakes the supervisor for a durable, already-authorized item.
 // Its approval or preceding stage writes the queue item transactionally.
 func (e *Engine) PushRoleWork(ctx context.Context, work RoleWork) error {
-	if work.ProjectID == "" || work.Version < 1 {
-		return errors.New("role work requires a project and current record version")
-	}
-	if work.IdeaID != "" {
-		if work.PlanID != "" || work.Queue != PlannerQueue {
-			return store.ErrConflict
-		}
-		record, err := e.Store.Get(ctx, "ideas", work.IdeaID)
-		if err != nil {
-			return err
-		}
-		idea, err := store.Decode[model.Idea](record)
-		if err != nil {
-			return err
-		}
-		if work.ProjectID != idea.ProjectID || work.Version != record.Version || idea.DecisionStatus != "approved" || idea.ArchivedAt != "" || idea.PlanID != "" {
-			return store.ErrConflict
-		}
-	} else if _, _, err := e.queuedRolePlan(ctx, work); err != nil {
+	if err := e.validateRolePush(ctx, work); err != nil {
 		return err
 	}
 	e.Wake()
 	return nil
+}
+
+func (e *Engine) validateRolePush(ctx context.Context, work RoleWork) error {
+	if work.ProjectID == "" || work.Version < 1 {
+		return errors.New("role work requires a project and current record version")
+	}
+	if work.IdeaID != "" {
+		return e.validateQueuedIdea(ctx, work)
+	}
+	_, _, err := e.queuedRolePlan(ctx, work)
+	return err
+}
+
+func (e *Engine) validateQueuedIdea(ctx context.Context, work RoleWork) error {
+	if work.PlanID != "" || work.Queue != PlannerQueue {
+		return store.ErrConflict
+	}
+	record, err := e.Store.Get(ctx, "ideas", work.IdeaID)
+	if err != nil {
+		return err
+	}
+	idea, err := store.Decode[model.Idea](record)
+	if err != nil {
+		return err
+	}
+	want := RoleWork{ProjectID: idea.ProjectID, Queue: PlannerQueue, IdeaID: record.ID, Version: record.Version}
+	if work != want || !pendingPlannerIdea(idea) {
+		return store.ErrConflict
+	}
+	return nil
+}
+
+func pendingPlannerIdea(idea model.Idea) bool {
+	return idea.DecisionStatus == "approved" && idea.ArchivedAt == "" && idea.PlanID == ""
 }
 
 // PopRoleWork requests admission to a normal supervisor run. The caller never
@@ -109,6 +125,10 @@ func (e *Engine) popRoleWork(ctx context.Context, request rolePop) rolePopResult
 	if err := e.checkDispatchRecovery(ctx); err != nil {
 		return rolePopResult{err: err}
 	}
+	return e.admitRolePlan(ctx, request)
+}
+
+func (e *Engine) admitRolePlan(ctx context.Context, request rolePop) rolePopResult {
 	task, record, err := e.queuedRolePlan(request.caller, request.work)
 	if err != nil {
 		return rolePopResult{err: err}
@@ -117,20 +137,34 @@ func (e *Engine) popRoleWork(ctx context.Context, request rolePop) rolePopResult
 	if err != nil {
 		return rolePopResult{err: err}
 	}
-	for _, earlier := range records {
-		if earlier.CreatedOrder >= record.CreatedOrder {
-			continue
-		}
-		plan, err := store.Decode[model.ExecutionPlan](earlier)
-		if err == nil && plan.ProjectID == task.ProjectID && plan.HasSelection() && roleQueue(plan.Stage) == request.work.Queue && !e.rolePlanRunning(plan.ID) {
-			return rolePopResult{}
-		}
+	if e.roleQueueHasEarlierWork(records, record.CreatedOrder, request.work) {
+		return rolePopResult{}
 	}
 	if err := request.caller.Err(); err != nil {
 		return rolePopResult{err: err}
 	}
 	scheduled, err := e.dispatchTask(ctx, task, e.runningCounts(records), record.Version)
 	return rolePopResult{scheduled, err}
+}
+
+func (e *Engine) roleQueueHasEarlierWork(records []model.Record, order int64, work RoleWork) bool {
+	for _, earlier := range records {
+		if earlier.CreatedOrder >= order {
+			continue
+		}
+		plan, err := store.Decode[model.ExecutionPlan](earlier)
+		if err != nil || !matchesRoleQueue(plan, work) {
+			continue
+		}
+		if !e.rolePlanRunning(plan.ID) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchesRoleQueue(plan model.ExecutionPlan, work RoleWork) bool {
+	return plan.ProjectID == work.ProjectID && plan.HasSelection() && roleQueue(plan.Stage) == work.Queue
 }
 
 func (e *Engine) rolePlanRunning(id string) bool {
@@ -141,39 +175,51 @@ func (e *Engine) rolePlanRunning(id string) bool {
 }
 
 func (e *Engine) queuedRolePlan(ctx context.Context, work RoleWork) (model.ExecutionPlan, model.Record, error) {
-	var task model.ExecutionPlan
-	var record model.Record
-	if work.PlanID == "" || work.IdeaID != "" || work.ProjectID == "" || work.Queue == "" || work.Version < 1 {
-		return task, record, errors.New("role work requires a project, queue, plan and current record version")
+	if !work.hasPlanReference() {
+		return model.ExecutionPlan{}, model.Record{}, errors.New("role work requires a project, queue, plan and current record version")
 	}
 	task, record, err := loadStepInput(ctx, e.Store, work.PlanID)
 	if err != nil {
 		return task, record, err
 	}
-	if task.ProjectID != work.ProjectID || record.Version != work.Version || roleQueue(task.Stage) != work.Queue || !task.HasSelection() {
+	if record.Version != work.Version || !matchesRoleQueue(task, work) {
 		return task, record, store.ErrConflict
 	}
 	if work.Queue == PlannerQueue {
 		return task, record, nil
 	}
+	return task, record, e.validateRolePlanApproval(ctx, task, record, work.Queue)
+}
+
+func (work RoleWork) hasPlanReference() bool {
+	if work.PlanID == "" || work.IdeaID != "" {
+		return false
+	}
+	return work.ProjectID != "" && work.Queue != "" && work.Version > 0
+}
+
+func (e *Engine) validateRolePlanApproval(ctx context.Context, task model.ExecutionPlan, record model.Record, queue string) error {
 	project, err := e.trustedProject(ctx, task.ProjectID)
 	if err != nil {
-		return task, record, err
+		return err
 	}
 	if !localPlanApproved(task) || task.PlanDocument.PolicyHash != project.PolicyHash {
-		return task, record, errors.New("role queue requires current local plan approval")
+		return errors.New("role queue requires current local plan approval")
 	}
 	if err := e.validateApprovalConfiguration(ctx, task); err != nil {
-		return task, record, err
+		return err
 	}
-	if _, err := e.approvedLocalPlanSnapshot(ctx, task); err != nil {
-		return task, record, err
+	_, err = e.approvedLocalPlanSnapshot(ctx, task)
+	if err != nil || queue != FinalizerQueue {
+		return err
 	}
-	if work.Queue == FinalizerQueue {
-		step := taskStep{Engine: e, ctx: ctx, project: project, task: task, record: record}
-		if _, accepted, err := step.acceptedDeliveryReport(); err != nil || !accepted {
-			return task, record, errors.Join(errors.New("finalizer queue requires current accepted review and verification"), err)
-		}
+	return e.requireQueuedDelivery(ctx, project, task, record)
+}
+
+func (e *Engine) requireQueuedDelivery(ctx context.Context, project model.Project, task model.ExecutionPlan, record model.Record) error {
+	step := taskStep{Engine: e, ctx: ctx, project: project, task: task, record: record}
+	if _, accepted, err := step.acceptedDeliveryReport(); err != nil || !accepted {
+		return errors.Join(errors.New("finalizer queue requires current accepted review and verification"), err)
 	}
-	return task, record, nil
+	return nil
 }

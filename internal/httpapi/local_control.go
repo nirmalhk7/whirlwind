@@ -28,10 +28,8 @@ func localPayload(payload json.RawMessage) json.RawMessage {
 // versioned and idempotent domain handlers. It starts no HTTP listener.
 func (s *Server) ExecuteLocal(ctx context.Context, command LocalCommand) (json.RawMessage, error) {
 	switch command.Operation {
-	case "queue.push", "queue.pop":
-		return s.executeRoleQueue(ctx, command)
-	case "runners.toggle":
-		return s.executeRunnerActivity(ctx, command)
+	case "queue.push", "queue.pop", "runners.toggle":
+		return s.executeRunnerControl(ctx, command)
 	case "ideation.start":
 		return s.executeIdeationStart(ctx, command)
 	case "plan.pause", "plan.resume":

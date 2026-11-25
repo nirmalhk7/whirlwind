@@ -38,7 +38,11 @@ func (e *Engine) runStepAtVersion(ctx context.Context, id string, expected int, 
 	if !ready {
 		return nil
 	}
-	ctx, release, lease, err := e.acquireStepLease(ctx, id, task.ProjectID)
+	return e.runLeasedStep(ctx, id, task.ProjectID, expected, onFailure)
+}
+
+func (e *Engine) runLeasedStep(ctx context.Context, id, projectID string, expected int, onFailure func(*taskStep, error)) error {
+	ctx, release, lease, err := e.acquireStepLease(ctx, id, projectID)
 	if err != nil {
 		return err
 	}
