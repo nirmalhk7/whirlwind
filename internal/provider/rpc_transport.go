@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -81,6 +82,12 @@ func (r *RPC) dispatchFrame(m Message) {
 		case ch <- m:
 		case <-r.ctx.Done():
 		}
+	}
+}
+
+func closeRPCReader(stream string, reader io.Closer) {
+	if err := reader.Close(); err != nil {
+		log.Printf("close provider %s reader: %v", stream, err)
 	}
 }
 

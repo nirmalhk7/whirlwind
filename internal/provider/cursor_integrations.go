@@ -166,29 +166,18 @@ func discardUnlaunchedCursorIdentity(profile execution.Profile) error {
 }
 
 func cursorNativeToolProbe(ctx context.Context, args []string, profile execution.Profile) ([]byte, error) {
-	cmd, err := execution.Command(ctx, args, profile)
-	if err != nil {
-		if execution.IsOpenShellLauncher(profile.Launcher) {
-			if cleanupErr := reconcileCursorProbe(profile); cleanupErr != nil {
-				return nil, retainStandaloneProfile(profile, cleanupErr)
-			}
-			if cleanupErr := completeStandaloneProfile(profile); cleanupErr != nil {
-				return nil, retainStandaloneProfile(profile, cleanupErr)
-			}
-		}
-		return nil, errors.New("cursor MCP probe could not start in configured sandbox; check native CLI and sandbox setup")
-	}
+	cmd, startErr := execution.Command(ctx, args, profile)
 	output := &cursorCatalogOutput{}
-	cmd.Stdout, cmd.Stderr = output, io.Discard
-	runErr := process.Run(cmd)
-	if execution.IsOpenShellLauncher(profile.Launcher) {
-		cleanupErr := reconcileCursorProbe(profile)
-		if cleanupErr != nil {
-			return nil, retainStandaloneProfile(profile, cleanupErr)
-		}
-		if cleanupErr = completeStandaloneProfile(profile); cleanupErr != nil {
-			return nil, retainStandaloneProfile(profile, cleanupErr)
-		}
+	var runErr error
+	if startErr == nil {
+		cmd.Stdout, cmd.Stderr = output, io.Discard
+		runErr = process.Run(cmd)
+	}
+	if err := settleCursorProbe(profile); err != nil {
+		return nil, err
+	}
+	if startErr != nil {
+		return nil, errors.New("cursor MCP probe could not start in configured sandbox; check native CLI and sandbox setup")
 	}
 	if runErr != nil {
 		return nil, cursorProbeFailure(ctx)
@@ -197,6 +186,19 @@ func cursorNativeToolProbe(ctx context.Context, args []string, profile execution
 		return nil, errors.New("cursor MCP tool catalog exceeded supported output limit")
 	}
 	return output.Bytes(), nil
+}
+
+func settleCursorProbe(profile execution.Profile) error {
+	if !execution.IsOpenShellLauncher(profile.Launcher) {
+		return nil
+	}
+	if err := reconcileCursorProbe(profile); err != nil {
+		return retainStandaloneProfile(profile, err)
+	}
+	if err := completeStandaloneProfile(profile); err != nil {
+		return retainStandaloneProfile(profile, err)
+	}
+	return nil
 }
 
 func reconcileCursorProbe(profile execution.Profile) error {

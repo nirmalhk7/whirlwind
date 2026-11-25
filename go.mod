@@ -1,6 +1,6 @@
 module whirlwind
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/gdamore/tcell/v2 v2.8.1

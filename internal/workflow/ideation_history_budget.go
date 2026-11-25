@@ -81,15 +81,6 @@ func historyBudgetFrom(ctx context.Context) *ideationHistoryBudget {
 	return budget
 }
 
-func (budget *ideationHistoryBudget) requestLimit() int {
-	budget.mu.Lock()
-	defer budget.mu.Unlock()
-	if budget.remaining < budget.perRetrieval {
-		return budget.remaining
-	}
-	return budget.perRetrieval
-}
-
 func (budget *ideationHistoryBudget) consume(bytes int) error {
 	budget.mu.Lock()
 	defer budget.mu.Unlock()

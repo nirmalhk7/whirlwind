@@ -52,23 +52,35 @@ func ReconcileOpenShellRuntime(ctx context.Context, profile Profile) error {
 			return err
 		}
 	}
-	if !confirmedSandboxIsolation(sandbox) {
-		stopErr := runSandboxSuccessful(ctx, cli, sandboxCommand(profile, "stop"))
-		stopped, observeErr := runSandboxJSON(ctx, cli, sandboxCommand(profile, "get", profile.SandboxName, "--output", "json"))
-		if observeErr != nil {
-			return isolationFailure(errors.Join(stopErr, observeErr))
-		}
-		if err := validateSandboxIdentity(stopped, profile); err != nil {
-			return err
-		}
-		if stopErr != nil && !confirmedSandboxIsolation(stopped) {
-			return isolationFailure(stopErr)
-		}
-		sandbox = stopped
+	isolated, err := quiescePinnedSandbox(ctx, cli, profile, sandbox)
+	if err != nil {
+		return err
 	}
-	if !confirmedSandboxIsolation(sandbox) {
-		return fmt.Errorf("%w: OpenShell phase %q did not confirm process isolation", ErrIsolationUnverified, sandbox.Phase)
+	if !confirmedSandboxIsolation(isolated) {
+		return fmt.Errorf("%w: OpenShell phase %q did not confirm process isolation", ErrIsolationUnverified, isolated.Phase)
 	}
+	return deletePinnedSandbox(ctx, cli, profile)
+}
+
+func quiescePinnedSandbox(ctx context.Context, cli string, profile Profile, sandbox sandboxIdentity) (sandboxIdentity, error) {
+	if confirmedSandboxIsolation(sandbox) {
+		return sandbox, nil
+	}
+	stopErr := runSandboxSuccessful(ctx, cli, sandboxCommand(profile, "stop"))
+	stopped, observeErr := runSandboxJSON(ctx, cli, sandboxCommand(profile, "get", profile.SandboxName, "--output", "json"))
+	if observeErr != nil {
+		return sandboxIdentity{}, isolationFailure(errors.Join(stopErr, observeErr))
+	}
+	if err := validateSandboxIdentity(stopped, profile); err != nil {
+		return sandboxIdentity{}, err
+	}
+	if stopErr != nil && !confirmedSandboxIsolation(stopped) {
+		return sandboxIdentity{}, isolationFailure(stopErr)
+	}
+	return stopped, nil
+}
+
+func deletePinnedSandbox(ctx context.Context, cli string, profile Profile) error {
 	if err := runSandboxSuccessful(ctx, cli, sandboxCommand(profile, "delete")); err != nil {
 		// A lost delete response is reconciled by listing the exact pinned authority.
 		stillPresent, found, listErr := findPinnedSandbox(ctx, cli, profile)
@@ -76,6 +88,10 @@ func ReconcileOpenShellRuntime(ctx context.Context, profile Profile) error {
 			return isolationFailure(errors.Join(err, listErr, identityErrorIfPresent(stillPresent, found, profile)))
 		}
 	}
+	return waitForPinnedSandboxDeletion(ctx, cli, profile)
+}
+
+func waitForPinnedSandboxDeletion(ctx context.Context, cli string, profile Profile) error {
 	deadline := time.NewTimer(15 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(250 * time.Millisecond)

@@ -14,12 +14,6 @@ import (
 	"whirlwind/internal/store"
 )
 
-type hookResult struct {
-	answers map[string]string
-	allowed bool
-	err     error
-}
-
 func hookAttempt(t *testing.T) *agentAttempt {
 	t.Helper()
 	e, task, path := testEngine(t)

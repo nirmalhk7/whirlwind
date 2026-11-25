@@ -13,6 +13,11 @@ import (
 	"whirlwind/internal/store"
 )
 
+const (
+	projectFixtureInitFailure = "git init: %s %v"
+	projectFixtureYAMLKey     = "projects: "
+)
+
 func TestProjectPathsOnboardGitRepositoriesAndReportInvalidPaths(t *testing.T) {
 	source := editorSource(t)
 	ctx := context.Background()
@@ -22,11 +27,11 @@ func TestProjectPathsOnboardGitRepositoriesAndReportInvalidPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	if out, err := exec.Command("git", "init", "-b", "main", repository).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %s %v", out, err)
+		t.Fatalf(projectFixtureInitFailure, out, err)
 	}
 	invalid := filepath.Join(t.TempDir(), "missing-repository")
 	paths, _ := json.Marshal([]string{repository, invalid})
-	content := editorYAML + "projects: " + string(paths) + "\n"
+	content := editorYAML + projectFixtureYAMLKey + string(paths) + "\n"
 	if err := os.WriteFile(source.path, []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -98,10 +103,10 @@ func TestDuplicateProjectPathsOnboardOnce(t *testing.T) {
 	source := editorSource(t)
 	repository := t.TempDir()
 	if out, err := exec.Command("git", "init", repository).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %s %v", out, err)
+		t.Fatalf(projectFixtureInitFailure, out, err)
 	}
 	paths, _ := json.Marshal([]string{repository, repository})
-	if err := os.WriteFile(source.path, []byte(editorYAML+"projects: "+string(paths)+"\n"), 0600); err != nil {
+	if err := os.WriteFile(source.path, []byte(editorYAML+projectFixtureYAMLKey+string(paths)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := source.Refresh(context.Background()); err != nil {
@@ -117,10 +122,10 @@ func TestYAMLOnboardingQueuesSetupAndInitialIdeationOnlyOnce(t *testing.T) {
 	source := editorSource(t)
 	repository := t.TempDir()
 	if out, err := exec.Command("git", "init", repository).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %s %v", out, err)
+		t.Fatalf(projectFixtureInitFailure, out, err)
 	}
 	paths, _ := json.Marshal([]string{repository, repository})
-	if err := os.WriteFile(source.path, []byte(editorYAML+"projects: "+string(paths)+"\n"), 0600); err != nil {
+	if err := os.WriteFile(source.path, []byte(editorYAML+projectFixtureYAMLKey+string(paths)+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {

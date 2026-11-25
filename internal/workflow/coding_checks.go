@@ -134,28 +134,9 @@ func (r *codingCheckRun) determinePhase(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	checks := structuredChecks([]model.Check{r.check})
-	if a.task.IdeaID != "" {
-		checks, err = brokerCheckCommands(r.current.Policy, r.check.Name)
-		if err != nil {
-			return "", err
-		}
-	}
-	baseline, err := a.qualityBaseline(ctx, r.current, a.task, checks)
+	baseline, err := r.codingPhaseBaseline(ctx)
 	if err != nil {
 		return "", err
-	}
-	if a.task.IdeaID != "" {
-		selected := verification.Report{Passed: baseline.Passed}
-		for _, result := range baseline.Results {
-			if result.Name == r.check.Name {
-				selected.Results = append(selected.Results, result)
-			}
-		}
-		if len(selected.Results) != 1 {
-			return "", errors.New("baseline omitted requested broker check")
-		}
-		baseline = selected
 	}
 	phase, err := r.phaseAgainstBaseline(ctx, origin, baseline)
 	if err != nil {
@@ -165,6 +146,39 @@ func (r *codingCheckRun) determinePhase(ctx context.Context) (string, error) {
 		err = r.advanceOrigin(ctx, originRecord.Version)
 	}
 	return phase, err
+}
+
+func (r *codingCheckRun) codingPhaseBaseline(ctx context.Context) (verification.Report, error) {
+	a := r.attempt
+	var err error
+	checks := structuredChecks([]model.Check{r.check})
+	if a.task.IdeaID != "" {
+		checks, err = brokerCheckCommands(r.current.Policy, r.check.Name)
+		if err != nil {
+			return verification.Report{}, err
+		}
+	}
+	baseline, err := a.qualityBaseline(ctx, r.current, a.task, checks)
+	if err != nil {
+		return verification.Report{}, err
+	}
+	if a.task.IdeaID == "" {
+		return baseline, nil
+	}
+	return singleBrokerBaseline(baseline, r.check.Name)
+}
+
+func singleBrokerBaseline(baseline verification.Report, checkName string) (verification.Report, error) {
+	selected := verification.Report{Passed: baseline.Passed}
+	for _, result := range baseline.Results {
+		if result.Name == checkName {
+			selected.Results = append(selected.Results, result)
+		}
+	}
+	if len(selected.Results) != 1 {
+		return verification.Report{}, errors.New("baseline omitted requested broker check")
+	}
+	return selected, nil
 }
 
 func (r *codingCheckRun) advanceOrigin(ctx context.Context, version int) error {

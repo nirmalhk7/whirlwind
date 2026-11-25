@@ -12,8 +12,8 @@ const preparationJobTimeout = 5 * time.Minute
 const attemptWallClockLimit = 5 * time.Minute
 
 func (a *agentRun) attemptTimeoutLimit() time.Duration {
-	if a.Engine.attemptTimeout > 0 {
-		return a.Engine.attemptTimeout
+	if a.attemptTimeout > 0 {
+		return a.attemptTimeout
 	}
 	return attemptWallClockLimit
 }
