@@ -15,9 +15,9 @@ jobs:
       matrix:
         include:
           - pr: 82
-            sha: 4b7301d91fc31d59d81db288a945f17b6a0cb46a
-            tree: 621edcf50a2c926879f9079499b23331a8627fc1
-            tests: TestSeededHumanWorkflowThroughPTY
+            sha: 31e0a6186ce7a953f78beceaf1180a027cea7d69
+            tree: e66c8b4b4b6384595d5dd4c23b4b2b935f97bb4e
+            tests: TestRoleQueueHTTPThroughLauncher|TestSeededHumanWorkflowThroughPTY
     env:
       GOTOOLCHAIN: local
       WHIRLWIND_TEST_SEEDED_PTY: '1'
