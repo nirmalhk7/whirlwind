@@ -39,14 +39,7 @@ func RunAgentHooks[T any](
 	observe func(event string, err error),
 ) (result T, err error) {
 	run := func(event string, checks []model.Check) error {
-		if len(checks) == 0 {
-			return nil
-		}
-		err := runAgentHook(ctx, profile, projectPolicy, event, checks)
-		if observe != nil {
-			observe(event, err)
-		}
-		return err
+		return runObservedAgentHook(ctx, profile, projectPolicy, event, checks, observe)
 	}
 	if !IsNonoLauncher(profile.Launcher) {
 		return result, fmt.Errorf("%w: agent lifecycle hooks require native nono", ErrSandbox)
@@ -61,16 +54,10 @@ func RunAgentHooks[T any](
 		}
 		var commit func(context.Context) error
 		if result, commit, err = round(ctx, feedback); err != nil {
-			if repair > 0 {
-				err = errors.Join(ErrAgentHookBlocked, fmt.Errorf("continue agent after hook failure: %w", err))
-			}
-			return result, err
+			return result, hookRoundFailure(repair, err)
 		}
 		if err = run("after", hooks.After); err == nil {
-			if err = ctx.Err(); err == nil && commit != nil {
-				err = commit(ctx)
-			}
-			return result, err
+			return result, commitHookRound(ctx, commit)
 		}
 		var failure *hookFailure
 		if !errors.As(err, &failure) {
@@ -81,21 +68,63 @@ func RunAgentHooks[T any](
 	return result, errors.Join(ErrAgentHookBlocked, err)
 }
 
+func runObservedAgentHook(ctx context.Context, profile Profile, policy model.Policy, event string, checks []model.Check, observe func(string, error)) error {
+	if len(checks) == 0 {
+		return nil
+	}
+	err := runAgentHook(ctx, profile, policy, event, checks)
+	if observe != nil {
+		observe(event, err)
+	}
+	return err
+}
+
+func hookRoundFailure(repair int, err error) error {
+	if repair == 0 {
+		return err
+	}
+	return errors.Join(ErrAgentHookBlocked, fmt.Errorf("continue agent after hook failure: %w", err))
+}
+
+func commitHookRound(ctx context.Context, commit func(context.Context) error) error {
+	if err := ctx.Err(); err != nil || commit == nil {
+		return err
+	}
+	return commit(ctx)
+}
+
 func runAgentHook(ctx context.Context, agent Profile, p model.Policy, event string, checks []model.Check) error {
 	root, err := os.MkdirTemp("", "whirlwind-hook-snapshot-")
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if err := os.RemoveAll(root); err != nil {
-			log.Printf("remove private hook snapshot: %v", err)
-		}
-	}()
+	defer removeHookSnapshot(root)
 	snapshot := filepath.Join(root, "source")
 	identity, err := freezeHookSnapshot(ctx, agent.CWD, snapshot)
 	if err != nil {
 		return fmt.Errorf("freeze %s hook snapshot: %w", event, err)
 	}
+	profile, err := agentHookProfile(snapshot, agent, p, event, checks)
+	if err != nil {
+		return err
+	}
+	if err := runNativeAgentHook(ctx, profile, event); err != nil {
+		return err
+	}
+	current, err := hookSnapshotIdentity(ctx, agent.CWD, nil)
+	if err != nil || current != identity {
+		return errors.Join(fmt.Errorf("worktree changed while sandbox %s hooks ran", event), err)
+	}
+	return nil
+}
+
+func removeHookSnapshot(root string) {
+	if err := os.RemoveAll(root); err != nil {
+		log.Printf("remove private hook snapshot: %v", err)
+	}
+}
+
+func agentHookProfile(snapshot string, agent Profile, p model.Policy, event string, checks []model.Check) (Profile, error) {
 	// Source grants are read-only. Provider credentials, network, brokers and
 	// writable paths are deliberately absent from the hook sandbox.
 	var policyReadRoots *model.SandboxPolicy
@@ -104,14 +133,18 @@ func runAgentHook(ctx context.Context, agent Profile, p model.Policy, event stri
 	}
 	profile, err := ForPolicy(snapshot, true, agent.PolicyHash, policyReadRoots)
 	if err != nil {
-		return err
+		return Profile{}, err
 	}
 	prepared, err := prepareAgentHookChecks(checks)
 	if err != nil {
-		return err
+		return Profile{}, err
 	}
 	profile.Launcher = agent.Launcher
 	profile.LifecycleHook = &lifecycleHook{Event: event, Checks: prepared}
+	return profile, nil
+}
+
+func runNativeAgentHook(ctx context.Context, profile Profile, event string) error {
 	// A dedicated native lifecycle runs after the previous provider and its
 	// ACP terminals are fully reaped, including on each repair round.
 	cmd, err := Command(ctx, []string{"/usr/bin/true"}, profile)
@@ -130,10 +163,6 @@ func runAgentHook(ctx context.Context, agent Profile, p model.Policy, event stri
 			return &hookFailure{event: event, diagnostics: strings.TrimSpace(stdout.String())}
 		}
 		return fmt.Errorf("sandbox %s hook runner: %w: %s", event, err, strings.TrimSpace(stderr.String()))
-	}
-	current, err := hookSnapshotIdentity(ctx, agent.CWD, nil)
-	if err != nil || current != identity {
-		return errors.Join(fmt.Errorf("worktree changed while sandbox %s hooks ran", event), err)
 	}
 	return nil
 }

@@ -213,7 +213,7 @@ func (d *OfflineDocker) verifyContainer(ctx context.Context, id, key, source str
 		host.Runtime != "runc" || host.NetworkMode != "none" || host.IpcMode != "none" || host.Privileged || !host.ReadonlyRootfs ||
 		!slices.Contains(host.CapDrop, "ALL") || !slices.Contains(host.SecurityOpt, "no-new-privileges") || !slices.Contains(host.SecurityOpt, "seccomp=builtin") ||
 		len(host.Tmpfs) != 1 || host.Tmpfs["/tmp"] != offlineDockerScratch {
-		return errors.New("Docker did not retain the requested offline verifier restrictions")
+		return errors.New("container did not retain the requested Docker offline verifier restrictions")
 	}
 	if len(host.Mounts) != 1 || host.Mounts[0].Source != source || host.Mounts[0].Target != offlineCheckoutPath || !host.Mounts[0].ReadOnly ||
 		!host.Mounts[0].BindOptions.NonRecursive || host.Mounts[0].BindOptions.Propagation != "rprivate" {

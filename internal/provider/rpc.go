@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os/exec"
 	"strings"
 	"sync"
@@ -109,16 +108,12 @@ func startCommandWithCleanup(ctx context.Context, cancel context.CancelFunc, cmd
 	}
 	r.diagnostics.Add(1)
 	go func() {
+		defer closeRPCReader("diagnostics", pipes.stderr)
 		r.readStderr(pipes.stderr)
-		if err := pipes.stderr.Close(); err != nil {
-			log.Printf("close provider diagnostics reader: %v", err)
-		}
 	}()
 	go func() {
+		defer closeRPCReader("output", pipes.output)
 		r.read(pipes.output)
-		if err := pipes.output.Close(); err != nil {
-			log.Printf("close provider output reader: %v", err)
-		}
 	}()
 	return r, nil
 }

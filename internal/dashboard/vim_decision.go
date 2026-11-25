@@ -91,7 +91,7 @@ func parseVimDecision(document, details string, actions []string) (string, strin
 		return "", "", fmt.Errorf("expected one Decision line followed by Reason")
 	}
 	if !inReason || action == "" {
-		return "", "", fmt.Errorf("Decision and Reason fields required")
+		return "", "", fmt.Errorf("missing required Decision or Reason field")
 	}
 	allowed := action == "cancel"
 	for _, value := range actions {
