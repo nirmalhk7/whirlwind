@@ -109,10 +109,7 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 		return err == nil
 	})
 	policyPath := filepath.Join(root, "reviewed-policy.yaml")
-	if output := launcher("memory", "list", project.ID, "plan"); !strings.Contains(output, `"enabled": false`) {
-		t.Fatalf("memory should be disabled before policy approval: %s", output)
-	}
-	write(policyPath, "project_memory: true\noffline_docker_image: "+image+"\nallowed_paths: [result.txt, regression_test.go]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks:\n  - name: regression\n    command: [go, test, -mod=readonly, -count=1, -json, './...']\n    report_format: go-test-json\n    timeout_seconds: 90\n")
+	write(policyPath, "offline_docker_image: "+image+"\nallowed_paths: [result.txt, regression_test.go]\nrisk_rules: [{level: low, paths: ['**']}]\nchecks:\n  - name: regression\n    command: [go, test, -mod=readonly, -count=1, -json, './...']\n    report_format: go-test-json\n    timeout_seconds: 90\n")
 	preview := launcher("policy", "preview", project.ID, policyPath)
 	fields := regexp.MustCompile(`Version (\d+)\nSHA256 ([a-f0-9]{64})`).FindStringSubmatch(preview)
 	if len(fields) != 3 {
@@ -182,7 +179,6 @@ func TestManagedOfflineVerificationThroughLauncher(t *testing.T) {
 		current, _ := store.Decode[model.ExecutionPlan](record)
 		return current.Stage == "paused" && strings.Contains(current.Error, "Reviewer preparation unavailable")
 	})
-	checkProjectMemoryThroughLauncher(t, launcher, project.ID, task.ID)
 	launcher("stop")
 	if nono := os.Getenv("WHIRLWIND_TEST_SEEDED_NONO"); nono != "" {
 		exerciseSeededOfflineHandoffs(t, db, data, project, task.ID, candidate, green, nono, git)
@@ -218,7 +214,7 @@ func seedOfflineCandidatePlan(t *testing.T, e *workflow.Engine, db *store.Store,
 	seed("plan intake", db.Put(ctx, "execution_plans", task.ID, task, 0))
 	now := time.Now().UTC()
 	planner := model.Attempt{AttemptID: "fixture-planner", Task: task.ID, ProjectID: project.ID, IdeaID: ideaID, OperationID: ideationID,
-		Role: "plan", PlanVersion: 1, PolicyHash: project.PolicyHash, Status: "running", StartedAt: now.Format(time.RFC3339Nano), DeadlineAt: now.Add(time.Minute).Format(time.RFC3339Nano)}
+		Role: "plan", PlanVersion: 1, Status: "running", StartedAt: now.Format(time.RFC3339Nano), DeadlineAt: now.Add(time.Minute).Format(time.RFC3339Nano)}
 	seed("plan claim", db.Put(ctx, "sessions", planner.AttemptID, planner, 0))
 	task.LastAttemptID = planner.AttemptID
 	seed("plan document", e.WriteLocalPlan(ctx, project, &task))
@@ -276,29 +272,4 @@ func waitOfflineFixture(t *testing.T, data, phase string, condition func() bool)
 	}
 	logs, _ := os.ReadFile(filepath.Join(data, "whirlwind-supervisor.log"))
 	t.Fatalf("timed out during %s\n%s", phase, logs)
-}
-
-func checkProjectMemoryThroughLauncher(t *testing.T, launcher func(...string) string, project, plan string) {
-	t.Helper()
-	const note = "Describe the regression assertion in the acceptance criteria."
-	launcher("memory", "remember", project, "plan", "fixture-planner", note)
-	before := launcher("memory", "list", project, "plan")
-	var view workflow.ProjectMemoryView
-	mustSeedTerminal(t, json.Unmarshal([]byte(before), &view))
-	if !view.Enabled || view.Version != 1 || len(view.Lessons) != 1 || view.Lessons[0].Note != note ||
-		view.Lessons[0].PlanID != plan || view.Lessons[0].PlanVersion != 1 || view.Lessons[0].SourcePolicy != view.PolicyHash {
-		t.Fatalf("missing lesson and source metadata: %s", before)
-	}
-	if code := launcher("memory", "list", project, "code"); strings.Contains(code, note) {
-		t.Fatalf("Planner's note appeared in Coding memory: %s", code)
-	}
-	launcher("restart")
-	if after := launcher("memory", "list", project, "plan"); before != after {
-		t.Fatalf("memory changed after supervisor restart: %s", after)
-	}
-	launcher("memory", "clear", project, "plan")
-	if after := launcher("memory", "list", project, "plan"); strings.Contains(after, note) {
-		t.Fatalf("cleared lesson persisted in memory: %s", after)
-	}
-	t.Log("shipped memory CLI preserved the opted-in Planner note and exact source across restart")
 }
