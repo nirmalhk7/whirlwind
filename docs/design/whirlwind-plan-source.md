@@ -1,6 +1,26 @@
 # Whirlwind Plan source snapshot
 
-Read from page_3a18b09675088191bbed2c3dcf95deb6, sequence 3035. User decisions in this chat override unresolved or superseded clauses: database migration is waived; breaking schema changes are allowed. One plan per idea; plan complete after local finalization; changed approvals wait for the active version; immutable UTC creation timestamps; four idea types enforced. All idea uniqueness comparison is deferred, including temporary LLM novelty checks; do not add an embedding runtime or sqlite-vec now. ACP profiles must be onboardable through settings.yaml; verify the configured Codex path using the existing authorized login. The November 24 decision limits the default onboarding analyzer set to Gitleaks.
+The [source Page](https://chatgpt.com/space/page_3a18b09675088191bbed2c3dcf95deb6)
+was captured at sequence 3035 and remains read-only. The following later
+decisions take precedence over conflicting language in the archived text:
+
+| Topic | Governing decision |
+| --- | --- |
+| State | No migration; discard obsolete layouts and reopen current state unchanged. The exact `projects`, `ideas`, and `plans` contracts and immutable UTC creation timestamps are in [persistence](../persistence.md#project-idea-and-plan-tables). |
+| Ideas and plans | Four idea types; one plan per idea. Planner completion is not plan completion: the plan becomes `complete` only after successful local finalization. |
+| Changed approvals | A changed save waits for active approved execution to finish or be explicitly paused. Then save a new draft and approve it separately. An unchanged save does not interrupt active work. |
+| Uniqueness | All content uniqueness comparison is deferred, including the temporary ACP/LLM judge, historical fingerprint rejection, embeddings and sqlite-vec. Preserve content validation and bounded history. |
+| Native runtime | Use macOS/nono for native agents and checks. Linux supports inspection. Configure ACP profiles and ordered choices in `settings.yaml`. Qualify configured Codex using its installed ACP adapter and an existing authorized local login. |
+| Onboarding analyzers | November 24 decision: Gitleaks only in managed Qlty defaults. Wiring is not current native compatibility proof. |
+
+Current runtime additions include [local project policy approval](../go-backend.md#project-policy-approval)
+and [opt-in Linux offline verification](../support.md#verification-on-linux).
+See the [support matrix](../support.md) for the implemented scope and remaining
+qualification. The archived repository copy below reflects the Gitleaks-only
+decision in its analyzer paragraph. The linked Page still names Semgrep
+alongside Gitleaks in that paragraph.
+
+## Archived Page text
 
 Whirlwind coordinates ideation, planning, coding, review, and local finalization for any onboarded repository. This is the implementation handoff for 6.1 Sol. An approved plan is the unit of execution; do not introduce a separate “task” concept.
 

@@ -6,10 +6,27 @@ import (
 	"os"
 	"testing"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/store"
 	"whirlwind/internal/verification"
 )
+
+func TestManagedReviewerRejectsOfflineDockerEvidence(t *testing.T) {
+	identity := verification.RuntimeIdentity{Kind: "nono", Launcher: "/native", ExecutionID: "check", Generation: 1,
+		SandboxID: "sandbox", SandboxName: "sandbox", LifecycleFile: "/lifecycle", GatewayName: "gateway", GatewayEndpoint: "http://127.0.0.1", Workspace: "workspace", CleanupVerified: true}
+	if !runtimeIdentityComplete(identity) {
+		t.Fatal("the positive control must supply complete managed evidence")
+	}
+	identity.Kind = execution.OfflineDockerKind
+	if runtimeIdentityComplete(identity) {
+		t.Fatal("offline Docker acquired managed runtime authority")
+	}
+	result := verification.JobResult{Status: "pass", Result: verification.Result{Passed: true, Runtime: identity}}
+	if _, err := completeRunnerStreams(verification.JobManifest{}, verification.JobReport{Passed: true, Results: []verification.JobResult{result}}); err == nil {
+		t.Fatal("standalone offline evidence was accepted for managed Review or Finalizer")
+	}
+}
 
 const acceptedCandidateRevision = "candidate-sha"
 

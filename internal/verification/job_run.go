@@ -20,6 +20,14 @@ func (r *jobRunner) run(ctx context.Context, observe func(JobEvent) error) (JobR
 	m := r.manifest
 	report := JobReport{Purpose: m.Purpose, ProjectID: m.ProjectID, OperationID: m.OperationID, ManifestHash: m.Digest(), PlanID: m.PlanID, PlanVersion: m.PlanVersion, PlanHash: m.PlanHash, ConfigurationHash: m.ConfigurationHash, CandidateCommit: m.CandidateCommit, CandidateTree: m.CandidateTree, Passed: true, Results: []JobResult{}}
 	var stage string
+	if m.OfflineDockerImage != "" {
+		var err error
+		stage, err = r.prepareJobInput(ctx)
+		if err != nil {
+			return report, err
+		}
+		defer func() { _ = os.RemoveAll(stage) }()
+	}
 	byName := map[string]JobResult{}
 	for index, command := range m.Commands {
 		result, exists := r.results[index]
@@ -100,6 +108,9 @@ func (r *jobRunner) command(ctx context.Context, stage string, index int, comman
 		return result, err
 	}
 	r.started[index] = true
+	if r.offline != nil {
+		return r.runOfflineDockerCheck(ctx, stage, index, command, result, stdout, stderr)
+	}
 	return r.executeCommand(ctx, stage, index, command, result, stdout, stderr)
 }
 

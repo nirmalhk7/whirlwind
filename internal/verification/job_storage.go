@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/process"
 )
 
@@ -19,12 +21,14 @@ const (
 )
 
 type jobRunner struct {
-	manifest JobManifest
-	root     *os.Root
-	lock     *os.File
-	journal  *os.File
-	results  map[int]JobResult
-	started  map[int]bool
+	manifest      JobManifest
+	root          *os.Root
+	lock          *os.File
+	journal       *os.File
+	results       map[int]JobResult
+	started       map[int]bool
+	offline       *execution.OfflineDocker
+	offlineConfig string
 }
 
 func openJob(m JobManifest) (*jobRunner, error) {
@@ -63,6 +67,9 @@ func openJob(m JobManifest) (*jobRunner, error) {
 }
 
 func (r *jobRunner) close() {
+	if r.offlineConfig != "" {
+		_ = os.RemoveAll(r.offlineConfig)
+	}
 	if r.journal != nil {
 		_ = r.journal.Close()
 	}
@@ -126,14 +133,7 @@ func (r *jobRunner) git(ctx context.Context, cwd string, args ...string) (string
 }
 
 func (r *jobRunner) gitRaw(ctx context.Context, cwd string, args ...string) (string, error) {
-	command := process.Command(ctx, "git", append([]string{"-c", "core.hooksPath=/dev/null", "-C", cwd}, args...)...)
-	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(r.root.Name(), "host-home"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0"}
-	for _, entry := range command.Env {
-		if strings.HasPrefix(entry, "WHIRLWIND_PROCESS_TOKEN=") {
-			env = append(env, entry)
-		}
-	}
-	command.Env = env
+	command := r.gitCommand(ctx, cwd, args...)
 	var output capped
 	command.Stdout, command.Stderr = &output, &output
 	err := process.Run(command)
@@ -144,6 +144,21 @@ func (r *jobRunner) gitRaw(ctx context.Context, cwd string, args ...string) (str
 		return "", errors.New("staging Git output exceeds bounded size")
 	}
 	return string(output.data), nil
+}
+
+func (r *jobRunner) gitCommand(ctx context.Context, cwd string, args ...string) *exec.Cmd {
+	command := process.Command(ctx, "git", append([]string{"-c", "core.hooksPath=/dev/null", "-C", cwd}, args...)...)
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + filepath.Join(r.root.Name(), "host-home"), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0"}
+	if r.manifest.OfflineDockerImage != "" {
+		env = append(env, "GIT_NO_LAZY_FETCH=1", "GIT_NO_REPLACE_OBJECTS=1")
+	}
+	for _, entry := range command.Env {
+		if strings.HasPrefix(entry, "WHIRLWIND_PROCESS_TOKEN=") {
+			env = append(env, entry)
+		}
+	}
+	command.Env = env
+	return command
 }
 
 func (r *jobRunner) prepareCheckout(ctx context.Context) (string, error) {

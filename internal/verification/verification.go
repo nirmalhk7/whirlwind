@@ -38,6 +38,7 @@ type Result struct {
 }
 
 type RuntimeIdentity struct {
+	ImageID         string `json:"image_id,omitempty"`
 	ExecutionID     string `json:"execution_id,omitempty"`
 	Launcher        string `json:"launcher,omitempty"`
 	LifecycleFile   string `json:"lifecycle_file,omitempty"`

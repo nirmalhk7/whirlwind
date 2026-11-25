@@ -17,6 +17,9 @@ import (
 
 // verify reserves capacity, checks diff scope, runs baseline and risk-specific checks, and stores diagnostics in the task handoff.
 func (e *Engine) verify(ctx context.Context, p model.Project, t *model.ExecutionPlan) (resultErr error) {
+	if p.Policy.OfflineDockerImage != "" && (t.IdeaID == "" || t.PlanDocument == nil) {
+		return errors.Join(verification.ErrJobSetup, errors.New("offline verification requires an approved canonical idea plan"))
+	}
 	var plan model.PlanSpecification
 	if t.Plan != nil {
 		plan = *t.Plan
@@ -80,11 +83,16 @@ func (run *verificationRun) checkDiff(p model.Policy, files, patch string) error
 	run.task.Risk = risk
 	run.value["risk"] = risk
 	checks = structuredChecks(checks)
-	baseline, err := run.engine.qualityBaseline(run.ctx, model.Project{ID: run.task.ProjectID, Path: run.task.Worktree, Policy: p, PolicyHash: evidenceDigest(p)}, *run.task, checks)
-	if err != nil {
-		return err
+	policyHash := evidenceDigest(p)
+	if p.OfflineDockerImage != "" {
+		policyHash = run.task.PlanDocument.PolicyHash
 	}
+	baseline, err := run.engine.qualityBaseline(run.ctx, model.Project{ID: run.task.ProjectID, Path: run.task.Worktree, Policy: p, PolicyHash: policyHash}, *run.task, checks)
 	run.value["baseline"] = baseline
+	if err != nil {
+		blocked := verification.Report{Results: []verification.Result{}}
+		return run.finish(blocked, blocked, fmt.Errorf("prepare verification baseline: %w", err))
+	}
 	if run.task.IdeaID == "" {
 		checks = append(checks, model.Check{Name: "diff", Command: []string{"git", "diff", "--check", run.task.Base + "...HEAD"}}, model.Check{Name: "tracked-files-clean", Command: []string{"git", "diff", "--exit-code"}}, model.Check{Name: "index-clean", Command: []string{"git", "diff", "--cached", "--exit-code"}})
 	}
@@ -120,7 +128,7 @@ func (run *verificationRun) captureResult(stored *verification.Report, result ve
 }
 
 func (run *verificationRun) finish(stored, report verification.Report, observeErr error) error {
-	stored.Passed = report.Passed
+	stored.Passed = report.Passed && observeErr == nil
 	run.value["report"] = stored
 	run.value["stage"] = "complete"
 	if !report.Passed || observeErr != nil {
@@ -171,16 +179,24 @@ func (run *verificationRun) handoff(report verification.Report) error {
 
 // progress measures check/blocker/criteria outcomes; patch churn alone never resets recovery.
 func (e *Engine) progress(ctx context.Context, t *model.ExecutionPlan) error {
-	diff, err := github.Run(ctx, t.Worktree, "git", "diff", t.Base)
+	change, err := e.collectProgress(ctx, t, nil)
 	if err != nil {
 		return err
+	}
+	return e.Store.Write(ctx, []store.Change{change}, nil)
+}
+
+func (e *Engine) collectProgress(ctx context.Context, t *model.ExecutionPlan, review *model.Review) (store.Change, error) {
+	diff, err := github.Run(ctx, t.Worktree, "git", "diff", t.Base)
+	if err != nil {
+		return store.Change{}, err
 	}
 	sum := sha256.Sum256([]byte(diff))
 	fingerprint := hex.EncodeToString(sum[:])
 	t.Fingerprint = fingerprint
-	improved, err := e.measuredProgress(ctx, t)
+	improved, change, err := e.measuredProgress(ctx, t, review)
 	if err != nil {
-		return err
+		return store.Change{}, err
 	}
 	if improved {
 		t.UnchangedFailures = 0
@@ -193,7 +209,7 @@ func (e *Engine) progress(ctx context.Context, t *model.ExecutionPlan) error {
 		t.Recoveries++
 		t.Handoff.NextAction = "recover with new context or another provider"
 	}
-	return nil
+	return change, nil
 }
 
 func checkedDiff(ctx context.Context, p model.Policy, t *model.ExecutionPlan) (string, string, error) {

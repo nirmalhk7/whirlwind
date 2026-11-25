@@ -69,10 +69,12 @@ func cleanupRegistration(record registration) error {
 		if err == nil {
 			live := liveProcesses(record, processes)
 			if len(live) == 0 {
-				return nil
+				if last = ambiguousProcess(record, processes); last == nil {
+					return nil
+				}
+			} else {
+				last = killLiveProcesses(live, fmt.Errorf("%d owned processes remain", len(live)))
 			}
-			last = fmt.Errorf("%d owned processes remain", len(live))
-			last = killLiveProcesses(live, last)
 		} else {
 			last = err
 		}

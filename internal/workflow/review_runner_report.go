@@ -18,6 +18,9 @@ func (step *taskStep) validateReviewRunnerReport(commit string) error {
 }
 
 func (step *taskStep) validatedReviewRunnerReport(commit string) (verification.Report, error) {
+	if step.task.PlanDocument == nil {
+		return verification.Report{}, errors.New("runner report requires an approved plan document")
+	}
 	r, err := step.Store.Get(step.ctx, "verification", step.task.VerificationID)
 	if err != nil {
 		return verification.Report{}, fmt.Errorf("complete runner report unavailable: %w", err)
@@ -34,6 +37,12 @@ func (step *taskStep) validatedReviewRunnerReport(commit string) (verification.R
 	m := saved.Manifest
 	if saved.Stage != "complete" || m.JobID != r.ID || m.PlanID != step.task.ID || m.PlanVersion != step.task.PlanVersion || m.PlanHash != step.task.PlanDocument.ApprovedHash || m.ConfigurationHash != verificationConfigurationHash(step.task) || m.CandidateCommit != commit || m.BaseCommit != step.task.Base || saved.Provenance.Task != step.task.ID || saved.Provenance.PlanVersion != step.task.PlanVersion || saved.Provenance.Head != commit || saved.Provenance.Base != step.task.Base || saved.Provenance.PolicyHash != step.project.PolicyHash {
 		return verification.Report{}, errors.New("runner report does not match the complete approved candidate handoff")
+	}
+	if m.OfflineDockerImage != "" && saved.Provenance.VerificationID != m.JobID {
+		return verification.Report{}, errors.New("offline runner report provenance differs from its verification job")
+	}
+	if err := step.validateOfflineReviewAuthority(m, commit); err != nil {
+		return verification.Report{}, err
 	}
 	tree, err := submissionGitRun(step.ctx, step.task.Worktree, "rev-parse", commit+"^{tree}")
 	if err != nil || tree != m.CandidateTree {

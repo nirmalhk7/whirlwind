@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -17,37 +20,54 @@ type testOutcomeEvidence struct {
 // advisory, and missing or skipped regression tests never establish a pass.
 // Callers retain raw Results and separately bind their source snapshots.
 func RegressionTestsPassed(base, red, green Result) bool {
-	if !sameBaselineCheck(base, red) || !sameBaselineCheck(red, green) {
-		return false
-	}
-	reports := make([]testOutcomeEvidence, 0, 3)
-	for _, result := range []Result{base, red, green} {
-		report, err := checkedTestOutcomes(result)
-		if err != nil {
-			return false
-		}
-		reports = append(reports, report)
-	}
-	return regressionOutcomesPassed(reports[0], reports[1], reports[2])
+	return RegressionEvidenceError(base, red, green) == nil
 }
 
-func regressionOutcomesPassed(base, red, green testOutcomeEvidence) bool {
-	for id := range green.failed {
+// RegressionEvidenceError keeps the precise reason why a candidate cannot
+// establish green, even when the command itself exited successfully.
+func RegressionEvidenceError(base, red, green Result) error {
+	if !sameBaselineCheck(base, red) || !sameBaselineCheck(red, green) {
+		return errors.New("baseline, red, and green use different check names or command arguments")
+	}
+	inputs := []struct {
+		stage  string
+		result Result
+	}{{"baseline", base}, {"red", red}, {"green", green}}
+	var reports [3]testOutcomeEvidence
+	for i, input := range inputs {
+		report, err := checkedTestOutcomes(input.result)
+		if err != nil {
+			return fmt.Errorf("%s test evidence: %w", input.stage, err)
+		}
+		reports[i] = report
+	}
+	return regressionOutcomesError(reports[0], reports[1], reports[2])
+}
+
+func regressionOutcomesError(base, red, green testOutcomeEvidence) error {
+	for _, id := range slices.Sorted(maps.Keys(green.failed)) {
 		if !base.failed[id] {
-			return false
+			return fmt.Errorf("candidate still has a new failing test %q", id)
 		}
 	}
 	newFailure := false
-	for id := range red.failed {
+	for _, id := range slices.Sorted(maps.Keys(red.failed)) {
 		if base.failed[id] {
 			continue
 		}
-		if !green.passed[id] {
-			return false
+		passed, present := green.passed[id]
+		if !present {
+			return fmt.Errorf("candidate report omitted regression test %q", id)
+		}
+		if !passed {
+			return fmt.Errorf("regression test %q did not explicitly pass in the candidate report", id)
 		}
 		newFailure = true
 	}
-	return newFailure
+	if !newFailure {
+		return errors.New("recorded red check did not identify a new failing test")
+	}
+	return nil
 }
 
 func checkedTestOutcomes(result Result) (testOutcomeEvidence, error) {

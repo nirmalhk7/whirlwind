@@ -2,9 +2,9 @@ package model
 
 import "github.com/google/uuid"
 
-// ProjectID preserves repository identity across settings refreshes and restarts.
-func ProjectID(repository string) string {
-	return "project_" + uuid.NewSHA1(uuid.NameSpaceURL, []byte(repository)).String()
+// ProjectID creates a stable identifier from a checkout path or legacy repository key.
+func ProjectID(identity string) string {
+	return "project_" + uuid.NewSHA1(uuid.NameSpaceURL, []byte(identity)).String()
 }
 
 // PlanID preserves the one-plan-per-source claim across concurrent intake polls.

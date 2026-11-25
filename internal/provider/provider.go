@@ -82,6 +82,7 @@ type Adapter interface {
 }
 type CheckResult struct {
 	Phase            string `json:"phase,omitempty"`
+	ValidationError  string `json:"validation_error,omitempty"`
 	BaselineAccepted bool   `json:"baseline_accepted,omitempty"`
 	ExecutionProfile string `json:"execution_profile"`
 	CheckID          string `json:"check_id"`

@@ -24,6 +24,7 @@ type Dashboard struct {
 	inbox                        *tview.List
 	inboxIdeaCount               int
 	inboxTaskIDs                 []string
+	setupNotice                  *projectSetupNotice
 	plans                        *tview.List
 	runs                         *tview.List
 	runRows                      []runRow
@@ -33,6 +34,7 @@ type Dashboard struct {
 	status                       *tview.TextView
 	runnerStatus                 *tview.TextView
 	agents                       *tview.TextView
+	agentInspection              *tview.TextView
 	focus                        int
 	snapshot                     control.Snapshot
 	root                         tview.Primitive
@@ -48,6 +50,7 @@ type Dashboard struct {
 	directionRows                []model.Direction
 	planRows                     []model.ExecutionPlan
 	projectID                    string
+	projectAliases               map[string]string
 	directionID                  string
 	planID                       string
 	updating                     bool
@@ -110,7 +113,7 @@ func New(dataDirectories ...string) *Dashboard {
 	d.directions.SetBorder(true).SetTitle(inboxTitle)
 	d.plans.SetBorder(true).SetTitle(" Plans ")
 	d.agents = tview.NewTextView().SetDynamicColors(true).SetScrollable(true)
-	d.agents.SetBorder(true).SetTitle(" Agents ")
+	d.agents.SetBorder(true).SetTitle(" Agents · Enter ")
 	d.agents.SetText("No configured agents")
 	d.projects.AddItem("No projects", "", 0, nil)
 	d.directions.AddItem("No inbox items", "", 0, nil)
