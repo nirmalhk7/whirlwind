@@ -460,6 +460,22 @@ func rootedQualityLinkTarget(root *os.Root, linkPath, target string) (string, er
 }
 
 func copyApprovedQualityTree(ctx context.Context, source, destination, expectedHash string) error {
+	if err := validateQualityCopyPaths(source, destination, expectedHash); err != nil {
+		return err
+	}
+	sourceRoot, err := os.OpenRoot(source)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = sourceRoot.Close() }()
+	copier := qualityTreeCopier{source: sourceRoot, destination: destination}
+	if err := copier.materialize(ctx); err != nil {
+		return err
+	}
+	return verifyQualityTreeCopy(source, destination, expectedHash)
+}
+
+func validateQualityCopyPaths(source, destination, expectedHash string) error {
 	if !filepath.IsAbs(source) || !filepath.IsAbs(destination) || qualityPathsOverlap(source, destination) || filepath.Base(source) != "tools" {
 		return errors.New("approved Qlty runtime paths must be distinct absolute paths")
 	}
@@ -472,95 +488,10 @@ func copyApprovedQualityTree(ctx context.Context, source, destination, expectedH
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	sourceRoot, err := os.OpenRoot(source)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = sourceRoot.Close() }()
-	if err := os.MkdirAll(destination, 0700); err != nil {
-		return err
-	}
-	total, count := int64(0), 0
-	type directoryMode struct {
-		path string
-		mode os.FileMode
-	}
-	directories := []directoryMode{}
-	err = filepath.WalkDir(source, func(path string, entry os.DirEntry, walkErr error) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if walkErr != nil {
-			return walkErr
-		}
-		if path == source {
-			return nil
-		}
-		relative, err := filepath.Rel(source, path)
-		if err != nil || !filepath.IsLocal(relative) {
-			return errors.New("unsafe scanner runtime path")
-		}
-		count++
-		if count > qualityRuntimeFileLimit {
-			return errors.New("approved scanner runtime exceeds file-count limit")
-		}
-		info, err := sourceRoot.Lstat(filepath.ToSlash(relative))
-		if err != nil {
-			return err
-		}
-		destinationPath := filepath.Join(destination, relative)
-		switch {
-		case info.IsDir():
-			if err := os.Mkdir(destinationPath, 0700); err != nil {
-				return err
-			}
-			directories = append(directories, directoryMode{path: destinationPath, mode: info.Mode().Perm()})
-			return nil
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := sourceRoot.Readlink(filepath.ToSlash(relative))
-			if err != nil {
-				return err
-			}
-			canonical, err := rootedQualityLinkTarget(sourceRoot, relative, target)
-			if err != nil {
-				return err
-			}
-			link, err := filepath.Rel(filepath.Dir(destinationPath), filepath.Join(destination, canonical))
-			if err != nil {
-				return err
-			}
-			return os.Symlink(link, destinationPath)
-		case info.Mode().IsRegular():
-			input, err := sourceRoot.Open(filepath.ToSlash(relative))
-			if err != nil {
-				return err
-			}
-			output, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm()&^0222)
-			if err != nil {
-				_ = input.Close()
-				return err
-			}
-			written, copyErr := io.Copy(output, io.LimitReader(contextReader{ctx: ctx, reader: input}, qualityRuntimeByteLimit-total+1))
-			total += written
-			if total > qualityRuntimeByteLimit {
-				copyErr = errors.Join(copyErr, errors.New("approved scanner runtime exceeds byte limit"))
-			}
-			return errors.Join(copyErr, input.Close(), output.Close())
-		default:
-			return errors.New("Qlty scanner runtime contains a special file")
-		}
-	})
-	if err != nil {
-		return err
-	}
-	for index := len(directories) - 1; index >= 0; index-- {
-		if err := os.Chmod(directories[index].path, directories[index].mode&^0222); err != nil {
-			return err
-		}
-	}
-	if err := os.Chmod(destination, 0500); err != nil {
-		return err
-	}
+	return nil
+}
+
+func verifyQualityTreeCopy(source, destination, expectedHash string) error {
 	after, err := hashQualityTree(source)
 	if err != nil || after != expectedHash {
 		return errors.New("approved Qlty scanner runtime changed during copy")
@@ -570,6 +501,115 @@ func copyApprovedQualityTree(ctx context.Context, source, destination, expectedH
 		return errors.New("copied Qlty scanner runtime failed identity verification")
 	}
 	return nil
+}
+
+type qualityCopyDirectory struct {
+	path string
+	mode os.FileMode
+}
+
+type qualityTreeCopier struct {
+	source      *os.Root
+	destination string
+	bytes       int64
+	count       int
+	directories []qualityCopyDirectory
+}
+
+func (copier *qualityTreeCopier) materialize(ctx context.Context) error {
+	if err := os.MkdirAll(copier.destination, 0700); err != nil {
+		return err
+	}
+	err := filepath.WalkDir(copier.source.Name(), func(path string, _ os.DirEntry, walkErr error) error {
+		return copier.copyEntry(ctx, path, walkErr)
+	})
+	if err != nil {
+		return err
+	}
+	// Seal directories from the leaves upward after their contents exist.
+	for index := len(copier.directories) - 1; index >= 0; index-- {
+		dir := copier.directories[index]
+		if err := os.Chmod(dir.path, dir.mode&^0222); err != nil {
+			return err
+		}
+	}
+	return os.Chmod(copier.destination, 0500)
+}
+
+func (copier *qualityTreeCopier) copyEntry(ctx context.Context, path string, walkErr error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	root := copier.source.Name()
+	if walkErr != nil || path == root {
+		return walkErr
+	}
+	relative, err := filepath.Rel(root, path)
+	if err != nil || !filepath.IsLocal(relative) {
+		return errors.New("unsafe scanner runtime path")
+	}
+	copier.count++
+	if copier.count > qualityRuntimeFileLimit {
+		return errors.New("approved scanner runtime exceeds file-count limit")
+	}
+	return copier.copyPath(ctx, relative)
+}
+
+func (copier *qualityTreeCopier) copyPath(ctx context.Context, relative string) error {
+	info, err := copier.source.Lstat(filepath.ToSlash(relative))
+	if err != nil {
+		return err
+	}
+	target := filepath.Join(copier.destination, relative)
+	switch {
+	case info.IsDir():
+		if err := os.Mkdir(target, 0700); err != nil {
+			return err
+		}
+		copier.directories = append(copier.directories, qualityCopyDirectory{path: target, mode: info.Mode().Perm()})
+		return nil
+	case info.Mode()&os.ModeSymlink != 0:
+		return copier.copyLink(relative, target)
+	case info.Mode().IsRegular():
+		return copier.copyFile(ctx, relative, target, info.Mode().Perm())
+	default:
+		return errors.New("Qlty scanner runtime contains a special file")
+	}
+}
+
+func (copier *qualityTreeCopier) copyLink(relative, destination string) error {
+	target, err := copier.source.Readlink(filepath.ToSlash(relative))
+	if err != nil {
+		return err
+	}
+	canonical, err := rootedQualityLinkTarget(copier.source, relative, target)
+	if err != nil {
+		return err
+	}
+	link, err := filepath.Rel(filepath.Dir(destination), filepath.Join(copier.destination, canonical))
+	if err != nil {
+		return err
+	}
+	return os.Symlink(link, destination)
+}
+
+func (copier *qualityTreeCopier) copyFile(ctx context.Context, relative, destination string, mode os.FileMode) error {
+	input, err := copier.source.Open(filepath.ToSlash(relative))
+	if err != nil {
+		return err
+	}
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode&^0222)
+	if err != nil {
+		_ = input.Close()
+		return err
+	}
+	reader := contextReader{ctx: ctx, reader: input}
+	written, copyErr := io.Copy(output, io.LimitReader(reader, qualityRuntimeByteLimit-copier.bytes+1))
+	copier.bytes += written
+	if copier.bytes > qualityRuntimeByteLimit {
+		copyErr = errors.Join(copyErr, errors.New("approved scanner runtime exceeds byte limit"))
+	}
+	return errors.Join(copyErr, input.Close(), output.Close())
 }
 
 type contextReader struct {
