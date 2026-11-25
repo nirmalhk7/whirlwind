@@ -7,27 +7,24 @@ permissions:
   contents: read
 jobs:
   entry-point:
-    name: "Integrated candidate ${{ matrix.pr }}"
+    name: "Port ${{ matrix.pr }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
-          - pr: 80
-            sha: bc3329ed95100915812590ca014b5298404975e0
-            tree: 8536b970a8098e12dd4a9e61fcf44255ab8cf04f
-          - pr: 52
-            sha: 5bbe9ce86cdb181e260d1bbd882b3cb8a68d17a8
-            tree: 8cc4b55701742c996d4a69b69848b38a9b785496
-          - pr: 76
-            sha: 6a16061673ef38651f293d116f9a9aead7a9011a
-            tree: 27ac2e610b927ca7f51d0dde911eec2613d20812
-          - pr: 75
-            sha: 74d826b6b0970ca183b8f45ebf6985e7b009162c
-            tree: 16c769aa295eda1dca6cc259224f3feaa8792513
+          - pr: 16
+            sha: 0c78fdf6497dc9cefbcda674268fd09dc66f5a3a
+            tree: 231ef1197230c544433795fb6f0f52c980dda37b
+            tests: TestSeededHumanWorkflowThroughPTY
+          - pr: 18
+            sha: 05bf75ac330b5223fd6dd449ee528dbcec0a2e9c
+            tree: 79579d16e02227d81a82228f6ce48ff2a724784b
+            tests: TestRoleQueueHTTPThroughLauncher|TestSeededHumanWorkflowThroughPTY
     env:
       GOTOOLCHAIN: local
+      WHIRLWIND_TEST_SEEDED_PTY: '1'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -41,29 +38,13 @@ jobs:
         with:
           node-version: '24'
           package-manager-cache: false
-      - name: Verify tree and run relevant entry point
+      - name: Match candidate tree and exercise the shipped entry points
         env:
           EXPECTED_TREE: ${{ matrix.tree }}
-          PR: ${{ matrix.pr }}
+          FIXTURES: ${{ matrix.tests }}
         run: |
           test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
           export GOCACHE="$(go env GOCACHE)" GOMODCACHE="$(go env GOMODCACHE)"
           go mod download
-          case "$PR" in
-            80)
-              go test -mod=readonly -race -v -count=1 ./internal/verification -run '^(TestResolveJobCommand.*|TestOfflineDockerManagedManifestPinsPolicyAndImage)$'
-              ;;
-            52)
-              go test -mod=readonly -race -v -count=1 ./internal/verification ./internal/workflow -run '^(TestQltyStagingSeparatesUnchangedOnboardingFromCandidateDiff|TestQltyOnboardingBaselineEvidenceIsNotCandidateFindingCoverage|TestProjectSetupAcceptsOnlyCompletedQltyBaselineFindings|TestDefaultQualityApprovalFreezesQltyAndSecretConfiguration)$'
-              ;;
-            76|75)
-              go build -mod=readonly ./cmd/whirlwind ./cmd/whirlwind-dashboard ./cmd/whirlwind-verify
-              export WHIRLWIND_TEST_SEEDED_PTY=1
-              if [ "$PR" = 76 ]; then
-                go test -mod=readonly -race -v -count=1 -timeout=8m ./cmd/whirlwind -run '^TestProjectMemoryThroughLauncher$'
-              else
-                go test -mod=readonly -race -v -count=1 -timeout=8m ./cmd/whirlwind -run '^(TestSeededHumanWorkflowThroughPTY|TestProjectMemoryThroughLauncher)$'
-              fi
-              ;;
-            *) exit 2 ;;
-          esac
+          go build -mod=readonly ./cmd/whirlwind ./cmd/whirlwind-dashboard ./cmd/whirlwind-verify
+          go test -mod=readonly -race -v -count=1 -timeout=8m ./cmd/whirlwind -run "^($FIXTURES)$"
