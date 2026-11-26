@@ -303,6 +303,7 @@ func offlineProjectSetupManifest(manifest verification.JobManifest, project mode
 	}
 	manifest.OfflineDockerImage, manifest.PolicyHash = rules.OfflineDockerImage, project.PolicyHash
 	manifest.Commands = verificationJobCommands(rules.Checks)
+	manifest.BindManagedOfflineQlty()
 	return manifest, manifest.Validate()
 }
 
@@ -326,6 +327,7 @@ func (e *Engine) nativeProjectSetupManifest(ctx context.Context, manifest verifi
 		applySetupQualitySnapshot(&manifest, snapshot)
 	}
 	manifest.Commands = verificationJobCommands(rules.Checks)
+	manifest.BindManagedOfflineQlty()
 	return manifest, manifest.Validate()
 }
 

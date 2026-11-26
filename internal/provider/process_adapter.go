@@ -23,6 +23,9 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (result Outp
 	}
 	if !in.ReadinessOnly && !in.CatalogOnly && in.Purpose != "provider_test" {
 		if len(in.AgentHooks.Before)+len(in.AgentHooks.After) > 0 {
+			if in.Execution != nil && in.Execution.OfflineACP() {
+				return Output{SessionID: in.SessionID}, errors.New("offline ACP cannot run provider lifecycle hooks")
+			}
 			return a.runWithAgentHooks(ctx, p, in, h)
 		}
 	}
@@ -52,13 +55,25 @@ func (a ProcessAdapter) runResolved(ctx context.Context, p model.Provider, in In
 	if cleanup != nil {
 		defer cleanup()
 	}
+	hooks, deferredDelivery := stageHookedFinalization(s.hooks, profile.OfflineACP() && s.hasFinalizationTool())
+	s.hooks = hooks
 	rpc, err := StartWithProfile(ctx, p.Command, profile, s.handle, h.Event)
 	if err != nil {
 		return s.output, actionableACPError(p, err)
 	}
 	transferred = true
 	s.rpc = rpc
-	defer func() { err = errors.Join(err, rpc.Close()) }()
+	defer func() {
+		err = errors.Join(err, rpc.Close())
+		if rpc.offlineWrites != nil {
+			err = errors.Join(err, rpc.offlineWrites(err == nil && ctx.Err() == nil))
+		}
+		if err == nil {
+			if commit := deferredDelivery(result); commit != nil {
+				err = commit(ctx)
+			}
+		}
+	}()
 	err = authenticationACPError(p, s.runACP())
 	s.mu.Lock()
 	result = s.output
@@ -108,6 +123,12 @@ func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider
 	s.input.Execution = profile
 	s.input.CWD = profile.CWD
 	s.client.input.CWD = profile.CWD
+	if execution.IsDirectLauncher(profile.Launcher) {
+		s.client.input.Execution = profile
+	}
+	if profile.OfflineACP() {
+		return nil, nil
+	}
 	if p.Kind != "acp" && p.Kind != "claude" {
 		return nil, nil
 	}
@@ -134,6 +155,9 @@ func (s *providerSession) prepareSelectedBroker(p model.Provider, profile *execu
 func (s *providerSession) prepareNativeIntegrations(p, provider model.Provider, profile *execution.Profile) error {
 	if !s.input.NativeIntegrations {
 		return nil
+	}
+	if execution.IsDirectLauncher(profile.Launcher) {
+		return errors.New("native credential mounts require sandboxed execution")
 	}
 	if err := ProvisionNativeIntegrations(profile, provider); err != nil {
 		return err

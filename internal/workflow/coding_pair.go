@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/store"
@@ -289,6 +290,14 @@ func (step *taskStep) runCodingPair(key, prepPath string, pair *pairSlots) error
 		return err
 	}
 	prompt := "Prepare a requirement checklist against this approved specification and base repository snapshot. Do not evaluate an implementation or wait for Coding. Return JSON {\"checklist\":[{\"requirement_id\":\"REQ-ID\",\"inspection\":\"concrete inspection and evidence to check\"}]}, exactly one entry for every approved requirement. Finish immediately after preparation.\n" + jsonText(step.task.Plan)
+	// Scoped Linux fixtures own one container and share one quota pool. Reuse
+	// the existing preparation-before-coding path while keeping pair ownership.
+	if execution.OfflineACPSelected(step.project.Path) {
+		if err := step.prepareReviewerChecklist(ctx, key, prepPath, frozen, prompt); err != nil {
+			return err
+		}
+		return step.code(ctx, step.project, &step.task)
+	}
 	group.Go(func() error { return step.code(ctx, step.project, &step.task) })
 	group.Go(func() error {
 		return step.prepareReviewerChecklist(ctx, key, prepPath, frozen, prompt)

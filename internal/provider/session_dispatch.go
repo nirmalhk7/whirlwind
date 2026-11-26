@@ -33,6 +33,12 @@ func (s *providerSession) handle(c context.Context, m Message) (any, error) {
 
 func (s *providerSession) handleToolRequest(ctx context.Context, m Message, params map[string]any) (any, bool, error) {
 	switch m.Method {
+	case "whirlwind/offline_finalize":
+		if s.input.Execution == nil || !s.input.Execution.OfflineACP() {
+			return nil, true, errors.New("offline finalization requires the scoped fixture runtime")
+		}
+		result, err := s.callScopedTool(ctx, "finalize_delivery", m.Params)
+		return result, true, err
 	case "whirlwind/run_check":
 		result, err := s.runCheckTool(ctx, m.Params)
 		return result, true, err

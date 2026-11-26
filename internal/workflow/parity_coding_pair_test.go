@@ -20,6 +20,11 @@ import (
 func pendingCodingPairFixture(t *testing.T, checks ...model.Check) (*Engine, model.ExecutionPlan) {
 	t.Helper()
 	e, idea := approvedIdeaPlannerFixture(t, checks...)
+	return e, pendingCodingPairForIdea(t, e, idea)
+}
+
+func pendingCodingPairForIdea(t *testing.T, e *Engine, idea model.Idea) model.ExecutionPlan {
+	t.Helper()
 	var launches atomic.Int32
 	e.Adapter = func(model.Provider) provider.Adapter { return markdownPlannerAdapter(t, &launches) }
 	e.intakeApprovedIdeas(context.Background())
@@ -27,17 +32,22 @@ func pendingCodingPairFixture(t *testing.T, checks ...model.Check) (*Engine, mod
 		t.Fatal(err)
 	}
 	plan, _ := localStoredTask(t, e, model.PlanID("idea:"+idea.ID))
-	return e, plan
+	return plan
 }
 func approvedCodingPairFixture(t *testing.T, checks ...model.Check) (*Engine, model.ExecutionPlan) {
 	t.Helper()
 	e, plan := pendingCodingPairFixture(t, checks...)
+	return e, approveCodingPair(t, e, plan)
+}
+
+func approveCodingPair(t *testing.T, e *Engine, plan model.ExecutionPlan) model.ExecutionPlan {
+	t.Helper()
 	_, version := localStoredTask(t, e, plan.ID)
 	if err := e.ReviewLocalPlan(context.Background(), plan.ID, version, "approve", plan.PlanDocument.Hash, ""); err != nil {
 		t.Fatal(err)
 	}
 	plan, _ = localStoredTask(t, e, plan.ID)
-	return e, plan
+	return plan
 }
 
 func TestParityCodingAndReviewerPreparationStartTogetherWithDurableRuns(t *testing.T) {

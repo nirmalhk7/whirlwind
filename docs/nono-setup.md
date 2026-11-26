@@ -9,6 +9,10 @@ nono --version
 
 The launcher requires `nono 0.81.0` and fails closed if it is missing, incompatible, or cannot apply the sandbox. `WHIRLWIND_NONO_CLI` can select an absolute host-managed binary. Agent-supplied environment exceptions cannot change this selection or nono policy.
 
+Use `WHIRLWIND_SANDBOX=off` only in a dedicated disposable test worker with its own checkout, data directory, settings, and test credentials. The supervisor logs a startup warning. Agents and their ACP terminals run as plain, supervised processes within the worker's existing limits. The worker is responsible for filesystem and network containment in this mode, including access to Git metadata and other files reachable by the worker user. Bundled ACP profiles use explicitly configured credential environment references and a private home. Repository credential variables, ambient provider login files, and sandbox-only integration grants are excluded from the direct launch path.
+
+Run the usual `./bin/whirlwind start` with the variable in the supervisor's environment. Restart the supervisor to change modes. The unset and `on` modes require sandboxed execution, and other values are rejected. Committed verification and role lifecycle hooks still run through the supervisor's independent check paths. Use the explicitly configured offline Docker verifier for supported Linux checks. Native quality qualification and native hooks still require macOS.
+
 Install and authenticate your configured ACP provider on the host. For the bundled Codex profile, the repository specifies:
 
 ```sh
@@ -25,7 +29,7 @@ Direct outbound network access is blocked. Provider and project `sandbox.allowed
 
 Codex ACP selects `agent-full-access` **inside the enforced nono boundary** to avoid applying a second nested Seatbelt sandbox. Whirlwind's read-only client permissions and nono's filesystem/network rules still apply. An adapter lacking that mode fails with an actionable setup error.
 
-The native execution builder and nono launcher reject Linux, including read-only agents and checks. Use the [dashboard](local-supervisor.md) to inspect state and a supported macOS host to run the native workflow. Managed and standalone verification on Linux can opt in to [offline Docker](offline-docker-verifier.md) for pinned local images.
+The sandboxed execution builder and nono launcher reject Linux, including read-only agents and checks. Use the [dashboard](local-supervisor.md) to inspect state and a supported macOS host to run the native workflow. Managed and standalone verification on Linux can opt in to [offline Docker](offline-docker-verifier.md) for pinned local images.
 
 ## Role-specific lifecycle hooks
 

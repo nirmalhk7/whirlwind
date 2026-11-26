@@ -23,6 +23,7 @@ import (
 const (
 	dockerFormatOption  = "--format"
 	offlineCheckoutPath = "/checkout"
+	offlineScannerPath  = "/scanner"
 )
 
 const OfflineDockerKind = "docker-offline"
@@ -87,9 +88,24 @@ func (d *OfflineDocker) ImageID() string { return d.imageID }
 
 // Run uses one container per command. The only bind mount is the read-only
 // frozen export. The CLI operates outside the container with a private config.
-func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []string, timeout time.Duration, stdout, stderr io.Writer) (id string, exit *int, cleaned bool, err error) {
-	if strings.ContainsAny(source, ",\"\r\n") {
-		return "", nil, false, errors.New("offline verifier checkout has an unsupported mount path")
+func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []string, timeout time.Duration, stdout, stderr io.Writer) (string, *int, bool, error) {
+	return d.run(ctx, key, map[string]string{offlineCheckoutPath: source}, argv, timeout, stdout, stderr)
+}
+
+// RunQltyProbe mounts only the frozen checkout and the private, prepared tool
+// bundle. Its entrypoint is fixed and cannot be selected by a job.
+func (d *OfflineDocker) RunQltyProbe(ctx context.Context, key, source, bundle string, timeout time.Duration, stdout, stderr io.Writer) (string, *int, bool, error) {
+	if source == bundle || !filepath.IsAbs(bundle) {
+		return "", nil, false, errors.New("Qlty probe requires a separate private tool bundle")
+	}
+	return d.run(ctx, key, map[string]string{offlineCheckoutPath: source, offlineScannerPath: bundle}, []string{offlineScannerPath + "/scan.sh"}, timeout, stdout, stderr)
+}
+
+func (d *OfflineDocker) run(ctx context.Context, key string, mounts map[string]string, argv []string, timeout time.Duration, stdout, stderr io.Writer) (id string, exit *int, cleaned bool, err error) {
+	for _, source := range mounts {
+		if !filepath.IsAbs(source) || strings.ContainsAny(source, ",\"\r\n") {
+			return "", nil, false, errors.New("offline verifier has an unsupported mount source")
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return "", nil, false, err
@@ -109,9 +125,13 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 		"--user", fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()),
 		"--env", "HOME=/tmp", "--env", "GOCACHE=/tmp/go-build", "--env", "GOTOOLCHAIN=local",
 		// Compilers can execute their test binaries in private, nonpersistent scratch.
-		"--tmpfs", "/tmp:" + offlineDockerScratch,
-		"--mount", "type=bind,src=" + source + ",dst=/checkout,readonly,bind-propagation=rprivate,bind-recursive=disabled",
-		"--workdir", offlineCheckoutPath, "--entrypoint", argv[0], d.imageID}
+		"--tmpfs", "/tmp:" + offlineDockerScratch}
+	for _, destination := range []string{offlineCheckoutPath, offlineScannerPath} {
+		if source, ok := mounts[destination]; ok {
+			args = append(args, "--mount", "type=bind,src="+source+",dst="+destination+",readonly,bind-propagation=rprivate,bind-recursive=disabled")
+		}
+	}
+	args = append(args, "--workdir", offlineCheckoutPath, "--entrypoint", argv[0], d.imageID)
 	// Cancellation of the CLI does not cancel an in-flight daemon create.
 	// Wait for its response separately before starting the workload clock.
 	creation, cancelCreation := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -127,7 +147,7 @@ func (d *OfflineDocker) Run(ctx context.Context, key, source string, argv []stri
 	createConfirmed = true
 	inspection, cancelInspection := context.WithTimeout(ctx, 15*time.Second)
 	defer cancelInspection()
-	if err := d.verifyContainer(inspection, id, key, source, argv); err != nil {
+	if err := d.verifyContainer(inspection, id, key, mounts, argv); err != nil {
 		return id, nil, false, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -170,7 +190,7 @@ func confirmedOfflineExit(state offlineContainerState, startErr error) (*int, er
 	return &state.ExitCode, nil
 }
 
-func (d *OfflineDocker) verifyContainer(ctx context.Context, id, key, source string, argv []string) error {
+func (d *OfflineDocker) verifyContainer(ctx context.Context, id, key string, mounts map[string]string, argv []string) error {
 	var values []struct {
 		Name, Image string
 		Config      struct {
@@ -212,22 +232,29 @@ func (d *OfflineDocker) verifyContainer(ctx context.Context, id, key, source str
 		len(host.Tmpfs) != 1 || host.Tmpfs["/tmp"] != offlineDockerScratch {
 		return errors.New("container did not retain the requested Docker offline verifier restrictions")
 	}
-	if len(host.Mounts) != 1 || host.Mounts[0].Source != source || host.Mounts[0].Target != offlineCheckoutPath || !host.Mounts[0].ReadOnly ||
-		!host.Mounts[0].BindOptions.NonRecursive || host.Mounts[0].BindOptions.Propagation != "rprivate" {
-		return errors.New("offline verifier requires a private, nonrecursive read-only bind")
+	if len(host.Mounts) != len(mounts) {
+		return errors.New("offline verifier host mount count differs from the requested binds")
 	}
-	bound := false
+	hostBound := make(map[string]bool, len(mounts))
+	for _, mount := range host.Mounts {
+		if hostBound[mount.Target] || mounts[mount.Target] != mount.Source || mount.Source == "" || !mount.ReadOnly ||
+			!mount.BindOptions.NonRecursive || mount.BindOptions.Propagation != "rprivate" {
+			return errors.New("offline verifier requires private, nonrecursive read-only binds")
+		}
+		hostBound[mount.Target] = true
+	}
+	bound := make(map[string]bool, len(mounts))
 	for _, mount := range v.Mounts {
 		if mount.Type == "tmpfs" && mount.Destination == "/tmp" {
 			continue
 		}
-		if bound || mount.Type != "bind" || mount.Source != source || mount.Destination != offlineCheckoutPath || mount.RW {
+		if bound[mount.Destination] || mount.Type != "bind" || mounts[mount.Destination] != mount.Source || mount.Source == "" || mount.RW {
 			return errors.New("offline verifier container has an unexpected host mount")
 		}
-		bound = true
+		bound[mount.Destination] = true
 	}
-	if !bound {
-		return errors.New("offline verifier container lacks the read-only checkout")
+	if len(bound) != len(mounts) {
+		return errors.New("offline verifier container lacks a required read-only mount")
 	}
 	return nil
 }

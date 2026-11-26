@@ -57,6 +57,9 @@ func validateManagedOfflinePolicy(rules model.Policy) error {
 		checks = append(checks, risk.Checks...)
 	}
 	for _, check := range checks {
+		if model.IsPinnedOfflineQltyCheck(check) && rules.OfflineDockerImage != model.PinnedOfflineQltyImage {
+			return errors.New("pinned offline Qlty requires the scanner-qualified image")
+		}
 		if check.Reusable {
 			return errors.New("managed offline checks require fresh execution evidence")
 		}

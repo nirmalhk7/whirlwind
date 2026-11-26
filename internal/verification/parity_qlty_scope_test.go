@@ -1,7 +1,7 @@
 package verification
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -74,6 +74,9 @@ func checkParityQltyLanguageScope(t *testing.T, extension, fileType, script, sou
 name = "default"
 default = true
 [[plugin]]
+name = "gitleaks"
+version = "8.29.1"
+[[plugin]]
 name = "scope-probe"
 version = "0.10.0"
 [plugins.definitions.scope-probe]
@@ -89,15 +92,13 @@ batch = true
 driver_type = "formatter"
 suggested = "targets"
 `, fileType, script)
-	manifest.Quality = &model.QualitySnapshot{Root: root, Files: map[string]string{".qlty/qlty.toml": configuration}}
 	argv := []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}
-	manifest.Commands = []JobCommand{{Name: "quality", Mode: "autofix", Command: argv, ReportFormat: "sarif", TimeoutSeconds: 15}}
-	raw, _ := json.Marshal(manifest)
-	command := exec.Command(binary)
-	command.Stdin = bytes.NewReader(raw)
-	command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()}
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("native Qlty scope job failed: %v %s", err, output)
+	manifest.Commands = []JobCommand{{Name: "quality", Mode: "autofix", Command: argv, ReportFormat: "sarif", TimeoutSeconds: 60}}
+	snapshot := qualifyNativeScopeScanner(t, binary, manifest, root, configuration)
+	manifest.Quality = &snapshot
+	report, err := RunLocalJob(t.Context(), binary, manifest, nil)
+	if err != nil || !model.SameQualityIdentity(snapshot.Identity, report.QualityIdentity) {
+		failNativeQltyJob(t, manifest, "scope scan did not use its approved scanner runtime", report, err)
 	}
 	assertQltyProbeReport(t, manifest.Root, argv, tracked, newFile, unchanged)
 	if git(qltyProbeRevParse, "HEAD") != manifest.CandidateCommit || git("status", "--porcelain", "-uall") != "" {
@@ -106,7 +107,45 @@ suggested = "targets"
 	if _, err := os.Stat(filepath.Join(manifest.Repository, ".qlty")); !os.IsNotExist(err) {
 		t.Fatalf("Qlty configuration leaked into original repository: %v", err)
 	}
-	assertQltyExternalState(t, manifest.Root)
+	assertQltyExternalState(t, manifest.Root, root, report.QualityIdentity)
+}
+
+func qualifyNativeScopeScanner(t *testing.T, binary string, candidate JobManifest, root, configuration string) model.QualitySnapshot {
+	t.Helper()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				_ = os.Chmod(path, 0700)
+			}
+			return nil
+		})
+	})
+	ctx := context.Background()
+	manifest := projectSetupFixture(t, candidate, nil)
+	snapshot := model.QualitySnapshot{Root: root, Files: map[string]string{".qlty/qlty.toml": configuration}}
+	manifest.Quality = &snapshot
+	manifest.JobID, manifest.OperationID = "scope-catalog", "scope-catalog"
+	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
+	manifest.Commands = []JobCommand{{Name: "catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
+	report, err := RunLocalJob(ctx, binary, manifest, nil)
+	requireVerificationSuccess(t, err)
+	if !report.Passed {
+		t.Fatalf("scope scanner catalog unavailable: %+v", report.Results)
+	}
+	catalog, _, err := ReadJobStreams(manifest.Root, 0)
+	requireVerificationSuccess(t, err)
+	snapshot.PluginCatalog = []byte(catalog)
+	manifest.JobID, manifest.OperationID = "scope-qualification", "scope-qualification"
+	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
+	manifest.Sandbox = nativeQltyQualificationSandbox()
+	manifest.Commands = slices.Clone(candidate.Commands)
+	manifest.Commands[0].TimeoutSeconds = 600
+	report, err = RunLocalJob(ctx, binary, manifest, nil)
+	if err != nil || report.QualityIdentity == nil {
+		failNativeQltyJob(t, manifest, "scope scanner runtime did not qualify", report, err)
+	}
+	snapshot.Identity = report.QualityIdentity
+	return snapshot
 }
 
 func assertQltyProbeReport(t *testing.T, root string, argv []string, tracked, newFile, unchanged string) {
@@ -134,28 +173,26 @@ func assertQltyProbeReport(t *testing.T, root string, argv []string, tracked, ne
 	}
 }
 
-func assertQltyExternalState(t *testing.T, root string) {
+func assertQltyExternalState(t *testing.T, jobRoot, qualityRoot string, identity *model.QualityIdentity) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, "report.json"))
-	requireVerificationSuccess(t, err)
-	var report JobReport
-	requireVerificationSuccess(t, json.Unmarshal(data, &report))
-	if report.QualityIdentity == nil {
+	if identity == nil {
 		t.Fatal("completed scan did not retain its qualified runtime identity")
 	}
-	canonicalRoot, err := filepath.EvalSymlinks(root)
+	canonicalRoot, err := filepath.EvalSymlinks(filepath.Join(qualityRoot, "jobs", "scope-qualification"))
 	requireVerificationSuccess(t, err)
-	target, err := filepath.EvalSymlinks(report.QualityIdentity.ToolRuntimePath)
+	target, err := filepath.EvalSymlinks(identity.ToolRuntimePath)
 	requireVerificationSuccess(t, err)
 	if rel, err := filepath.Rel(canonicalRoot, target); err != nil || !filepath.IsLocal(rel) {
-		t.Fatalf("Qlty runtime state escaped approved external root: %s %v", target, err)
+		t.Fatalf("approved Qlty runtime escaped the qualification job: %s %v", target, err)
 	}
-	hash, err := hashQualityTree(target)
-	requireVerificationSuccess(t, err)
-	if hash != report.QualityIdentity.ToolRuntimeHash {
-		t.Fatal("retained Qlty tools no longer match the verified identity")
+	for _, runtime := range []string{target, filepath.Join(jobRoot, "runtime", "quality", "home", ".qlty", "cache", "tools")} {
+		hash, err := hashQualityTree(runtime)
+		requireVerificationSuccess(t, err)
+		if hash != identity.ToolRuntimeHash {
+			t.Fatalf("runtime at %s no longer matches the approved identity", runtime)
+		}
 	}
-	if _, err := os.Lstat(filepath.Join(root, autofixCheckoutDir(0))); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(jobRoot, autofixCheckoutDir(0))); !os.IsNotExist(err) {
 		t.Fatalf("completed detached autofix checkout was not released: %v", err)
 	}
 }

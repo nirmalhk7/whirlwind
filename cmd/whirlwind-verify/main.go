@@ -31,15 +31,9 @@ func run() error {
 	if len(raw) > 1<<20 {
 		return errors.New("verification manifest exceeds 1 MiB")
 	}
-	var manifest verification.JobManifest
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&manifest); err != nil {
-		return fmt.Errorf("invalid verification manifest: %w", err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return errors.New("verification requires exactly one manifest")
+	manifest, err := decodeManifest(raw, os.Args[1:])
+	if err != nil {
+		return err
 	}
 	if err := os.Setenv("WHIRLWIND_PROCESS_REGISTRY", filepath.Join(manifest.Root, "processes")); err != nil {
 		return err
@@ -52,4 +46,39 @@ func run() error {
 		return err
 	}
 	return encoder.Encode(map[string]any{"type": "complete", "manifest_hash": report.ManifestHash, "passed": report.Passed})
+}
+
+func decodeManifest(raw []byte, args []string) (verification.JobManifest, error) {
+	switch {
+	case len(args) == 0:
+		var manifest verification.JobManifest
+		if err := decodeRequest(raw, &manifest); err != nil {
+			return manifest, err
+		}
+		if manifest.Purpose == verification.LinuxQltyProbePurpose {
+			return manifest, errors.New("use --linux-qlty-probe for standalone scanner qualification")
+		}
+		return manifest, nil
+	case len(args) == 1 && args[0] == "--linux-qlty-probe":
+		var request verification.LinuxQltyProbeRequest
+		if err := decodeRequest(raw, &request); err != nil {
+			return verification.JobManifest{}, err
+		}
+		return request.Manifest(), nil
+	default:
+		return verification.JobManifest{}, errors.New("usage: whirlwind-verify [--linux-qlty-probe]")
+	}
+}
+
+func decodeRequest(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return fmt.Errorf("invalid verification manifest: %w", err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		return errors.New("verification requires exactly one manifest")
+	}
+	return nil
 }

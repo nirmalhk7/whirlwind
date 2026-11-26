@@ -61,7 +61,7 @@ func (c *Client) startTerminal(ctx context.Context, p clientParams, cwd string) 
 	defer c.mu.Unlock()
 	if c.closed {
 		cancel()
-		return "", context.Canceled
+		return "", errors.Join(context.Canceled, process.Forget(cmd))
 	}
 	if err = process.Start(cmd); err != nil {
 		cancel()
@@ -88,9 +88,9 @@ func (c *Client) prepareTerminalCommand(run context.Context, p clientParams, cwd
 		cancel()
 		return nil, err
 	}
-	if err = p.applyEnvironment(cmd, c.input.Policy.Sandbox); err != nil {
+	if err = p.applyTerminalEnvironment(cmd, profile, c.input.Policy.Sandbox); err != nil {
 		cancel()
-		return nil, err
+		return nil, errors.Join(err, process.Forget(cmd))
 	}
 	return cmd, nil
 }
@@ -118,6 +118,17 @@ func (c *Client) authorizeTerminal(ctx context.Context, m Message, p clientParam
 	args := append([]string{p.Command}, p.Args...)
 	err := c.allow(ctx, Permission{Tool: m.Method, Command: args, Raw: m.Params})
 	return cwd, err
+}
+
+func (p clientParams) applyTerminalEnvironment(cmd *exec.Cmd, profile execution.Profile, policy *model.SandboxPolicy) error {
+	if execution.IsDirectLauncher(profile.Launcher) {
+		for _, entry := range p.Env {
+			if !execution.DirectEnvironmentAllowed(entry.Name) {
+				return errors.New("reserved process environment")
+			}
+		}
+	}
+	return p.applyEnvironment(cmd, policy)
 }
 
 func (p clientParams) applyEnvironment(cmd *exec.Cmd, policies ...*model.SandboxPolicy) error {

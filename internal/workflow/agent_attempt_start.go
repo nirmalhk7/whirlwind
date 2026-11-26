@@ -78,6 +78,9 @@ func (execution *agentAttempt) launch() error {
 		configHash = a.input.Execution.Digest()
 	}
 	execution.state = model.Attempt{IdeaID: plannerIdeaID(a), ExecutionID: execution.id, ExecutionGeneration: generation, RuntimeKind: runtimeKind, RuntimeLauncher: runtimeLauncher, WorkerHeartbeatAt: started.Format(time.RFC3339Nano), LeaseExpiresAt: started.Add(runtimeLeaseLifetime).Format(time.RFC3339Nano), ProviderProgressAt: started.Format(time.RFC3339Nano), ProcessState: "starting", SandboxHealth: "unknown", SandboxPhase: "unknown", ConfigSnapshotVersion: 1, ConfigSnapshotHash: configHash, ExecutionProfile: a.input.ExecutionProfile, AttemptID: execution.id, Task: a.task.ID, UnitID: a.input.UnitID, OperationID: a.input.OperationID, Purpose: a.input.Purpose, PreviousAttemptID: a.previousAttempt, ResumedFromAttemptID: a.resumeSource, RecoveryEpisodeID: episodeID, RestartCount: a.recoveryRestartCount, QueuePosition: a.queuePosition, QueueLength: a.queueLength, Role: a.input.Role, Provider: chosen.ID, SessionID: a.input.SessionID, RequestedSessionID: a.input.SessionID, CWD: a.input.CWD, PlanVersion: a.task.PlanVersion, Finished: false, Status: "running", Owner: a.owner, ContextCommit: a.index.Commit, ContextIndexVersion: a.index.Version, PolicyHash: a.project.PolicyHash, Model: a.input.Model, ProjectID: a.project.ID, ProviderName: chosen.Name, Transport: provider.ExecutionProvider(chosen, a.input.Thinking).Kind, Thinking: a.input.Thinking, DeadlineAt: deadline.Format(time.RFC3339Nano), StartedAt: started.Format(time.RFC3339Nano)}
+	if runtimeKind == "direct" {
+		execution.state.SandboxPhase, execution.state.SandboxHealth = "Disabled", "disabled"
+	}
 	if a.input.Execution != nil {
 		execution.state.SandboxName = a.input.Execution.SandboxName
 		execution.state.ExecutionLabelValue = a.input.Execution.ExecutionLabelValue

@@ -76,9 +76,6 @@ func agenticFixtureCoding(ctx context.Context, in provider.Input, hooks provider
 	if preserveDebt {
 		checkID = "focused"
 	}
-	if err := os.WriteFile(filepath.Join(in.CWD, agenticResultFile), []byte("package result\n\nfunc Result() bool {\n\treturn false\n}\n"), 0600); err != nil {
-		return provider.Output{}, err
-	}
 	test := "package result\n\nimport \"testing\"\n\nfunc TestResult(t *testing.T) {\n\tif !Result() {\n\t\tt.Fatal(\"Result must return true\")\n\t}\n}\n"
 	if err := os.WriteFile(filepath.Join(in.CWD, agenticRegressionFile), []byte(test), 0600); err != nil {
 		return provider.Output{}, err
@@ -98,7 +95,90 @@ func agenticFixtureCoding(ctx context.Context, in provider.Input, hooks provider
 }
 
 func TestAgenticWorkflowCompletesWithoutGitHubCLI(t *testing.T) {
-	testAgenticWorkflow(t, false)
+	if runtime.GOOS != "darwin" {
+		testAgenticWorkflow(t, false)
+		return
+	}
+	run := nativeAgenticReviewCandidate(t)
+	run.finishDelivery(t)
+}
+
+type nativeAgenticRun struct {
+	engine     *Engine
+	task       model.ExecutionPlan
+	project    model.Project
+	marker     string
+	head, tree string
+}
+
+// The native local workflow qualifies Qlty and retains the standalone proof
+// required for review and delivery. Its test-first broker and ACP peers run
+// through the same supervised entry points used by approved ideas.
+func nativeAgenticReviewCandidate(t *testing.T) nativeAgenticRun {
+	t.Helper()
+	bin := t.TempDir()
+	marker := filepath.Join(bin, "gh-called")
+	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\nprintf '%s\n' invoked >> '"+marker+"'\nexit 97\n"), 0700))
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	e, idea := approvedIdeaPlannerFixture(t)
+	e.GitHub = github.CLI{}
+	_, draft, project := nativeCodingPlanForIdea(t, e, idea, nil, nil, false)
+	e.dispatch(t.Context())
+	e.background.Wait()
+	verified := assertNativeCodingCandidate(t, e, project, draft)
+	candidate, _ := localStoredTask(t, e, draft.ID)
+	return nativeAgenticRun{engine: e, task: candidate, project: project, marker: marker, head: verified.CandidateCommit, tree: verified.CandidateTree}
+}
+
+func (run nativeAgenticRun) finishDelivery(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	for range 5 {
+		task, _ := localStoredTask(t, run.engine, run.task.ID)
+		if task.Stage == "complete" {
+			run.assertDelivery(t, task)
+			return
+		}
+		requireWorkflowSuccess(t, run.engine.Step(ctx, task.ID))
+	}
+	task, _ := localStoredTask(t, run.engine, run.task.ID)
+	t.Fatalf("workflow stopped before local delivery: stage=%s error=%q", task.Stage, task.Error)
+}
+
+func (run nativeAgenticRun) assertDelivery(t *testing.T, done model.ExecutionPlan) {
+	t.Helper()
+	delivery := done.Delivery
+	if delivery == nil || delivery.Stage != "complete" {
+		t.Fatalf("local delivery receipt missing: %+v", delivery)
+	}
+	if delivery.ReviewedCommit != run.head || delivery.Tree != run.tree || delivery.VerificationID != done.VerificationID {
+		t.Fatalf("delivery changed the verified candidate: commit=%s tree=%s verification=%s, want commit=%s tree=%s verification=%s",
+			delivery.ReviewedCommit, delivery.Tree, delivery.VerificationID, run.head, run.tree, done.VerificationID)
+	}
+	// Review may request fresh verification of the same immutable candidate.
+	// Validate the proof named by the delivery receipt against the original tree.
+	row, err := run.engine.Store.Get(t.Context(), "verification", delivery.VerificationID)
+	requireWorkflowSuccess(t, err)
+	saved, err := store.Decode[savedReviewRunnerReport](row)
+	requireWorkflowSuccess(t, err)
+	if saved.Stage != "complete" || !saved.Report.Passed || saved.Manifest.CandidateCommit != run.head || saved.Manifest.CandidateTree != run.tree {
+		t.Fatalf("delivery did not retain successful verification of the exact candidate: %+v", saved.Provenance)
+	}
+	requireWorkflowSuccess(t, saved.Report.Validate(saved.Manifest))
+	ref := submissionGit(t, run.project.Path, submissionRevParse, "refs/heads/"+delivery.Branch)
+	if ref != delivery.DeliveryCommit || submissionGit(t, run.project.Path, submissionRevParse, ref+"^{tree}") != run.tree {
+		t.Fatal("published local ref differs from the exact reviewed tree")
+	}
+	if _, err := os.Stat(run.marker); !os.IsNotExist(err) {
+		t.Fatalf("Agentic workflow invoked GitHub CLI: %v", err)
+	}
+	publications, err := run.engine.Store.List(t.Context(), "publications")
+	if err != nil || len(publications) != 0 || done.PR != "" {
+		t.Fatalf("local delivery attempted remote publication: PR=%q records=%d err=%v", done.PR, len(publications), err)
+	}
+	if got := submissionGit(t, run.project.Path, submissionRevParse, "HEAD"); got != run.task.Base {
+		t.Fatalf("local delivery moved the original checkout: %s", got)
+	}
 }
 
 func TestAgenticWorkflowPreservesExistingTestDebt(t *testing.T) {

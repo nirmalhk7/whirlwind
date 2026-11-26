@@ -25,24 +25,19 @@ func (f onboardingFixture) verifyIdeation(t *testing.T, project model.Project, c
 		t.Fatalf("agent reply not applied: %d directions, %v", len(directions), err)
 	}
 	var sessions []model.Record
-	if err := json.Unmarshal(f.request(t, "GET", "/sessions", nil, 200), &sessions); err != nil || len(sessions) < 2 {
-		t.Fatalf("generation and read-only novelty sessions not persisted: %d sessions, %v", len(sessions), err)
+	if err := json.Unmarshal(f.request(t, "GET", "/sessions", nil, 200), &sessions); err != nil || len(sessions) != 1 {
+		t.Fatalf("expected one saved generation session: %d sessions, %v", len(sessions), err)
 	}
 	var result struct {
+		Purpose   string `json:"purpose"`
 		Provider  string `json:"provider"`
 		SessionID string `json:"session_id"`
 		Summary   string `json:"summary"`
 		Finished  bool   `json:"finished"`
 	}
-	summaries := map[string]bool{}
-	for _, session := range sessions {
-		if err := json.Unmarshal(session.Data, &result); err != nil || result.Provider != chosen || result.SessionID != onboardingSessionID || !result.Finished {
-			t.Fatalf("final reply/session lost: %+v, %v", result, err)
-		}
-		summaries[result.Summary] = true
-	}
-	if !summaries[onboardingReply] || !summaries[`{"unique":true}`] {
-		t.Fatalf("generation or novelty result missing: %v", summaries)
+	if err := json.Unmarshal(sessions[0].Data, &result); err != nil || result.Provider != chosen || result.SessionID != onboardingSessionID || !result.Finished ||
+		result.Purpose != "generation" || result.Summary != onboardingReply {
+		t.Fatalf("final generation reply or session lost: %+v, %v", result, err)
 	}
 }
 

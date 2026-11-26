@@ -2,8 +2,6 @@ package workflow
 
 import (
 	"context"
-	"os"
-	"strings"
 	"testing"
 
 	"whirlwind/internal/model"
@@ -40,15 +38,11 @@ func TestParityQltyHeadDiffPreservesDependentCandidateChecks(t *testing.T) {
 }
 
 func TestParityQltyHeadDiffNeedsNoScannerBaseline(t *testing.T) {
-	check := cleanQltyFixtureCheck(t)
-	script, err := os.ReadFile(check.Command[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	guard := "#!/bin/sh\nif [ ! -f result.txt ]; then echo 'HEAD-diff scanner must not run against unchanged base' >&2; exit 77; fi\n"
-	if err := os.WriteFile(check.Command[0], []byte(strings.Replace(string(script), "#!/bin/sh\n", guard, 1)), 0700); err != nil {
-		t.Fatal(err)
-	}
+	check := guardedQltyFixtureCheck(t, `if [ ! -f result.txt ]; then
+  echo 'HEAD-diff scanner must not run against unchanged base' >&2
+  exit 77
+fi
+`)
 	e, project, plan, head := optionalCheckFixture(t, "0", check)
 	ctx := context.Background()
 	if err := e.verify(ctx, project, &plan); err != nil {

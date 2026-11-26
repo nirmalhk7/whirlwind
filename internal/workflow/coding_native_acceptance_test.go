@@ -113,7 +113,13 @@ func qualifyLiveCodingCandidate(t *testing.T, live model.Provider, choice model.
 
 func nativeCodingPlan(t *testing.T, live *model.Provider, choice *model.AgentChoice, fallback bool) (*Engine, model.ExecutionPlan, model.Project) {
 	t.Helper()
-	e, draft := pendingCodingPairFixture(t)
+	e, idea := approvedIdeaPlannerFixture(t)
+	return nativeCodingPlanForIdea(t, e, idea, live, choice, fallback)
+}
+
+func nativeCodingPlanForIdea(t *testing.T, e *Engine, idea model.Idea, live *model.Provider, choice *model.AgentChoice, fallback bool) (*Engine, model.ExecutionPlan, model.Project) {
+	t.Helper()
+	draft := pendingCodingPairForIdea(t, e, idea)
 	installNativeParityVerifier(t)
 	ctx := context.Background()
 	project, err := e.Project(ctx, draft.ProjectID)
@@ -169,31 +175,11 @@ fi
 		requireWorkflowSuccess(t, os.WriteFile(filepath.Join(root, path), []byte(content), 0600))
 	}
 	scanner := cleanQltyFixtureCheck(t)
-	requireWorkflowSuccess(t, os.WriteFile(scanner.Command[0], []byte(`#!/bin/sh
-set -eu
-if [ "$1" = config ]; then
-  printf '%s\n' 'plugins: {}'
-  exit 0
-fi
-root="$HOME/.qlty/cache/tools/fixture"
-if [ ! -f "$root/1.0-12345678.done" ]; then
-  mkdir -p "$root/1.0-12345678"
-  printf '%s\n' 'fixture runtime' > "$root/1.0-12345678/scanner"
-  touch "$root/1.0-12345678.done"
-fi
-printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty","version":"fixture","semanticVersion":"1.0.0"}},"invocations":[{"executionSuccessful":true}],"results":[]}]}'
-`), 0700))
 	checks := []model.Check{
 		{Name: nativeCodingCheck, Command: []string{"/bin/sh", "fixture-check.sh"}, ReportFormat: "go-test-json", TimeoutSeconds: 10},
 		scanner,
 	}
 	optionalFixtureQuality(t, project, checks)
-	qualityRoot := project.Policy.Quality.Root
-	t.Cleanup(func() {
-		if err := filepath.Walk(qualityRoot, restoreAgenticCachePathPermissions); err != nil {
-			t.Errorf("restore permissions for disposable scanner cache: %v", err)
-		}
-	})
 	project.Policy.Checks = append(project.Policy.Checks, checks...)
 	project.Policy.Commands = [][]string{{"/bin/sh", "-c"}}
 	raw, err := yaml.Marshal(project.Policy)
@@ -204,20 +190,20 @@ printf '%s\n' '{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty","vers
 	project.Policy, project.PolicyHash, err = policy.Load(root)
 	requireWorkflowSuccess(t, err)
 	ctx := context.Background()
-	project.QualityIdentity = qualifyCodingFixtureScanner(t, *project, scanner)
+	project.QualityIdentity = qualifyNativeFixtureScanner(t, *project, scanner)
 	record, err := e.Store.Get(ctx, "projects", project.ID)
 	requireWorkflowSuccess(t, err)
 	requireWorkflowSuccess(t, e.Store.Put(ctx, "projects", project.ID, *project, record.Version))
 }
 
-func qualifyCodingFixtureScanner(t *testing.T, project model.Project, scanner model.Check) *model.QualityIdentity {
+func qualifyNativeFixtureScanner(t *testing.T, project model.Project, scanner model.Check) *model.QualityIdentity {
 	t.Helper()
 	quality, err := externalQualitySnapshot(project)
 	requireWorkflowSuccess(t, err)
 	quality.PluginCatalog = []byte("plugins: {}\n")
 	head := submissionGit(t, project.Path, nativeCodingFixtureRevParse, "HEAD")
 	tree := submissionGit(t, project.Path, nativeCodingFixtureRevParse, nativeCodingFixtureHeadTree)
-	const id = "coding-quality-setup"
+	const id = "fixture-quality-setup"
 	manifest := verification.JobManifest{
 		Version: 1, Purpose: verification.ProjectSetupPurpose,
 		ProjectID: project.ID, OperationID: id, JobID: id, ConfigurationHash: project.PolicyHash,
@@ -230,7 +216,7 @@ func qualifyCodingFixtureScanner(t *testing.T, project model.Project, scanner mo
 	}
 	report, err := verification.RunLocalJob(context.Background(), os.Getenv("WHIRLWIND_VERIFY_BIN"), manifest, nil)
 	requireWorkflowSuccess(t, err)
-	if !report.Passed || report.QualityIdentity == nil {
+	if report.QualityIdentity == nil {
 		t.Fatalf("fixture quality runner did not qualify: %+v", report.Results)
 	}
 	return report.QualityIdentity

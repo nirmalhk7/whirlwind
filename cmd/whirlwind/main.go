@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"whirlwind/internal/control"
+	"whirlwind/internal/execution"
 	"whirlwind/internal/github"
 	"whirlwind/internal/httpapi"
 	"whirlwind/internal/workflow"
@@ -25,6 +26,13 @@ func run() error {
 	config, err := readConfig()
 	if err != nil {
 		return err
+	}
+	sandboxEnabled, err := execution.SandboxEnabled()
+	if err != nil {
+		return err
+	}
+	if !sandboxEnabled {
+		log.Print("WARNING: WHIRLWIND_SANDBOX=off runs agents and their terminals without Whirlwind sandboxing. Use only in a dedicated isolated test worker.")
 	}
 	s, lock, err := config.openState()
 	if err != nil {

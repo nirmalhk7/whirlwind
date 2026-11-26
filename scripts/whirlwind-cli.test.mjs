@@ -66,7 +66,7 @@ async function waitGone(pid) {
         const [state] = await linuxProcessStat(pid);
         if (state === "Z" || state === "X") return;
       } catch (error) {
-        if (error.code === "ENOENT") return;
+        if (error.code === "ENOENT" || error.code === "ESRCH") return;
         throw error;
       }
     }

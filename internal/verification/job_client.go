@@ -38,6 +38,11 @@ func RunLocalJob(ctx context.Context, binary string, manifest JobManifest, obser
 	defer cancel()
 	child := process.Command(run, binary)
 	env := verificationRunnerEnvironment(manifest.Root, child.Env)
+	if manifest.OfflineQltyConfiguration != "" {
+		if tools := os.Getenv("WHIRLWIND_QLTY_PROBE_TOOLS"); tools != "" {
+			env = append(env, "WHIRLWIND_QLTY_PROBE_TOOLS="+tools)
+		}
+	}
 	child.Env = env
 	child.Stdin = bytes.NewReader(raw)
 	child.Cancel = func() error { return child.Process.Signal(syscall.SIGTERM) }
@@ -185,6 +190,9 @@ func verificationRunnerEnvironment(root string, inherited []string) []string {
 		if value := os.Getenv(key); value != "" {
 			env = append(env, key+"="+value)
 		}
+	}
+	if value, set := os.LookupEnv("WHIRLWIND_SANDBOX"); set {
+		env = append(env, "WHIRLWIND_SANDBOX="+value)
 	}
 	for _, entry := range inherited {
 		if strings.HasPrefix(entry, "WHIRLWIND_PROCESS_TOKEN=") {

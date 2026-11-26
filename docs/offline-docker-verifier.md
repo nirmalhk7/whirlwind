@@ -3,8 +3,8 @@
 An operator can set `offline_docker_image` in an approved external project
 policy or a private standalone `whirlwind-verify` manifest to run mandatory
 commands against a frozen Git tree on Linux. Native nono remains the default.
-Managed Review can consume the offline evidence for this policy. Live Review
-and Finalizer still require the native read-only role runtime.
+Managed Review can consume offline evidence for this policy. The disposable
+ACP fixture below supports isolated offline Review and Finalizer.
 
 ## Managed setup and candidate checks
 
@@ -17,13 +17,13 @@ actually completed them. Setup must pass before approving an idea plan.
 Later checks use the qualified image configuration and bind every result to
 the approved policy, plan, command and exact Git tree. Changing the approved
 policy clears its qualification. The Linux option supports mandatory checks
-with preloaded or vendored dependencies. Managed Qlty setup and live agent
-execution continue to require native nono.
+with preloaded or vendored dependencies and the explicitly approved pinned
+scanner profile below.
 
 Review and the local delivery gate revalidate the completed job, its retained
 streams, the qualified image, and the current clean candidate. Local delivery
-also requires qualified Qlty evidence. The offline runner does not support
-that scanner, so an offline-only report cannot qualify for delivery.
+also requires qualified Qlty evidence. For managed Linux delivery, use the
+pinned offline scanner selected by the project's approved policy.
 
 Use the managed rootless Docker socket at `/var/run/docker.sock` with `runc`
 and built-in seccomp. Preload an approved Linux workload image and record one
@@ -87,3 +87,88 @@ shipped supervisor path. Setting `WHIRLWIND_TEST_SEEDED_NONO` to an installed
 nono binary also exercises deterministic Reviewer handoffs and delivery
 refusals. The Review fixture uses the native profile metadata and returns a
 seeded response in process.
+
+## Standalone Linux Qlty qualification
+
+On Linux amd64, an operator can exercise a fixed Qlty/Gitleaks profile against
+one exact Git tree with `whirlwind-verify --linux-qlty-probe`. Use a disposable
+worker where agent processes cannot access the operator's filesystem, Docker
+socket or verification outputs, or run the probe with agents stopped. A private
+directory cannot protect evidence from another process with the same Unix
+identity.
+
+Use the Linux x86-64 musl binary from
+[Qlty 0.668.0](https://github.com/qltysh/qlty/releases/tag/v0.668.0) and the
+Linux x64 binary from
+[Gitleaks 8.29.1](https://github.com/gitleaks/gitleaks/releases/tag/v8.29.1).
+The probe verifies the extracted binary digests before use. Set
+`WHIRLWIND_QLTY_PROBE_TOOLS` to the absolute directory containing the two
+binaries named `qlty` and `gitleaks`. The Go Alpine image pinned above must
+already be present.
+
+With `repo` set to an absolute checkout path and `job_root` set to a new
+absolute private directory outside that checkout, run:
+
+```sh
+jq -n \
+  --arg job_id linux-qlty-probe \
+  --arg repository "$repo" \
+  --arg root "$job_root" \
+  --arg candidate_commit "$(git -C "$repo" rev-parse HEAD)" \
+  --arg candidate_tree "$(git -C "$repo" rev-parse 'HEAD^{tree}')" \
+  '{job_id:$job_id, repository:$repository, root:$root,
+    candidate_commit:$candidate_commit, candidate_tree:$candidate_tree}' |
+  ./bin/whirlwind-verify --linux-qlty-probe
+```
+
+Read the verdict in `report.json`. A passing probe needs a successful,
+findings-free invocation by the pinned scanner, exact tree and image evidence,
+and verified container cleanup. The verifier retains the raw streams and
+checks their hashes on replay. A failed scan can still write a complete report
+with `passed: false`. This standalone report has no managed-project or plan
+identity. Managed qualification, review and Finalizer still require their own
+approved evidence.
+
+## Isolated ACP fixture worker
+
+The supervisor can run an operator-selected offline ACP fixture on a
+disposable Linux worker. Use a separate local checkout with no Git remotes
+and an isolated supervisor data directory. Set these variables in the
+supervisor's environment before `./bin/whirlwind start`:
+
+- `WHIRLWIND_SANDBOX=off`
+- `WHIRLWIND_OFFLINE_ACP_CHECKOUT` to the absolute disposable checkout
+- `WHIRLWIND_OFFLINE_ACP_FIXTURE` to an operator-controlled executable outside
+  that checkout and the supervisor data directory
+- `WHIRLWIND_OFFLINE_ACP_IMAGE` to the digest of a compatible, locally
+  preloaded Docker image
+
+Use the fixture path as the ACP provider's sole command argument. Keep that
+provider free of credentials and sandbox grants. The worker mounts the
+fixture and its assigned source directory read-only. It cannot use network
+access or the Docker socket. Ideation and Reviewer remain read-only. The
+supervisor validates the role-specific capabilities below.
+
+The supervisor saves a private ownership record before asking rootless Docker
+to create a worker. It checks the daemon, container identity, confinement
+settings and mounts before launch. At exit it checks the runtime's terminal
+state, removes that exact container and confirms removal. Restart recovers
+only workers that match their records. An ambiguous create, mismatched owner
+or unavailable daemon keeps recovery blocked. The fixture transport does not
+inherit host process capabilities.
+
+For the disposable documentation workflow, Planner receives its assigned
+scratch output directory. Coder receives a staged copy of one existing
+Markdown file named exactly in the approved unit scope. The supervisor
+verifies cleanup and checks the original file before importing changes. Other
+roles keep read-only access. The offline Finalizer can request the existing
+empty-argument delivery operation through ACP. The supervisor publishes only
+after that container has been cleaned up and the existing acceptance checks
+have been replayed.
+
+A managed project can explicitly qualify the pinned strict Qlty profile
+with a mandatory check named `qlty-offline`, command
+`[whirlwind-linux-qlty-probe]`, and report format `sarif`, using the pinned
+image and tool directory above. Setup qualifies that exact policy and scanner
+configuration. Candidate verification records the exact commit, tree and
+streams for review and delivery replay. The scanner requires a clean scan.

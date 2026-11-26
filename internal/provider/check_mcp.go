@@ -169,10 +169,27 @@ func (s *providerSession) configureCheckMCP(profile *execution.Profile, resource
 		cleanup()
 		return errors.New("OpenShell guest MCP stdio shim unavailable")
 	}
+	if execution.IsDirectLauncher(profile.Launcher) {
+		return s.configureDirectCheckMCP(script, resources, cleanup)
+	}
 	profile.ReadRoots = append(profile.ReadRoots, script)
 	profile.MCPBroker = &execution.MCPBroker{ID: checkMCPBrokerID, SocketPath: resources.socket, Host: "whirlwind-mcp.openshell.internal", Path: "/mcp"}
 	profile.MCPBrokerToken = resources.token
 	s.checkServers = []any{map[string]any{"name": "whirlwind_checks", "command": "node", "args": []string{script, checkMCPBrokerID}, "env": []any{}}}
+	return nil
+}
+
+func (s *providerSession) configureDirectCheckMCP(script string, resources checkMCPResources, cleanup func()) error {
+	descriptor := filepath.Join(resources.root, "direct.json")
+	raw, err := json.Marshal(map[string]string{"socket": resources.socket, "token": resources.token})
+	if err == nil {
+		err = os.WriteFile(descriptor, raw, 0600)
+	}
+	if err != nil {
+		cleanup()
+		return err
+	}
+	s.checkServers = []any{map[string]any{"name": "whirlwind_checks", "command": "node", "args": []string{script, "--direct", descriptor}, "env": []any{}}}
 	return nil
 }
 

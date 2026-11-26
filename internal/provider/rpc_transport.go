@@ -99,7 +99,7 @@ func (r *RPC) finishRead(e error) {
 	r.mu.Unlock()
 	r.cancel()
 	r.callbacks.Wait()
-	release, exitErr := process.WaitForDrain(r.cmd)
+	code, release, exitErr := r.drain()
 	if release != nil && r.afterDrain != nil {
 		if cleanupErr := r.afterDrain(); cleanupErr != nil {
 			cleanupErr = errors.Join(process.ErrCleanup, fmt.Errorf("sandbox runtime cleanup failed: %w", cleanupErr))
@@ -120,7 +120,7 @@ func (r *RPC) finishRead(e error) {
 		release()
 	}
 	if r.observe != nil {
-		exit := map[string]any{"exit_code": r.cmd.ProcessState.ExitCode(), "cleanup_verified": r.cleanupErr == nil}
+		exit := map[string]any{"exit_code": code, "cleanup_verified": r.cleanupErr == nil}
 		if r.cleanupErr != nil {
 			exit["cleanup_error"] = r.cleanupErr.Error()
 		}

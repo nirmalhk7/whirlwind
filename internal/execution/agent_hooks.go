@@ -39,7 +39,7 @@ func RunAgentHooks[T any](
 	observe func(event string, err error),
 ) (result T, err error) {
 	hookExecution := agentHookExecution{profile: profile, policy: projectPolicy, observe: observe}
-	if !IsNonoLauncher(profile.Launcher) {
+	if !IsNonoLauncher(profile.Launcher) && !IsDirectLauncher(profile.Launcher) {
 		return result, fmt.Errorf("%w: agent lifecycle hooks require native nono", ErrSandbox)
 	}
 	var feedback string
@@ -143,7 +143,9 @@ func agentHookProfile(snapshot string, agent Profile, p model.Policy, event stri
 	if err != nil {
 		return Profile{}, err
 	}
-	profile.Launcher = agent.Launcher
+	if IsNonoLauncher(agent.Launcher) {
+		profile.Launcher = agent.Launcher
+	}
 	profile.LifecycleHook = &lifecycleHook{Event: event, Checks: prepared}
 	return profile, nil
 }

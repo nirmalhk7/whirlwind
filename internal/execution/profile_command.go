@@ -17,8 +17,21 @@ const (
 	sandboxWrappedErrorFormat = "%w: %v"
 )
 
-// Command never starts the target directly. Missing runtime or unsupported hosts fail closed.
+// Command uses the selected backend and keeps all children under process supervision.
 func Command(ctx context.Context, command []string, p Profile) (*exec.Cmd, error) {
+	enabled, err := SandboxEnabled()
+	if err != nil {
+		return nil, err
+	}
+	if p.OfflineACP() {
+		return nil, fmt.Errorf("%w: offline ACP is available only through the supervised container transport", ErrSandbox)
+	}
+	if IsDirectLauncher(p.Launcher) {
+		if enabled || !p.direct {
+			return nil, fmt.Errorf("%w: direct execution requires a provider profile selected with WHIRLWIND_SANDBOX=off", ErrSandbox)
+		}
+		return directCommand(ctx, command, p)
+	}
 	node, args, err := prepareSandboxCommand(command, p)
 	if err != nil {
 		return nil, err
@@ -55,13 +68,13 @@ func secretEnvironmentName(name string) bool {
 }
 
 func openShellLauncher(launcher string) bool {
-	return strings.Contains(filepath.ToSlash(launcher), "/bridges/openshell/")
+	return !IsDirectLauncher(launcher) && strings.Contains(filepath.ToSlash(launcher), "/bridges/openshell/")
 }
 
 func IsOpenShellLauncher(launcher string) bool { return openShellLauncher(launcher) }
 
 func IsNonoLauncher(launcher string) bool {
-	return strings.Contains(filepath.ToSlash(launcher), "/bridges/nono/")
+	return !IsDirectLauncher(launcher) && strings.Contains(filepath.ToSlash(launcher), "/bridges/nono/")
 }
 
 func proxyLauncher(launcher string) bool {

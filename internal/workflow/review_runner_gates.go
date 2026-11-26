@@ -35,7 +35,7 @@ func (step *taskStep) qualifiedRunnerReport(manifest verification.JobManifest, r
 
 func runnerChecksNeedBaseline(checks []model.Check) bool {
 	for _, check := range checks {
-		if verification.IsQltyHeadDiffCommand(check.Command) {
+		if verification.IsQltyHeadDiffCommand(check.Command) || model.IsPinnedOfflineQltyCheck(check) {
 			continue
 		}
 		if check.ReportFormat == "sarif" || isQltyCommand(check.Command) {
