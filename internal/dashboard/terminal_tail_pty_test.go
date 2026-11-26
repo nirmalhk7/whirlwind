@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -27,6 +28,12 @@ func TestTerminalTailKeysInRealPTY(t *testing.T) {
 		after, err := unix.IoctlGetTermios(fd, tailGetTermios)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if runtime.GOOS == "darwin" {
+			// XNU sets this kernel-owned flag when canonical input resumes.
+			// The next input operation clears it.
+			before.Lflag &^= unix.PENDIN
+			after.Lflag &^= unix.PENDIN
 		}
 		if *after != *before {
 			t.Fatalf("log viewer did not restore terminal settings: before=%+v after=%+v", before, after)
