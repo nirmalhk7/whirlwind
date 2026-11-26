@@ -19,11 +19,10 @@ import (
 func optionalCheckFixture(t *testing.T, optionalExit string, additional ...model.Check) (*Engine, model.Project, model.ExecutionPlan, string) {
 	t.Helper()
 	e, idea := approvedIdeaPlannerFixture(t)
-	installNativeParityVerifier(t)
 	ctx := context.Background()
 	optional := false
 	checks := append([]model.Check{{Name: "advisory", Command: []string{"sh", "-c", "exit " + optionalExit}, TimeoutSeconds: 5, Required: &optional}}, additional...)
-	project := configureQualifiedFixtureChecks(t, e, idea.ProjectID, checks)
+	project := configureFixtureChecks(t, e, idea.ProjectID, checks)
 	var launches atomic.Int32
 	e.Adapter = func(model.Provider) provider.Adapter { return markdownPlannerAdapter(t, &launches) }
 	e.intakeApprovedIdeas(ctx)
@@ -32,6 +31,8 @@ func optionalCheckFixture(t *testing.T, optionalExit string, additional ...model
 		t.Fatal(err)
 	}
 	plan, version := localStoredTask(t, e, id)
+	installNativeParityVerifier(t)
+	project = qualifyConfiguredFixtureChecks(t, e, project, checks)
 	if err := e.ReviewLocalPlan(ctx, plan.ID, version, "approve", plan.PlanDocument.Hash, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -78,17 +79,16 @@ func configureFixtureChecks(t *testing.T, e *Engine, projectID string, checks []
 	return project
 }
 
-func configureQualifiedFixtureChecks(t *testing.T, e *Engine, projectID string, checks []model.Check) model.Project {
+func qualifyConfiguredFixtureChecks(t *testing.T, e *Engine, project model.Project, checks []model.Check) model.Project {
 	t.Helper()
-	project := configureFixtureChecks(t, e, projectID, checks)
 	for _, check := range checks {
 		if !isQltyCommand(check.Command) {
 			continue
 		}
 		project.QualityIdentity = qualifyNativeFixtureScanner(t, project, check)
-		row, err := e.Store.Get(t.Context(), "projects", projectID)
+		row, err := e.Store.Get(t.Context(), "projects", project.ID)
 		requireWorkflowSuccess(t, err)
-		requireWorkflowSuccess(t, e.Store.Put(t.Context(), "projects", projectID, project, row.Version))
+		requireWorkflowSuccess(t, e.Store.Put(t.Context(), "projects", project.ID, project, row.Version))
 		break
 	}
 	return project

@@ -25,14 +25,13 @@ const (
 func acceptedParityDeliveryFixture(t *testing.T) (*Engine, model.ExecutionPlan, model.Project, model.Record) {
 	t.Helper()
 	e, idea := approvedIdeaPlannerFixture(t)
+	checks := []model.Check{cleanQltyFixtureCheck(t)}
+	project := configureFixtureChecks(t, e, idea.ProjectID, checks)
+	draft := pendingCodingPairForIdea(t, e, idea)
 	installNativeParityVerifier(t)
-	configureQualifiedFixtureChecks(t, e, idea.ProjectID, []model.Check{cleanQltyFixtureCheck(t)})
-	plan := approveCodingPair(t, e, pendingCodingPairForIdea(t, e, idea))
+	project = qualifyConfiguredFixtureChecks(t, e, project, checks)
+	plan := approveCodingPair(t, e, draft)
 	ctx := context.Background()
-	project, err := e.Project(ctx, plan.ProjectID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	plan.Worktree = project.Path
 	plan.Base = submissionGit(t, project.Path, finalizerFixtureRevParse, "HEAD")
 	if err := os.WriteFile(filepath.Join(project.Path, finalizerFixtureResultPath), []byte("accepted result\n"), 0600); err != nil {

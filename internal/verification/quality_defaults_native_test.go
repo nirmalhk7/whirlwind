@@ -66,7 +66,7 @@ func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	manifest.Commands = []JobCommand{{Name: "quality", Mode: "autofix", Command: argv, ReportFormat: "sarif", TimeoutSeconds: 600}}
 	report, err = RunLocalJob(context.Background(), binary, manifest, nil)
 	if err != nil || report.Passed || len(report.Results) != 1 || report.Results[0].Status != "fail" {
-		t.Fatalf("default scanners did not report intentional canaries: %+v %v", report, err)
+		failNativeQltyJob(t, manifest, "default scanners did not report intentional canaries", report, err)
 	}
 	output, _, err := ReadJobStreams(manifest.Root, 0)
 	requireVerificationSuccess(t, err)
@@ -78,7 +78,7 @@ func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	manifest.Quality = &qualifiedSnapshot
 	candidateReport, candidateErr := RunLocalJob(context.Background(), binary, manifest, nil)
 	if candidateErr != nil || candidateReport.QualityIdentity == nil || !model.SameQualityIdentity(report.QualityIdentity, candidateReport.QualityIdentity) {
-		t.Fatalf("candidate did not reuse qualified runtime identity: %+v %v", candidateReport, candidateErr)
+		failNativeQltyJob(t, manifest, "candidate did not reuse qualified runtime identity", candidateReport, candidateErr)
 	}
 	candidateOutput, _, err := ReadJobStreams(manifest.Root, 0)
 	requireVerificationSuccess(t, err)
@@ -89,6 +89,12 @@ func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	if output := nativeDefaultGit(t, manifest.Repository, "status", "--porcelain"); output != "" {
 		t.Fatalf("default scanners changed original source: %s", output)
 	}
+}
+
+func failNativeQltyJob(t *testing.T, manifest JobManifest, reason string, report JobReport, err error) {
+	t.Helper()
+	_, diagnostics, streamErr := ReadJobStreams(manifest.Root, 0)
+	t.Fatalf("%s: %+v %v; scanner diagnostics: %s (read error: %v)", reason, report, err, diagnostics[:min(2048, len(diagnostics))], streamErr)
 }
 
 func writeNativeDefaultProbe(t *testing.T, manifest *JobManifest) {

@@ -97,9 +97,8 @@ suggested = "targets"
 	snapshot := qualifyNativeScopeScanner(t, binary, manifest, root, configuration)
 	manifest.Quality = &snapshot
 	report, err := RunLocalJob(t.Context(), binary, manifest, nil)
-	requireVerificationSuccess(t, err)
-	if !model.SameQualityIdentity(snapshot.Identity, report.QualityIdentity) {
-		t.Fatalf("scope scan did not use its approved scanner runtime: %+v", report.Results)
+	if err != nil || !model.SameQualityIdentity(snapshot.Identity, report.QualityIdentity) {
+		failNativeQltyJob(t, manifest, "scope scan did not use its approved scanner runtime", report, err)
 	}
 	assertQltyProbeReport(t, manifest.Root, argv, tracked, newFile, unchanged)
 	if git(qltyProbeRevParse, "HEAD") != manifest.CandidateCommit || git("status", "--porcelain", "-uall") != "" {
@@ -142,9 +141,8 @@ func qualifyNativeScopeScanner(t *testing.T, binary string, candidate JobManifes
 	manifest.Commands = slices.Clone(candidate.Commands)
 	manifest.Commands[0].TimeoutSeconds = 600
 	report, err = RunLocalJob(ctx, binary, manifest, nil)
-	requireVerificationSuccess(t, err)
-	if report.QualityIdentity == nil {
-		t.Fatalf("scope scanner runtime did not qualify: %+v", report.Results)
+	if err != nil || report.QualityIdentity == nil {
+		failNativeQltyJob(t, manifest, "scope scanner runtime did not qualify", report, err)
 	}
 	snapshot.Identity = report.QualityIdentity
 	return snapshot

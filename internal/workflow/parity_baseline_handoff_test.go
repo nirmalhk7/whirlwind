@@ -18,17 +18,18 @@ import (
 // complete findings can qualify against the approved base at the review boundary.
 func TestParityQltyBaselineAdvisoryReachesReviewerWithoutRewritingRawResults(t *testing.T) {
 	e, idea := approvedIdeaPlannerFixture(t)
-	installNativeParityVerifier(t)
 	ctx := context.Background()
 	const sarif = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty","version":"fixture","semanticVersion":"1.0.0"}},"invocations":[{"executionSuccessful":true}],"results":[{"ruleId":"existing","level":"warning","message":{"text":"Existing finding"},"partialFingerprints":{"primaryLocationLineHash":"stable"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"file.txt"},"region":{"startLine":1}}}]}]}]}`
 	tool := writeQltyFixture(t, sarif, "1", "")
 	check := model.Check{Name: "quality", Command: []string{tool, "check", "--sarif"}, TimeoutSeconds: 5, ReportFormat: "sarif"}
-	project := configureQualifiedFixtureChecks(t, e, idea.ProjectID, []model.Check{check})
+	project := configureFixtureChecks(t, e, idea.ProjectID, []model.Check{check})
 	var launches atomic.Int32
 	e.Adapter = func(model.Provider) provider.Adapter { return markdownPlannerAdapter(t, &launches) }
 	e.intakeApprovedIdeas(ctx)
 	requireWorkflowSuccess(t, e.Step(ctx, model.PlanID("idea:"+idea.ID)))
 	plan, version := localStoredTask(t, e, model.PlanID("idea:"+idea.ID))
+	installNativeParityVerifier(t)
+	project = qualifyConfiguredFixtureChecks(t, e, project, []model.Check{check})
 	requireWorkflowSuccess(t, e.ReviewLocalPlan(ctx, plan.ID, version, "approve", plan.PlanDocument.Hash, ""))
 	plan, _ = localStoredTask(t, e, plan.ID)
 	plan.Worktree = project.Path
