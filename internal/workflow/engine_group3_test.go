@@ -46,9 +46,9 @@ func TestCriticalChangeWaitsForHumanBeforeLocalFinalization(t *testing.T) {
 // TestProductiveReviewHasNoPassCap verifies a task can be accepted after more than one hundred review passes.
 func TestProductiveReviewHasNoPassCap(t *testing.T) {
 	if runtime.GOOS == "darwin" {
-		e, candidate, project, marker := nativeAgenticReviewCandidate(t)
-		acceptReviewAfterOneHundredPasses(t, e, candidate)
-		finishNativeAgenticDelivery(t, e, candidate, project, marker)
+		run := nativeAgenticReviewCandidate(t)
+		acceptReviewAfterOneHundredPasses(t, run.engine, run.task)
+		run.finishDelivery(t)
 		return
 	}
 	fixture := newAgenticReviewFixture(t, false)
