@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
+	"whirlwind/internal/execution"
 	"whirlwind/internal/model"
 	"whirlwind/internal/process"
 	"whirlwind/internal/provider"
@@ -37,6 +39,11 @@ func (c config) openState() (s *store.Store, lock *os.File, err error) {
 	return s, lock, err
 }
 func (c config) prepareRegistry() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	if err := execution.RecoverOfflineACP(ctx, execution.OfflineACPRegistry(c.data)); err != nil {
+		return fmt.Errorf("recover offline ACP worker: %w", err)
+	}
 	registry := filepath.Join(c.data, "processes")
 	if err := process.Reap(registry); err != nil {
 		return err

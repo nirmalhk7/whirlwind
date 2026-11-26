@@ -23,6 +23,9 @@ func (a ProcessAdapter) Run(ctx context.Context, in Input, h Hooks) (result Outp
 	}
 	if !in.ReadinessOnly && !in.CatalogOnly && in.Purpose != "provider_test" {
 		if len(in.AgentHooks.Before)+len(in.AgentHooks.After) > 0 {
+			if in.Execution != nil && in.Execution.OfflineACP() {
+				return Output{SessionID: in.SessionID}, errors.New("offline ACP cannot run provider lifecycle hooks")
+			}
 			return a.runWithAgentHooks(ctx, p, in, h)
 		}
 	}

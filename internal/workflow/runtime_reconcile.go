@@ -48,6 +48,9 @@ func attemptRuntimeKind(profile *execution.Profile) (string, string) {
 	if profile == nil || profile.Launcher == "" {
 		return "unknown", ""
 	}
+	if profile.OfflineACP() {
+		return "offline-acp", ""
+	}
 	launcher := filepath.Clean(profile.Launcher)
 	if execution.IsDirectLauncher(launcher) {
 		return "direct", launcher
@@ -103,6 +106,9 @@ func hasOpenShellIdentity(attempt model.Attempt) bool {
 }
 
 func (a *agentRun) reconcilePriorRuntime(ctx context.Context, attempt model.Attempt) error {
+	if attempt.RuntimeKind == "offline-acp" {
+		return execution.CheckOfflineACPRecovery(execution.OfflineACPRegistry(a.Root))
+	}
 	if attempt.RuntimeKind == "direct" || (attempt.RuntimeKind == "nono" && attempt.LifecycleFile == "") {
 		if err := reconcileLocalRuntimeProcessTree(filepath.Join(a.Root, "processes")); err != nil {
 			return err

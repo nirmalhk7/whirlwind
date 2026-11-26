@@ -32,6 +32,7 @@ type MCPBroker struct {
 	Path       string `json:"path"`
 }
 type Profile struct {
+	offlineACP          *offlineACPProfile
 	direct              bool
 	ProtectedFiles      []string                           `json:"protected_files,omitempty"`
 	LifecycleHook       *lifecycleHook                     `json:"lifecycle_hook,omitempty"`

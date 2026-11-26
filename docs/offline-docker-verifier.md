@@ -128,3 +128,32 @@ checks their hashes on replay. A failed scan can still write a complete report
 with `passed: false`. This standalone report has no managed-project or plan
 identity. Managed qualification, review and Finalizer still require their own
 approved evidence.
+
+## Read-only ACP fixture worker
+
+The supervisor can run an operator-selected read-only ACP fixture on a
+disposable Linux worker. Use a separate local checkout with no Git remotes
+and an isolated supervisor data directory. Set these variables in the
+supervisor's environment before `./bin/whirlwind start`:
+
+- `WHIRLWIND_SANDBOX=off`
+- `WHIRLWIND_OFFLINE_ACP_CHECKOUT` to the absolute disposable checkout
+- `WHIRLWIND_OFFLINE_ACP_FIXTURE` to an operator-controlled executable outside
+  that checkout and the supervisor data directory
+- `WHIRLWIND_OFFLINE_ACP_IMAGE` to the digest of a compatible, locally
+  preloaded Docker image
+
+Use the fixture path as the ACP provider's sole command argument. Keep that
+provider free of credentials and sandbox grants. The worker mounts the
+fixture and its assigned source directory read-only. It cannot use network
+access, host callbacks or the Docker socket. This path covers a read-only
+fixture such as Ideation. Coding, managed scanner qualification and delivery
+require their existing approved paths.
+
+The supervisor saves a private ownership record before asking rootless Docker
+to create a worker. It checks the daemon, container identity, confinement
+settings and mounts before launch. At exit it checks the runtime's terminal
+state, removes that exact container and confirms removal. Restart recovers
+only workers that match their records. An ambiguous create, mismatched owner
+or unavailable daemon keeps recovery blocked. The fixture transport does not
+inherit host process capabilities.

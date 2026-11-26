@@ -27,7 +27,7 @@ type Message struct {
 }
 type Handler func(context.Context, Message) (any, error)
 type RPC struct {
-	cmd         *exec.Cmd
+	drain       func() (int, func(), error)
 	input       io.WriteCloser
 	write       sync.Mutex
 	mu          sync.Mutex
@@ -62,6 +62,9 @@ func Start(ctx context.Context, command []string, cwd string, handler Handler, o
 // StartWithProfile is the enforced provider/terminal execution entry point.
 func StartWithProfile(ctx context.Context, command []string, profile execution.Profile, handler Handler, observers ...func(string, any)) (*RPC, error) {
 	ctx, cancel := context.WithCancel(ctx)
+	if profile.OfflineACP() {
+		return startOfflineACPRPC(ctx, cancel, command, profile, handler, observers...)
+	}
 	cmd, err := execution.Command(ctx, command, profile)
 	if err != nil {
 		cancel()
@@ -102,7 +105,15 @@ func startCommandWithCleanup(ctx context.Context, cancel context.CancelFunc, cmd
 		return nil, e
 	}
 	pipes.closeWriters()
-	r := &RPC{cmd: cmd, input: pipes.input, pending: map[string]chan Message{}, done: make(chan struct{}), ctx: ctx, cancel: cancel, handler: handler, afterDrain: afterDrain}
+	drain := func() (int, func(), error) {
+		release, err := process.WaitForDrain(cmd)
+		return cmd.ProcessState.ExitCode(), release, err
+	}
+	return startRPCTransport(ctx, cancel, pipes, handler, afterDrain, drain, observers...), nil
+}
+
+func startRPCTransport(ctx context.Context, cancel context.CancelFunc, pipes processPipes, handler Handler, afterDrain func() error, drain func() (int, func(), error), observers ...func(string, any)) *RPC {
+	r := &RPC{drain: drain, input: pipes.input, pending: map[string]chan Message{}, done: make(chan struct{}), ctx: ctx, cancel: cancel, handler: handler, afterDrain: afterDrain}
 	if len(observers) > 0 {
 		r.observe = observers[0]
 	}
@@ -115,7 +126,7 @@ func startCommandWithCleanup(ctx context.Context, cancel context.CancelFunc, cmd
 		defer closeRPCReader("output", pipes.output)
 		r.read(pipes.output)
 	}()
-	return r, nil
+	return r
 }
 
 // read decodes provider frames, dispatches callbacks, routes replies to waiting calls, and cancels and reaps the process on stream termination.

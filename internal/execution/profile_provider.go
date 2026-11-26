@@ -26,6 +26,9 @@ func ForProvider(cwd string, readOnly bool, hash string, policy *model.SandboxPo
 		p.Version = "direct-v1"
 		p.Launcher = filepath.Join(filepath.Dir(p.Launcher), directLauncherName)
 	}
+	if err := p.selectOfflineACP(command, policy); err != nil {
+		return Profile{}, err
+	}
 	b, _ := json.Marshal(command)
 	sum := sha256.Sum256(b)
 	p.CommandHash = hex.EncodeToString(sum[:])
