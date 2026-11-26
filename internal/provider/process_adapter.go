@@ -55,13 +55,25 @@ func (a ProcessAdapter) runResolved(ctx context.Context, p model.Provider, in In
 	if cleanup != nil {
 		defer cleanup()
 	}
+	hooks, deferredDelivery := stageHookedFinalization(s.hooks, profile.OfflineACP() && s.hasFinalizationTool())
+	s.hooks = hooks
 	rpc, err := StartWithProfile(ctx, p.Command, profile, s.handle, h.Event)
 	if err != nil {
 		return s.output, actionableACPError(p, err)
 	}
 	transferred = true
 	s.rpc = rpc
-	defer func() { err = errors.Join(err, rpc.Close()) }()
+	defer func() {
+		err = errors.Join(err, rpc.Close())
+		if rpc.offlineWrites != nil {
+			err = errors.Join(err, rpc.offlineWrites(err == nil && ctx.Err() == nil))
+		}
+		if err == nil {
+			if commit := deferredDelivery(result); commit != nil {
+				err = commit(ctx)
+			}
+		}
+	}()
 	err = authenticationACPError(p, s.runACP())
 	s.mu.Lock()
 	result = s.output
@@ -113,6 +125,9 @@ func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider
 	s.client.input.CWD = profile.CWD
 	if execution.IsDirectLauncher(profile.Launcher) {
 		s.client.input.Execution = profile
+	}
+	if profile.OfflineACP() {
+		return nil, nil
 	}
 	if p.Kind != "acp" && p.Kind != "claude" {
 		return nil, nil

@@ -45,6 +45,7 @@ func (a *agentRun) prepareExecutionProfile(chosen model.Provider) error {
 	if err := a.protectHookSettings(&profile); err != nil {
 		return err
 	}
+	profile.BindOfflineACPRole(a.input.Role, a.input.Purpose)
 	a.input.ExecutionProfile = profile.Digest()
 	scope := sha256.Sum256([]byte(a.task.ID + ":" + fmt.Sprint(a.task.PlanVersion) + ":" + a.input.Role + ":" + chosen.ID + ":" + a.input.Model + ":" + a.input.Purpose + ":" + a.input.UnitID + ":" + a.input.ExecutionProfile))
 	profile.RuntimeDir = filepath.Join(a.Root, "sandbox", fmt.Sprintf("%x", scope[:]))

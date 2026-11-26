@@ -145,11 +145,16 @@ func offlineACPConfig(r offlineACPRecord, p offlineACPProfile, mounts []offlineA
 	}
 }
 
-func (api *offlineACPAPI) start(ctx context.Context, root string, r offlineACPRecord, p offlineACPProfile) (_ *OfflineACPConnection, failure error) {
+func (api *offlineACPAPI) start(ctx context.Context, root string, r offlineACPRecord, p offlineACPProfile, stage *offlineACPStage) (_ *OfflineACPConnection, failure error) {
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Join(err, removeOfflineACPRecord(root, r))
 	}
 	mounts := []offlineACPMount{offlineACPBind(p.cwd, p.cwd), offlineACPBind(p.program, offlineACPProgram)}
+	if stage != nil {
+		writeMount := offlineACPBind(stage.source, stage.target)
+		writeMount.ReadOnly = false
+		mounts = append(mounts, writeMount)
+	}
 	var created struct{ ID string }
 	defer func() {
 		if failure != nil {
@@ -238,7 +243,7 @@ func (c offlineACPContainer) verifyConfig(p offlineACPProfile, mounts []offlineA
 			continue
 		}
 		if !slices.ContainsFunc(mounts, func(want offlineACPMount) bool {
-			return m.Type == "bind" && m.Source == want.Source && m.Destination == want.Target && !m.RW
+			return m.Type == "bind" && m.Source == want.Source && m.Destination == want.Target && m.RW != want.ReadOnly
 		}) {
 			return errors.New("offline ACP runtime exposed an unexpected mount")
 		}

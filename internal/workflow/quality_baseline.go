@@ -52,7 +52,7 @@ func scannerBaselineChecks(checks []model.Check) []model.Check {
 	out := make([]model.Check, 0, len(checks))
 	available := map[string]bool{}
 	for _, check := range checks {
-		if verification.IsQltyHeadDiffCommand(check.Command) || slices.ContainsFunc(check.DependsOn, func(name string) bool { return !available[name] }) {
+		if verification.IsQltyHeadDiffCommand(check.Command) || model.IsPinnedOfflineQltyCheck(check) || slices.ContainsFunc(check.DependsOn, func(name string) bool { return !available[name] }) {
 			continue
 		}
 		available[check.Name] = true

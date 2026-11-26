@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"slices"
 	"time"
+
+	"whirlwind/internal/model"
 )
 
 // LinuxQltyProbePurpose is operator-only qualification. It has no approved
@@ -20,11 +22,11 @@ import (
 const LinuxQltyProbePurpose = "linux_qlty_probe"
 
 const (
-	linuxQltyProbeImage   = "golang@sha256:87c65a688975c0b1d4585d204874c45ca78354670e3a5f11368c5a492303d696"
+	linuxQltyProbeImage   = model.PinnedOfflineQltyImage
 	linuxQltyProbeVersion = "0.668.0"
 	linuxQltyProbeBinary  = "33bb7f1107b3a9626aaad4cf629346fd300aa6e63612075af12febdaed549d4d"
 	gitleaksProbeBinary   = "2d248645545650fa16eaa61424c86bd2d22646a7205a06b5942d86e8a48c0dd1"
-	linuxQltyProbeName    = "whirlwind-linux-qlty-probe"
+	linuxQltyProbeName    = model.PinnedOfflineQltyCommand
 	probeDriverSuccess    = "qlty:message:invocation.concluded.success"
 )
 
@@ -67,7 +69,7 @@ func linuxQltyProbeConfiguration() string {
 
 func (m JobManifest) validateLinuxQltyProbe() error {
 	if m.ProjectID != "" || m.PlanID != "" || m.PlanVersion != 0 || m.PlanHash != "" || m.OperationID != "" ||
-		m.PolicyHash != "" || m.OfflineImageID != "" || m.ConfigurationHash != linuxQltyProbeConfiguration() {
+		m.PolicyHash != "" || m.OfflineImageID != "" || m.OfflineQltyConfiguration != "" || m.ConfigurationHash != linuxQltyProbeConfiguration() {
 		return errors.New("Linux Qlty probe has no project, qualification, or plan authority")
 	}
 	if m.OfflineDockerImage != linuxQltyProbeImage || m.Launcher != "" || m.Quality != nil || m.Sandbox != nil ||

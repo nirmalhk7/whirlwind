@@ -57,6 +57,16 @@ func compareBaseline(base, head Report, checks []model.Check) Report {
 }
 
 func qualifyBaselineResult(previous *Result, result *Result, checks []model.Check) bool {
+	for _, check := range checks {
+		if check.Name == result.Name && model.IsPinnedOfflineQltyCheck(check) && model.IsPinnedOfflineQlty(result.Command) {
+			if result.Passed && result.ExitCode != nil && *result.ExitCode == 0 && !result.Truncated && validateLinuxQltyProbeOutput(result.Output) == nil {
+				return true
+			}
+			result.Passed = false
+			result.Error = joinBaselineError(result.Error, "approved strict offline Qlty did not produce a clean scan")
+			return false
+		}
+	}
 	advisory := advisoryFailureForChecks(checks, *result)
 	if err := compareBaselineResult(previous, result); err != nil && !advisory {
 		result.Passed = false

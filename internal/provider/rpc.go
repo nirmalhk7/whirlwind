@@ -27,25 +27,26 @@ type Message struct {
 }
 type Handler func(context.Context, Message) (any, error)
 type RPC struct {
-	drain       func() (int, func(), error)
-	input       io.WriteCloser
-	write       sync.Mutex
-	mu          sync.Mutex
-	pending     map[string]chan Message
-	next        atomic.Int64
-	done        chan struct{}
-	ctx         context.Context
-	cancel      context.CancelFunc
-	handler     Handler
-	afterDrain  func() error
-	err         error
-	cleanupErr  error
-	once        sync.Once
-	observe     func(string, any)
-	diagnostics sync.WaitGroup
-	callbacks   sync.WaitGroup
-	ready       bool
-	stderrTail  string
+	drain         func() (int, func(), error)
+	offlineWrites func(bool) error
+	input         io.WriteCloser
+	write         sync.Mutex
+	mu            sync.Mutex
+	pending       map[string]chan Message
+	next          atomic.Int64
+	done          chan struct{}
+	ctx           context.Context
+	cancel        context.CancelFunc
+	handler       Handler
+	afterDrain    func() error
+	err           error
+	cleanupErr    error
+	once          sync.Once
+	observe       func(string, any)
+	diagnostics   sync.WaitGroup
+	callbacks     sync.WaitGroup
+	ready         bool
+	stderrTail    string
 }
 
 // Start starts a registered provider process and initializes newline-delimited JSON-RPC transport with a background reader.
@@ -196,7 +197,7 @@ func requestHasSideEffect(message Message) bool {
 		return false
 	}
 	switch message.Method {
-	case "fs/write_text_file", "terminal/create", "terminal/kill", "terminal/release", "tools/call", "item/tool/call", "whirlwind/run_check":
+	case "fs/write_text_file", "terminal/create", "terminal/kill", "terminal/release", "tools/call", "item/tool/call", "whirlwind/run_check", "whirlwind/offline_finalize":
 		return true
 	default:
 		return false

@@ -22,27 +22,28 @@ import (
 // JobManifest is trusted input from the local supervisor or an offline check
 // operator. It has no store handle or authority to change workflow state.
 type JobManifest struct {
-	Purpose            string                 `json:"purpose,omitempty"`
-	ProjectID          string                 `json:"project_id,omitempty"`
-	OperationID        string                 `json:"operation_id,omitempty"`
-	Quality            *model.QualitySnapshot `json:"quality,omitempty"`
-	Version            int                    `json:"version"`
-	JobID              string                 `json:"job_id"`
-	PlanID             string                 `json:"plan_id"`
-	PlanVersion        int                    `json:"plan_version"`
-	PlanHash           string                 `json:"plan_hash"`
-	ConfigurationHash  string                 `json:"configuration_hash"`
-	CandidateCommit    string                 `json:"candidate_commit"`
-	CandidateTree      string                 `json:"candidate_tree"`
-	BaseCommit         string                 `json:"base_commit"`
-	Repository         string                 `json:"repository"`
-	Root               string                 `json:"root"`
-	Launcher           string                 `json:"launcher"`
-	OfflineDockerImage string                 `json:"offline_docker_image,omitempty"`
-	OfflineImageID     string                 `json:"offline_image_id,omitempty"`
-	PolicyHash         string                 `json:"policy_hash,omitempty"`
-	Sandbox            *model.SandboxPolicy   `json:"sandbox,omitempty"`
-	Commands           []JobCommand           `json:"commands"`
+	Purpose                  string                 `json:"purpose,omitempty"`
+	ProjectID                string                 `json:"project_id,omitempty"`
+	OperationID              string                 `json:"operation_id,omitempty"`
+	Quality                  *model.QualitySnapshot `json:"quality,omitempty"`
+	Version                  int                    `json:"version"`
+	JobID                    string                 `json:"job_id"`
+	PlanID                   string                 `json:"plan_id"`
+	PlanVersion              int                    `json:"plan_version"`
+	PlanHash                 string                 `json:"plan_hash"`
+	ConfigurationHash        string                 `json:"configuration_hash"`
+	CandidateCommit          string                 `json:"candidate_commit"`
+	CandidateTree            string                 `json:"candidate_tree"`
+	BaseCommit               string                 `json:"base_commit"`
+	Repository               string                 `json:"repository"`
+	Root                     string                 `json:"root"`
+	Launcher                 string                 `json:"launcher"`
+	OfflineQltyConfiguration string                 `json:"offline_qlty_configuration,omitempty"`
+	OfflineDockerImage       string                 `json:"offline_docker_image,omitempty"`
+	OfflineImageID           string                 `json:"offline_image_id,omitempty"`
+	PolicyHash               string                 `json:"policy_hash,omitempty"`
+	Sandbox                  *model.SandboxPolicy   `json:"sandbox,omitempty"`
+	Commands                 []JobCommand           `json:"commands"`
 }
 
 type JobCommand struct {
@@ -121,7 +122,7 @@ func (m JobManifest) validateDefinition() error {
 	if m.Version != 1 || !jobIdentifier.MatchString(m.JobID) {
 		return errors.New("verification manifest requires supported version and job identity")
 	}
-	if m.OfflineDockerImage == "" && (m.OfflineImageID != "" || m.PolicyHash != "") {
+	if m.OfflineDockerImage == "" && (m.OfflineImageID != "" || m.PolicyHash != "" || m.OfflineQltyConfiguration != "") {
 		return errors.New("offline authority requires the offline Docker backend")
 	}
 	if m.Purpose == LinuxQltyProbePurpose {

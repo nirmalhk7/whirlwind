@@ -98,6 +98,7 @@ func (run *verificationRun) bindOfflineManifest(m *verification.JobManifest, pol
 	}
 	m.ProjectID, m.PolicyHash = project.ID, project.PolicyHash
 	m.OfflineDockerImage, m.OfflineImageID = policy.OfflineDockerImage, qualification.ImageID
+	m.BindManagedOfflineQlty()
 	return nil
 }
 

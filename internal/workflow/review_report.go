@@ -210,8 +210,16 @@ func (e *Engine) loadVerificationEvidence(ctx context.Context, task model.Execut
 	}
 	if project.Policy.OfflineDockerImage != "" {
 		step := taskStep{Engine: e, ctx: ctx, task: task, project: project}
-		if err := step.validateReviewRunnerReport(evidence.Provenance.Head); err != nil {
+		qualified, err := step.validatedReviewRunnerReport(evidence.Provenance.Head)
+		if err != nil {
 			return verification.Report{}, model.Provenance{}, err
+		}
+		for _, result := range qualified.Results {
+			if model.IsPinnedOfflineQlty(result.Command) && result.Passed {
+				// The complete runner must match approved checks and retains the
+				// authenticated scanner's stream digests and exact candidate.
+				return evidence.Report, evidence.Provenance, nil
+			}
 		}
 	}
 	if err := e.validateQltyEvidence(ctx, task, evidence.Report); err != nil {

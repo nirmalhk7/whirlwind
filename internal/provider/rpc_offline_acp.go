@@ -39,12 +39,17 @@ func startOfflineACPRPC(ctx context.Context, cancel context.CancelFunc, command 
 	}
 	// The fixture may emit ACP output. It cannot execute host callbacks.
 	pipes := processPipes{input: conn, output: stdout, stderr: stderr}
-	return startRPCTransport(ctx, cancel, pipes, offlineACPNotifications(handler), nil, drain, observers...), nil
+	rpc := startRPCTransport(ctx, cancel, pipes, offlineACPNotifications(handler), nil, drain, observers...)
+	rpc.offlineWrites = conn.FinishWrites
+	return rpc, nil
 }
 
 func offlineACPNotifications(handle Handler) Handler {
 	return func(ctx context.Context, message Message) (any, error) {
 		if len(message.ID) != 0 {
+			if message.Method == "whirlwind/offline_finalize" && handle != nil {
+				return handle(ctx, message)
+			}
 			return nil, errors.New("offline ACP cannot request host callbacks")
 		}
 		if handle == nil || message.Method != "session/update" {

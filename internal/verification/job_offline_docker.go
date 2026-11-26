@@ -23,8 +23,11 @@ func (m JobManifest) validateOfflineDocker() error {
 	if err := m.validateOfflineAuthority(); err != nil {
 		return err
 	}
+	if err := m.validateManagedOfflineQlty(); err != nil {
+		return err
+	}
 	for _, check := range m.Commands {
-		if err := model.ValidateOfflineDockerCheck(model.Check{Name: check.Name, Mode: check.Mode, Command: check.Command, OutputPaths: check.OutputPaths, Environment: check.Environment, ReportFormat: check.ReportFormat, Required: check.Required}); err != nil {
+		if err := model.ValidateOfflineDockerCheck(model.Check{Name: check.Name, Mode: check.Mode, Command: check.Command, OutputPaths: check.OutputPaths, Environment: check.Environment, ReportFormat: check.ReportFormat, Required: check.Required, DependsOn: check.DependsOn}); err != nil {
 			return err
 		}
 	}
@@ -136,7 +139,7 @@ func (r *jobRunner) runOfflineDockerCheck(ctx context.Context, stage string, ind
 	if result.Truncated && (result.Status == "pass" || result.Status == "fail") {
 		result.Passed, result.Status, result.Error = false, "error", "offline command exceeded retained stream limits"
 	}
-	if r.manifest.Purpose == LinuxQltyProbePurpose && result.Passed {
+	if r.manifest.runsPinnedOfflineQlty(command) && result.Passed {
 		if err := validateLinuxQltyProbeOutput(output.String()); err != nil {
 			result.Passed, result.Status, result.Error = false, "error", err.Error()
 		}
@@ -148,7 +151,7 @@ func (r *jobRunner) runOfflineDockerCheck(ctx context.Context, stage string, ind
 
 func (r *jobRunner) runOfflineDockerCommand(ctx context.Context, stage, executionID string, command JobCommand, output, diagnostics *capped) (string, *int, bool, error) {
 	timeout := time.Duration(command.TimeoutSeconds) * time.Second
-	if r.manifest.Purpose != LinuxQltyProbePurpose {
+	if !r.manifest.runsPinnedOfflineQlty(command) {
 		return r.offline.Run(ctx, executionID, stage, command.Command, timeout, output, diagnostics)
 	}
 	bundle, err := r.prepareLinuxQltyBundle(ctx)
@@ -206,7 +209,7 @@ func validateOfflineDockerStreams(m JobManifest, index int, result JobResult) er
 		result.Output != offlinePreview(stdout) || result.Diagnostics != offlinePreview(stderr) {
 		return errors.New("offline Docker verification streams differ from retained evidence")
 	}
-	if m.Purpose == LinuxQltyProbePurpose && result.Status == "pass" {
+	if m.runsPinnedOfflineQlty(m.Commands[index]) && result.Status == "pass" {
 		return validateLinuxQltyProbeOutput(stdout)
 	}
 	return nil
@@ -219,4 +222,33 @@ func offlinePreview(raw string) string {
 func streamHash(p []byte) string {
 	sum := sha256.Sum256(p)
 	return hex.EncodeToString(sum[:])
+}
+
+func (m *JobManifest) BindManagedOfflineQlty() {
+	for _, check := range m.Commands {
+		if model.IsPinnedOfflineQlty(check.Command) {
+			m.OfflineQltyConfiguration = linuxQltyProbeConfiguration()
+		}
+	}
+}
+
+func (m JobManifest) validateManagedOfflineQlty() error {
+	count := 0
+	for _, check := range m.Commands {
+		if model.IsPinnedOfflineQlty(check.Command) {
+			count++
+		}
+	}
+	if count == 0 && m.OfflineQltyConfiguration == "" {
+		return nil
+	}
+	if count != 1 || m.ProjectID == "" || m.OfflineDockerImage != model.PinnedOfflineQltyImage ||
+		m.OfflineQltyConfiguration != linuxQltyProbeConfiguration() {
+		return errors.New("pinned offline Qlty requires the exact approved managed scanner configuration and image")
+	}
+	return nil
+}
+
+func (m JobManifest) runsPinnedOfflineQlty(command JobCommand) bool {
+	return model.IsPinnedOfflineQlty(command.Command) && (m.Purpose == LinuxQltyProbePurpose || m.OfflineQltyConfiguration == linuxQltyProbeConfiguration())
 }

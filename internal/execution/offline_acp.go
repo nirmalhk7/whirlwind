@@ -34,20 +34,20 @@ type offlineACPProfile struct {
 func (p Profile) OfflineACP() bool { return p.offlineACP != nil }
 
 // selectOfflineACP is intentionally limited to a separately configured
-// read-only fixture, one checkout, and an operator-selected executable.
+// fixture, one checkout, and an operator-selected executable.
 func (p *Profile) selectOfflineACP(command []string, policy *model.SandboxPolicy) error {
 	program := os.Getenv("WHIRLWIND_OFFLINE_ACP_FIXTURE")
 	if program == "" || len(command) == 0 || command[0] != program {
 		return nil
 	}
-	if !p.direct || runtime.GOOS != "linux" || len(command) != 1 || !filepath.IsAbs(program) || !p.ReadOnly || policy != nil {
-		return fmt.Errorf("%w: offline ACP requires explicit direct mode and a read-only fixture without sandbox grants", ErrSandbox)
+	if !p.direct || runtime.GOOS != "linux" || len(command) != 1 || !filepath.IsAbs(program) || policy != nil {
+		return fmt.Errorf("%w: offline ACP requires explicit direct mode and a designated fixture without sandbox grants", ErrSandbox)
 	}
 	project, image := os.Getenv("WHIRLWIND_OFFLINE_ACP_CHECKOUT"), os.Getenv("WHIRLWIND_OFFLINE_ACP_IMAGE")
 	registry := os.Getenv("WHIRLWIND_PROCESS_REGISTRY")
-	scratch := filepath.Join(filepath.Dir(registry), "ideation")
-	relative, relationErr := filepath.Rel(scratch, p.CWD)
-	inScratch := filepath.IsAbs(registry) && relationErr == nil && filepath.IsLocal(relative) && relative != "."
+	inScratch := filepath.IsAbs(registry) && slices.ContainsFunc([]string{"ideation", "planning", "worktrees"}, func(name string) bool {
+		return offlineACPChild(filepath.Join(filepath.Dir(registry), name), p.CWD)
+	})
 	if !filepath.IsAbs(project) || !model.IsOfflineDockerImage(image) || (p.CWD != project && !inScratch) {
 		return fmt.Errorf("%w: offline ACP requires the designated checkout and locally pinned image", ErrSandbox)
 	}
@@ -62,6 +62,29 @@ func (p *Profile) selectOfflineACP(command []string, policy *model.SandboxPolicy
 	p.offlineACP = &offlineACPProfile{image: image, project: project, cwd: p.CWD, program: program, programSHA: digest}
 	p.Version = offlineACPVersion + ":" + image + ":" + digest
 	return nil
+}
+
+// BindOfflineACPRole captures the supervisor-owned role before the execution
+// profile is frozen. Standalone probes and all other roles get no write grant.
+func (p *Profile) BindOfflineACPRole(role, purpose string) {
+	if !p.OfflineACP() {
+		return
+	}
+	switch {
+	case role == "plan" && purpose == "idea_planning" && p.ReadOnly:
+		p.offlineACPRole = "planner_output"
+	case role == "code" && !p.ReadOnly:
+		p.offlineACPRole = "coder_documentation"
+	}
+	if p.offlineACPRole != "" {
+		p.Version += ":" + p.offlineACPRole
+	}
+}
+
+func OfflineACPSelected(project string) bool {
+	enabled, err := SandboxEnabled()
+	return err == nil && !enabled && runtime.GOOS == "linux" && project != "" &&
+		os.Getenv("WHIRLWIND_OFFLINE_ACP_CHECKOUT") == project && os.Getenv("WHIRLWIND_OFFLINE_ACP_FIXTURE") != ""
 }
 
 func offlineACPProgramDigest(path string) (string, error) {
@@ -107,15 +130,17 @@ func (r offlineACPRecord) valid() bool {
 
 type OfflineACPConnection struct {
 	io.ReadWriteCloser
-	docker *offlineACPAPI
-	root   string
-	record offlineACPRecord
-	lock   *os.File
+	docker          *offlineACPAPI
+	root            string
+	record          offlineACPRecord
+	stage           *offlineACPStage
+	cleanupVerified bool
+	lock            *os.File
 }
 
 func (p Profile) OpenOfflineACP(ctx context.Context, command []string) (_ *OfflineACPConnection, failure error) {
-	if p.offlineACP == nil || !p.direct || !p.ReadOnly || !slices.Equal(command, []string{p.offlineACP.program}) ||
-		len(p.WriteRoots)+len(p.Credentials)+len(p.Environment)+len(p.NativeFiles)+len(p.ProtectedFiles)+len(p.Sockets) != 0 ||
+	if p.offlineACP == nil || !p.direct || !slices.Equal(command, []string{p.offlineACP.program}) ||
+		len(p.Credentials)+len(p.Environment)+len(p.NativeFiles)+len(p.ProtectedFiles)+len(p.Sockets) != 0 ||
 		p.LifecycleHook != nil || p.MCPBroker != nil || p.MCPBrokerToken != "" {
 		return nil, fmt.Errorf("%w: offline ACP configuration exceeds fixture grants", ErrSandbox)
 	}
@@ -173,14 +198,19 @@ func (p Profile) OpenOfflineACP(ctx context.Context, command []string) (_ *Offli
 	}
 	owner := hex.EncodeToString(token)
 	r := offlineACPRecord{Name: offlineACPNamePrefix + owner[:24], Token: owner, Image: image, Daemon: api.daemon}
+	stage, err := p.offlineACPWriteStage(root)
+	if err != nil {
+		return nil, err
+	}
 	if err := saveOfflineACPRecord(root, r); err != nil {
 		return nil, err
 	}
-	connection, err := api.start(ctx, root, r, *p.offlineACP)
+	connection, err := api.start(ctx, root, r, *p.offlineACP, stage)
 	if err != nil {
 		return nil, err
 	}
 	connection.lock = lock
+	connection.stage = stage
 	return connection, nil
 }
 
@@ -307,5 +337,6 @@ func (conn *OfflineACPConnection) VerifyCleanup() (int, error) {
 	if err != nil {
 		return -1, errors.Join(process.ErrCleanup, err)
 	}
+	conn.cleanupVerified = true
 	return code, nil
 }

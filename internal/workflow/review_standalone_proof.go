@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"reflect"
+
+	"whirlwind/internal/execution"
 )
 
 // Standalone jobs own their journal and lifecycle evidence. Never manufacture
@@ -22,7 +24,13 @@ func (e *Engine) validateStandaloneCheckProof(ctx context.Context, input runtime
 		if result.Name != input.check.Name {
 			continue
 		}
-		if !runtimeIdentityComplete(result.Runtime) || !reflect.DeepEqual(result.Runtime, input.result.Runtime) || !reflect.DeepEqual(result.Command, input.result.Command) || !reflect.DeepEqual(result.ExitCode, input.result.ExitCode) {
+		owned := runtimeIdentityComplete(result.Runtime)
+		if project.Policy.OfflineDockerImage != "" {
+			owned = result.Runtime.Kind == execution.OfflineDockerKind && result.Runtime.CleanupVerified &&
+				execution.IsOfflineDockerIdentity(result.Runtime.SandboxID, result.Runtime.ImageID) &&
+				result.ExecutionProfile != "" && result.ExecutionProfile == input.result.ExecutionProfile
+		}
+		if !owned || !reflect.DeepEqual(result.Runtime, input.result.Runtime) || !reflect.DeepEqual(result.Command, input.result.Command) || !reflect.DeepEqual(result.ExitCode, input.result.ExitCode) {
 			return errors.New("standalone check proof does not match retained command result")
 		}
 		if result.Passed != input.result.Passed || result.Error != input.result.Error || result.Output != input.result.Output || result.Diagnostics != input.result.Diagnostics || result.Truncated != input.result.Truncated {
