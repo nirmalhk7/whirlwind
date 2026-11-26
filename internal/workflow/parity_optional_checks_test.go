@@ -19,6 +19,7 @@ import (
 func optionalCheckFixture(t *testing.T, optionalExit string, additional ...model.Check) (*Engine, model.Project, model.ExecutionPlan, string) {
 	t.Helper()
 	e, idea := approvedIdeaPlannerFixture(t)
+	installNativeParityVerifier(t)
 	ctx := context.Background()
 	optional := false
 	checks := append([]model.Check{{Name: "advisory", Command: []string{"sh", "-c", "exit " + optionalExit}, TimeoutSeconds: 5, Required: &optional}}, additional...)
@@ -35,7 +36,6 @@ func optionalCheckFixture(t *testing.T, optionalExit string, additional ...model
 		t.Fatal(err)
 	}
 	plan, _ = localStoredTask(t, e, id)
-	installNativeParityVerifier(t)
 	plan.Worktree = project.Path
 	plan.Base = submissionGit(t, project.Path, "rev-parse", "HEAD")
 	if err := os.WriteFile(filepath.Join(project.Path, "result.txt"), []byte("result\n"), 0600); err != nil {
@@ -85,7 +85,6 @@ func configureQualifiedFixtureChecks(t *testing.T, e *Engine, projectID string, 
 		if !isQltyCommand(check.Command) {
 			continue
 		}
-		installNativeParityVerifier(t)
 		project.QualityIdentity = qualifyNativeFixtureScanner(t, project, check)
 		row, err := e.Store.Get(t.Context(), "projects", projectID)
 		requireWorkflowSuccess(t, err)

@@ -8,14 +8,28 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestTerminalTailKeysInRealPTY(t *testing.T) {
 	if path := os.Getenv("WHIRLWIND_TEST_TAIL_PTY_FILE"); path != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		fd := int(os.Stdin.Fd())
+		before, err := unix.IoctlGetTermios(fd, tailGetTermios)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := runTerminalTail(ctx, path); err != nil {
 			t.Fatal(err)
+		}
+		after, err := unix.IoctlGetTermios(fd, tailGetTermios)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if *after != *before {
+			t.Fatalf("log viewer did not restore terminal settings: before=%+v after=%+v", before, after)
 		}
 		fmt.Println("TAIL_VIEW_RETURNED")
 		return

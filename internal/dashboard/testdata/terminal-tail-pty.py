@@ -5,24 +5,14 @@ import os
 import pty
 import select
 import signal
-import subprocess
 import sys
-import termios
 import time
 
 
 def run_session(close_key):
     pid, terminal = pty.fork()
     if pid == 0:
-        before = termios.tcgetattr(0)
-        child = subprocess.run(
-            [sys.argv[1], "-test.run=^TestTerminalTailKeysInRealPTY$"],
-            check=False,
-        )
-        if termios.tcgetattr(0) != before:
-            os.write(1, b"\nTTY_STATE_NOT_RESTORED\n")
-            os._exit(1)
-        os._exit(child.returncode)
+        os.execv(sys.argv[1], [sys.argv[1], "-test.run=^TestTerminalTailKeysInRealPTY$"])
 
     output = bytearray()
     exit_status = None
@@ -57,7 +47,7 @@ def run_session(close_key):
         assert b"Esc or Ctrl-C" in output, "tail view did not explain how to return"
         _, exit_status = os.waitpid(pid, 0)
         # Keep the PTY open and retain any final race-detector or tty diagnostics.
-        read_until(b"TTY_STATE_NOT_RESTORED", 0.25)
+        read_until(b"\x00", 0.25)
         assert (
             os.waitstatus_to_exitcode(exit_status) == 0
         ), f"log viewer/tty state exit={exit_status}: {output!r}"

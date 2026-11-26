@@ -268,9 +268,6 @@ func TestParityReviewerCheckUsesIndependentRunnerForReviewedCommit(t *testing.T)
 
 func installNativeParityVerifier(t *testing.T) {
 	t.Helper()
-	if os.Getenv("WHIRLWIND_VERIFY_BIN") != "" && os.Getenv("WHIRLWIND_EXECUTION_LAUNCHER") != "" {
-		return
-	}
 	if runtime.GOOS != "darwin" {
 		t.Skip(runnerNativeAcceptanceLabel)
 	}

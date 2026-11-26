@@ -18,6 +18,7 @@ import (
 // complete findings can qualify against the approved base at the review boundary.
 func TestParityQltyBaselineAdvisoryReachesReviewerWithoutRewritingRawResults(t *testing.T) {
 	e, idea := approvedIdeaPlannerFixture(t)
+	installNativeParityVerifier(t)
 	ctx := context.Background()
 	const sarif = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty","version":"fixture","semanticVersion":"1.0.0"}},"invocations":[{"executionSuccessful":true}],"results":[{"ruleId":"existing","level":"warning","message":{"text":"Existing finding"},"partialFingerprints":{"primaryLocationLineHash":"stable"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"file.txt"},"region":{"startLine":1}}}]}]}]}`
 	tool := writeQltyFixture(t, sarif, "1", "")

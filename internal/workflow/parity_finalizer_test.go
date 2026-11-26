@@ -25,6 +25,7 @@ const (
 func acceptedParityDeliveryFixture(t *testing.T) (*Engine, model.ExecutionPlan, model.Project, model.Record) {
 	t.Helper()
 	e, idea := approvedIdeaPlannerFixture(t)
+	installNativeParityVerifier(t)
 	configureQualifiedFixtureChecks(t, e, idea.ProjectID, []model.Check{cleanQltyFixtureCheck(t)})
 	plan := approveCodingPair(t, e, pendingCodingPairForIdea(t, e, idea))
 	ctx := context.Background()
