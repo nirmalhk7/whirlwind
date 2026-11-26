@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -44,12 +45,31 @@ func TestCriticalChangeWaitsForHumanBeforeLocalFinalization(t *testing.T) {
 
 // TestProductiveReviewHasNoPassCap verifies a task can be accepted after more than one hundred review passes.
 func TestProductiveReviewHasNoPassCap(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		e, candidate, project, marker := nativeAgenticReviewCandidate(t)
+		acceptReviewAfterOneHundredPasses(t, e, candidate)
+		finishNativeAgenticDelivery(t, e, candidate, project, marker)
+		return
+	}
 	fixture := newAgenticReviewFixture(t, false)
 	ctx, e := fixture.ctx, fixture.e
 	if err := e.Step(ctx, fixture.task.ID); err != nil {
 		t.Fatal(err)
 	}
-	candidate, version := localStoredTask(t, e, fixture.task.ID)
+	acceptReviewAfterOneHundredPasses(t, e, fixture.task)
+	done := fixture.completeLocalDelivery()
+	fixture.verifyTDD(done)
+	fixture.verifySubmission(done)
+	fixture.reconcile(done)
+	if done.Delivery == nil || done.Delivery.Stage != "complete" || done.PR != "" {
+		t.Fatalf("accepted candidate did not complete local delivery: %+v", done)
+	}
+}
+
+func acceptReviewAfterOneHundredPasses(t *testing.T, e *Engine, plan model.ExecutionPlan) {
+	t.Helper()
+	ctx := t.Context()
+	candidate, version := localStoredTask(t, e, plan.ID)
 	if candidate.Stage != "review" || !candidate.ChecksPassed || candidate.PlanDocument == nil || candidate.PlanDocument.ApprovedHash == "" {
 		t.Fatalf("review did not receive an approved, verified candidate: %+v", candidate)
 	}
@@ -67,13 +87,6 @@ func TestProductiveReviewHasNoPassCap(t *testing.T) {
 	_, adherence, ok, err := e.LoadAcceptedReviewReport(ctx, accepted.ID)
 	if err != nil || !ok || adherence.Score != 100 || len(accepted.Handoff.CompletedCriteria) != 1 {
 		t.Fatalf("frozen requirement evidence was not accepted after the 101st review: adherence=%+v task=%+v err=%v", adherence, accepted, err)
-	}
-	done := fixture.completeLocalDelivery()
-	fixture.verifyTDD(done)
-	fixture.verifySubmission(done)
-	fixture.reconcile(done)
-	if done.Delivery == nil || done.Delivery.Stage != "complete" || done.PR != "" {
-		t.Fatalf("accepted candidate did not complete local delivery: %+v", done)
 	}
 }
 

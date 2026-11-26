@@ -113,7 +113,13 @@ func qualifyLiveCodingCandidate(t *testing.T, live model.Provider, choice model.
 
 func nativeCodingPlan(t *testing.T, live *model.Provider, choice *model.AgentChoice, fallback bool) (*Engine, model.ExecutionPlan, model.Project) {
 	t.Helper()
-	e, draft := pendingCodingPairFixture(t)
+	e, idea := approvedIdeaPlannerFixture(t)
+	return nativeCodingPlanForIdea(t, e, idea, live, choice, fallback)
+}
+
+func nativeCodingPlanForIdea(t *testing.T, e *Engine, idea model.Idea, live *model.Provider, choice *model.AgentChoice, fallback bool) (*Engine, model.ExecutionPlan, model.Project) {
+	t.Helper()
+	draft := pendingCodingPairForIdea(t, e, idea)
 	installNativeParityVerifier(t)
 	ctx := context.Background()
 	project, err := e.Project(ctx, draft.ProjectID)
