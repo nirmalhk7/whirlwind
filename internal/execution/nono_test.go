@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +11,39 @@ import (
 
 	"whirlwind/internal/process"
 )
+
+func TestNonoOptOutFailsClosed(t *testing.T) {
+	t.Setenv("WHIRLWIND_NONO", "")
+	if err := os.Unsetenv("WHIRLWIND_NONO"); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, err := NonoEnabled(); err != nil || !enabled {
+		t.Fatalf("unset mode: enabled=%t, err=%v", enabled, err)
+	}
+	t.Setenv("WHIRLWIND_NONO", "on")
+	if enabled, err := NonoEnabled(); err != nil || !enabled {
+		t.Fatalf("explicit on: enabled=%t, err=%v", enabled, err)
+	}
+	profile, err := ForPolicy(t.TempDir(), true, "policy", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WHIRLWIND_NONO", "off")
+	if enabled, err := NonoEnabled(); err != nil || enabled {
+		t.Fatalf("explicit off: enabled=%t, err=%v", enabled, err)
+	}
+	cmd, err := Command(t.Context(), []string{"true"}, profile)
+	if cmd != nil || !errors.Is(err, ErrSandbox) || !strings.Contains(err.Error(), "WHIRLWIND_NONO=off") {
+		t.Fatalf("off mode prepared a native launch or reported the wrong error: %v", err)
+	}
+	if _, err := nonoCLI(); !errors.Is(err, ErrSandbox) || !strings.Contains(err.Error(), "WHIRLWIND_NONO=off") {
+		t.Fatalf("managed runtime lookup ignored off mode: %v", err)
+	}
+	t.Setenv("WHIRLWIND_NONO", "false")
+	if enabled, err := NonoEnabled(); !errors.Is(err, ErrSandbox) || enabled {
+		t.Fatalf("invalid mode: enabled=%t, err=%v", enabled, err)
+	}
+}
 
 // A stale OpenShell default or host-direct fallback breaks this real launch.
 func TestDefaultNonoCommandRunsWithoutOpenShell(t *testing.T) {

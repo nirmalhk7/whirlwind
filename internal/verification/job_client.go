@@ -186,6 +186,9 @@ func verificationRunnerEnvironment(root string, inherited []string) []string {
 			env = append(env, key+"="+value)
 		}
 	}
+	if value, set := os.LookupEnv("WHIRLWIND_NONO"); set {
+		env = append(env, "WHIRLWIND_NONO="+value)
+	}
 	for _, entry := range inherited {
 		if strings.HasPrefix(entry, "WHIRLWIND_PROCESS_TOKEN=") {
 			env = append(env, entry)

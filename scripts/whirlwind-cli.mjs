@@ -29,6 +29,7 @@ const help = `Usage: whirlwind <command>
 
 The dashboard is available with ./bin/whirlwind dashboard.
 The supervisor uses a private local socket; it starts no browser or UI server.
+WHIRLWIND_NONO=off disables native execution for disposable testing. Default: on.
 `;
 
 export async function runCLI(args) {

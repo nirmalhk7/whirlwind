@@ -96,6 +96,11 @@ func prepareSandboxCommand(command []string, profile Profile) (string, []string,
 }
 
 func validateCommandSetup(command []string, profile Profile) error {
+	if !openShellLauncher(profile.Launcher) {
+		if err := requireNono(); err != nil {
+			return err
+		}
+	}
 	if runtime.GOOS != "darwin" {
 		return fmt.Errorf("%w: execution requires macOS; inspection remains available", ErrSandbox)
 	}

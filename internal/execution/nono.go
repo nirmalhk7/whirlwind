@@ -12,8 +12,34 @@ import (
 	"whirlwind/internal/process"
 )
 
+// NonoEnabled reads the supervisor's host-only runtime setting.
+func NonoEnabled() (bool, error) {
+	value, set := os.LookupEnv("WHIRLWIND_NONO")
+	if !set || value == "on" {
+		return true, nil
+	}
+	if value == "off" {
+		return false, nil
+	}
+	return false, fmt.Errorf("%w: WHIRLWIND_NONO must be on or off", ErrSandbox)
+}
+
+func requireNono() error {
+	enabled, err := NonoEnabled()
+	if err != nil {
+		return err
+	}
+	if !enabled {
+		return fmt.Errorf("%w: native nono execution disabled by WHIRLWIND_NONO=off (disposable testing only)", ErrSandbox)
+	}
+	return nil
+}
+
 // The host chooses the runtime; agent policy cannot override this bootstrap.
 func nonoCLI() (string, error) {
+	if err := requireNono(); err != nil {
+		return "", err
+	}
 	name := os.Getenv("WHIRLWIND_NONO_CLI")
 	if name == "" {
 		name = "nono"

@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"whirlwind/internal/control"
+	"whirlwind/internal/execution"
 	"whirlwind/internal/github"
 	"whirlwind/internal/httpapi"
 	"whirlwind/internal/workflow"
@@ -25,6 +26,13 @@ func run() error {
 	config, err := readConfig()
 	if err != nil {
 		return err
+	}
+	nonoEnabled, err := execution.NonoEnabled()
+	if err != nil {
+		return err
+	}
+	if !nonoEnabled {
+		log.Print("WHIRLWIND_NONO=off: native agent and check execution disabled for disposable testing")
 	}
 	s, lock, err := config.openState()
 	if err != nil {

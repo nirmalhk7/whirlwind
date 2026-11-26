@@ -203,7 +203,7 @@ func newManagedOfflineLauncher(t *testing.T, repoRoot, home, data, settings stri
 		cmd := exec.CommandContext(c, filepath.Join(repoRoot, "bin", "whirlwind"), args...)
 		cmd.Dir = repoRoot
 		cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + home, "WHIRLWIND_ROOT=" + repoRoot, "WHIRLWIND_DATA_DIR=" + data, "WHIRLWIND_SETTINGS_FILE=" + settings}
-		for _, key := range []string{"GOCACHE", "GOMODCACHE", "GOFLAGS"} {
+		for _, key := range []string{"GOCACHE", "GOMODCACHE", "GOFLAGS", "WHIRLWIND_NONO"} {
 			if value := os.Getenv(key); value != "" {
 				cmd.Env = append(cmd.Env, key+"="+value)
 			}

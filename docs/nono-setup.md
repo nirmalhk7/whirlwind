@@ -9,6 +9,8 @@ nono --version
 
 The launcher requires `nono 0.81.0` and fails closed if it is missing, incompatible, or cannot apply the sandbox. `WHIRLWIND_NONO_CLI` can select an absolute host-managed binary. Agent-supplied environment exceptions cannot change this selection or nono policy.
 
+For disposable testing, start a separate supervisor with `WHIRLWIND_NONO=off` and dedicated state and settings paths. The supervisor logs the opt-out and blocks native agent, terminal, and check execution. Inspection and explicitly configured Linux offline Docker verification remain available. Native execution is enabled when the variable is unset or `on`. Set the variable in the supervisor's startup environment and restart the supervisor to apply a change.
+
 Install and authenticate your configured ACP provider on the host. For the bundled Codex profile, the repository specifies:
 
 ```sh
