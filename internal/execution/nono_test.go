@@ -12,36 +12,47 @@ import (
 	"whirlwind/internal/process"
 )
 
-func TestNonoOptOutFailsClosed(t *testing.T) {
-	t.Setenv("WHIRLWIND_NONO", "")
-	if err := os.Unsetenv("WHIRLWIND_NONO"); err != nil {
+func TestSandboxOptOutRequiresExplicitHostSetting(t *testing.T) {
+	const key = "WHIRLWIND_SANDBOX"
+	t.Setenv(key, "")
+	if err := os.Unsetenv(key); err != nil {
 		t.Fatal(err)
 	}
-	if enabled, err := NonoEnabled(); err != nil || !enabled {
+	if enabled, err := SandboxEnabled(); err != nil || !enabled {
 		t.Fatalf("unset mode: enabled=%t, err=%v", enabled, err)
 	}
-	t.Setenv("WHIRLWIND_NONO", "on")
-	if enabled, err := NonoEnabled(); err != nil || !enabled {
-		t.Fatalf("explicit on: enabled=%t, err=%v", enabled, err)
+	cwd := t.TempDir()
+	command := []string{"/bin/sh", "-ec", `test -z "${GH_TOKEN-}${WHIRLWIND_SANDBOX-}"; test "$GIT_CONFIG_GLOBAL" = /dev/null; printf plain`}
+	t.Setenv(key, "off")
+	t.Setenv("GH_TOKEN", "test-connector-canary")
+	t.Setenv("WHIRLWIND_NONO_CLI", filepath.Join(cwd, "missing-nono"))
+	profile, err := ForProvider(cwd, true, "policy", nil, command)
+	if err != nil || !IsDirectLauncher(profile.Launcher) {
+		t.Fatalf("direct profile: %v", err)
 	}
-	profile, err := ForPolicy(t.TempDir(), true, "policy", nil)
+	checkProfile, err := ForPolicy(cwd, true, "policy", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("WHIRLWIND_NONO", "off")
-	if enabled, err := NonoEnabled(); err != nil || enabled {
-		t.Fatalf("explicit off: enabled=%t, err=%v", enabled, err)
+	checkProfile.Launcher = profile.Launcher
+	if cmd, err := Command(t.Context(), command, checkProfile); cmd != nil || !errors.Is(err, ErrSandbox) {
+		t.Fatalf("independent check profile accepted direct launcher: %v", err)
 	}
-	cmd, err := Command(t.Context(), []string{"true"}, profile)
-	if cmd != nil || !errors.Is(err, ErrSandbox) || !strings.Contains(err.Error(), "WHIRLWIND_NONO=off") {
-		t.Fatalf("off mode prepared a native launch or reported the wrong error: %v", err)
+	profile.Environment = []string{"GH_TOKEN"}
+	cmd, err := Command(t.Context(), command, profile)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := nonoCLI(); !errors.Is(err, ErrSandbox) || !strings.Contains(err.Error(), "WHIRLWIND_NONO=off") {
-		t.Fatalf("managed runtime lookup ignored off mode: %v", err)
+	var output strings.Builder
+	cmd.Stdout = &output
+	if err := process.Run(cmd); err != nil || output.String() != "plain" {
+		t.Fatalf("plain process: %q, %v", output.String(), err)
 	}
-	t.Setenv("WHIRLWIND_NONO", "false")
-	if enabled, err := NonoEnabled(); !errors.Is(err, ErrSandbox) || enabled {
-		t.Fatalf("invalid mode: enabled=%t, err=%v", enabled, err)
+	for _, mode := range []string{"on", "false", ""} {
+		t.Setenv(key, mode)
+		if cmd, err := Command(t.Context(), command, profile); cmd != nil || !errors.Is(err, ErrSandbox) {
+			t.Fatalf("mode %q permitted saved direct profile: %v", mode, err)
+		}
 	}
 }
 

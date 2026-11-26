@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"whirlwind/internal/execution"
+	"whirlwind/internal/process"
 )
 
 const (
@@ -80,5 +82,36 @@ func TestCheckMCPRejectsSelectedIntegrationBrokerConflict(t *testing.T) {
 	profile.MCPBrokerToken = strings.Repeat("e", 64)
 	if _, err := s.prepareCheckMCP(context.Background(), &profile); err == nil || !strings.Contains(err.Error(), "conflicting integration broker") {
 		t.Fatalf("check broker silently replaced selected integration broker: %v", err)
+	}
+}
+
+func TestDirectMCPUsesScopedSupervisorCheck(t *testing.T) {
+	t.Setenv("WHIRLWIND_SANDBOX", "off")
+	ctx := t.Context()
+	session := &providerSession{input: Input{ReadOnly: true, Role: "review"}, hooks: Hooks{
+		RunCheck: func(_ context.Context, id string) (CheckResult, error) {
+			return CheckResult{CheckID: id, Passed: true, Output: "supervisor fixture check " + id}, nil
+		},
+	}}
+	profile, err := execution.ForProvider(t.TempDir(), true, "fixture", nil, []string{"node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close, err := session.prepareCheckMCP(ctx, &profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer close()
+	server := session.checkServers[0].(map[string]any)
+	args := append([]string{server["command"].(string)}, server["args"].([]string)...)
+	cmd, err := execution.Command(ctx, args, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stdin = strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_check","arguments":{"check_id":"tests"}}}` + "\n")
+	var output, diagnostics bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &output, &diagnostics
+	if err := process.Run(cmd); err != nil || !strings.Contains(output.String(), "supervisor fixture check tests") {
+		t.Fatalf("direct MCP check output %q stderr %q: %v", output.String(), diagnostics.String(), err)
 	}
 }

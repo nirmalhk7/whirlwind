@@ -108,6 +108,9 @@ func (s *providerSession) prepareProviderIntegrations(p, provider model.Provider
 	s.input.Execution = profile
 	s.input.CWD = profile.CWD
 	s.client.input.CWD = profile.CWD
+	if execution.IsDirectLauncher(profile.Launcher) {
+		s.client.input.Execution = profile
+	}
 	if p.Kind != "acp" && p.Kind != "claude" {
 		return nil, nil
 	}
@@ -134,6 +137,9 @@ func (s *providerSession) prepareSelectedBroker(p model.Provider, profile *execu
 func (s *providerSession) prepareNativeIntegrations(p, provider model.Provider, profile *execution.Profile) error {
 	if !s.input.NativeIntegrations {
 		return nil
+	}
+	if execution.IsDirectLauncher(profile.Launcher) {
+		return errors.New("native credential mounts require sandboxed execution")
 	}
 	if err := ProvisionNativeIntegrations(profile, provider); err != nil {
 		return err

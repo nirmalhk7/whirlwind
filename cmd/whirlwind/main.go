@@ -27,12 +27,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	nonoEnabled, err := execution.NonoEnabled()
+	sandboxEnabled, err := execution.SandboxEnabled()
 	if err != nil {
 		return err
 	}
-	if !nonoEnabled {
-		log.Print("WHIRLWIND_NONO=off: native agent and check execution disabled for disposable testing")
+	if !sandboxEnabled {
+		log.Print("WARNING: WHIRLWIND_SANDBOX=off runs agents and their terminals without Whirlwind sandboxing. Use only in a dedicated isolated test worker.")
 	}
 	s, lock, err := config.openState()
 	if err != nil {

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import http from "node:http";
 import readline from "node:readline";
 
@@ -29,6 +31,41 @@ function proxyAuthority() {
   };
 }
 
+function directAuthority() {
+  let config;
+  try {
+    config = JSON.parse(readFileSync(process.argv[3], "utf8"));
+    if (
+      typeof config?.socket !== "string" ||
+      !isAbsolute(config.socket) ||
+      typeof config.token !== "string" ||
+      !/^[a-f0-9]{64}$/.test(config.token)
+    ) {
+      throw new Error();
+    }
+  } catch {
+    throw new Error("Invalid direct tool broker configuration");
+  }
+  return {
+    socketPath: config.socket,
+    path: "/mcp",
+    headers: { "x-whirlwind-mcp-token": config.token },
+  };
+}
+
+function proxyRequest(proxy) {
+  return {
+    host: proxy.host,
+    port: proxy.port,
+    path: target,
+    headers: {
+      host: new URL(target).host,
+      "proxy-authorization": proxy.authorization,
+      "x-whirlwind-broker-id": brokerID,
+    },
+  };
+}
+
 function validBrokerID(value) {
   return /^[A-Za-z0-9._-]{1,128}$/.test(value);
 }
@@ -41,22 +78,18 @@ function writeMessage(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
-function forward(message, proxy) {
+function forward(message, transport) {
   return new Promise((resolve, reject) => {
     const body = Buffer.from(JSON.stringify(message));
     if (body.length > maxMessageBytes) return reject(new Error("MCP request exceeds size limit"));
     const request = http.request(
       {
-        host: proxy.host,
-        port: proxy.port,
+        ...transport,
         method: "POST",
-        path: target,
         headers: {
-          host: new URL(target).host,
+          ...transport.headers,
           "content-type": "application/json",
           "content-length": String(body.length),
-          "proxy-authorization": proxy.authorization,
-          "x-whirlwind-broker-id": brokerID,
         },
       },
       (response) => {
@@ -85,7 +118,7 @@ function forward(message, proxy) {
   });
 }
 
-async function handle(line, proxy) {
+async function handle(line, transport) {
   let message;
   try {
     message = JSON.parse(line);
@@ -107,7 +140,7 @@ async function handle(line, proxy) {
     return;
   }
   try {
-    const response = await forward(message, proxy);
+    const response = await forward(message, transport);
     if (!Object.hasOwn(message, "id")) return;
     if (response.status < 200 || response.status >= 300) {
       const reason = typeof response.reason === "string" ? response.reason : "broker_unavailable";
@@ -122,21 +155,22 @@ async function handle(line, proxy) {
   }
 }
 
-if (!validBrokerID(brokerID)) {
+const direct = brokerID === "--direct";
+if (!direct && !validBrokerID(brokerID)) {
   process.stderr.write("MCP broker identity is invalid\n");
   process.exitCode = 2;
 } else {
-  let proxy;
+  let transport;
   try {
-    proxy = proxyAuthority();
+    transport = direct ? directAuthority() : proxyRequest(proxyAuthority());
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 2;
   }
-  if (proxy) {
+  if (transport) {
     const input = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
     input.on("line", (line) => {
-      void handle(line, proxy);
+      void handle(line, transport);
     });
   }
 }

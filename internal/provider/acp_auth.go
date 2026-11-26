@@ -37,6 +37,12 @@ func provisionACPAuth(profile *execution.Profile, provider model.Provider) error
 	if err != nil {
 		return err
 	}
+	if execution.IsDirectLauncher(profile.Launcher) {
+		if len(authorizedACPEnvironment(profile.Environment, selected.AuthReferences)) == 0 {
+			return fmt.Errorf("ACP provider %q requires an explicitly authorized test credential in direct mode: %v", provider.ID, selected.AuthReferences)
+		}
+		return nil
+	}
 	home, err := nativeUserHome()
 	if err != nil {
 		return fmt.Errorf("ACP provider %q authentication home unavailable: %w", provider.ID, err)

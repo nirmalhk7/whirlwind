@@ -34,6 +34,9 @@ func (a *agentRun) prepareExecutionProfile(chosen model.Provider) error {
 	}
 	profile.MCPBrokerToken = a.input.MCPBrokerToken
 	if a.input.NativeIntegrations {
+		if execution.IsDirectLauncher(profile.Launcher) {
+			return errors.New("native credential mounts require sandboxed execution")
+		}
 		if err := provisionNativeProfile(&profile, chosen); err != nil {
 			return err
 		}
