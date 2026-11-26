@@ -137,7 +137,7 @@ func qualifyNativeScopeScanner(t *testing.T, binary string, candidate JobManifes
 	snapshot.PluginCatalog = []byte(catalog)
 	manifest.JobID, manifest.OperationID = "scope-qualification", "scope-qualification"
 	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
-	manifest.Sandbox = &model.SandboxPolicy{AllowedDomains: []string{"github.com", "api.github.com", "release-assets.githubusercontent.com"}}
+	manifest.Sandbox = nativeQltyQualificationSandbox()
 	manifest.Commands = slices.Clone(candidate.Commands)
 	manifest.Commands[0].TimeoutSeconds = 600
 	report, err = RunLocalJob(ctx, binary, manifest, nil)

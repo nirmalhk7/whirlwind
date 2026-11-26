@@ -57,9 +57,7 @@ func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	manifest.JobID, manifest.OperationID = "qualification", "qualification"
 	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
 	manifest.Quality = &snapshot
-	// Installed Qlty is not a preinstalled plugin runtime. This fixture grants
-	// only public distribution hosts, through the existing enforced proxy.
-	manifest.Sandbox = &model.SandboxPolicy{AllowedDomains: []string{"github.com", "api.github.com", "release-assets.githubusercontent.com"}}
+	manifest.Sandbox = nativeQltyQualificationSandbox()
 	argv := []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}
 	// Cold provisioning includes plugin installation. Keep it bounded
 	// by the existing generic-command default, independently of ACP deadlines.
@@ -76,6 +74,7 @@ func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	manifest.JobID, manifest.OperationID = "candidate", "candidate"
 	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
 	manifest.Quality = &qualifiedSnapshot
+	manifest.Sandbox = nil
 	candidateReport, candidateErr := RunLocalJob(context.Background(), binary, manifest, nil)
 	if candidateErr != nil || candidateReport.QualityIdentity == nil || !model.SameQualityIdentity(report.QualityIdentity, candidateReport.QualityIdentity) {
 		failNativeQltyJob(t, manifest, "candidate did not reuse qualified runtime identity", candidateReport, candidateErr)
@@ -89,6 +88,15 @@ func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	if output := nativeDefaultGit(t, manifest.Repository, "status", "--porcelain"); output != "" {
 		t.Fatalf("default scanners changed original source: %s", output)
 	}
+}
+
+// Qlty first requests release metadata from its public GitHub proxy, then
+// falls back to GitHub's unauthenticated API. Permit these exact hosts only
+// during qualification. Candidate jobs reuse the cache without networking.
+func nativeQltyQualificationSandbox() *model.SandboxPolicy {
+	return &model.SandboxPolicy{AllowedDomains: []string{
+		"github-proxy.qlty.sh", "api.github.com", "github.com", "release-assets.githubusercontent.com",
+	}}
 }
 
 func failNativeQltyJob(t *testing.T, manifest JobManifest, reason string, report JobReport, err error) {
