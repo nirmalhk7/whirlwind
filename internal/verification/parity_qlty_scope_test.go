@@ -108,7 +108,7 @@ suggested = "targets"
 	if _, err := os.Stat(filepath.Join(manifest.Repository, ".qlty")); !os.IsNotExist(err) {
 		t.Fatalf("Qlty configuration leaked into original repository: %v", err)
 	}
-	assertQltyExternalState(t, manifest.Root)
+	assertQltyExternalState(t, manifest.Root, root, report.QualityIdentity)
 }
 
 func qualifyNativeScopeScanner(t *testing.T, binary string, candidate JobManifest, root, configuration string) model.QualitySnapshot {
@@ -175,28 +175,26 @@ func assertQltyProbeReport(t *testing.T, root string, argv []string, tracked, ne
 	}
 }
 
-func assertQltyExternalState(t *testing.T, root string) {
+func assertQltyExternalState(t *testing.T, jobRoot, qualityRoot string, identity *model.QualityIdentity) {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, "report.json"))
-	requireVerificationSuccess(t, err)
-	var report JobReport
-	requireVerificationSuccess(t, json.Unmarshal(data, &report))
-	if report.QualityIdentity == nil {
+	if identity == nil {
 		t.Fatal("completed scan did not retain its qualified runtime identity")
 	}
-	canonicalRoot, err := filepath.EvalSymlinks(root)
+	canonicalRoot, err := filepath.EvalSymlinks(filepath.Join(qualityRoot, "jobs", "scope-qualification"))
 	requireVerificationSuccess(t, err)
-	target, err := filepath.EvalSymlinks(report.QualityIdentity.ToolRuntimePath)
+	target, err := filepath.EvalSymlinks(identity.ToolRuntimePath)
 	requireVerificationSuccess(t, err)
 	if rel, err := filepath.Rel(canonicalRoot, target); err != nil || !filepath.IsLocal(rel) {
-		t.Fatalf("Qlty runtime state escaped approved external root: %s %v", target, err)
+		t.Fatalf("approved Qlty runtime escaped the qualification job: %s %v", target, err)
 	}
-	hash, err := hashQualityTree(target)
-	requireVerificationSuccess(t, err)
-	if hash != report.QualityIdentity.ToolRuntimeHash {
-		t.Fatal("retained Qlty tools no longer match the verified identity")
+	for _, runtime := range []string{target, filepath.Join(jobRoot, "runtime", "quality", "home", ".qlty", "cache", "tools")} {
+		hash, err := hashQualityTree(runtime)
+		requireVerificationSuccess(t, err)
+		if hash != identity.ToolRuntimeHash {
+			t.Fatalf("runtime at %s no longer matches the approved identity", runtime)
+		}
 	}
-	if _, err := os.Lstat(filepath.Join(root, autofixCheckoutDir(0))); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(jobRoot, autofixCheckoutDir(0))); !os.IsNotExist(err) {
 		t.Fatalf("completed detached autofix checkout was not released: %v", err)
 	}
 }
