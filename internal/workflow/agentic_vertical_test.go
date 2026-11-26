@@ -151,10 +151,20 @@ func (run nativeAgenticRun) assertDelivery(t *testing.T, done model.ExecutionPla
 	if delivery == nil || delivery.Stage != "complete" {
 		t.Fatalf("local delivery receipt missing: %+v", delivery)
 	}
-	if delivery.ReviewedCommit != run.head || delivery.Tree != run.tree || delivery.VerificationID != run.task.VerificationID {
+	if delivery.ReviewedCommit != run.head || delivery.Tree != run.tree || delivery.VerificationID != done.VerificationID {
 		t.Fatalf("delivery changed the verified candidate: commit=%s tree=%s verification=%s, want commit=%s tree=%s verification=%s",
-			delivery.ReviewedCommit, delivery.Tree, delivery.VerificationID, run.head, run.tree, run.task.VerificationID)
+			delivery.ReviewedCommit, delivery.Tree, delivery.VerificationID, run.head, run.tree, done.VerificationID)
 	}
+	// Review may request fresh verification of the same immutable candidate.
+	// Validate the proof named by the delivery receipt against the original tree.
+	row, err := run.engine.Store.Get(t.Context(), "verification", delivery.VerificationID)
+	requireWorkflowSuccess(t, err)
+	saved, err := store.Decode[savedReviewRunnerReport](row)
+	requireWorkflowSuccess(t, err)
+	if saved.Stage != "complete" || !saved.Report.Passed || saved.Manifest.CandidateCommit != run.head || saved.Manifest.CandidateTree != run.tree {
+		t.Fatalf("delivery did not retain successful verification of the exact candidate: %+v", saved.Provenance)
+	}
+	requireWorkflowSuccess(t, saved.Report.Validate(saved.Manifest))
 	ref := submissionGit(t, run.project.Path, submissionRevParse, "refs/heads/"+delivery.Branch)
 	if ref != delivery.DeliveryCommit || submissionGit(t, run.project.Path, submissionRevParse, ref+"^{tree}") != run.tree {
 		t.Fatal("published local ref differs from the exact reviewed tree")
