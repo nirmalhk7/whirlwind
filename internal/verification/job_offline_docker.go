@@ -105,7 +105,7 @@ func (r *jobRunner) runOfflineDockerCheck(ctx context.Context, stage string, ind
 	started := time.Now()
 	var output, diagnostics capped
 	executionID := offlineExecutionKey(r.manifest, index)
-	id, exit, cleaned, err := r.offline.Run(ctx, executionID, stage, command.Command, time.Duration(command.TimeoutSeconds)*time.Second, &output, &diagnostics)
+	id, exit, cleaned, err := r.runOfflineDockerCommand(ctx, stage, executionID, command, &output, &diagnostics)
 	result.Runtime = RuntimeIdentity{Kind: execution.OfflineDockerKind, ExecutionID: executionID, Generation: 1, SandboxID: id, ImageID: r.offline.ImageID(), CleanupVerified: cleaned}
 	result.ExecutionProfile = r.manifest.Digest()
 	result.ExitCode = exit
@@ -136,9 +136,26 @@ func (r *jobRunner) runOfflineDockerCheck(ctx context.Context, stage string, ind
 	if result.Truncated && (result.Status == "pass" || result.Status == "fail") {
 		result.Passed, result.Status, result.Error = false, "error", "offline command exceeded retained stream limits"
 	}
+	if r.manifest.Purpose == LinuxQltyProbePurpose && result.Passed {
+		if err := validateLinuxQltyProbeOutput(output.String()); err != nil {
+			result.Passed, result.Status, result.Error = false, "error", err.Error()
+		}
+	}
 	result.DurationMS = time.Since(started).Milliseconds()
 	result.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return result, nil
+}
+
+func (r *jobRunner) runOfflineDockerCommand(ctx context.Context, stage, executionID string, command JobCommand, output, diagnostics *capped) (string, *int, bool, error) {
+	timeout := time.Duration(command.TimeoutSeconds) * time.Second
+	if r.manifest.Purpose != LinuxQltyProbePurpose {
+		return r.offline.Run(ctx, executionID, stage, command.Command, timeout, output, diagnostics)
+	}
+	bundle, err := r.prepareLinuxQltyBundle(ctx)
+	if err != nil {
+		return "", nil, false, err
+	}
+	return r.offline.RunQltyProbe(ctx, executionID, stage, bundle, timeout, output, diagnostics)
 }
 
 func validateOfflineDockerResult(m JobManifest, index int, result JobResult) error {
@@ -163,7 +180,7 @@ func validateOfflineDockerResult(m JobManifest, index int, result JobResult) err
 	if err := validateOfflineDockerImage(m, result.Runtime.ImageID); err != nil {
 		return err
 	}
-	return validateOfflineDockerStreams(m.Root, index, result)
+	return validateOfflineDockerStreams(m, index, result)
 }
 
 func validateOfflineDockerImage(m JobManifest, runtimeImage string) error {
@@ -180,14 +197,17 @@ func validateOfflineDockerImage(m JobManifest, runtimeImage string) error {
 	return nil
 }
 
-func validateOfflineDockerStreams(root string, index int, result JobResult) error {
-	stdout, stderr, err := ReadJobStreams(root, index)
+func validateOfflineDockerStreams(m JobManifest, index int, result JobResult) error {
+	stdout, stderr, err := ReadJobStreams(m.Root, index)
 	if err != nil {
 		return err
 	}
 	if streamHash([]byte(stdout)) != result.StdoutSHA256 || streamHash([]byte(stderr)) != result.StderrSHA256 ||
 		result.Output != offlinePreview(stdout) || result.Diagnostics != offlinePreview(stderr) {
 		return errors.New("offline Docker verification streams differ from retained evidence")
+	}
+	if m.Purpose == LinuxQltyProbePurpose && result.Status == "pass" {
+		return validateLinuxQltyProbeOutput(stdout)
 	}
 	return nil
 }

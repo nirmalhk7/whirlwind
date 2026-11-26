@@ -124,6 +124,12 @@ func (m JobManifest) validateDefinition() error {
 	if m.OfflineDockerImage == "" && (m.OfflineImageID != "" || m.PolicyHash != "") {
 		return errors.New("offline authority requires the offline Docker backend")
 	}
+	if m.Purpose == LinuxQltyProbePurpose {
+		if err := m.validateSnapshotPaths(); err != nil {
+			return err
+		}
+		return m.validateLinuxQltyProbe()
+	}
 	if err := m.validateAuthority(); err != nil {
 		return err
 	}

@@ -87,3 +87,44 @@ shipped supervisor path. Setting `WHIRLWIND_TEST_SEEDED_NONO` to an installed
 nono binary also exercises deterministic Reviewer handoffs and delivery
 refusals. The Review fixture uses the native profile metadata and returns a
 seeded response in process.
+
+## Standalone Linux Qlty qualification
+
+On Linux amd64, an operator can exercise a fixed Qlty/Gitleaks profile against
+one exact Git tree with `whirlwind-verify --linux-qlty-probe`. Use a disposable
+worker where agent processes cannot access the operator's filesystem, Docker
+socket or verification outputs, or run the probe with agents stopped. A private
+directory cannot protect evidence from another process with the same Unix
+identity.
+
+Use the Linux x86-64 musl binary from
+[Qlty 0.668.0](https://github.com/qltysh/qlty/releases/tag/v0.668.0) and the
+Linux x64 binary from
+[Gitleaks 8.29.1](https://github.com/gitleaks/gitleaks/releases/tag/v8.29.1).
+The probe verifies the extracted binary digests before use. Set
+`WHIRLWIND_QLTY_PROBE_TOOLS` to the absolute directory containing the two
+binaries named `qlty` and `gitleaks`. The Go Alpine image pinned above must
+already be present.
+
+With `repo` set to an absolute checkout path and `job_root` set to a new
+absolute private directory outside that checkout, run:
+
+```sh
+jq -n \
+  --arg job_id linux-qlty-probe \
+  --arg repository "$repo" \
+  --arg root "$job_root" \
+  --arg candidate_commit "$(git -C "$repo" rev-parse HEAD)" \
+  --arg candidate_tree "$(git -C "$repo" rev-parse 'HEAD^{tree}')" \
+  '{job_id:$job_id, repository:$repository, root:$root,
+    candidate_commit:$candidate_commit, candidate_tree:$candidate_tree}' |
+  ./bin/whirlwind-verify --linux-qlty-probe
+```
+
+Read the verdict in `report.json`. A passing probe needs a successful,
+findings-free invocation by the pinned scanner, exact tree and image evidence,
+and verified container cleanup. The verifier retains the raw streams and
+checks their hashes on replay. A failed scan can still write a complete report
+with `passed: false`. This standalone report has no managed-project or plan
+identity. Managed qualification, review and Finalizer still require their own
+approved evidence.
