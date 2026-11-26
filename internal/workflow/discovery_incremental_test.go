@@ -19,7 +19,7 @@ const (
 	discoveryPolicyFile = ".whirlwind.yaml"
 )
 
-func TestZeroCandidatesAreIncompleteAndReportedWithoutExtraInference(t *testing.T) {
+func TestZeroCandidatesAreIncompleteAfterBoundedGenerationRepairs(t *testing.T) {
 	openshell.Install(t)
 	e, task, _ := testEngine(t)
 	ctx := context.Background()
@@ -32,13 +32,26 @@ func TestZeroCandidatesAreIncompleteAndReportedWithoutExtraInference(t *testing.
 	putFixtureAgent(t, e.Store, "ideate", model.AgentConfig{Role: "ideate", Chain: []model.AgentChoice{{Provider: "fake", Model: "fixture"}}})
 	fixture := &ideationFixture{batch: []model.Direction{}}
 	e.Adapter = func(model.Provider) provider.Adapter { return fixture }
+	const attempts = 3
+	settings, err := e.Store.Get(ctx, "settings", "global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := store.Decode[Settings](settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config.Ideation.MaxAttemptsPerDirection = attempts
+	if err := e.Store.Put(ctx, "settings", "global", config, settings.Version); err != nil {
+		t.Fatal(err)
+	}
 	project, _ := e.Project(ctx, task.ProjectID)
-	err := e.Ideate(ctx, project, "2026-10-22")
+	err = e.Ideate(ctx, project, "2026-10-22")
 	if err == nil || !strings.Contains(err.Error(), "expand, optimize, harden, simplify") {
 		t.Fatalf("empty result was treated as a completed ideation run: %v", err)
 	}
-	if fixture.generations != 1 {
-		t.Fatalf("empty candidate batch made unexpected inference calls: %d", fixture.generations)
+	if fixture.generations != attempts || fixture.calls != attempts {
+		t.Fatalf("expected %d generation repairs, got %d generation calls out of %d", attempts, fixture.generations, fixture.calls)
 	}
 	rows, err := e.Store.List(ctx, "inbox")
 	if err != nil {

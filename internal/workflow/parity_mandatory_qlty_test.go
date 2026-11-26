@@ -15,12 +15,35 @@ import (
 // acceptance handoff. Installed Qlty compatibility has its own native test.
 func cleanQltyFixtureCheck(t *testing.T) model.Check {
 	t.Helper()
-	tool := filepath.Join(t.TempDir(), "qlty")
-	const output = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty","version":"fixture"}},"invocations":[{"executionSuccessful":true}],"results":[]}]}`
-	if err := os.WriteFile(tool, []byte("#!/bin/sh\nprintf '%s\\n' '"+output+"'\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
+	return guardedQltyFixtureCheck(t, "")
+}
+
+func guardedQltyFixtureCheck(t *testing.T, candidateGuard string) model.Check {
+	t.Helper()
+	const output = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty","version":"fixture","semanticVersion":"1.0.0"}},"invocations":[{"executionSuccessful":true}],"results":[]}]}`
+	tool := writeQltyFixture(t, output, "0", candidateGuard)
 	return model.Check{Name: "quality", Command: []string{tool, "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}, Mode: "autofix", ReportFormat: "sarif", TimeoutSeconds: 5}
+}
+
+func writeQltyFixture(t *testing.T, sarif, exit, candidateGuard string) string {
+	t.Helper()
+	tool := filepath.Join(t.TempDir(), "qlty")
+	const setup = `#!/bin/sh
+set -eu
+if [ "$1" = config ]; then
+  printf '%s\n' 'plugins: {}'
+  exit 0
+fi
+root="$HOME/.qlty/cache/tools/fixture"
+if [ ! -f "$root/1.0-12345678.done" ]; then
+  mkdir -p "$root/1.0-12345678"
+  printf '%s\n' 'fixture runtime' > "$root/1.0-12345678/scanner"
+  touch "$root/1.0-12345678.done"
+else
+`
+	script := setup + candidateGuard + ":\nfi\nprintf '%s\n' '" + sarif + "'\nexit " + exit + "\n"
+	requireWorkflowSuccess(t, os.WriteFile(tool, []byte(script), 0700))
+	return tool
 }
 
 func configurePlannerFixtureChecks(t *testing.T, e *Engine, projectID string, checks []model.Check) {

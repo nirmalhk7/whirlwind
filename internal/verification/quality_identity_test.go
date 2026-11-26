@@ -262,6 +262,11 @@ func TestCopyApprovedQualityTreeVerifiesSourceAndCopy(t *testing.T) {
 		})
 	})
 	writeApprovedQualityTreeFixture(t, source)
+	const tool = "trivy"
+	lock := filepath.Join(tool, qualityFixtureScannerPackage+".lock")
+	unrelatedLock := filepath.Join(tool, qualityFixtureScannerPackage, "dependency.lock")
+	requireVerificationSuccess(t, os.WriteFile(filepath.Join(source, lock), nil, 0600))
+	requireVerificationSuccess(t, os.WriteFile(filepath.Join(source, unrelatedLock), nil, 0600))
 	expected, err := hashQualityTree(source)
 	requireVerificationSuccess(t, err)
 	requireVerificationSuccess(t, copyApprovedQualityTree(context.Background(), source, dest, expected))
@@ -274,6 +279,13 @@ func TestCopyApprovedQualityTreeVerifiesSourceAndCopy(t *testing.T) {
 	requireVerificationSuccess(t, err)
 	if mode.Mode().Perm()&0222 != 0 {
 		t.Fatal("copied approved scanner executable remains writable")
+	}
+	for path, writable := range map[string]bool{lock: true, unrelatedLock: false} {
+		info, err := os.Stat(filepath.Join(dest, path))
+		requireVerificationSuccess(t, err)
+		if got := info.Mode().Perm()&0222 != 0; got != writable {
+			t.Fatalf("unexpected write permission for %s: %v", path, info.Mode())
+		}
 	}
 	if _, err := os.Stat(filepath.Join(dest, "bin", "current")); err != nil {
 		t.Fatalf("internal runtime symlink was not preserved: %v", err)

@@ -22,7 +22,7 @@ func optionalCheckFixture(t *testing.T, optionalExit string, additional ...model
 	ctx := context.Background()
 	optional := false
 	checks := append([]model.Check{{Name: "advisory", Command: []string{"sh", "-c", "exit " + optionalExit}, TimeoutSeconds: 5, Required: &optional}}, additional...)
-	project := configureFixtureChecks(t, e, idea.ProjectID, checks)
+	project := configureQualifiedFixtureChecks(t, e, idea.ProjectID, checks)
 	var launches atomic.Int32
 	e.Adapter = func(model.Provider) provider.Adapter { return markdownPlannerAdapter(t, &launches) }
 	e.intakeApprovedIdeas(ctx)
@@ -78,6 +78,23 @@ func configureFixtureChecks(t *testing.T, e *Engine, projectID string, checks []
 	return project
 }
 
+func configureQualifiedFixtureChecks(t *testing.T, e *Engine, projectID string, checks []model.Check) model.Project {
+	t.Helper()
+	project := configureFixtureChecks(t, e, projectID, checks)
+	for _, check := range checks {
+		if !isQltyCommand(check.Command) {
+			continue
+		}
+		installNativeParityVerifier(t)
+		project.QualityIdentity = qualifyNativeFixtureScanner(t, project, check)
+		row, err := e.Store.Get(t.Context(), "projects", projectID)
+		requireWorkflowSuccess(t, err)
+		requireWorkflowSuccess(t, e.Store.Put(t.Context(), "projects", projectID, project, row.Version))
+		break
+	}
+	return project
+}
+
 func optionalFixtureQuality(t *testing.T, project *model.Project, checks []model.Check) {
 	t.Helper()
 	qualityChecks := []model.Check{}
@@ -98,6 +115,11 @@ func optionalFixtureQuality(t *testing.T, project *model.Project, checks []model
 		}
 	}
 	root := t.TempDir()
+	t.Cleanup(func() {
+		if err := filepath.Walk(root, restoreAgenticCachePathPermissions); err != nil {
+			t.Errorf("restore permissions for disposable scanner cache: %v", err)
+		}
+	})
 	if err := os.MkdirAll(filepath.Join(root, "config", ".qlty"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -150,11 +172,8 @@ func TestParityOptionalFailureAndExistingQualityDebtReachReview(t *testing.T) {
 
 func assertOptionalQualityReview(t *testing.T, exit, optionalExit string) {
 	t.Helper()
-	const findings = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"fixture"}},"invocations":[{"executionSuccessful":true}],"results":[{"ruleId":"existing","level":"warning","message":{"text":"Existing quality finding"},"partialFingerprints":{"primaryLocationLineHash":"same"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"file.txt"},"region":{"startLine":1}}}]}]}]}`
-	tool := filepath.Join(t.TempDir(), "qlty")
-	if err := os.WriteFile(tool, []byte("#!/bin/sh\nprintf '%s\\n' '"+findings+"'\nexit "+exit+"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
+	const findings = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty","version":"fixture","semanticVersion":"1.0.0"}},"invocations":[{"executionSuccessful":true}],"results":[{"ruleId":"existing","level":"warning","message":{"text":"Existing quality finding"},"partialFingerprints":{"primaryLocationLineHash":"same"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"file.txt"},"region":{"startLine":1}}}]}]}]}`
+	tool := writeQltyFixture(t, findings, exit, "")
 	e, project, plan, head := optionalCheckFixture(t, optionalExit, model.Check{Name: "quality", Command: []string{tool, "check", "--sarif"}, TimeoutSeconds: 5, ReportFormat: "sarif"})
 	ctx := context.Background()
 	if err := e.verify(ctx, project, &plan); err != nil {

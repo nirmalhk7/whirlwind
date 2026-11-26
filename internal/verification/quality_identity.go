@@ -616,7 +616,7 @@ func (copier *qualityTreeCopier) copyPath(ctx context.Context, relative string) 
 	case info.Mode()&os.ModeSymlink != 0:
 		return copier.copyLink(relative, target)
 	case info.Mode().IsRegular():
-		return copier.copyFile(ctx, relative, target, info.Mode().Perm())
+		return copier.copyFile(ctx, relative, target, copier.fileMode(relative, info))
 	default:
 		return errors.New("special file in Qlty scanner runtime")
 	}
@@ -646,12 +646,34 @@ func (copier *qualityTreeCopier) copyLink(relative, destination string) error {
 	return os.Symlink(link, destination)
 }
 
+// Qlty opens the installer lock read/write even when its package is already
+// installed. Its lock is empty after release and remains covered by the tree
+// hash. Only allow writes to the existing lock alongside a completed package.
+func (copier *qualityTreeCopier) fileMode(relative string, info os.FileInfo) os.FileMode {
+	mode := info.Mode().Perm() &^ 0222
+	parts := strings.Split(filepath.ToSlash(relative), "/")
+	if len(parts) != 2 || info.Size() != 0 || info.Mode().Perm()&0111 != 0 ||
+		!qualityToolName.MatchString(parts[0]) || !strings.HasSuffix(parts[1], ".lock") {
+		return mode
+	}
+	pkg := strings.TrimSuffix(filepath.ToSlash(relative), ".lock")
+	if !qualityPackageDirectory.MatchString(filepath.Base(pkg)) {
+		return mode
+	}
+	directory, dirErr := copier.source.Lstat(pkg)
+	marker, markerErr := copier.source.Lstat(pkg + ".done")
+	if dirErr == nil && directory.IsDir() && markerErr == nil && marker.Mode().IsRegular() {
+		return mode | 0200
+	}
+	return mode
+}
+
 func (copier *qualityTreeCopier) copyFile(ctx context.Context, relative, destination string, mode os.FileMode) error {
 	input, err := copier.source.Open(filepath.ToSlash(relative))
 	if err != nil {
 		return err
 	}
-	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode&^0222)
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		_ = input.Close()
 		return err

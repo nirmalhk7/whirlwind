@@ -14,14 +14,11 @@ import (
 // Each ACP attempt is bounded independently; discovery and fallback orchestration
 // must not consume a single five-minute deadline for the whole ideation run.
 func TestIdeationDoesNotWrapWholeRunInFiveMinuteDeadline(t *testing.T) {
-	f := prepareNoveltyTest(t, []string{`{"unique":false}`, `{"unique":true}`})
-	regenerated := ideaBatch(t)
-	for index := range regenerated {
-		regenerated[index].Problem = "Distinct " + regenerated[index].Category + " problem found during reconsideration"
-		regenerated[index].Mechanism = "Apply a different " + regenerated[index].Category + " solution"
-		regenerated[index].Components = []string{"internal/reconsidered/" + regenerated[index].Category}
-	}
-	f.fixture.batches = [][]model.Direction{f.fixture.batch, regenerated}
+	f := prepareNoveltyTest(t, nil)
+	// The first batch provides only one category. The retry must get a
+	// fresh deadline and supply the missing categories.
+	batch := f.fixture.batch
+	f.fixture.batches = [][]model.Direction{batch[:1], batch[1:]}
 	source := &deadlineSource{t: t, started: time.Now()}
 	f.engine.GitHub = source
 	var previousDeadline time.Time
@@ -37,8 +34,8 @@ func TestIdeationDoesNotWrapWholeRunInFiveMinuteDeadline(t *testing.T) {
 	if err := f.engine.Ideate(context.Background(), f.project, "2026-10-29"); err != nil {
 		t.Fatal(err)
 	}
-	if f.fixture.calls != 4 {
-		t.Fatalf("generation/novelty retries not exercised: %d", f.fixture.calls)
+	if f.fixture.calls != 2 || f.fixture.generations != 2 {
+		t.Fatalf("generation repair not exercised: %d", f.fixture.calls)
 	}
 }
 

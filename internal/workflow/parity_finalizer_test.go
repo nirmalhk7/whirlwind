@@ -24,8 +24,9 @@ const (
 // replacing it with legacy in-process runtime rows would hide this handoff bug.
 func acceptedParityDeliveryFixture(t *testing.T) (*Engine, model.ExecutionPlan, model.Project, model.Record) {
 	t.Helper()
-	e, plan := approvedCodingPairFixture(t, cleanQltyFixtureCheck(t))
-	installNativeParityVerifier(t)
+	e, idea := approvedIdeaPlannerFixture(t)
+	configureQualifiedFixtureChecks(t, e, idea.ProjectID, []model.Check{cleanQltyFixtureCheck(t)})
+	plan := approveCodingPair(t, e, pendingCodingPairForIdea(t, e, idea))
 	ctx := context.Background()
 	project, err := e.Project(ctx, plan.ProjectID)
 	if err != nil {

@@ -80,6 +80,9 @@ func TestPreparedDefaultConfigurationRunsActualGitleaks(t *testing.T) {
 	if candidateErr != nil || candidateReport.QualityIdentity == nil || !model.SameQualityIdentity(report.QualityIdentity, candidateReport.QualityIdentity) {
 		t.Fatalf("candidate did not reuse qualified runtime identity: %+v %v", candidateReport, candidateErr)
 	}
+	candidateOutput, _, err := ReadJobStreams(manifest.Root, 0)
+	requireVerificationSuccess(t, err)
+	assertNativeDefaultCanary(t, candidateOutput)
 	if _, err := os.Lstat(filepath.Join(manifest.Repository, ".qlty")); !os.IsNotExist(err) {
 		t.Fatalf("default scanner preparation polluted original source: %v", err)
 	}

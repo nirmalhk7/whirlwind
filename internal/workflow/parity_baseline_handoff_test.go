@@ -9,10 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"go.yaml.in/yaml/v3"
-
 	"whirlwind/internal/model"
-	"whirlwind/internal/policy"
 	"whirlwind/internal/provider"
 	"whirlwind/internal/verification"
 )
@@ -22,29 +19,10 @@ import (
 func TestParityQltyBaselineAdvisoryReachesReviewerWithoutRewritingRawResults(t *testing.T) {
 	e, idea := approvedIdeaPlannerFixture(t)
 	ctx := context.Background()
-	project, err := e.Project(ctx, idea.ProjectID)
-	requireWorkflowSuccess(t, err)
-	tool := filepath.Join(t.TempDir(), "qlty")
-	const sarif = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"fixture-quality"}},"invocations":[{"executionSuccessful":true}],"results":[{"ruleId":"existing","level":"warning","message":{"text":"Existing finding"},"partialFingerprints":{"primaryLocationLineHash":"stable"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"file.txt"},"region":{"startLine":1}}}]}]}]}`
-	requireWorkflowSuccess(t, os.WriteFile(tool, []byte("#!/bin/sh\nprintf '%s\\n' '"+sarif+"'\nexit 1\n"), 0700))
-	project.Policy.Checks = append(project.Policy.Checks, model.Check{Name: "quality", Command: []string{tool, "check", "--sarif"}, TimeoutSeconds: 5, ReportFormat: "sarif"})
-	if project.Policy.Sandbox == nil {
-		project.Policy.Sandbox = &model.SandboxPolicy{}
-	}
-	project.Policy.Sandbox.ReadRoots = append(project.Policy.Sandbox.ReadRoots, tool)
-	qualityRoot := t.TempDir()
-	requireWorkflowSuccess(t, os.MkdirAll(filepath.Join(qualityRoot, "config", ".qlty"), 0700))
-	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(qualityRoot, "config", ".qlty", "qlty.toml"), []byte("config_version = \"0\"\n"), 0600))
-	project.Policy.Quality = &model.QualityPolicy{Root: qualityRoot, ConfigurationFiles: []string{".qlty/qlty.toml"}}
-	data, err := yaml.Marshal(project.Policy)
-	requireWorkflowSuccess(t, err)
-	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(project.Path, ".whirlwind.yaml"), data, 0600))
-	submissionGit(t, project.Path, "add", ".whirlwind.yaml")
-	submissionGit(t, project.Path, "commit", "-m", "approve quality command")
-	project.Policy, project.PolicyHash, err = policy.Load(project.Path)
-	requireWorkflowSuccess(t, err)
-	row, _ := e.Store.Get(ctx, "projects", project.ID)
-	requireWorkflowSuccess(t, e.Store.Put(ctx, "projects", project.ID, project, row.Version))
+	const sarif = `{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"qlty","version":"fixture","semanticVersion":"1.0.0"}},"invocations":[{"executionSuccessful":true}],"results":[{"ruleId":"existing","level":"warning","message":{"text":"Existing finding"},"partialFingerprints":{"primaryLocationLineHash":"stable"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"file.txt"},"region":{"startLine":1}}}]}]}]}`
+	tool := writeQltyFixture(t, sarif, "1", "")
+	check := model.Check{Name: "quality", Command: []string{tool, "check", "--sarif"}, TimeoutSeconds: 5, ReportFormat: "sarif"}
+	project := configureQualifiedFixtureChecks(t, e, idea.ProjectID, []model.Check{check})
 	var launches atomic.Int32
 	e.Adapter = func(model.Provider) provider.Adapter { return markdownPlannerAdapter(t, &launches) }
 	e.intakeApprovedIdeas(ctx)
@@ -52,7 +30,6 @@ func TestParityQltyBaselineAdvisoryReachesReviewerWithoutRewritingRawResults(t *
 	plan, version := localStoredTask(t, e, model.PlanID("idea:"+idea.ID))
 	requireWorkflowSuccess(t, e.ReviewLocalPlan(ctx, plan.ID, version, "approve", plan.PlanDocument.Hash, ""))
 	plan, _ = localStoredTask(t, e, plan.ID)
-	installNativeParityVerifier(t)
 	plan.Worktree = project.Path
 	plan.Base = submissionGit(t, project.Path, "rev-parse", "HEAD")
 	requireWorkflowSuccess(t, os.WriteFile(filepath.Join(project.Path, "result.txt"), []byte("result\n"), 0600))

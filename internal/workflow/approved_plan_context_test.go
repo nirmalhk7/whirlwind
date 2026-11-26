@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -92,15 +93,17 @@ func TestDiscoveryRotatesTowardLessExploredRepositoryAreas(t *testing.T) {
 	if err := engine.Store.SaveDirections(ctx, project.ID, "2026-11-02", prior); err != nil {
 		t.Fatal(err)
 	}
-	prompt, _, _, _, err := engine.prepareDiscovery(WithFreshDiscovery(ctx, true), project)
+	prompt, _, snapshot, _, err := engine.prepareDiscovery(WithFreshDiscovery(ctx, true), project)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, `"src/b.go"`) || !strings.Contains(prompt, `"src/a.go"`) {
-		t.Fatalf("ideation prompt omitted the tracked repository areas: %s", prompt)
+	first := slices.Index(snapshot.ExplorationAreas, "src/b.go")
+	second := slices.Index(snapshot.ExplorationAreas, planContextFixtureSourceFile)
+	if first < 0 || second < 0 || first >= second {
+		t.Fatalf("ideation did not rotate toward the less explored area: %v", snapshot.ExplorationAreas)
 	}
-	if strings.Index(prompt, `"src/b.go"`) > strings.Index(prompt, `"src/a.go"`) {
-		t.Fatalf("ideation did not rotate toward the less explored area: %s", prompt)
+	if !strings.Contains(prompt, `"src/b.go"`) || !strings.Contains(prompt, `"src/a.go"`) {
+		t.Fatalf("ideation prompt omitted the sampled repository areas: %s", prompt)
 	}
 }
 

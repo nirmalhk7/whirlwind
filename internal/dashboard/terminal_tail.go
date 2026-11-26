@@ -22,7 +22,8 @@ const (
 func runTerminalTail(ctx context.Context, path string) (resultErr error) {
 	terminal := int(os.Stdin.Fd())
 	saved, err := unix.IoctlGetTermios(terminal, tailGetTermios)
-	if errors.Is(err, unix.ENOTTY) {
+	// macOS can return ENODEV for an inherited, non-terminal stdin.
+	if errors.Is(err, unix.ENOTTY) || errors.Is(err, unix.ENODEV) {
 		return execTerminalTail(ctx, path)
 	}
 	if err != nil {

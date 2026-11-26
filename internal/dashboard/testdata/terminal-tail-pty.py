@@ -56,6 +56,8 @@ def run_session(close_key):
         assert read_until(b"TAIL_VIEW_RETURNED", 2), f"{close_key!r} did not return: {output!r}"
         assert b"Esc or Ctrl-C" in output, "tail view did not explain how to return"
         _, exit_status = os.waitpid(pid, 0)
+        # Keep the PTY open and retain any final race-detector or tty diagnostics.
+        read_until(b"TTY_STATE_NOT_RESTORED", 0.25)
         assert (
             os.waitstatus_to_exitcode(exit_status) == 0
         ), f"log viewer/tty state exit={exit_status}: {output!r}"

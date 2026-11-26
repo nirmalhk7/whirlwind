@@ -1,7 +1,7 @@
 package verification
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -74,6 +74,9 @@ func checkParityQltyLanguageScope(t *testing.T, extension, fileType, script, sou
 name = "default"
 default = true
 [[plugin]]
+name = "gitleaks"
+version = "8.29.1"
+[[plugin]]
 name = "scope-probe"
 version = "0.10.0"
 [plugins.definitions.scope-probe]
@@ -89,15 +92,14 @@ batch = true
 driver_type = "formatter"
 suggested = "targets"
 `, fileType, script)
-	manifest.Quality = &model.QualitySnapshot{Root: root, Files: map[string]string{".qlty/qlty.toml": configuration}}
 	argv := []string{"qlty", "check", "--upstream", "HEAD", "--fix", "--no-progress", "--sarif"}
-	manifest.Commands = []JobCommand{{Name: "quality", Mode: "autofix", Command: argv, ReportFormat: "sarif", TimeoutSeconds: 15}}
-	raw, _ := json.Marshal(manifest)
-	command := exec.Command(binary)
-	command.Stdin = bytes.NewReader(raw)
-	command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + t.TempDir()}
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("native Qlty scope job failed: %v %s", err, output)
+	manifest.Commands = []JobCommand{{Name: "quality", Mode: "autofix", Command: argv, ReportFormat: "sarif", TimeoutSeconds: 60}}
+	snapshot := qualifyNativeScopeScanner(t, binary, manifest, root, configuration)
+	manifest.Quality = &snapshot
+	report, err := RunLocalJob(t.Context(), binary, manifest, nil)
+	requireVerificationSuccess(t, err)
+	if !model.SameQualityIdentity(snapshot.Identity, report.QualityIdentity) {
+		t.Fatalf("scope scan did not use its approved scanner runtime: %+v", report.Results)
 	}
 	assertQltyProbeReport(t, manifest.Root, argv, tracked, newFile, unchanged)
 	if git(qltyProbeRevParse, "HEAD") != manifest.CandidateCommit || git("status", "--porcelain", "-uall") != "" {
@@ -107,6 +109,45 @@ suggested = "targets"
 		t.Fatalf("Qlty configuration leaked into original repository: %v", err)
 	}
 	assertQltyExternalState(t, manifest.Root)
+}
+
+func qualifyNativeScopeScanner(t *testing.T, binary string, candidate JobManifest, root, configuration string) model.QualitySnapshot {
+	t.Helper()
+	t.Cleanup(func() {
+		_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+			if err == nil && entry.IsDir() {
+				_ = os.Chmod(path, 0700)
+			}
+			return nil
+		})
+	})
+	ctx := context.Background()
+	manifest := projectSetupFixture(t, candidate, nil)
+	snapshot := model.QualitySnapshot{Root: root, Files: map[string]string{".qlty/qlty.toml": configuration}}
+	manifest.Quality = &snapshot
+	manifest.JobID, manifest.OperationID = "scope-catalog", "scope-catalog"
+	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
+	manifest.Commands = []JobCommand{{Name: "catalog", Command: []string{"qlty", "config", "show", "--no-upgrade-check"}, TimeoutSeconds: 30}}
+	report, err := RunLocalJob(ctx, binary, manifest, nil)
+	requireVerificationSuccess(t, err)
+	if !report.Passed {
+		t.Fatalf("scope scanner catalog unavailable: %+v", report.Results)
+	}
+	catalog, _, err := ReadJobStreams(manifest.Root, 0)
+	requireVerificationSuccess(t, err)
+	snapshot.PluginCatalog = []byte(catalog)
+	manifest.JobID, manifest.OperationID = "scope-qualification", "scope-qualification"
+	manifest.Root = filepath.Join(root, "jobs", manifest.JobID)
+	manifest.Sandbox = &model.SandboxPolicy{AllowedDomains: []string{"github.com", "api.github.com", "release-assets.githubusercontent.com"}}
+	manifest.Commands = slices.Clone(candidate.Commands)
+	manifest.Commands[0].TimeoutSeconds = 600
+	report, err = RunLocalJob(ctx, binary, manifest, nil)
+	requireVerificationSuccess(t, err)
+	if report.QualityIdentity == nil {
+		t.Fatalf("scope scanner runtime did not qualify: %+v", report.Results)
+	}
+	snapshot.Identity = report.QualityIdentity
+	return snapshot
 }
 
 func assertQltyProbeReport(t *testing.T, root string, argv []string, tracked, newFile, unchanged string) {
