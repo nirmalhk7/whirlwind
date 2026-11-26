@@ -37,10 +37,9 @@ def run_session(close_key):
 
     try:
         assert read_until(b"SAVED_LOG_LINE", 5), f"saved logs did not render: {output!r}"
-        # A split ANSI Up key starts with Esc, but must not leave a live log.
-        os.write(terminal, b"\x1b")
-        time.sleep(0.01)
-        os.write(terminal, b"[A")
+        # ANSI Up must not leave a live log. Split reads are tested in Go
+        # so this check does not depend on scheduling two separate writes.
+        os.write(terminal, b"\x1b[A")
         assert not read_until(b"TAIL_VIEW_RETURNED", 0.15), "arrow exited the log view"
         os.write(terminal, close_key)
         assert read_until(b"TAIL_VIEW_RETURNED", 2), f"{close_key!r} did not return: {output!r}"

@@ -53,3 +53,16 @@ func TestTerminalTailKeysInRealPTY(t *testing.T) {
 		t.Fatalf("real PTY run-log test: %v\n%s", err, out)
 	}
 }
+
+func TestTerminalTailDecodesSplitArrowKey(t *testing.T) {
+	var escapeUntil time.Time
+	if consumeTailKeys([]byte{0x1b}, &escapeUntil) || escapeUntil.IsZero() {
+		t.Fatal("the first byte of an arrow key did not leave Escape pending")
+	}
+	if consumeTailKeys([]byte{'['}, &escapeUntil) || !escapeUntil.IsZero() {
+		t.Fatal("the arrow key continuation did not disarm pending Escape")
+	}
+	if consumeTailKeys([]byte{'A'}, &escapeUntil) || !escapeUntil.IsZero() {
+		t.Fatal("the completed arrow key requested closing the viewer")
+	}
+}
