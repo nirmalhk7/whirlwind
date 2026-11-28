@@ -169,6 +169,11 @@ def initial_session(session, data):
     decision(session, data, "planner.cancel", 1, ENTER)
     see(session, b"decision saved by supervisor")
 
+    step(session, DOWN + b"v", b"Decline fixture proposal")
+    step(session, b"\t" * 6 + ENTER, b"Reason")
+    decision(session, data, "idea.archive", 1, b"Outside this smoke test\t" + ENTER)
+    see(session, b"decision saved by supervisor")
+
     select_plan(session, 1, b"State: plan_approval")
     step(session, b"r", b"F6 plan/controls")
     see(session, b"whirlwind-plan-", send(session, F6 + b"v"), raw=True)
@@ -181,6 +186,7 @@ def initial_session(session, data):
     )
     see(session, b"decision saved by supervisor")
     see(session, b"sandbox recovery status unverified")
+    select_plan(session, 1, b"State: plan_approval")
     step(session, b"r", b"Verify revised fixture output")
     decision(session, data, "plan.review", 1, b"\t" + ENTER)
 
@@ -248,7 +254,8 @@ def main():
         finally:
             session.close()
     print(
-        "PASS: the shipped dashboard sent versioned mutations over the private Unix socket, rejected a stale decision, reopened pending clarification, and inspected local delivery."
+        "PASS: the shipped dashboard sent versioned mutations over the private Unix socket, "
+        "archived a draft without planning, rejected a stale decision, and approved the saved Vim edit."
     )
 
 

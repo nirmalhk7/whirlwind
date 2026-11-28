@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from dashboard_pty_support import RENDER_MARKER, dashboard_pty
@@ -25,13 +26,20 @@ def run_cli(env, command, timeout=300, expected_code=0):
         check=False,
     )
     if result.returncode != expected_code:
+        log = Path(env["WHIRLWIND_DATA_DIR"]) / "whirlwind-supervisor.log"
+        diagnostics = (
+            log.read_text(encoding="utf-8", errors="replace").splitlines()[-12:]
+            if log.is_file()
+            else []
+        )
         raise AssertionError(
-            f"./bin/whirlwind {command} returned {result.returncode}, expected {expected_code}: {result.stdout}{result.stderr}"
+            f"./bin/whirlwind {command} returned {result.returncode}, expected {expected_code}: "
+            f"{result.stdout}{result.stderr}" + "\n".join(diagnostics)
         )
     return result.stdout + result.stderr
 
 
-def main():
+def main(project=None):
     scratch = Path(tempfile.mkdtemp(prefix="whirlwind-dashboard-pty-"))
     scratch.chmod(0o700)
     data = scratch / "data"
@@ -41,6 +49,21 @@ def main():
     runtime = scratch / "runtime"
     runtime.mkdir(mode=0o700)
     settings = scratch / "settings.yaml"
+    project_marker = b"No projects"
+    if project is not None:
+        settings.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "projects": [str(project)],
+                    "providers": [],
+                    "agents": {},
+                    "workers": {"stopped": True, "ideation": {"on_registration": False}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        project_marker = project.name.encode("utf-8")
     env = {
         "PATH": os.environ["PATH"],
         "HOME": str(home),
@@ -66,7 +89,7 @@ def main():
         run_cli(env, "start")
         started = True
         before = json.loads(state_path.read_text(encoding="utf-8"))
-        first_output = dashboard_pty(env)
+        first_output = dashboard_pty(env, project_marker=project_marker)
         if run_cli(env, "status").find("supervisor: running") < 0:
             raise AssertionError("supervisor did not survive the first dashboard exit")
         after_first = json.loads(state_path.read_text(encoding="utf-8"))
@@ -75,7 +98,11 @@ def main():
                 "first dashboard exit changed supervisor identity or durable state"
             )
         second_output = dashboard_pty(
-            env, rows=24, columns=80, additional_markers=(b"? all keys | Tab/Shift-Tab panels",)
+            env,
+            rows=24,
+            columns=80,
+            additional_markers=(b"? all keys | Tab/Shift-Tab panels",),
+            project_marker=project_marker,
         )
         if run_cli(env, "status").find("supervisor: running") < 0:
             raise AssertionError("supervisor did not survive reopening the dashboard")
@@ -84,6 +111,13 @@ def main():
             raise AssertionError("reopening the dashboard reset or replaced supervisor state")
         if RENDER_MARKER not in first_output or RENDER_MARKER not in second_output:
             raise AssertionError("one of the PTY sessions did not render the dashboard")
+        if project is not None:
+            run_cli(env, "restart")
+            restarted = json.loads(state_path.read_text(encoding="utf-8"))
+            if restarted == before:
+                raise AssertionError("restart retained the same launcher identity")
+            dashboard_pty(env, project_marker=project_marker)
+            print(f"PASS: {project.name} rendered before and after supervisor restart.", flush=True)
         run_cli(env, "stop")
         started = False
         start_attempted = False
@@ -120,4 +154,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 2:
+        sys.exit("usage: python3 scripts/dashboard-pty-acceptance.py [disposable local checkout]")
+    main(Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else None)

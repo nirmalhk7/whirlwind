@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestFinalizationVerificationKeepsRecordedPrerequisiteFailure(t *testing.T) {
-	e, plan, project, _ := acceptedDeliveryFixture(t)
+	e, plan, project, record := acceptedDeliveryFixture(t)
 	ctx := t.Context()
 	row, err := e.Store.Get(ctx, "verification", plan.VerificationID)
 	requireWorkflowSuccess(t, err)
@@ -26,10 +27,47 @@ func TestFinalizationVerificationKeepsRecordedPrerequisiteFailure(t *testing.T) 
 	if accepted || err == nil || !strings.Contains(err.Error(), "qualified scanner runtime was not recorded") {
 		t.Fatalf("acceptance lost its precise verification prerequisite: accepted=%v err=%v", accepted, err)
 	}
+	step := taskStep{Engine: e, ctx: ctx, task: plan, project: project, record: record}
+	if _, err := step.submitting(); err == nil || !strings.Contains(err.Error(), "qualified scanner runtime was not recorded") || step.task.Delivery != nil {
+		t.Fatalf("Finalizer did not refuse the failed verification: delivery=%+v error=%v", step.task.Delivery, err)
+	}
 	refs := submissionGit(t, project.Path, "for-each-ref", "--format=%(refname)", "refs/heads/codex/delivery")
 	if refs != "" {
 		t.Fatalf("invalid evidence created a delivery ref: %s", refs)
 	}
+}
+
+func TestFinalizerRejectsFailedMandatoryStaticCheck(t *testing.T) {
+	e, plan, project, record := acceptedDeliveryFixture(t)
+	ctx := t.Context()
+	_, _, accepted, err := e.LoadAcceptedReviewReport(ctx, plan.ID)
+	requireWorkflowSuccess(t, err)
+	if !accepted {
+		t.Fatal("the green fixture must be eligible for finalization")
+	}
+	row, err := e.Store.Get(ctx, "verification", plan.VerificationID)
+	requireWorkflowSuccess(t, err)
+	evidence, err := store.Decode[map[string]any](row)
+	requireWorkflowSuccess(t, err)
+	var saved struct {
+		Report verification.Report `json:"report"`
+	}
+	requireWorkflowSuccess(t, json.Unmarshal(row.Data, &saved))
+	report := saved.Report
+	static := &report.Results[qltyResultIndex(t, report)]
+	static.Passed, static.ExitCode = false, intPointer(1)
+	report.Passed = false
+	evidence["report"] = report
+	requireWorkflowSuccess(t, e.Store.Put(ctx, "verification", row.ID, evidence, row.Version))
+
+	step := taskStep{Engine: e, ctx: ctx, task: plan, project: project, record: record}
+	if _, err := step.submitting(); err == nil || step.task.Delivery != nil {
+		t.Fatalf("Finalizer accepted failed %s evidence: delivery=%+v error=%v", static.Name, step.task.Delivery, err)
+	}
+	if refs := submissionGit(t, project.Path, "for-each-ref", "--format=%(refname)", "refs/heads/codex/delivery"); refs != "" {
+		t.Fatalf("failed static check created a delivery ref: %s", refs)
+	}
+	t.Logf("Finalizer refused %s exit=%d, verification=%s, candidate=%s", static.Name, *static.ExitCode, row.ID, plan.ReviewedCommit)
 }
 
 func TestFinalizationVerificationNamesMissingConfiguredRunner(t *testing.T) {
