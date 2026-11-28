@@ -113,6 +113,7 @@ qlty check --all
 ```
 
 See [development setup](docs/development.md) for the pinned formatters and source checks.
+Run the [Basera smoke test](docs/basera-smoke.md) for the shipped launcher, dashboard decisions, and workflow fixtures.
 
 On macOS with the pinned runtime, the native suites can exercise real nono filesystem, network and ACP terminal boundaries. Linux launcher tests cover refusal of the native path. The [offline verifier checks](docs/offline-docker-verifier.md#reproduce-on-the-cloud-runner) exercise the separate Linux backend with a pinned local image. Controlled OpenShell fixtures cover legacy recovery. See [nono setup](docs/nono-setup.md) for native boundary checks.
 

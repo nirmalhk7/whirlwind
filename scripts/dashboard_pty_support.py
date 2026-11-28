@@ -107,16 +107,20 @@ class PTYSession:
             os.close(self.master)
 
 
-def dashboard_pty(env, *, rows=32, columns=112, additional_markers=()):
+def dashboard_pty(
+    env, *, rows=32, columns=112, additional_markers=(), project_marker=b"No projects"
+):
     session = PTYSession(env, rows=rows, columns=columns)
     try:
-        session.wait_for_render((RENDER_MARKER, b"Agents", b"Runs", b"Inbox", *additional_markers))
+        session.wait_for_render(
+            (RENDER_MARKER, b"Agents", b"Runs", b"Inbox", project_marker, *additional_markers)
+        )
         code = session.quit_and_wait()
         if code != 0:
             raise AssertionError(
                 f"dashboard did not exit cleanly after q (exit={code}): {bytes(session.output)[-4000:]!r}"
             )
-        for marker in (b"Projects", b"Agents", b"Runs", b"Inbox", b"No projects"):
+        for marker in (b"Projects", b"Agents", b"Runs", b"Inbox", project_marker):
             if marker not in session.output:
                 raise AssertionError(
                     f"dashboard PTY output missed {marker!r}: {bytes(session.output)[-4000:]!r}"

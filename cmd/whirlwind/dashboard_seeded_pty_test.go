@@ -33,6 +33,7 @@ const (
 	fixtureProject       = "terminal-project"
 	fixtureDraftIdea     = "draft-idea"
 	fixtureCancelIdea    = "cancel-idea"
+	fixtureArchiveIdea   = "rejected-idea"
 	fixtureDraftPlan     = "draft-plan"
 	fixturePausedPlan    = "paused-plan"
 	fixtureCompletedPlan = "delivered-plan"
@@ -219,6 +220,9 @@ func seedTerminalWorkflow(t *testing.T, s *store.Store, w *workflow.Engine, data
 		ProjectID: project.ID, IdeaID: idea.ID, OperationID: idea.RunID, Role: "plan", Status: "running",
 		StartedAt: terminalFixtureRunStart, DeadlineAt: fixtureDeadline, PlanVersion: 1})
 
+	idea.ID, idea.Title, idea.Direction, idea.DecisionStatus = fixtureArchiveIdea, "Decline fixture proposal", "optimize", "draft"
+	save("ideas", idea.ID, idea)
+
 	draft := model.ExecutionPlan{ID: fixtureDraftPlan, ProjectID: project.ID, Mode: model.AgenticMode, PlanVersion: 1,
 		Issue: model.Issue{Title: fixtureDraftTitle, Body: "Make result useful"}, Plan: seededTerminalSpecification(),
 		Selection: &model.SelectionAuthorization{CandidateID: "draft-selection", CandidateVersion: 1, SelectedAt: terminalFixtureRunStart}}
@@ -314,11 +318,25 @@ func assertSeededTerminalDecisions(t *testing.T, s *store.Store, data, initialHa
 	if cancelledPlan.Stage != "cancelled" || cancelledAttempt.Status != "cancelled" || !cancelledAttempt.Finished {
 		t.Fatalf("planner cancellation left plan or attempt active: stage=%s attempt=%s", cancelledPlan.Stage, cancelledAttempt.Status)
 	}
+	archived := terminalFixtureRecord[model.Idea](t, s, "ideas", fixtureArchiveIdea, 2)
+	if archived.ArchivedAt == "" || archived.ArchiveReason != "Outside this smoke test" || archived.PlanID != "" {
+		t.Fatalf("archiving an idea did not record the refusal: %+v", archived)
+	}
+	plans, err := s.List(t.Context(), "execution_plans")
+	mustSeedTerminal(t, err)
+	for _, record := range plans {
+		plan, err := store.Decode[model.ExecutionPlan](record)
+		mustSeedTerminal(t, err)
+		if plan.IdeaID == archived.ID {
+			t.Fatalf("archived idea created plan %s", plan.ID)
+		}
+	}
 	plan := terminalFixtureRecord[model.ExecutionPlan](t, s, "execution_plans", fixtureDraftPlan, 3)
-	if writes[4].Request.ContentHash != initialHash || writes[5].Request.ContentHash == initialHash ||
-		plan.PlanDocument.ApprovedHash != writes[5].Request.ContentHash ||
+	save, approve := writes[5].Request, writes[6].Request
+	if save.ContentHash != initialHash || approve.ContentHash == initialHash ||
+		plan.PlanDocument.ApprovedHash != approve.ContentHash ||
 		plan.Plan.Objective != fixtureEditedTitle || plan.Stage != "coding" {
-		t.Fatalf("Vim save/approval did not bind separate document identities: %+v; %+v", plan, writes[4:6])
+		t.Fatalf("Vim save/approval did not bind separate document identities: %+v; %+v", plan, writes[5:7])
 	}
 	q := terminalFixtureRecord[model.QuestionSet](t, s, "questions", fixtureQuestion, 2)
 	if q.Status != "answered" || q.Answers["encoding"] != "UTF-8" {
@@ -358,6 +376,7 @@ func assertSeededTerminalJournal(t *testing.T, data string) []terminalJournalEnt
 		{terminalFixtureEditIdea, fixtureDraftIdea, "", 2, false},
 		{"idea.approve", fixtureDraftIdea, "", 3, false},
 		{"planner.cancel", fixtureCancelIdea, "", 3, false},
+		{"idea.archive", fixtureArchiveIdea, "", 1, false},
 		{"plan.document.save", "", fixtureDraftPlan, 1, false},
 		{"plan.review", "", fixtureDraftPlan, 2, false},
 		{"question.answer", fixtureQuestion, fixturePausedPlan, 1, false},

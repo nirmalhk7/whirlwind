@@ -3,6 +3,9 @@ package workflow
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +50,46 @@ func TestLocalGitIdeationUsesRepositoryEvidenceWithoutGitHub(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The smoke driver supplies a fresh Basera checkout with no remotes. The
+// deterministic adapter proposes only README edits against its committed tree.
+func TestBaseraSmokeIdeationUsesCommittedReadme(t *testing.T) {
+	source := os.Getenv("WHIRLWIND_TEST_BASERA_CHECKOUT")
+	if source == "" {
+		t.Skip("run scripts/basera-smoke.py to supply the disposable Basera checkout")
+	}
+	fixture := prepareNoveltyTest(t, nil)
+	repo := filepath.Join(t.TempDir(), "basera")
+	cmd := exec.CommandContext(t.Context(), "git", "clone", "--quiet", "--no-local", "--", source, repo)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone disposable Basera snapshot: %v: %s", err, output)
+	}
+	submissionGit(t, repo, "remote", "remove", "origin")
+	fixture.project.Path = repo
+	head := configureLocalIdeationProject(t, &fixture)
+
+	topics := []string{"Add a local setup example", "Shorten the startup steps", "Document supported Node versions", "Clarify the README test command"}
+	for i := range fixture.fixture.batch {
+		direction := &fixture.fixture.batch[i]
+		direction.Title = topics[i]
+		direction.Description = topics[i] + " in the Basera README."
+		direction.Problem = "The Basera README could be clearer about " + strings.ToLower(topics[i]) + "."
+		direction.Mechanism = "Update the README wording."
+		direction.Components = []string{"README.md"}
+		direction.Evidence = []model.EvidenceRef{{Kind: "code", Ref: "README.md"}}
+	}
+	spy := &ideationGitHubSpy{err: errors.New("the Basera fixture has no GitHub credentials")}
+	fixture.engine.GitHub = spy
+	runID := dispatchLocalIdeationFixture(t, fixture, false)
+	assertLocalIdeationSnapshot(t, fixture, runID, head)
+	if commits := fixture.fixture.commits; len(commits) == 0 || commits[0] != head {
+		t.Fatalf("adapter did not read the pinned Basera checkout: %v", commits)
+	}
+	if spy.sourcesCalls != 0 || spy.issueCalls != 0 {
+		t.Fatal("the Basera fixture attempted a hosted source read")
+	}
+	t.Logf("Basera %s: ideation %s saved four README proposals against the committed tree", head, runID)
 }
 
 func configureLocalIdeationProject(t *testing.T, fixture *noveltyTestFixture) string {
@@ -110,6 +153,15 @@ func dispatchLocalIdeationFixture(t *testing.T, fixture noveltyTestFixture, init
 
 func assertLocalIdeationEvidence(t *testing.T, fixture noveltyTestFixture, runID, head string) {
 	t.Helper()
+	prompts := fixture.fixture.generationPrompts
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "local_repository_only") {
+		t.Fatal("provider did not receive explicit local-only scope")
+	}
+	assertLocalIdeationSnapshot(t, fixture, runID, head)
+}
+
+func assertLocalIdeationSnapshot(t *testing.T, fixture noveltyTestFixture, runID, head string) {
+	t.Helper()
 	db, ctx := fixture.engine.Store, t.Context()
 	run, err := db.Get(ctx, "operations", runID)
 	requireWorkflowSuccess(t, err)
@@ -117,10 +169,6 @@ func assertLocalIdeationEvidence(t *testing.T, fixture noveltyTestFixture, runID
 	requireWorkflowSuccess(t, err)
 	if op.Stage != "complete" || op.RepositoryRevision != head {
 		t.Fatalf("local ideation did not complete using pinned Git evidence: %+v", op)
-	}
-	prompts := fixture.fixture.generationPrompts
-	if len(prompts) != 1 || !strings.Contains(prompts[0], "local_repository_only") {
-		t.Fatal("provider did not receive explicit local-only scope")
 	}
 	assertLocalIdeationDirections(t, fixture, head)
 	saved, err := db.Get(ctx, "discovery_scans", fixture.project.ID)
